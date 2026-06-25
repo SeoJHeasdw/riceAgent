@@ -1,0 +1,89 @@
+"""Execution module seams (#7 plugin loading, #8 sandbox).
+
+Owns: installing/loading plugins (manifest → injected skills + required
+connectors), and the **sandbox boundary** for any code that actually runs
+(RUNTIME_DESIGN §5). Recall the trust model: market *skills* are declarative
+(SKILL.md, no code → no sandbox); only plugin/connector *code* executes, in a
+child process with a scrubbed env (§5, demo-trust).
+
+Seams:
+  IPluginLoader  — install/list/enable/remove plugins; surface plugin-provided
+                   tools (source="plugin") + the skills a plugin injects.
+  ISandbox       — the execution boundary. `run(...)` is the single choke point
+                   where untrusted code runs; today = child process + env scrub,
+                   future = container (ADR). Keeping it behind a Protocol means the
+                   backend can be hardened without touching callers.
+
+**FROZEN.** `plugin/loader.py`, `plugin/manifest.py`, `sandbox/runner.py` implement
+these. The artifact manifest schema is owned by CONTRACTS §2.1.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Protocol, runtime_checkable
+
+from ..core.types import InjectedSkill, ToolCall, ToolResult, ToolSpec
+
+
+@dataclass(frozen=True)
+class PluginInfo:
+    id: str
+    name: str
+    version: str
+    description: str
+    enabled: bool
+    required_connectors: tuple[str, ...] = ()  # connector_type list (CONTRACTS §2.1)
+    skill_count: int = 0
+
+
+@dataclass(frozen=True)
+class SandboxResult:
+    ok: bool
+    stdout: str = ""
+    stderr: str = ""
+    result: Any = None
+    error: str | None = None
+
+
+@runtime_checkable
+class ISandbox(Protocol):
+    """The execution boundary (RUNTIME_DESIGN §5). The *only* place untrusted
+    plugin/connector code is run."""
+
+    async def run(
+        self,
+        *,
+        entrypoint: str,
+        payload: dict[str, Any],
+        timeout_s: float = 30.0,
+    ) -> SandboxResult:
+        """Run `entrypoint` in an isolated child process (env-scrubbed) with the
+        given payload, enforcing a timeout. Never executes in-process."""
+        ...
+
+
+@runtime_checkable
+class IPluginLoader(Protocol):
+    # ── tool/skill surface (orchestrator) ────────────────────────────────────
+    def list_tools(self) -> list[ToolSpec]:
+        """Tools from enabled plugins (source="plugin")."""
+        ...
+
+    def injected_skills(self) -> list[InjectedSkill]:
+        """SKILL.md bundles that enabled plugins contribute to the system prompt."""
+        ...
+
+    async def invoke(self, call: ToolCall) -> ToolResult:
+        """Run a plugin tool via the sandbox (after dispatcher's approval check)."""
+        ...
+
+    # ── management (routes/plugins.py, routes/artifacts.py) ──────────────────
+    def list_plugins(self) -> list[PluginInfo]: ...
+    def set_enabled(self, plugin_id: str, enabled: bool) -> None: ...
+    async def install(self, *, path: str, manifest: dict[str, Any]) -> PluginInfo:
+        """Verify checksum, place under `~/.rice/{skills|plugins}/`, load
+        (CONTRACTS §2.3)."""
+        ...
+
+    async def remove(self, artifact_id: str) -> None: ...

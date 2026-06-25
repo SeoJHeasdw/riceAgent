@@ -1,0 +1,98 @@
+"""Local storage abstraction (#14, RUNTIME_DIRECTORY) — SQLite in WAL mode.
+
+This is the **only** module that talks to `sqlite3` directly. Everything else
+(session store, memory store, …) receives a `Database` and runs queries through it.
+That keeps the storage engine swappable and gives one place for connection policy.
+
+Policy decisions baked in here:
+  - **WAL journal mode** (RUNTIME_DESIGN §7) — concurrent reads during a write,
+    which matters because a turn streams while reading history.
+  - **Single connection, single process** (RUNTIME_DESIGN §2: one active session).
+    SQLite connections aren't thread-safe across threads by default; FastAPI runs
+    handlers on a threadpool, so we guard with a lock and `check_same_thread=False`.
+    For the MVP's low concurrency this is correct and simple.
+  - **Migrations** run on connect, tracked in `schema_migrations`. Forward-only.
+  - `row_factory = sqlite3.Row` so callers get dict-like rows.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+import threading
+from pathlib import Path
+from typing import Any, Iterable, Sequence
+
+MIGRATIONS_DIR = Path(__file__).parent / "migrations"
+
+
+class Database:
+    def __init__(self, path: str | Path) -> None:
+        self._path = str(path)
+        self._lock = threading.RLock()
+        self._conn: sqlite3.Connection | None = None
+
+    # ── lifecycle ─────────────────────────────────────────────────────────────
+    def connect(self) -> "Database":
+        if self._conn is not None:
+            return self
+        is_memory = self._path == ":memory:"
+        if not is_memory:
+            Path(self._path).parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(self._path, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON;")
+        if not is_memory:
+            conn.execute("PRAGMA journal_mode = WAL;")
+            conn.execute("PRAGMA synchronous = NORMAL;")
+        self._conn = conn
+        self._run_migrations()
+        return self
+
+    def close(self) -> None:
+        with self._lock:
+            if self._conn is not None:
+                self._conn.close()
+                self._conn = None
+
+    @property
+    def raw(self) -> sqlite3.Connection:
+        if self._conn is None:
+            raise RuntimeError("Database not connected — call connect() first")
+        return self._conn
+
+    # ── query helpers (all serialized through the lock) ───────────────────────
+    def execute(self, sql: str, params: Sequence[Any] = ()) -> sqlite3.Cursor:
+        with self._lock:
+            cur = self.raw.execute(sql, params)
+            self.raw.commit()
+            return cur
+
+    def executemany(self, sql: str, seq: Iterable[Sequence[Any]]) -> sqlite3.Cursor:
+        with self._lock:
+            cur = self.raw.executemany(sql, seq)
+            self.raw.commit()
+            return cur
+
+    def query_one(self, sql: str, params: Sequence[Any] = ()) -> sqlite3.Row | None:
+        with self._lock:
+            return self.raw.execute(sql, params).fetchone()
+
+    def query_all(self, sql: str, params: Sequence[Any] = ()) -> list[sqlite3.Row]:
+        with self._lock:
+            return self.raw.execute(sql, params).fetchall()
+
+    # ── migrations (forward-only, tracked) ────────────────────────────────────
+    def _run_migrations(self) -> None:
+        with self._lock:
+            self.raw.execute(
+                "CREATE TABLE IF NOT EXISTS schema_migrations ("
+                "  version TEXT PRIMARY KEY, applied_at TEXT DEFAULT (datetime('now')))"
+            )
+            applied = {r["version"] for r in self.raw.execute("SELECT version FROM schema_migrations")}
+            for sql_file in sorted(MIGRATIONS_DIR.glob("*.sql")):
+                version = sql_file.stem
+                if version in applied:
+                    continue
+                self.raw.executescript(sql_file.read_text(encoding="utf-8"))
+                self.raw.execute("INSERT INTO schema_migrations(version) VALUES (?)", (version,))
+                self.raw.commit()

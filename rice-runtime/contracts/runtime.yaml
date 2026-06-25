@@ -1,0 +1,330 @@
+openapi: 3.1.0
+info:
+  title: rice-runtime local API
+  version: 0.1.0
+  description: >
+    app↔runtime local API (RICE_CONTRACTS §1, §4). Owned by rice-runtime; rice-app
+    is the codegen consumer (REPO_STRATEGY §4.3). Transport is localhost HTTP; the
+    turn streams Server-Sent Events (see contracts/sse-events.schema.json). All
+    paths except /health require a one-shot bearer token injected by the Electron
+    supervisor on spawn (CONTRACTS §1.1, RUNTIME_DESIGN §10.1).
+
+servers:
+  - url: http://127.0.0.1:{port}
+    variables:
+      port: { default: "8080" }
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: lifecycle
+  - name: sessions
+  - name: skills
+  - name: plugins
+  - name: connectors
+  - name: settings
+
+paths:
+  /health:
+    get:
+      tags: [lifecycle]
+      summary: Readiness probe (no auth)
+      security: []
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+                  provider: { type: string }
+                  version: { type: string }
+  /shutdown:
+    post:
+      tags: [lifecycle]
+      summary: Graceful shutdown
+      responses: { "200": { $ref: "#/components/responses/Ok" } }
+
+  /sessions:
+    post:
+      tags: [sessions]
+      summary: Create a session
+      responses:
+        "200":
+          description: created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties: { id: { type: string } }
+    get:
+      tags: [sessions]
+      summary: List sessions
+      responses: { "200": { $ref: "#/components/responses/Ok" } }
+  /sessions/{id}:
+    get:
+      tags: [sessions]
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /sessions/{id}/messages:
+    get:
+      tags: [sessions]
+      summary: Paginated history
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses: { "200": { $ref: "#/components/responses/Ok" } }
+    post:
+      tags: [sessions]
+      summary: Send a message → SSE turn stream
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MessageIn" }
+      responses:
+        "200":
+          description: >
+            text/event-stream of SSE events. Each frame's `data` validates against
+            contracts/sse-events.schema.json (9 stream + 2 control events).
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /sessions/{id}/abort:
+    post:
+      tags: [sessions]
+      summary: Cancel the in-flight turn (cancels parked approvals too)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses: { "200": { $ref: "#/components/responses/Ok" } }
+
+  /sessions/{id}/tool-approval:
+    post:
+      tags: [sessions]
+      summary: Answer a tool_approval_required control event
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ToolApprovalDecision" }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "409": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
+
+  /sessions/{id}/pending-approvals:
+    get:
+      tags: [sessions]
+      summary: Recover parked approvals after SSE reconnect (RUNTIME_DESIGN §5.1)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: pending approvals
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/PendingApproval" }
+
+  /skills:
+    get: { tags: [skills], summary: List skills + usage, responses: { "200": { $ref: "#/components/responses/Ok" } } }
+  /skills/{id}:
+    get:
+      tags: [skills]
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses: { "200": { $ref: "#/components/responses/Ok" }, "404": { $ref: "#/components/responses/Error" } }
+  /skills/curate:
+    post: { tags: [skills], summary: Manual curator trigger, responses: { "200": { $ref: "#/components/responses/Ok" } } }
+  /skills/{id}/state:
+    patch:
+      tags: [skills]
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, properties: { state: { enum: [active, stale, archived] } } }
+      responses: { "200": { $ref: "#/components/responses/Ok" } }
+  /skills/{id}/patch:
+    post:
+      tags: [skills]
+      summary: Answer a skill_patch_proposed control event
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SkillPatchDecision" }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "409": { $ref: "#/components/responses/Error" }
+  /skills/{id}/history:
+    get:
+      tags: [skills]
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses: { "200": { $ref: "#/components/responses/Ok" } }
+  /skills/{id}/rollback:
+    post:
+      tags: [skills]
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        content: { application/json: { schema: { type: object, properties: { version: { type: integer } } } } }
+      responses: { "200": { $ref: "#/components/responses/Ok" } }
+
+  /plugins:
+    get: { tags: [plugins], responses: { "200": { $ref: "#/components/responses/Ok" } } }
+  /plugins/{id}/enabled:
+    patch:
+      tags: [plugins]
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody: { content: { application/json: { schema: { type: object, properties: { enabled: { type: boolean } } } } } }
+      responses: { "200": { $ref: "#/components/responses/Ok" } }
+  /plugins/{id}:
+    delete:
+      tags: [plugins]
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses: { "200": { $ref: "#/components/responses/Ok" } }
+  /artifacts/install:
+    post:
+      tags: [plugins]
+      summary: Install a downloaded artifact (CONTRACTS §2.3)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path, manifest]
+              properties:
+                path: { type: string }
+                manifest: { type: object }
+      responses: { "200": { $ref: "#/components/responses/Ok" } }
+  /artifacts/{id}:
+    delete:
+      tags: [plugins]
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses: { "200": { $ref: "#/components/responses/Ok" } }
+
+  /connectors:
+    get: { tags: [connectors], responses: { "200": { $ref: "#/components/responses/Ok" } } }
+    post:
+      tags: [connectors]
+      summary: Begin OAuth (returns oauth_url)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [connector_type], properties: { connector_type: { type: string, example: gmail } } }
+      responses:
+        "200":
+          description: oauth start
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties: { oauth_url: { type: string }, connector_id: { type: string } }
+  /connectors/{id}:
+    get:
+      tags: [connectors]
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses: { "200": { $ref: "#/components/responses/Ok" }, "404": { $ref: "#/components/responses/Error" } }
+    delete:
+      tags: [connectors]
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses: { "200": { $ref: "#/components/responses/Ok" } }
+  /connectors/{id}/status:
+    get:
+      tags: [connectors]
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses: { "200": { $ref: "#/components/responses/Ok" } }
+  /connectors/oauth/callback:
+    get:
+      tags: [connectors]
+      summary: OAuth redirect handler
+      parameters:
+        - { name: code, in: query, required: true, schema: { type: string } }
+        - { name: state, in: query, required: true, schema: { type: string } }
+      responses: { "200": { $ref: "#/components/responses/Ok" } }
+
+  /memories:
+    get: { tags: [settings], responses: { "200": { $ref: "#/components/responses/Ok" } } }
+  /models:
+    get: { tags: [settings], responses: { "200": { $ref: "#/components/responses/Ok" } } }
+  /settings:
+    get: { tags: [settings], responses: { "200": { $ref: "#/components/responses/Ok" } } }
+    put:
+      tags: [settings]
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { $ref: "#/components/responses/Ok" } }
+
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer }
+  parameters:
+    Id: { name: id, in: path, required: true, schema: { type: string } }
+  responses:
+    Ok:
+      description: success envelope
+      content: { application/json: { schema: { $ref: "#/components/schemas/Envelope" } } }
+    Error:
+      description: error envelope
+      content: { application/json: { schema: { $ref: "#/components/schemas/ErrorEnvelope" } } }
+  schemas:
+    Envelope:
+      type: object
+      required: [success]
+      properties:
+        success: { type: boolean }
+        data: {}
+    ErrorEnvelope:
+      type: object
+      required: [success, error]
+      properties:
+        success: { type: boolean, const: false }
+        error: { type: string }
+        code: { type: string }
+    MessageIn:
+      type: object
+      required: [content]
+      properties:
+        content: { type: string }
+    ToolApprovalDecision:
+      type: object
+      required: [approval_id, decision]
+      properties:
+        approval_id: { type: string }
+        decision: { enum: [approve, reject] }
+    SkillPatchDecision:
+      type: object
+      required: [approval_id, decision]
+      properties:
+        approval_id: { type: string }
+        decision: { enum: [approve, reject] }
+        edited_body: { type: string }
+    PendingApproval:
+      type: object
+      required: [approval_id, kind, payload]
+      properties:
+        approval_id: { type: string }
+        kind: { enum: [tool_approval, skill_patch] }
+        payload: { type: object }
