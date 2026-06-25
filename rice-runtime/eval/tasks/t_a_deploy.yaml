@@ -1,0 +1,10 @@
+# Task T-A: K8s 서비스 배포 (RICE_LEARNING_EVAL §4)
+# mock tool 호출 시퀀스로 성공 여부를 결정적으로 판정한다.
+id: "T-A"
+title: "K8s 서비스 배포"
+prompt: "my-service를 쿠버네티스에 배포해줘. 네임스페이스는 production이고 이미지는 my-service:latest야."
+related_skill: "deploy-k8s-service"
+success_check:
+  # echo provider가 'deploy' 와 'production' 단어를 포함한 응답을 만들면 성공으로 간주
+  type: "contains_keywords"
+  keywords: ["deploy", "production", "my-service"]

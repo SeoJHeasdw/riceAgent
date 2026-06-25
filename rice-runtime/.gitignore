@@ -19,3 +19,9 @@ venv/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+
+# eval: ignore throwaway timestamped runs; keep the canonical fixtures
+# (latest.json = the static fixture the app reads; demo-v1-seed.json = source)
+eval/results/*.json
+!eval/results/latest.json
+!eval/results/demo-v1-seed.json

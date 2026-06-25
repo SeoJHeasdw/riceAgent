@@ -31,7 +31,7 @@ from ..core.events import EventBus
 from ..core.paths import RicePaths
 from ..core.storage.sqlite import Database
 from ..execution.interfaces import IPluginLoader
-from ..execution.service import NoopSandbox, PluginLoader
+from ..execution.service import ChildProcessSandbox, PluginLoaderService
 from ..learning.interfaces import ILearningService
 from ..learning.service import LearningService
 from .approval import ApprovalRegistry
@@ -80,9 +80,9 @@ def build_container(args: RuntimeArgs | None = None, *, paths: RicePaths | None 
 
     # ── module services (each behind its interface) ───────────────────────────
     sessions: ISessionStore = SessionManager(db)
-    learning: ILearningService = LearningService(db, config_store.config.learning)
-    connectors: IConnectorService = ConnectorService(db)
-    plugins: IPluginLoader = PluginLoader(db, NoopSandbox())
+    learning: ILearningService = LearningService(db, config_store.config.learning, paths)
+    connectors: IConnectorService = ConnectorService(db, paths)
+    plugins: IPluginLoader = PluginLoaderService(db, ChildProcessSandbox(), paths)
     approvals: IApprovalGate = ApprovalRegistry()
 
     # ── provider selection (one mapping point) ────────────────────────────────

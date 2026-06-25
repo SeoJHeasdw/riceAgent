@@ -6,3 +6,15 @@
 
 # bob
 .bob
+
+# Python (defense-in-depth; rice-runtime/.gitignore has the detailed rules)
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Node (rice-app)
+node_modules/
+dist/

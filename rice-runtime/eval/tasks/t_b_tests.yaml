@@ -1,0 +1,8 @@
+# Task T-B: 프로젝트 테스트 실행 (RICE_LEARNING_EVAL §4)
+id: "T-B"
+title: "프로젝트 테스트 실행"
+prompt: "이 프로젝트의 유닛 테스트를 전부 돌려줘."
+related_skill: "run-tests"
+success_check:
+  type: "contains_keywords"
+  keywords: ["test", "pytest", "run"]

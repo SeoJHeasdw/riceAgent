@@ -1,0 +1,83 @@
+{
+  "task_suite": "demo-v1",
+  "model": "claude-sonnet-4-6",
+  "runs_per_task": 5,
+  "generated_at": "2026-06-22T10:00:00Z",
+  "tasks": [
+    {
+      "id": "T-A",
+      "title": "K8s 서비스 배포",
+      "cold": {
+        "turns": 5.0,
+        "tool_calls": 8.0,
+        "success_rate": 0.8,
+        "skill_hit": false,
+        "skills_used": []
+      },
+      "warm": {
+        "turns": 2.0,
+        "tool_calls": 3.0,
+        "success_rate": 1.0,
+        "skill_hit": true,
+        "skills_used": ["deploy-k8s-service@2"]
+      },
+      "delta": {
+        "turns_pct": -0.6,
+        "tool_calls_pct": -0.625,
+        "success_pp": 0.2
+      }
+    },
+    {
+      "id": "T-B",
+      "title": "프로젝트 테스트 실행",
+      "cold": {
+        "turns": 4.0,
+        "tool_calls": 6.0,
+        "success_rate": 0.6,
+        "skill_hit": false,
+        "skills_used": []
+      },
+      "warm": {
+        "turns": 2.0,
+        "tool_calls": 2.0,
+        "success_rate": 1.0,
+        "skill_hit": true,
+        "skills_used": ["run-tests@1"]
+      },
+      "delta": {
+        "turns_pct": -0.5,
+        "tool_calls_pct": -0.6667,
+        "success_pp": 0.4
+      }
+    },
+    {
+      "id": "T-C",
+      "title": "배포 오류 트러블슈팅",
+      "cold": {
+        "turns": 6.0,
+        "tool_calls": 10.0,
+        "success_rate": 0.4,
+        "skill_hit": false,
+        "skills_used": []
+      },
+      "warm": {
+        "turns": 3.0,
+        "tool_calls": 4.0,
+        "success_rate": 0.8,
+        "skill_hit": true,
+        "skills_used": ["deploy-k8s-service@2"]
+      },
+      "delta": {
+        "turns_pct": -0.5,
+        "tool_calls_pct": -0.6,
+        "success_pp": 0.4
+      }
+    }
+  ],
+  "aggregate": {
+    "turns_pct": -0.5333,
+    "tool_calls_pct": -0.6306,
+    "success_pp": 0.3333,
+    "skill_hit_rate": 1.0
+  }
+}
