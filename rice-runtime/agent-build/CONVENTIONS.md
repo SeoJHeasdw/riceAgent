@@ -10,6 +10,31 @@
 
 ---
 
+## -1. 환경 부트스트랩 (코드 만지기 전에 먼저)
+
+이 프로젝트는 **Python 3.13** 전용이다(코드에 PEP 695 `type` 문법이 있어 3.12
+미만에서는 컴파일조차 안 된다). 너의 실행 환경에서 **격리된 venv를 직접 만들고**
+거기 설치한 뒤, 이후 모든 명령을 그 venv의 파이썬으로 실행하라. 의존성의 단일
+출처는 `pyproject.toml`이다(requirements.txt에 패키지를 나열하지 마라).
+
+```bash
+cd rice-runtime
+python3.13 --version            # 3.13.x 인지 먼저 확인. 없으면 3.13을 설치/지정하라.
+python3.13 -m venv .venv
+.venv/bin/python -m pip install -U pip
+.venv/bin/python -m pip install -e ".[dev]"     # 기본(테스트·서버 포함)
+# 네 모듈이 필요로 하면 extra 추가:
+#   providers(claude)  → .venv/bin/python -m pip install -e ".[dev,claude]"
+#   connector          → .venv/bin/python -m pip install -e ".[dev,connectors]"
+```
+
+이후 이 문서의 모든 `python3.13 ...` 명령은 **`.venv/bin/python ...`** 로 실행하면
+된다(둘 다 3.13이다). `.venv/`는 커밋하지 않는다(이미 `.gitignore` 처리됨).
+새 런타임 의존성이 필요하면 **`pyproject.toml`의 적절한 extra에 추가**하고
+재설치하라(§2 참조). `requirements-dev.txt`는 `-e .[dev]` 로 pyproject에 위임만 한다.
+
+---
+
 ## 0. 황금률 (어기면 작업 실패로 간주)
 
 1. **interfaces.py 는 동결(FROZEN)이다.** 어떤 모듈의 `interfaces.py`도 수정하지

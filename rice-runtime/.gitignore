@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# venv (machine-specific — never commit; reproduce from pyproject, see CONVENTIONS §-1)
+.venv/
+venv/
+
+# local runtime data / SQLite
+*.db
+*.db-wal
+*.db-shm
+.rice/
+
+# pytest / tooling
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/

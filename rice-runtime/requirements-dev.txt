@@ -1,0 +1,9 @@
+# Dev install — defers to pyproject.toml (single source of truth for deps).
+# Do NOT list packages here; edit pyproject [project.dependencies] / extras instead.
+#
+#   python3.13 -m venv .venv
+#   .venv/bin/python -m pip install -r requirements-dev.txt
+#
+# Add provider/connector extras when working those modules:
+#   .venv/bin/python -m pip install -e ".[dev,claude,connectors]"
+-e .[dev]
