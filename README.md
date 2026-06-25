@@ -32,9 +32,9 @@
 
 ## 현재 상태 (2026-06-22)
 
-- 단계: 아키텍처 확정 — 3레포 + rice-runtime 모듈화 모놀리스
+- 단계: 아키텍처 확정 — `rice` 단일 레포(app + runtime) + rice-runtime 모듈화 모놀리스
 - 결정됨:
-  - 레포 3개: `rice-app` (Electron) / `rice-runtime` (로컬) / `rice-platform` (원격)
+  - **레포 구조**: `rice` 단일 레포 (`rice-app/` + `rice-runtime/`) + `rice-platform` 별도 레포 (Phase 2) — 설치형 데스크톱 앱으로 함께 배포되므로 단일 레포가 자연스럽다
   - 2개 백엔드 구조(로컬 runtime + 원격 platform), 7개 화면 매핑 검증
   - rice-runtime 내부 6모듈(server·agent·execution·learning·connector·core) — Protocol 인터페이스 + composition_root.py DI
   - Connector Management 설계 반영 (RUNTIME_DESIGN 9장, CONTRACTS 4장)

@@ -1,7 +1,7 @@
-# RICE Repo Strategy (레포 분리 전략)
+# RICE Repo Strategy (레포 구조 전략)
 
-> 작성일: 2026-06-10 (개정: 2026-06-18)
-> 목적: RICE의 초기 제품 구조와 레포 분리 전략 정리
+> 작성일: 2026-06-10 (개정: 2026-06-22)
+> 목적: RICE의 초기 제품 구조와 레포 구조 전략 정리
 > 선행 문서: 제품 컨셉은 [RICE_PRODUCT_IDEA.md](RICE_PRODUCT_IDEA.md), learning loop 참조 분석은 [HERMES_LEARNING_LOOP_REFERENCE.md](HERMES_LEARNING_LOOP_REFERENCE.md) 참고
 > 모듈 구조 정본: [RICE_RUNTIME_DIRECTORY.md](RICE_RUNTIME_DIRECTORY.md) · 런타임/계약 설계: [RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md), [RICE_CONTRACTS.md](RICE_CONTRACTS.md)
 
@@ -16,11 +16,11 @@ RICE는 macOS와 Windows를 모두 지원하는 로컬 데스크톱 애플리케
 
 ### 기술 스택
 
-| 영역 | 레포 | 스택 |
+| 영역 | 위치 | 스택 |
 |------|------|------|
-| Frontend | `rice-app` | Electron, React, TailwindCSS, shadcn/ui |
-| Agent Runtime | `rice-runtime` | Python |
-| Market Platform | `rice-platform` | Python (API), React (admin-web) |
+| Frontend | `rice` repo / `rice-app/` | Electron, React, TailwindCSS, shadcn/ui |
+| Agent Runtime | `rice` repo / `rice-runtime/` | Python |
+| Market Platform | `rice-platform` repo (별도, Phase 2) | Python (API), React (admin-web) |
 
 에이전트의 learning loop(경험에서 스킬 생성 → 사용하며 개선 → 세션을 넘나드는 user modeling)는 Hermes Agent 분석([HERMES_LEARNING_LOOP_REFERENCE.md](HERMES_LEARNING_LOOP_REFERENCE.md))을 참조 모델로 삼는다.
 
@@ -49,40 +49,40 @@ RICE는 단순 프론트엔드 앱이 아니라 아래 3개 축의 결합이다.
 
 ---
 
-## 3. 레포 구성: 3개 권장
+## 3. 레포 구성: ✅ 결정됨
 
-> 용어 정리: 정확히는 "레포 3개, 각 레포는 내부에 여러 패키지를 가진 모노레포 구조"이다. 전체 전략은 멀티레포(polyrepo)이고, 각 레포가 모노레포다.
+### 현재 구조 (2026-06-22 결정)
 
-### 권장 3개
+```
+rice/                    ← 단일 레포 (rice-app + rice-runtime)
+├── rice-app/            ← Electron + React
+├── rice-runtime/        ← Python 로컬 런타임
+└── RICE_*.md            ← 설계 문서
 
-1. `rice-app` — 보여주는 것 (앱 셸 + 프론트엔드 제품 레이어)
-2. `rice-runtime` — 생각하고 실행하는 것 (제품의 핵심 두뇌 레이어)
-3. `rice-platform` — 공유하고 배포하는 것 (배포 플랫폼 레이어)
+rice-platform            ← 별도 레포 (Phase 2)
+```
 
-### 검토했지만 채택하지 않은 대안
+**rice-app + rice-runtime을 하나의 `rice` 레포에서 관리하는 이유:**
+- 두 컴포넌트는 **하나의 설치형 데스크톱 앱으로 함께 배포**된다 — Electron이 PyInstaller 바이너리를 번들에 포함
+- `rice-app`이 `rice-runtime`을 자식 프로세스로 spawn하는 구조상, 빌드 시 두 artifact가 함께 있어야 함
+- `contracts/`(OpenAPI 스펙, SSE 스키마)도 `rice-runtime/contracts/`에 두고 `rice-app`에서 코드젠 — 한 레포 안에서 자연스럽게 해결
+- 버전 스큐 없음, 교차 PR 불필요
 
-**대안 A: 전부 1개 레포**
-- 장점: 데모 단계에서 가장 빠른 반복 속도
-- 문제: 앱·런타임·플랫폼 경계가 무너짐, 팀 분업 어려움, 제품화 시 재분리 비용 큼
+**rice-platform을 별도 레포로 유지하는 이유:**
+- 원격 클라우드 배포물로 rice-app/runtime과 배포 단위가 다름
+- Phase 2 범위로, 현재 단계에서 함께 관리할 이유 없음
 
-**대안 B: 2개 레포 (`rice-desktop` = app + runtime, `rice-platform`)**
-- 가장 진지하게 고려할 만한 대안. 앱과 런타임은 결국 **하나의 데스크톱 앱으로 함께 배포**되므로 배포 단위 기준으로는 한 레포가 자연스럽다. 레포가 갈리면 버전 스큐 관리와 교차 PR 비용이 생긴다.
-- 그럼에도 분리하는 이유: 런타임은 핵심 제품 IP로 추후 CLI/게이트웨이/원격 실행 등 앱 외 접점을 가질 수 있고, TS 팀과 Python 팀의 분업 경계와 일치한다.
-- 단, 이 선택의 전제로 **두 레포 간 인터페이스 계약(4장)을 먼저 고정**해야 한다. 계약 없이 분리하면 대안 B보다 나쁜 결과가 된다.
+### 검토했던 대안
 
-**대안 C: 4개 이상 (`app` / `runtime` / `skill-market` / `plugin-market`)**
-- Skill Market과 Plugin Market은 운영 정책은 달라도, 데모 단계에서는 같은 플랫폼 백엔드에서 artifact type으로 구분하면 충분함 (5.3 참조)
-- 현재 단계에서는 과함
-
-### 결론
-
-3개가 경계 명확성과 데모 속도의 균형점이며, 데모 이후 제품화로 이어질 때도 유리하다. 4개 이상으로 늘릴 이유는 현재 없다.
+**대안: 3개 폴리레포 (`rice-app` / `rice-runtime` / `rice-platform`)**
+- 초기 설계안. 런타임이 추후 CLI/게이트웨이 등 앱 외 접점을 가질 수 있고, TS/Python 팀 분업 경계라는 장점이 있었음.
+- **번복 이유**: 설치형 앱은 배포 단위가 하나이므로, 폴리레포로 분리하면 빌드 시 다른 레포 artifact를 끌어오는 번거로움, 버전 스큐 관리 비용이 발생. 현재 단계(데모/프로토타입)에서 이 비용을 감수할 이유 없음.
 
 ---
 
-## 4. 레포 간 인터페이스 (계약)
+## 4. 컴포넌트 간 인터페이스 (계약)
 
-> 레포를 3개로 나누는 순간, 레포 사이의 계약이 곧 아키텍처가 된다. 이 장의 결정이 레포 분리보다 중요하다.
+> rice-app과 rice-runtime은 같은 레포에 있지만, 런타임 프로세스 경계는 유지된다. 인터페이스 계약은 여전히 명시적으로 정의한다.
 
 ### 4.1 rice-app ↔ rice-runtime (로컬 IPC)
 
@@ -104,15 +104,12 @@ RICE는 단순 프론트엔드 앱이 아니라 아래 3개 축의 결합이다.
 
 ### 4.3 공유 타입(shared-types) 전략
 
-레포가 갈리면 타입을 공유할 수 없으므로, 다음 중 하나를 선택해야 한다.
+같은 `rice` 레포 안에서는 직접 import 가능하지만, 런타임 프로세스 경계를 명시적으로 유지하기 위해 코드젠 방식을 사용한다.
 
 | 전략 | 내용 | 판단 |
 |------|------|------|
-| OpenAPI 스키마 + 코드젠 | 각 API 제공 레포가 스펙을 소유, 소비 레포가 타입 생성 | **권장** — 계약이 명시적 |
-| 별도 contracts 레포 | 레포 4개째가 됨 | 데모 단계에서 과함 |
+| OpenAPI 스키마 + 코드젠 | `rice-runtime/contracts/`가 스펙 소유, `rice-app`이 TS 타입 생성 | **채택** — 계약이 명시적, 같은 레포라 코드젠 자동화 용이 |
 | 수동 복제 | 양쪽에 같은 타입 정의 | 스큐 위험, 비권장 |
-
-각 레포 내부의 `packages/shared-types`는 **레포 내부 공유용**이며, 레포 간 공유는 코드젠으로 해결한다.
 
 ### 4.4 API 버전·호환 정책
 
@@ -224,19 +221,25 @@ flowchart LR
 
 ---
 
-## 7. 각 레포 내부 패키지 예시
+## 7. `rice` 레포 내부 구조
 
-### `rice-app`
-- `apps/desktop`
-- `packages/ui`
-- `packages/shared-types` (레포 내부용; 런타임 API 타입은 코드젠)
-- `packages/desktop-bridge`
+```
+rice/
+├── rice-app/            ← Electron + React
+│   ├── electron/
+│   ├── src/
+│   ├── package.json
+│   └── ...
+├── rice-runtime/        ← Python 로컬 런타임
+│   ├── contracts/       ← OpenAPI 스펙 소유 (rice-app이 코드젠)
+│   │   ├── runtime.yaml
+│   │   └── sse-events.schema.json
+│   ├── src/rice_runtime/
+│   └── pyproject.toml
+└── RICE_*.md            ← 설계 문서
+```
 
-### `rice-runtime`
-- 내부는 `src/rice_runtime/` 아래 **6모듈**(server / agent / execution / learning / connector / core)로 구성한다. 상세 디렉토리·모듈 책임은 [RICE_RUNTIME_DIRECTORY.md](RICE_RUNTIME_DIRECTORY.md)(정본)를 단일 출처로 한다.
-- `server/`가 runtime OpenAPI 스펙(`contracts/runtime.yaml`)을 소유한다.
-
-### `rice-platform`
+`rice-platform` (별도 레포, Phase 2):
 - `apps/api` (OpenAPI 스펙 소유)
 - `apps/admin-web`
 - `packages/catalog`
@@ -291,12 +294,12 @@ flowchart LR
 
 ## 10. 최종 결론
 
-권장안: `rice-app` / `rice-runtime` / `rice-platform` — **레포 3개**
+✅ **`rice` 단일 레포** (rice-app + rice-runtime) + **`rice-platform` 별도 레포** (Phase 2)
 
 실행 전략:
-1. 레포 간 계약(IPC, artifact 스펙)과 패키징 방식을 먼저 고정한다 (Phase 0)
+1. 컴포넌트 간 계약(IPC, artifact 스펙)과 패키징 방식을 먼저 고정한다 (Phase 0)
 2. `rice-runtime`과 `rice-app`으로 learning loop 기반 데모를 만든다 (Phase 1)
-3. Skill Market / Plugin Market은 구조적으로 분리된 `rice-platform`으로 설계하고, 초기에는 단순 catalog와 mock으로 시작한다 (Phase 2)
+3. Skill Market / Plugin Market은 `rice-platform` 별도 레포로 설계하고, 초기에는 단순 catalog와 mock으로 시작한다 (Phase 2)
 
 ---
 
@@ -304,4 +307,4 @@ flowchart LR
 
 RICE는 단순 Electron 앱이 아니라,
 **학습·진화하는 로컬 에이전트 런타임 + 데스크톱 앱 + 내부 공유 마켓 플랫폼**의 결합으로 설계해야 하며,
-현재 단계에서 가장 현실적인 구조는 **레포 3개 + 명시적 레포 간 계약**이다.
+현재 단계에서 가장 현실적인 구조는 **`rice` 단일 레포(app + runtime) + `rice-platform` 별도 레포**이다.

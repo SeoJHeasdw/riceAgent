@@ -1,22 +1,26 @@
 # RICE Runtime Directory (rice-runtime 내부 모듈 레이아웃)
 
-> 작성일: 2026-06-12 (개정: 2026-06-18) · 상태: ✅ 정본
+> 작성일: 2026-06-12 (개정: 2026-06-22) · 상태: ✅ 정본
 > 목적: `rice-runtime`의 내부 모듈 구조와 디렉토리 레이아웃, 모듈↔책임↔화면 매핑, 핵심 불변식을 정의한다.
 > 이 문서는 **모듈 구조의 단일 출처(source of truth)**다. 다른 문서는 여기를 링크로 참조한다.
-> 선행 문서: [RICE_REPO_STRATEGY.md](RICE_REPO_STRATEGY.md)(레포 분리 전략), [RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md)(런타임 설계)
+> 선행 문서: [RICE_REPO_STRATEGY.md](RICE_REPO_STRATEGY.md)(레포 구조 전략), [RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md)(런타임 설계)
 
 ---
 
 ## 1. 레포 컨텍스트
 
-RICE는 **3개 분리 레포(폴리레포)**로 구성된다 ([REPO_STRATEGY 3장](RICE_REPO_STRATEGY.md)):
+RICE는 **`rice` 단일 레포(app + runtime) + `rice-platform` 별도 레포**로 구성된다 ([REPO_STRATEGY 3장](RICE_REPO_STRATEGY.md)):
 
-- `rice-app` — Electron + React (배포물 ①)
-- `rice-runtime` — Python 로컬 단일 프로세스 (배포물 ②, **이 문서의 대상**)
-- `rice-platform` — Python 원격 마켓 서버 (배포물 ③)
+```
+rice/                    ← 단일 레포
+├── rice-app/            ← Electron + React (배포물 ①)
+└── rice-runtime/        ← Python 로컬 단일 프로세스 (배포물 ②, 이 문서의 대상)
 
-**계약(OpenAPI) 소유 규칙** ([REPO_STRATEGY 4.3](RICE_REPO_STRATEGY.md)): 공용 contracts 레포를 두지 않는다. 각 API 제공 레포가 스펙을 소유하고 소비 레포가 코드젠한다.
-- `rice-runtime`이 `contracts/runtime.yaml` + `sse-events.schema.json`을 소유 → `rice-app`이 TS 클라이언트 코드젠
+rice-platform            ← 별도 레포, Python 원격 마켓 서버 (배포물 ③, Phase 2)
+```
+
+**계약(OpenAPI) 소유 규칙** ([REPO_STRATEGY 4.3](RICE_REPO_STRATEGY.md)):
+- `rice-runtime/contracts/`가 `runtime.yaml` + `sse-events.schema.json`을 소유 → `rice-app`이 TS 클라이언트 코드젠
 - `rice-platform`이 `platform.yaml`을 소유 → `rice-app`/`rice-runtime`이 코드젠
 
 ---
