@@ -1,0 +1,8 @@
+# macOS
+.DS_Store
+
+# claude code
+.claude
+
+# bob
+.bob

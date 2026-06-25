@@ -1,0 +1,456 @@
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Button, Icon, Tag, ResizeHandle, Toggle } from '../components/ui';
+import { useResizable } from '../hooks/useResizable';
+import { useLearning } from '../lib/learning/LearningContext';
+import { connectorIdForScope, type MyPlugin } from '../lib/learningData';
+
+/**
+ * MyPluginsScreen ("내 플러그인") — management screen for installed plugins.
+ * Master-detail: enable/disable a plugin, see its source/version/author,
+ * the skills it provides (invokable via "/" or auto-used), and example
+ * prompts to try. Mirrors the "내 스킬" screen.
+ */
+
+const FILTERS = ['전체', '활성', '업데이트 있음', '비활성'] as const;
+type Filter = (typeof FILTERS)[number];
+
+const hasUpdate = (p: MyPlugin) => !!p.update;
+
+const SectionLabel: React.FC<{ children: React.ReactNode; right?: React.ReactNode }> = ({ children, right }) => (
+  <div className="flex items-center mb-2.5">
+    <span className="text-caption-01 font-semibold uppercase tracking-wider text-text-secondary">{children}</span>
+    {right && <span className="ml-auto">{right}</span>}
+  </div>
+);
+
+type PluginTab = 'skills' | 'knowledge' | 'permissions';
+
+const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) => {
+  const navigate = useNavigate();
+  const { myPlugins, setMyPlugins } = useLearning();
+  const [tab, setTab] = useState<PluginTab>('skills');
+  const plugin = myPlugins.find((p) => p.id === pluginId);
+
+  if (!plugin || !pluginId) {
+    return <div className="flex-1 flex items-center justify-center text-body-short-02 text-text-helper">플러그인을 선택하세요.</div>;
+  }
+
+  const patch = (fn: (p: MyPlugin) => MyPlugin) => setMyPlugins((a) => a.map((x) => (x.id === pluginId ? fn(x) : x)));
+  const toggle = () => patch((x) => ({ ...x, enabled: !x.enabled }));
+  const remove = () => setMyPlugins((a) => a.filter((x) => x.id !== pluginId));
+  const update = () =>
+    plugin.update && patch((x) => ({ ...x, update: undefined, version: plugin.update!.version, updated: '방금' }));
+  const addPermission = () =>
+    patch((x) => ({ ...x, permissions: [...x.permissions, { name: '새 권한 — 데이터 소스를 선택하세요', mode: '읽기' }] }));
+  const removePermission = (idx: number) =>
+    patch((x) => ({ ...x, permissions: x.permissions.filter((_, i) => i !== idx) }));
+
+  const meta: [string, string][] = [
+    ['소스', plugin.source],
+    ['버전', plugin.version],
+    ['작성자', plugin.author],
+    ['마지막 업데이트', plugin.updated],
+  ];
+
+  return (
+    <div className="flex-1 min-w-0 overflow-y-auto">
+      {/* header */}
+      <div className="px-7 pt-6 pb-5 border-b border-border-subtle-01">
+        <div className="flex items-start gap-3.5">
+          <div
+            className={`w-11 h-11 flex-shrink-0 flex items-center justify-center rounded-lg ${plugin.enabled ? 'bg-blue-60' : 'bg-layer-03'}`}
+          >
+            <Icon name={plugin.icon} size={22} className="text-white" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-heading-03 font-semibold text-text-primary">{plugin.name}</h2>
+              <Tag type="purple" size="sm">
+                플러그인
+              </Tag>
+              {!plugin.enabled && (
+                <Tag type="gray" size="sm">
+                  비활성
+                </Tag>
+              )}
+            </div>
+            <p className="mt-1.5 text-body-short-01 leading-5 text-text-secondary">{plugin.summary}</p>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <span className="text-caption-01 text-text-helper">{plugin.enabled ? '활성' : '비활성'}</span>
+            <Toggle checked={plugin.enabled} onChange={toggle} />
+          </div>
+        </div>
+
+        {/* update available — sits right under the plugin description */}
+        {plugin.update && (
+          <div className="mt-4 flex items-center gap-3 rounded-xl border border-blue-50/30 bg-gradient-to-r from-blue-60/12 to-blue-60/[0.04] pl-3 pr-3 py-2.5">
+            <div className="w-8 h-8 flex-shrink-0 flex items-center justify-center rounded-lg bg-blue-60/15">
+              <Icon name="renew" size={16} className="text-link-primary" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5 text-body-short-01 leading-5 text-text-primary">
+                <span className="font-semibold">새 버전</span>
+                <span className="font-mono font-semibold text-link-primary">{plugin.update.version}</span>
+                <span className="text-text-secondary">사용 가능</span>
+              </div>
+              <div className="text-caption-01 leading-4 text-text-helper truncate mt-0.5">{plugin.update.note}</div>
+            </div>
+            <Button kind="primary" size="sm" icon={<Icon name="renew" size={14} />} onClick={update} className="flex-shrink-0">
+              업데이트
+            </Button>
+          </div>
+        )}
+      </div>
+
+      <div className="px-7 pt-5 pb-10 flex flex-col gap-7">
+        {/* metadata */}
+        <div>
+          <SectionLabel>정보</SectionLabel>
+          <div className="grid grid-cols-2 gap-x-6 gap-y-3.5">
+            {meta.map(([k, v]) => (
+              <div key={k}>
+                <div className="text-caption-01 text-text-helper">{k}</div>
+                <div className="text-body-short-01 text-text-primary mt-0.5">{v}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* skills · knowledge · permissions — tabbed */}
+        <div>
+          <div className="flex items-center border-b border-border-subtle-01 mb-3.5">
+            {([
+              ['skills', `스킬 · ${plugin.skills.length}`],
+              ['knowledge', `지식 · ${plugin.knowledge.length}`],
+              ['permissions', `권한 · ${plugin.permissions.length}`],
+            ] as const).map(([id, label]) => {
+              const on = tab === id;
+              return (
+                <button
+                  key={id}
+                  onClick={() => setTab(id)}
+                  className={`relative px-3.5 py-2.5 text-body-short-01 transition-colors ${
+                    on ? 'text-text-primary font-semibold' : 'text-text-secondary hover:text-text-primary'
+                  }`}
+                >
+                  {label}
+                  {on && <span className="absolute bottom-0 left-2 right-2 h-0.5 rounded-full bg-interactive" />}
+                </button>
+              );
+            })}
+            <div className="flex-1" />
+            {tab === 'skills' && (
+              <button
+                onClick={() => navigate('/my-skills')}
+                className="inline-flex items-center gap-1 text-caption-01 text-link-primary hover:underline"
+              >
+                모두 보기 <Icon name="arrow-up-right" size={12} />
+              </button>
+            )}
+            {tab === 'permissions' && (
+              <Button kind="ghost" size="sm" icon={<Icon name="add" size={14} />} onClick={addPermission}>
+                권한 추가
+              </Button>
+            )}
+          </div>
+
+          {tab === 'skills' && (
+            <>
+              <p className="text-caption-01 text-text-helper mb-2.5">
+                채팅에서 <span className="font-mono text-text-secondary">/</span> 를 입력해 호출하거나, RICE가 관련 작업에 자동으로 사용합니다.
+              </p>
+              <div className="flex flex-col gap-px bg-border-subtle-01 rounded-lg overflow-hidden">
+                {plugin.skills.map((s, i) => (
+                  <div key={i} className="flex items-start gap-2.5 bg-background px-3.5 py-2.5">
+                    <Icon name="skill" size={16} className="text-icon-secondary mt-0.5 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-body-short-01 font-semibold text-text-primary">{s.name}</span>
+                        <span className="text-[10px] font-mono text-text-helper border border-border-subtle-01 rounded px-1 py-px">
+                          /{s.name.replace(/\s+/g, '')}
+                        </span>
+                      </div>
+                      <div className="text-caption-01 text-text-helper mt-0.5">{s.desc}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {tab === 'knowledge' && (
+            <>
+              <p className="text-caption-01 text-text-helper mb-2.5">
+                플러그인이 답변에 활용하는 지식 소스예요. 제공사가 갱신하면 자동으로 최신화됩니다.
+              </p>
+              <div className="flex flex-col gap-px bg-border-subtle-01 rounded-lg overflow-hidden">
+                {plugin.knowledge.map((k, i) => (
+                  <div key={i} className="flex items-start gap-2.5 bg-background px-3.5 py-2.5">
+                    <Icon name="bookmark" size={16} className="text-icon-secondary mt-0.5 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-body-short-01 font-semibold text-text-primary">{k.name}</div>
+                      <div className="text-caption-01 text-text-helper mt-0.5">{k.desc}</div>
+                    </div>
+                    <span className="text-caption-01 font-mono text-text-helper flex-shrink-0 mt-0.5">{k.meta}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {tab === 'permissions' && (
+            <>
+              <p className="text-caption-01 text-text-helper mb-2.5">
+                이 플러그인이 접근할 수 있는 데이터·도구 범위예요. 항목을 누르면 해당 커넥터로 이동합니다.
+              </p>
+              {plugin.permissions.length === 0 ? (
+                <div className="text-caption-01 text-text-helper bg-layer-01 border border-border-subtle-01 rounded-lg px-3.5 py-3.5">
+                  부여된 권한이 없어요. <span className="text-link-primary">권한 추가</span>로 데이터 접근을 허용하세요.
+                </div>
+              ) : (
+                <div className="flex flex-col gap-px bg-border-subtle-01 rounded-lg overflow-hidden">
+                  {plugin.permissions.map((p, i) => {
+                    const cid = connectorIdForScope(p.name);
+                    return (
+                      <div key={i} className="flex items-center gap-2.5 bg-background px-3.5 py-2.5">
+                        <button
+                          type="button"
+                          onClick={() => navigate(cid ? `/connectors/${cid}` : '/connectors')}
+                          title={cid ? '커넥터에서 보기' : '커넥터 화면으로'}
+                          className="group flex items-center gap-2.5 flex-1 min-w-0 text-left"
+                        >
+                          <Icon name="lock" size={15} className="text-icon-secondary flex-shrink-0 opacity-70" />
+                          <span className="flex-1 min-w-0 text-body-short-01 font-mono text-text-primary truncate group-hover:underline">
+                            {p.name}
+                          </span>
+                          {cid && <Icon name="arrow-up-right" size={13} className="text-icon-secondary opacity-50 flex-shrink-0" />}
+                        </button>
+                        <Tag type="gray" size="sm">
+                          {p.mode}
+                        </Tag>
+                        <button
+                          onClick={() => removePermission(i)}
+                          title="권한 제거"
+                          aria-label="권한 제거"
+                          className="w-6 h-6 flex items-center justify-center text-icon-secondary hover:text-text-primary opacity-60 hover:opacity-100"
+                        >
+                          <Icon name="close" size={14} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* example prompts */}
+        <div>
+          <SectionLabel>다음과 같이 질문해 보세요</SectionLabel>
+          <div className="flex flex-col gap-1.5">
+            {plugin.examples.map((q, i) => (
+              <button
+                key={i}
+                onClick={() => navigate('/chat')}
+                disabled={!plugin.enabled}
+                className={`group flex items-center gap-2.5 text-left bg-layer-01 border border-border-subtle-01 rounded-lg px-3 py-2.5 transition-colors ${
+                  plugin.enabled ? 'hover:bg-layer-hover-01 hover:border-border-strong-01' : 'opacity-50 cursor-not-allowed'
+                }`}
+              >
+                <Icon name="chat" size={15} className="text-icon-secondary flex-shrink-0" />
+                <span className="flex-1 min-w-0 text-body-short-01 text-text-primary">{q}</span>
+                <Icon name="arrow-up-right" size={13} className="text-icon-secondary opacity-0 group-hover:opacity-70 transition-opacity flex-shrink-0" />
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* actions */}
+        <div className="flex gap-2 border-t border-border-subtle-01 pt-4 items-center">
+          <Button kind="secondary" size="sm" icon={<Icon name="arrow-up-right" size={15} />} onClick={() => navigate('/plugins')}>
+            Plugin Market에서 보기
+          </Button>
+          <div className="flex-1" />
+          <button
+            onClick={remove}
+            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-support-error/40 bg-transparent text-support-error text-body-short-01 font-semibold hover:bg-support-error/10 hover:border-support-error/70 transition-colors"
+          >
+            <Icon name="trash" size={15} />
+            제거
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+function MyPluginsScreen() {
+  const { myPlugins } = useLearning();
+  const [filter, setFilter] = useState<Filter>('전체');
+  const [sel, setSel] = useState<string | null>(myPlugins[0]?.id ?? null);
+
+  // Resizable left rail
+  const railPanel = useResizable({
+    initial: 282,
+    min: 184,
+    max: 360,
+    storageKey: 'rice.panel.myplugins',
+  });
+
+  // Resizable plugin list
+  const listPanel = useResizable({
+    initial: 312,
+    min: 240,
+    max: 480,
+    storageKey: 'rice.panel.myplugins-list',
+  });
+
+  const match = (p: MyPlugin) =>
+    filter === '전체' ||
+    (filter === '활성' && p.enabled) ||
+    (filter === '업데이트 있음' && hasUpdate(p)) ||
+    (filter === '비활성' && !p.enabled);
+
+  const list = myPlugins.filter(match);
+  const active = myPlugins.filter((p) => p.enabled).length;
+  const updateCount = myPlugins.filter(hasUpdate).length;
+
+  const selectedExists = sel && myPlugins.some((p) => p.id === sel);
+  const effectiveSel = selectedExists ? sel : list[0]?.id ?? myPlugins[0]?.id ?? null;
+
+  return (
+    <div className="flex flex-1 min-w-0 bg-background overflow-hidden">
+      {/* rail */}
+      <div
+        className="flex-shrink-0 bg-layer-01 border-r border-border-subtle-01 flex flex-col min-w-0 overflow-hidden"
+        style={{ width: railPanel.width }}
+      >
+        <div className="p-4">
+          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#0f62fe] via-[#3023ae] to-[#8a3ffc] p-4 text-white shadow-elevation-2">
+            <div className="absolute -top-8 -right-8 w-28 h-28 rounded-full bg-white/10 blur-2xl" aria-hidden="true" />
+            <div className="relative">
+              <div className="text-caption-01 text-white/85 mb-1">설치된 플러그인</div>
+              <div className="text-[28px] font-light leading-none">
+                {myPlugins.length}
+                <span className="text-body-short-01 ml-1">개</span>
+              </div>
+              <div className="text-caption-01 text-white/85 mt-1.5 flex gap-3">
+                <span>{active} 활성</span>
+                {updateCount > 0 && <span>{updateCount} 업데이트</span>}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="text-caption-01 text-text-helper px-4 pt-1 pb-1.5 tracking-wider">필터</div>
+        <div className="flex-1 overflow-y-auto">
+          {FILTERS.map((c) => {
+            const isActive = c === filter;
+            const badge = c === '업데이트 있음' && updateCount > 0 ? updateCount : null;
+            return (
+              <button
+                key={c}
+                onClick={() => setFilter(c)}
+                className={`flex items-center w-full text-left px-4 py-2.5 text-body-short-01 border-l-2 transition-colors ${
+                  isActive
+                    ? 'bg-layer-selected-01 border-l-blue-50 text-text-primary font-semibold'
+                    : 'bg-transparent border-l-transparent text-text-secondary hover:bg-layer-hover-01'
+                }`}
+              >
+                {c}
+                {badge && (
+                  <span className="ml-auto inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 rounded-full bg-blue-60 text-white text-[11px]">
+                    {badge}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="border-t border-border-subtle-01 px-4 py-3 flex items-start gap-2">
+          <Icon name="idea" size={15} className="text-icon-secondary mt-0.5 flex-shrink-0" />
+          <span className="text-caption-01 text-text-helper leading-4">
+            플러그인은 Plugin Market에서 설치돼요. 여기서 켜고 끄거나 제공 스킬을 확인하세요.
+          </span>
+        </div>
+      </div>
+
+      {/* Rail resize handle */}
+      <ResizeHandle
+        onPointerDown={railPanel.startResize}
+        onDoubleClick={railPanel.resetWidth}
+        isResizing={railPanel.isResizing}
+        aria-label="Resize filters panel"
+      />
+
+      {/* plugin list */}
+      <div
+        className="flex-shrink-0 bg-background border-r border-border-subtle-01 overflow-y-auto min-w-0"
+        style={{ width: listPanel.width }}
+      >
+        <div className="px-5 pt-5 pb-3">
+          <h1 className="text-heading-03 font-light text-text-primary">내 플러그인</h1>
+        </div>
+        {list.map((p) => {
+          const on = p.id === effectiveSel;
+          return (
+            <button
+              key={p.id}
+              onClick={() => setSel(p.id)}
+              className={`flex items-start gap-2.5 w-full text-left border-b border-border-subtle-01 border-l-2 px-[18px] py-3 transition-colors ${
+                on ? 'bg-layer-selected-01 border-l-blue-50' : 'bg-transparent border-l-transparent hover:bg-layer-hover-01'
+              } ${p.enabled ? '' : 'opacity-55'}`}
+            >
+              <div
+                className={`w-7 h-7 flex-shrink-0 flex items-center justify-center rounded mt-0.5 ${p.enabled ? 'bg-blue-60' : 'bg-layer-03'}`}
+              >
+                <Icon name={p.icon} size={16} className="text-white" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-body-short-01 font-semibold text-text-primary truncate">{p.name}</span>
+                  <span className="text-caption-01 font-mono text-text-helper flex-shrink-0">{p.version}</span>
+                </div>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <span className="text-caption-01 text-text-helper truncate">
+                    {p.skills.length}개 스킬 · {p.updated}
+                  </span>
+                  {hasUpdate(p) && (
+                    <Tag type="blue" size="sm">
+                      업데이트
+                    </Tag>
+                  )}
+                </div>
+              </div>
+              {!p.enabled && (
+                <Tag type="gray" size="sm">
+                  off
+                </Tag>
+              )}
+            </button>
+          );
+        })}
+        {list.length === 0 && <div className="p-10 text-center text-body-short-01 text-text-helper">해당하는 플러그인이 없어요.</div>}
+      </div>
+
+      {/* List resize handle */}
+      <ResizeHandle
+        onPointerDown={listPanel.startResize}
+        onDoubleClick={listPanel.resetWidth}
+        isResizing={listPanel.isResizing}
+        aria-label="Resize plugins list panel"
+      />
+
+      {/* detail */}
+      <PluginDetailView pluginId={effectiveSel} />
+    </div>
+  );
+}
+
+export default MyPluginsScreen;
+
+// Made with Bob
