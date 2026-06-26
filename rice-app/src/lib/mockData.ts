@@ -1,45 +1,14 @@
-import { Model, ModelSettings } from '../components/carbon/ModelSettingsPanel';
+import { ModelSettings } from '../components/carbon/ModelSettingsPanel';
 
 /**
- * Mock data for development and testing.
- * Models/settings for the chat model picker, and the skill/plugin marketplaces.
- * (Learning-loop content lives in ./learningData.)
+ * Sample marketplace data for the chat surface.
+ * Models are NOT listed here: SaaS models are user-registered (model + API key)
+ * and local models are fetched live from Ollama. (Learning-loop content lives in
+ * ./learningData.)
  */
 
-// Available models
-export const mockModels: { saas: Model[]; local: Model[] } = {
-  saas: [
-    {
-      id: 'claude-sonnet-4-5',
-      name: 'Claude Sonnet 4.5',
-      description: 'Anthropic API · 고품질 · prompt caching',
-      badge: '권장',
-    },
-  ],
-  local: [
-    {
-      id: 'qwen3.6-27b',
-      name: 'Qwen3.6 27B',
-      description: 'Ollama · 로컬 · 고성능',
-      badge: '오프라인',
-    },
-    {
-      id: 'qwen-3.5-9b',
-      name: 'Qwen3.5 9B',
-      description: 'Ollama · 로컬 · 균형',
-      badge: '오프라인',
-    },
-    {
-      id: 'qwen3.5:9b',
-      name: 'Qwen3.5 9B (MLX)',
-      description: 'Ollama · 로컬 · 균형 · Apple MLX',
-      badge: '오프라인',
-    },
-  ],
-};
-
-// Default model settings
-export const mockModelSettings: ModelSettings = {
+// Default model settings (used until the runtime restores saved settings)
+export const defaultModelSettings: ModelSettings = {
   temperature: 0.7,
   maxTokens: 2048,
   contextLength: '32K',

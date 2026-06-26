@@ -70,9 +70,11 @@ export interface ModelRegisterModalProps {
   onClose: () => void;
   /** 테스트 통과 후 등록 확정 시 호출 */
   onRegister: (payload: RegisterPayload) => void;
+  /** 특정 모델 카드의 "연결"에서 열 때, 제공자·모델명을 미리 채운다 */
+  defaults?: { provider?: string; modelId?: string };
 }
 
-export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, onClose, onRegister }) => {
+export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, onClose, onRegister, defaults }) => {
   const [providerId, setProviderId] = useState<string>('anthropic');
   const [modelId, setModelId] = useState('');
   const [apiKey, setApiKey] = useState('');
@@ -85,15 +87,17 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
     [providerId]
   );
 
-  // 모달이 열릴 때마다 폼 초기화
+  // 모달이 열릴 때마다 폼 초기화 (defaults가 있으면 그 값으로 시드)
   useEffect(() => {
     if (open) {
-      setProviderId('anthropic');
-      setModelId('');
+      setProviderId(defaults?.provider ?? 'anthropic');
+      setModelId(defaults?.modelId ?? '');
       setApiKey('');
       setShowKey(false);
       setTest('idle');
     }
+    // defaults는 열림 시점의 스냅샷만 사용 — open 토글에만 반응
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const trimmedKey = apiKey.trim();

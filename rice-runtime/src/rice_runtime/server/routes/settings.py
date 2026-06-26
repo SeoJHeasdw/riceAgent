@@ -27,11 +27,31 @@ class SettingsIn(BaseModel):
     ui: dict[str, Any] | None = None
     # api_key is handled out-of-band → OS keychain (never persisted in config.yaml)
     api_key: str | None = None
+    # SaaS 등록 모델 목록 (모델 + API 키). None이면 변경 안 함, 리스트면 전체 교체.
+    # 로컬 단일 사용자 앱이라 state.db(provider_models)에 보관한다.
+    registered_models: list[dict[str, Any]] | None = None
+
+
+def _load_registered_models(c: Container) -> list[dict[str, Any]]:
+    rows = c.db.query_all(
+        "SELECT model_id, provider, provider_label, api_key FROM provider_models ORDER BY created_at"
+    )
+    return [
+        {
+            "modelId": r["model_id"],
+            "provider": r["provider"],
+            "providerLabel": r["provider_label"],
+            "apiKey": r["api_key"],
+        }
+        for r in rows
+    ]
 
 
 @router.get("/settings")
 async def get_settings(c: Container = Depends(get_container)):
-    return {"success": True, "data": c.config.to_dict()}
+    data = c.config.to_dict()
+    data["registered_models"] = _load_registered_models(c)
+    return {"success": True, "data": data}
 
 
 @router.put("/settings")
@@ -42,8 +62,27 @@ async def update_settings(body: SettingsIn, c: Container = Depends(get_container
     new_cfg = Config(provider=provider, learning=cfg.learning, ui=ui)
     save_config(c.paths, new_cfg)
     c.config_store.update(new_cfg)  # live: provider/orchestrator observe this next turn (C-1)
-    # TODO(connector/credential): if body.api_key, store in OS keychain.
-    return {"success": True, "data": new_cfg.to_dict()}
+
+    # 등록 모델 목록이 오면 전체 교체 (프론트가 항상 전체 목록을 보낸다)
+    if body.registered_models is not None:
+        c.db.execute("DELETE FROM provider_models")
+        c.db.executemany(
+            "INSERT INTO provider_models(model_id, provider, provider_label, api_key) VALUES (?, ?, ?, ?)",
+            [
+                (
+                    m.get("modelId"),
+                    m.get("provider"),
+                    m.get("providerLabel"),
+                    m.get("apiKey", ""),
+                )
+                for m in body.registered_models
+                if m.get("modelId")
+            ],
+        )
+
+    data = new_cfg.to_dict()
+    data["registered_models"] = _load_registered_models(c)
+    return {"success": True, "data": data}
 
 
 @router.get("/models")

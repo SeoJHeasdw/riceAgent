@@ -1,18 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
 import { SessionSidebar, type Session } from '../components/carbon/SessionSidebar';
 import { ModelSettingsPanel } from '../components/carbon/ModelSettingsPanel';
+import { ModelOnboarding } from '../components/carbon/ModelOnboarding';
 import { LearningPanel } from '../components/carbon/LearningPanel';
 import { ChatTurn } from '../components/carbon/ChatMessage';
 import { useResizable } from '../hooks/useResizable';
 import { useLearning } from '../lib/learning/LearningContext';
 import type { ThreadMessage } from '../lib/learningData';
-import { mockModels, mockModelSettings } from '../lib/mockData';
+import { defaultModelSettings } from '../lib/mockData';
 import { api } from '../lib/api';
 import { sseClient } from '../lib/sse';
 import type { PendingApproval, ToolApprovalRequiredData, SkillPatchProposedData, SSEEvent } from '../lib/types';
 import { Icon, ResizeHandle, ConfirmDialog } from '../components/ui';
 import { FileViewerProvider } from '../lib/fileViewer/FileViewerContext';
 import { useToast } from '../lib/toast/ToastContext';
+import type { RegisteredModel } from '../components/carbon/ModelSettingsPanel';
 
 /**
  * ChatScreen - Claude-Desktop-style chat with the learning-loop surface:
@@ -361,6 +363,8 @@ function ChatScreen() {
   const [sessionSidebarOpen, setSessionSidebarOpen] = useState(true);
   const [learningPanelOpen, setLearningPanelOpen] = useState(true);
   const [settingsPanelOpen, setSettingsPanelOpen] = useState(false);
+  // 최초 실행 온보딩: 런타임 연결 후 provider.configured가 false면 모델 연결을 강제한다.
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
   // a live (runtime) turn is streaming — gates the composer so we can't double-send,
   // and drives the "생성 중" affordance on the send button.
@@ -368,8 +372,9 @@ function ChatScreen() {
   // session pending delete-confirmation (ConfirmDialog target), null = closed
   const [confirmDelete, setConfirmDelete] = useState<Session | null>(null);
   const [modelMode, setModelMode] = useState<'saas' | 'local'>('saas');
-  const [currentModel, setCurrentModel] = useState('claude-sonnet-4-5');
-  const [modelSettings, setModelSettings] = useState(mockModelSettings);
+  const [currentModel, setCurrentModel] = useState('claude-sonnet-4-6');
+  // 등록 모델·키는 런타임 state.db(SQLite)에 저장된다 — 연결 시 GET /settings로 복원.
+  const [modelSettings, setModelSettings] = useState(defaultModelSettings);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -386,9 +391,32 @@ function ChatScreen() {
   const sessionPanel = useResizable({ initial: 264, min: 200, max: 420, storageKey: 'rice.panel.sessions' });
   const learningPanel = useResizable({ initial: 320, min: 240, max: 480, storageKey: 'rice.panel.learning', invert: true });
 
-  const availableModels = mockModels[modelMode];
-  const selectedModel = availableModels.find((m) => m.id === currentModel) || availableModels[0];
+  // 모델 카탈로그는 없다(SaaS=직접 등록, Local=ollama에서 라이브 조회).
+  // 헤더에 보여줄 이름은 현재 선택된 모델 식별자 그대로 사용한다.
+  const selectedModelName = currentModel || (modelMode === 'local' ? '로컬 모델 미선택' : '모델 미선택');
   const activeSession = sessions.find((s) => s.id === activeSessionId);
+
+  // 모델 선택 저장: 로컬 상태 갱신 + 런타임에 영속화(configured=true).
+  // 설정 패널과 온보딩 화면 양쪽에서 동일하게 사용한다.
+  const persistModelSelection = ({ modelId, settings, mode }: { modelId: string; settings: typeof modelSettings; mode: 'saas' | 'local' }) => {
+    setCurrentModel(modelId);
+    setModelSettings(settings);
+    setModelMode(mode);
+    if (connected) {
+      // 활성 모델 선택 + 등록 모델 목록(키 포함)을 런타임 state.db에 영속화.
+      // configured:true → 다음 실행부터 온보딩을 건너뛰고 저장된 모델을 쓴다 (C-1).
+      void api.updateSettings({
+        provider: {
+          kind: mode === 'local' ? 'ollama' : 'claude',
+          model: modelId,
+          temperature: settings.temperature,
+          base_url: settings.endpoint ?? null,
+          configured: true,
+        },
+        registered_models: settings.registeredModels,
+      });
+    }
+  };
 
   // Keep `connected` in sync with the (async) runtime connect probe.
   useEffect(() => {
@@ -405,18 +433,25 @@ function ChatScreen() {
     // 1) Restore model settings saved by PUT /settings, then health-check when local
     void api.getSettings().then(async (res) => {
       if (cancelled || !res.success) return;
-      const prov = (res.data as { provider?: { kind?: string; model?: string; base_url?: string; temperature?: number } })?.provider;
+      const data = res.data as {
+        provider?: { kind?: string; model?: string; base_url?: string; temperature?: number; configured?: boolean };
+        registered_models?: RegisteredModel[];
+      };
+      const prov = data?.provider;
+      // SaaS 등록 모델(키 포함)을 state.db에서 복원
+      const registered = data?.registered_models ?? [];
       if (prov) {
+        // 최초 실행: 아직 모델을 연결·저장한 적이 없으면 온보딩을 강제한다.
+        if (!prov.configured) setOnboardingOpen(true);
         const restoredMode: 'saas' | 'local' = prov.kind === 'ollama' ? 'local' : 'saas';
         setModelMode(restoredMode);
         if (prov.model) setCurrentModel(prov.model);
-        if (prov.base_url || prov.temperature !== undefined) {
-          setModelSettings((prev) => ({
-            ...prev,
-            ...(prov.base_url ? { endpoint: prov.base_url } : {}),
-            ...(prov.temperature !== undefined ? { temperature: prov.temperature } : {}),
-          }));
-        }
+        setModelSettings((prev) => ({
+          ...prev,
+          registeredModels: registered,
+          ...(prov.base_url ? { endpoint: prov.base_url } : {}),
+          ...(prov.temperature !== undefined ? { temperature: prov.temperature } : {}),
+        }));
 
         // Local 모드일 때만: 설정된 모델이 실제 Ollama에 남아 있는지 확인
         if (prov.kind === 'ollama' && prov.model) {
@@ -1078,7 +1113,7 @@ function ChatScreen() {
           isOpen={sessionSidebarOpen}
           onToggle={() => setSessionSidebarOpen(!sessionSidebarOpen)}
           width={sessionPanel.width}
-          modelName={selectedModel.name}
+          modelName={selectedModelName}
           modelMode={modelMode}
           onOpenModelSettings={() => setSettingsPanelOpen(true)}
         />
@@ -1278,40 +1313,31 @@ function ChatScreen() {
         )}
       </div>
 
-      {/* Model Settings Panel */}
+      {/* Model Settings Panel (기어 아이콘) */}
       <ModelSettingsPanel
         isOpen={settingsPanelOpen}
         onClose={() => setSettingsPanelOpen(false)}
         currentModel={currentModel}
-        availableModels={availableModels}
-        onModelChange={(modelId) => {
-          setCurrentModel(modelId);
-          // 모델 선택 시 즉시 백엔드에 반영 (다음 turn부터 적용, C-1)
-          if (connected) {
-            const kind = modelMode === 'local' ? 'ollama' : 'claude';
-            void api.updateSettings({ provider: { kind, model: modelId } });
-          }
+        onSave={(payload) => {
+          persistModelSelection(payload);
+          setSettingsPanelOpen(false);
         }}
         settings={modelSettings}
-        onSettingsChange={(s) => {
-          setModelSettings(s);
-          // temperature/maxTokens 등 파라미터 변경 반영
-          if (connected) {
-            const kind = modelMode === 'local' ? 'ollama' : 'claude';
-            void api.updateSettings({
-              provider: { kind, model: currentModel, temperature: s.temperature, base_url: s.endpoint ?? null },
-            });
-          }
-        }}
         modelMode={modelMode}
-        onModelModeChange={(mode) => {
-          setModelMode(mode);
-          // Local로 전환 시에는 모델이 아직 미결정 — kind만 변경
-          if (connected) {
-            void api.updateSettings({ provider: { kind: mode === 'local' ? 'ollama' : 'claude' } });
-          }
-        }}
       />
+
+      {/* 최초 실행: 모델 미연결 시 전체 화면 온보딩 */}
+      {onboardingOpen && (
+        <ModelOnboarding
+          currentModel={currentModel}
+          modelMode={modelMode}
+          settings={modelSettings}
+          onComplete={(payload) => {
+            persistModelSelection(payload);
+            setOnboardingOpen(false);
+          }}
+        />
+      )}
 
       {/* Delete-session confirmation (irreversible) */}
       <ConfirmDialog

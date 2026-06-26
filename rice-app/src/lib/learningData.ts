@@ -1882,23 +1882,4 @@ export const CONNECTOR_CATALOG: CatalogConnector[] = [
   },
 ];
 
-// ── Models (model settings panel) ───────────────────────────────
-export interface ModelOption {
-  id: string;
-  name: string;
-  sub: string;
-  badge?: string;
-}
-
-export const MODELS: { saas: ModelOption[]; local: ModelOption[] } = {
-  saas: [
-    { id: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5', sub: 'Anthropic API · prompt caching', badge: '권장' },
-  ],
-  local: [
-    { id: 'qwen3.6-27b', name: 'Qwen3.6 27B', sub: 'Ollama · 로컬 · 고성능', badge: '오프라인' },
-    { id: 'qwen-3.5-9b', name: 'Qwen3.5 9B', sub: 'Ollama · 로컬 · 균형' },
-    { id: 'qwen3.5:9b', name: 'Qwen3.5 9B (MLX)', sub: 'Ollama · 로컬 · 균형 · Apple MLX' },
-  ],
-};
-
 // Made with Bob

@@ -41,6 +41,10 @@ class ProviderConfig:
     model: str = "claude-sonnet-4-6"
     temperature: float = 0.7
     base_url: str | None = None  # Ollama only
+    # First-run gate: False until the user picks & connects a model in the
+    # settings panel and saves (PUT /settings). The app shows the mandatory
+    # model-onboarding flow while this is False, then trusts the saved provider.
+    configured: bool = False
 
 
 @dataclass(frozen=True)
