@@ -1,10 +1,8 @@
 # RICE Learning Eval Design
 
-> 작성일: 2026-06-22 · 상태: **골격 (결정 진행 중)**
+> 작성일: 2026-06-22 (개정: 2026-06-26) · 상태: **확정 (결정 완료)**
 > 범위: 제품 thesis "쓸수록 똑똑해짐"을 **정량적으로 측정·증명**하는 방법 — 측정 지표, cold/warm 실험 설계, eval harness, in-app "Learning Impact" 가시화(디자인 데모 surface), 데이터 계약, 데모 스크립트
 > 관계: [RICE_LEARNING_LOOP_DESIGN.md](RICE_LEARNING_LOOP_DESIGN.md)는 *무엇이 학습되는가*(skill·memory·patch)를 정의한다. 이 문서는 *학습이 일어났음을 어떻게 측정·증명하는가*를 정의한다. patch 메커니즘은 [RICE_LEARNING_LOOP_DESIGN.md](RICE_LEARNING_LOOP_DESIGN.md) 5.2, SSE 이벤트는 [RICE_CONTRACTS.md](RICE_CONTRACTS.md) 1.3, 화면 매핑은 [RICE_RUNTIME_DIRECTORY.md](RICE_RUNTIME_DIRECTORY.md) 4장.
-
-**표기법**: ★ = 추천안 · ☐ = 결정 필요 · ✅ = 결정됨
 
 ---
 
@@ -70,7 +68,7 @@ RICE의 단 하나의 핵심 주장은 **"쓸수록 사용자에게 맞춰 똑�
 | A. 자연 워밍업 | 워밍업 시나리오를 **실제로 실행**해 스킬을 자연 생성/patch | 가장 정직 (loop 전체가 도는 증거) | 비결정적(LLM 변동), 데모마다 결과 흔들림 |
 | B. 스냅샷 시드 | 미리 만든 `skills/` 스냅샷을 WARM 프로파일에 주입 | **재현성 높음**, 데모 안정 | 워밍업 과정 자체는 안 보임 |
 
-★ **권고: 데모는 B(스냅샷)로 재현성 확보 + 부록으로 A를 1회 실측 첨부.** B로 "결과의 안정적 재현"을, A로 "스킬이 실제로 자연 생성된다"를 각각 책임진다. (☐ 결정 LE-2)
+**데모는 B(스냅샷)로 재현성 확보 + 부록으로 A를 1회 실측 첨부한다.** B로 "결과의 안정적 재현"을, A로 "스킬이 실제로 자연 생성된다"를 각각 책임진다. 따라서 `eval/profiles/warm/`은 스냅샷 시드를 정본으로 두고, 자연 워밍업(A) 1회 실측은 부록 결과로 첨부한다.
 
 ---
 
@@ -84,7 +82,7 @@ RICE의 단 하나의 핵심 주장은 **"쓸수록 사용자에게 맞춰 똑�
 | T-B | "프로젝트 테스트 돌려줘" | `run-tests` + pytest preference | mock test runner가 `-n 8`(교정 반영)로 호출됨 |
 | T-C | "WXO 에러 X 트러블슈팅" | `wxo-expert` plugin | 정답 진단 단계 시퀀스 도달 |
 
-**성공 체크는 가능한 한 결정적으로.** 실제 부수효과(실 배포) 대신 **mock tool의 호출 시퀀스/최종 상태**로 판정한다. LLM-judge(자유 서술 채점)는 보조 수단으로만 — 결정성을 해친다.
+**성공 체크는 결정적 mock 기반으로 구현한다.** 실제 부수효과(실 배포) 대신 **mock tool의 호출 시퀀스/최종 상태**로 판정한다(예: 정해진 인자·순서로 호출됐는가, 최종 상태가 기대값인가). LLM-judge(자유 서술 채점)는 결정성을 해치므로 **보조 수단으로만** 쓴다. 각 task의 `success_check`는 이 결정적 술어로 작성한다.
 
 > mock tool은 built-in tool로 구현(코드 실행 sandbox 불필요, [RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md) 5장). 결정적으로 응답하도록 고정한다(예: 정해진 입력 → 정해진 결과·실패).
 
@@ -135,13 +133,9 @@ rice-runtime/
 
 ### 6.1 위치
 
-| 후보 | 판단 |
-|------|------|
-| ★ **MySkillsScreen 내 패널/탭** ("Learning Impact" / "학습 효과") | MySkills가 이미 "RICE 차별점이 보이는 화면"([RICE_PRODUCT_IDEA.md](RICE_PRODUCT_IDEA.md) 4.4). 화면 수를 늘리지 않음. |
-| ChatScreen 사이드 배지 | 라이브 데모와 가깝지만 공간 협소 |
-| 새 화면(8번째) 신설 | 제품 결정 필요 — 현재 7화면 구조 변경 |
+**MySkillsScreen 내 패널.** 7화면 구조를 유지하면서 정량 증거를 차별점 화면에 자연 배치한다. (검토했던 대안: ChatScreen 사이드 배지 — 공간 협소 / 새 8번째 화면 신설 — 화면 구조 변경 부담.)
 
-★ **권고: MySkillsScreen 내 패널.** (☐ 결정 LE-1) — 7화면 구조를 유지하면서 정량 증거를 차별점 화면에 자연 배치.
+> **구현 상태**: 이 패널은 프론트엔드에 **이미 구현됨** — [`LearningImpactPanel.tsx`](rice-app/src/components/carbon/LearningImpactPanel.tsx)가 MySkillsScreen 안에서 "Learning Impact" 탭으로 렌더된다([MySkillsScreen.tsx](rice-app/src/screens/MySkillsScreen.tsx) — `showImpact` 토글). 6.3 스키마(`ImpactReport`)에만 의존하므로 현재 시드 fixture가 추후 harness 실측치로 drop-in 교체된다.
 
 ### 6.2 패널 와이어프레임 (개념)
 
@@ -207,7 +201,6 @@ UI는 이 스키마에만 의존한다. 디자인 단계엔 **시드 fixture**�
 | [RICE_CONTRACTS.md](RICE_CONTRACTS.md) | (선택) `GET /eval/runs`·`/eval/runs/{id}` — **MVP는 fixture로 대체 가능** |
 | [RICE_PRODUCT_IDEA.md](RICE_PRODUCT_IDEA.md) | MySkillsScreen에 "Learning Impact" 패널 추가(4.4) |
 | [RICE_RUNTIME_DIRECTORY.md](RICE_RUNTIME_DIRECTORY.md) | `eval/` 디렉토리 추가(`tests/`와 별개, 5장 트리) |
-| [DECISIONS.md](DECISIONS.md) | 신규 결정 LE-1·LE-2·LE-3 등록(9장) |
 | [README.md](README.md) | 문서 목록에 본 문서 추가, 단일 출처 규칙에 "학습 측정 = LEARNING_EVAL" 한 줄 |
 
 ---
@@ -224,15 +217,3 @@ UI는 이 스키마에만 의존한다. 디자인 단계엔 **시드 fixture**�
 ```
 
 → **정량(패널) + 정성(라이브 SSE·diff 카드)** 이 동일 주장을 두 각도에서 증명한다. 비개발자에겐 패널의 막대·퍼센트가, 개발자에겐 JSON·반복 횟수·분산이 각각 설득력을 가진다.
-
----
-
-## 9. 미결정
-
-| ID | 항목 | 추천/메모 |
-|----|------|-----------|
-| LE-1 | Learning Impact 패널 **위치** | ★ MySkillsScreen 내 패널 (7화면 유지) vs 새 화면 (6.1) |
-| LE-2 | WARM 프로파일 **준비 방식** | ★ B(스냅샷) 재현성 + 부록 A(자연 워밍업) 1회 (3장) |
-| LE-3 | **성공 체크** 구현 | ★ mock tool 호출 시퀀스/최종 상태(결정적), LLM-judge 보조 (4장) |
-
-> patch 메커니즘 미결정은 [RICE_LEARNING_LOOP_DESIGN.md](RICE_LEARNING_LOOP_DESIGN.md) 8장(LL-5). 전체 등록부는 [DECISIONS.md](DECISIONS.md).

@@ -1,10 +1,8 @@
 # RICE Learning Loop Design
 
-> 작성일: 2026-06-18 (개정: 2026-06-22) · 상태: **골격 (결정 진행 중)**
+> 작성일: 2026-06-18 (개정: 2026-06-26) · 상태: **확정 (결정 완료)**
 > 범위: RICE의 핵심 차별점인 learning loop의 **자체 스펙** — SKILL.md 포맷, usage 텔레메트리, 생성 트리거, **개선(patch)**, curator 규칙, memory/user modeling
 > 관계: [HERMES_LEARNING_LOOP_REFERENCE.md](HERMES_LEARNING_LOOP_REFERENCE.md)는 *참조*(Hermes 코드 분석), 이 문서는 *RICE의 결정*이다. 런타임 통합은 [RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md) 3·4장, 모듈 위치는 [RICE_RUNTIME_DIRECTORY.md](RICE_RUNTIME_DIRECTORY.md) `learning/`. **학습이 실제로 일어났음을 측정·증명하는 방법**은 [RICE_LEARNING_EVAL.md](RICE_LEARNING_EVAL.md)(신규).
-
-**표기법**: ★ = 추천안 · ☐ = 결정 필요 · ✅ = 결정됨
 
 ---
 
@@ -169,7 +167,7 @@ T1/T3 제안은 다음을 산출한다:
 
 > `skill_patch_proposed`의 정지/재개·`approval_id`·timeout·재연결 복구(`GET /sessions/{id}/pending-approvals`)는 tool 승인과 **공유 메커니즘**이라 patch 전용 추가가 아니다 — 정본 [RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md) 5.1.
 
-→ ☐ **결정 LL-5**: 위 patch 메커니즘(제안-승인 + T1/T2/T3 트리거) 및 계약 추가 승인. ([DECISIONS.md](DECISIONS.md))
+→ 위 patch 메커니즘(제안 → HITL 승인 → 적용 + T1/T2/T3 트리거) 및 계약 추가(`skill_patch_proposed`·`skill_patched`·`/skills/{id}/patch|history|rollback`)가 정본이다. CONTRACTS 1.2·1.3에 반영 완료.
 
 #### 5.2.6 데모 스크립트 (T1a 경로 — 가장 설득력)
 
@@ -196,23 +194,29 @@ T1/T3 제안은 다음을 산출한다:
 | preferences | `state.db` | 답변 스타일(간결/상세/기술형), 선호 모델/도구 |
 | 세션 히스토리 | `state.db` + FTS5 | 과거 대화 검색(session_search) |
 
-- ★ **prefetch**(턴 시작): 최근 facts N개 + 쿼리 FTS 매칭 상위 K개(메모리) + **active 스킬 전부 주입**(예산 내, §7). 스킬은 예산 초과 시에만 FTS 랭킹으로 선별 — 그 구간이 retrieval 취약점이며([RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md) 3장), `skill_hit`으로 진단한다([RICE_LEARNING_EVAL.md](RICE_LEARNING_EVAL.md) 2장)
+- **prefetch 기본값**: 턴 시작에 **최근 facts N=20** + **쿼리 FTS 매칭 상위 K=10(메모리)** + **active 스킬 전부 주입**(스킬 예산 내, §7). N·K는 `config.yaml`로 노출. 스킬은 예산 초과 시에만 FTS 랭킹으로 선별 — 그 구간이 retrieval 취약점이며([RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md) 3장), `skill_hit`으로 진단한다([RICE_LEARNING_EVAL.md](RICE_LEARNING_EVAL.md) 2장)
 - ★ memory 기록 시 `memory_written` SSE 이벤트 → 개인화 가시화
-- ☐ **결정 LL-4**: prefetch N·K 기본값과 **context 토큰 예산** — 스킬·메모리 누적 시 컨텍스트 비대화 방지(주입 상한 + 우선순위)
 
 ---
 
-## 7. Context 예산 & Prefix Caching
+## 7. Context 토큰 예산 & Prefix Caching
+
+**총 컨텍스트 예산 = 270K 토큰**(모델 응답 20K 예약 포함). "토큰 사용량 < 정확도" 원칙 — 토큰을 더 쓰더라도 업무 처리 능력·정확도를 우선한다. 270K 전제는 대용량 컨텍스트(예: Claude 1M 컨텍스트 베타) 또는 그에 준하는 모델이며, on-prem(Ollama) 모델은 모델별 한도에 맞춰 같은 우선순위로 비례 축소한다.
+
+| 구획 | 예산(목표) | 비고 |
+|------|----------:|------|
+| 시스템 프롬프트(base + 스킬 생성/patch 가이드) | ~8K | 고정 |
+| 도구 정의(built-in tools, `execute_code` 포함) | ~12K | |
+| MCP 도구(Connector 노출 tool) | ~15K | 연결 수 비례 (MVP: Gmail) |
+| 규칙(rules) | ~5K | |
+| **스킬(active 주입)** | **~40K (상한)** | 초과 시 `state=active` + `use` 상위 우선, 나머지는 description만 색인 |
+| 메모리(facts N=20 + FTS K=10) | ~10K | §6 |
+| 메시지(대화 히스토리) | ~160K (잔여) | 초과 시 오래된 턴부터 요약/절단 |
+| **모델 응답(출력 예약)** | **20K** | |
+| **합계** | **270K** | |
 
 - 활성 스킬은 시스템 프롬프트에 전체 주입 + prefix caching 의존(Claude `cache_control`, Hermes 검증 #6). Ollama는 caching 미지원 → 컨텍스트 재사용으로 대체([RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md) 6장).
-- 스킬 수가 늘면 주입 비용↑ → 상한(토큰 예산) 도달 시 `state=active` + `use` 상위 우선 주입, 나머지는 description만 색인. **이 예산 초과 구간에서만 검색이 스킬을 선별**하므로 retrieval 취약성이 노출된다(MVP 대응·진단: [RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md) 3장 + `skill_hit`).
+- **스킬 예산(~40K) 초과 구간에서만 검색이 스킬을 선별**하므로 retrieval 취약성이 노출된다(MVP 대응·진단: [RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md) 3장 + `skill_hit`).
+- **서브에이전트 컨텍스트 격리**: 서브에이전트 실행은 **새 대화를 여는 것과 동일하게** 독립된 컨텍스트(별도 270K 윈도)에서 작업시켜 부모 대화의 컨텍스트 오염을 막는다. 토큰 사용량은 늘지만 정확도를 우선하는 위 원칙과 일관된다.
 
----
-
-## 8. 미결정
-
-확정 사항은 위 본문에 반영됐다. 남은 미결정은 **2건** — [DECISIONS.md](DECISIONS.md) 참조:
-- **LL-4**: prefetch N·K + context 토큰 예산 (주입 상한·우선순위)
-- **LL-5**: Skill 개선(patch) 메커니즘 — 제안-승인 흐름 + 트리거(T1/T2/T3) + 계약 추가(`skill_patch_proposed`·`skill_patched`·`POST /skills/{id}/patch`·history) 승인 (§5.2.5)
-
-> 학습 측정(eval) 관련 미결정은 [RICE_LEARNING_EVAL.md](RICE_LEARNING_EVAL.md) 9장(LE-1~LE-3).
+> 학습 측정(eval)은 [RICE_LEARNING_EVAL.md](RICE_LEARNING_EVAL.md) 참조.

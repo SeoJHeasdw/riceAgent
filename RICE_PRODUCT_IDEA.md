@@ -131,7 +131,7 @@ Learning loop이 축적한 스킬을 보고 관리하는 화면
 - 상태(active / stale / archived)와 사용 통계 확인
 - 스킬 보관/활성화, 수동 "스킬 정리" 트리거
 - 스킬 **버전 배지·개선(patch) 이력**과 롤백 — 개선 제안 diff 카드 승인 흐름은 [RICE_LEARNING_LOOP_DESIGN.md](RICE_LEARNING_LOOP_DESIGN.md) 5.2
-- **Learning Impact 패널** — 같은 과제를 학습 전(cold) vs 후(warm)로 돌린 정량 비교(turns·tool calls·success·관련 스킬 주입)로 "쓸수록 똑똑해짐"을 **숫자로** 증명하는 surface. 측정 방법·데이터 계약은 [RICE_LEARNING_EVAL.md](RICE_LEARNING_EVAL.md)(패널 위치는 결정 LE-1)
+- **Learning Impact 패널** — 같은 과제를 학습 전(cold) vs 후(warm)로 돌린 정량 비교(turns·tool calls·success·관련 스킬 주입)로 "쓸수록 똑똑해짐"을 **숫자로** 증명하는 surface. **MySkillsScreen 내 패널**로 구현됨. 측정 방법·데이터 계약은 [RICE_LEARNING_EVAL.md](RICE_LEARNING_EVAL.md)
 
 ---
 

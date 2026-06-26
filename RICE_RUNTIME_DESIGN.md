@@ -1,11 +1,9 @@
 # RICE Runtime Design
 
-> 작성일: 2026-06-12 · 상태: **골격 (결정 진행 중)**
+> 작성일: 2026-06-12 (개정: 2026-06-26) · 상태: **확정 (결정 완료)**
 > 범위: `rice-runtime`의 핵심 설계 + 패키징 + 보안 베이스라인
-> 해소 대상: [RICE_REPO_STRATEGY.md](RICE_REPO_STRATEGY.md) 9장 미결정 #1, #3, #5, #6, #7
+> 해소 대상(전건 확정): [RICE_REPO_STRATEGY.md](RICE_REPO_STRATEGY.md) 9장 #1, #3, #5, #6, #7
 > 아키텍처 참조: [RICE_RUNTIME_DIRECTORY.md](RICE_RUNTIME_DIRECTORY.md)(모듈 구조 정본)
-
-**표기법**: ★ = 추천안 (이유 포함) · ☐ = 결정 필요 · ✅ = 결정됨
 
 ---
 
@@ -21,14 +19,13 @@
 | Curator | ★ **단순화** — 자동 전이(규칙)만 차용, LLM 리뷰는 수동 트리거 버튼으로 | 기본 7일 주기는 데모에서 절대 안 보임. UI에서 "스킬 정리" 버튼 → 즉시 실행이 데모에 유리 |
 | Memory Manager | ★ **차용** (builtin 1개로 시작) | Hermes도 외부 provider 1개 제한. MVP는 builtin(로컬)만 |
 | Honcho (외부 user modeling) | ★ **제외** | 원격 API 의존 — IBM 내부 데모에 외부 SaaS 부적합. user modeling은 로컬 구현 (3장) |
-| `execute_code` (PTC) | ☐ **결정 필요** — 차용 시 sandbox 백엔드 문제(5장)와 연동 | 강력하지만 MVP 필수는 아님. 데모 시나리오에 따라 결정 |
+| `execute_code` (PTC) | ✅ **차용 (포함)** — repo 단위 코드 실행 도구로 제공 | Hermes도 코드를 생성·실행한다(스킬에 넣지 않을 뿐). RICE는 **repo 단위**로 작업하므로 에이전트가 생성한 코드를 작업 repo 안에서 실행하는 것이 자연스럽다. 실행 경계는 5장(자식 프로세스 + repo 작업 디렉토리 한정 + env 스크럽) |
 | Plugin 시스템 (`register(ctx)`) | ★ **차용** (artifact 스펙은 CONTRACTS 문서) | Plugin Market의 전제 조건 |
 | Cron Scheduler | ★ **제외** | 데모 범위 밖 |
 | Gateway (메시징) | ★ **제외** | RICE는 데스크톱 앱 단일 접점 |
 | FTS5 세션 검색 | ★ **차용** | 세션 간 컨텍스트 유지 데모에 직접 기여, SQLite 내장이라 비용 낮음 |
 
-☐ **결정 1-A**: 위 표에서 ★ 항목 승인 여부 (특히 Honcho 제외, Curator 수동 트리거)
-☐ **결정 1-B**: `execute_code` 포함 여부
+위 차용표가 runtime 전체 스코프의 정본이다 — Honcho **제외**(외부 SaaS), Curator **수동 트리거** 포함, `execute_code` **포함**(repo 단위 코드 실행 도구, sandbox 경계는 5장). Hermes를 기준으로 가깝게 벤치마킹하며, 추후 개선·확장은 본 표를 갱신하는 방식으로 추적한다.
 
 ---
 
@@ -88,20 +85,23 @@
 
 > Hermes 검증 #4의 핵심 교훈: **local 백엔드는 파일시스템/네트워크 격리가 없다.** 마켓에서 받은 코드를 그대로 local 실행하면 안 됨.
 >
-> 전제: 마켓 artifact 중 **skill(SKILL.md)은 선언적**이라 코드 실행이 없어 sandbox 대상이 아니다. 실제 코드 실행/외부 접근은 **Connector(MCP) 레이어와 plugin이 포함한 connector 코드**에서만 발생하며, 이 장은 그 경계를 정의한다.
+> 전제: 마켓 artifact 중 **skill(SKILL.md)은 선언적**이라 코드 실행이 없어 sandbox 대상이 아니다. 실제 코드 실행/외부 접근은 ① 에이전트의 **`execute_code`**, ② **Connector(MCP) 레이어와 plugin이 포함한 connector 코드**에서 발생하며, 이 장은 그 경계를 정의한다.
 
 | 실행 대상 | 신뢰 수준 | ★ 실행 방식 |
 |----------|----------|------------|
 | built-in tool | 우리가 작성 | 프로세스 내 직접 실행 |
+| **`execute_code` (에이전트 생성 코드)** | 에이전트 생성 · repo 범위 | **자식 프로세스 + 작업 repo 디렉토리로 cwd 한정 + env 스크럽 + 타임아웃** (Hermes PTC 수준, "repo 단위" 작업 전제) |
 | skill (SKILL.md) | 선언적 | 코드 실행 없음 → sandbox 대상 아님 |
 | 사용자 본인이 만든 Connector·plugin 코드 | 본인 책임 | 자식 프로세스 + env 스크럽 (Hermes local 수준) |
 | **마켓에서 설치한 plugin·Connector(MCP 서버) 코드** | 타인 코드 | 자식 프로세스 + env 스크럽 (데모 한정 신뢰) |
+
+**`execute_code` 실행 경계**: 에이전트가 생성한 코드는 **현재 작업 repo를 cwd로 고정**한 자식 프로세스에서 실행한다 — 파일 접근이 작업 repo로 자연 제한되고, env는 스크럽(키체인 시크릿·토큰 미노출), 실행은 타임아웃으로 끊는다. "repo 단위 작업"이라는 전제가 곧 격리 경계다(Claude Code/Hermes PTC와 동일 발상). 위험 동작(파일 삭제·네트워크·외부 명령)은 아래 tool 실행 승인(HITL) 대상이다. 제품화 시 Docker 컨테이너(CPU/메모리/네트워크 제한)로의 승격은 ADR로 기록.
 
 **실행 방식**: 마켓에서 설치한 plugin·Connector(MCP) 코드는 **자식 프로세스 + env 스크럽**으로 실행하고, "데모 한정, 신뢰된 사내 artifact만"을 전제로 둔다 — 데모 대상이 IBM 내부 큐레이션된 artifact이기 때문. 제품화 시 Docker 컨테이너(CPU/메모리 제한)로 전환은 ADR로 기록.
 
 > 검토했던 대안: Docker 실행(안전하나 사용자 PC에 Docker 요구 → 데모 제약), 선언적만 허용(가장 안전 — skill은 이미 선언적이나, Connector(MCP) 실행이 막혀 외부 연동 데모 약화).
 
-**Tool 실행 승인 (human-in-the-loop)**: Connector(MCP)·plugin이 제공하는 tool 실행 전, 위험 동작은 사용자 승인을 받는다. 승인 요청은 SSE `tool_approval_required` 이벤트로 보내고 앱이 `POST /sessions/{id}/tool-approval`로 응답한다(CONTRACTS 1.2). 승인 **UI 구현은 개발 영역**이며, 본 문서는 승인 **시점(실행 직전)·실행 경계(위 표)** 를 정의한다. 전송 메커니즘(아래 5.1)은 스킬 개선 승인(`skill_patch_proposed`, LEARNING_LOOP 5.2)과 **동일**하다.
+**Tool 실행 승인 (human-in-the-loop)**: Connector(MCP)·plugin이 제공하는 tool, 그리고 `execute_code`의 위험 동작(파일 삭제·네트워크·외부 명령) 실행 전, 사용자 승인을 받는다. 승인 요청은 SSE `tool_approval_required` 이벤트로 보내고 앱이 `POST /sessions/{id}/tool-approval`로 응답한다(CONTRACTS 1.2). 승인 **UI 구현은 개발 영역**이며, 본 문서는 승인 **시점(실행 직전)·실행 경계(위 표)** 를 정의한다. 전송 메커니즘(아래 5.1)은 스킬 개선 승인(`skill_patch_proposed`, LEARNING_LOOP 5.2)과 **동일**하다.
 
 ### 5.1 HITL 승인 메커니즘 — parking · timeout · 방치 · 재연결
 
@@ -123,7 +123,7 @@
 
 ---
 
-## 6. 모델 프로바이더 & 키 보관 (미결정 #3)
+## 6. 모델 프로바이더 & 키 보관 (REPO_STRATEGY #3 해소)
 
 서비스 형태 관점으로 2개 provider를 지원한다 ("모델 선택" UI가 SaaS/on-prem을 토글 — 제품 기능):
 
@@ -161,7 +161,7 @@ sessions(id, title, model, started_at, ended_at, archived)
 messages(id, session_id, role, content, tool_calls, ts)  + FTS5
 memories(id, kind, content, created_at, source_session_id)
 installed_artifacts(id, type, name, version, source, installed_at)  -- type: skill|plugin (MySkills / MyPlugins)
-attachments(id, message_id, kind, path, created_at)                 -- ★ 향후: 첨부/멀티모달 입력
+attachments(id, message_id, kind, path, created_at)                 -- 첨부/멀티모달 (MVP: kind ∈ {xlsx, png})
 
 -- Connector 관련 테이블 (신규)
 connectors(
@@ -186,7 +186,7 @@ connector_credentials(
 
 ---
 
-## 8. 패키징/배포 (미결정 #1)
+## 8. 패키징/배포 (REPO_STRATEGY #1 해소)
 
 ### 8.0 배포 형태 (3 배포물)
 
@@ -220,7 +220,7 @@ Python 런타임은 **PyInstaller 단일 바이너리**로 배포한다 (아래 
 
 ### 9.1 개요
 
-**목적**: Plugin이 외부 서비스에 접근할 수 있도록 OAuth 기반 연결 관리. 프로토타입 지원 대상은 **Gmail만**이다 (이후 Google Drive·Slack·Microsoft 등 확장).
+**목적**: Plugin이 외부 서비스에 접근할 수 있도록 OAuth 기반 연결 관리. 프로토타입은 **Gmail 커넥터 하나만 진지하게 구현**하고, 아래 9.2 OAuth 흐름을 정본으로 한다. 그 외 서비스(Google Drive·Slack·Microsoft 등)는 동일 OAuth 골격에 connector_type만 추가하면 되는 **확장 포인트로만** 두고 이번 데모에서는 구현하지 않는다.
 
 **구성 요소**:
 - Connector Manager (connector/manager.py)
@@ -277,23 +277,17 @@ def check_plugin_permission(plugin_id: str, connector_type: str) -> bool:
 1. **로컬 API 인증**: 런타임 spawn 시 일회성 토큰 발급 → 앱만 접근 가능 (포트 스캔하는 타 프로세스 차단)
 2. **시크릿**: OS 키체인 (6장, 9.3장), 로그에 키/토큰 출력 금지
 3. **마켓 artifact 실행 경계**: 5장 결정에 따름 + artifact 체크섬 검증 (CONTRACTS 문서)
-   - ☐ **Phase 2 분석**: 체크섬만으로는 위변조 방지가 약함 → 디지털 서명(GPG/X.509) + platform 측 서명 키 관리 + runtime 측 신뢰 체인 검증 (우선순위 🟢 낮음, 담당: 보안 팀 + Platform 팀)
+   - **Phase 2 백로그 (MVP 밖, 결정 아님)**: 체크섬만으로는 위변조 방지가 약함 → 디지털 서명(GPG/X.509) + platform 측 서명 키 관리 + runtime 측 신뢰 체인 검증 (우선순위 🟢 낮음, 담당: 보안 팀 + Platform 팀)
 4. **Connector Credential**: OS 키체인 저장, 메모리에서 즉시 삭제, 로그 금지
 
 ---
 
-## 11. 결정 현황
-
-이 문서 관련 결정(RD 1-A ~ 9-B)의 상태·근거·기한은 **단일 등록부** [DECISIONS.md](DECISIONS.md) 1장에서 추적한다.
-
----
-
-## 12. 향후 확장 (UI 로드맵 대응)
+## 11. 향후 확장 (UI 로드맵 대응)
 
 > 설계는 UI 상위집합이다. 현재 프로토타입 UI에 있으나 MVP 범위가 미정인 것 + 아직 UI에 없는 확장 후보를 추적한다.
 
-- **멀티모달/첨부 처리**: ChatScreen 파일 첨부 → 첨부 저장(`~/.rice/attachments/`) + provider 멀티모달 전달 (CONTRACTS 결정 1-C)
-- **음성 입력(STT)**: ChatScreen 마이크 UI → Web Speech 또는 로컬 STT (CONTRACTS 결정 1-D)
+- **멀티모달/첨부 처리 (MVP 포함)**: ChatScreen 파일 첨부 → **xlsx·png만** 첨부 저장(`~/.rice/attachments/`) + provider 멀티모달 전달. 업로드는 `POST /sessions/{id}/attachments`(선업로드) 후 메시지가 `attachment_id`로 참조 (CONTRACTS 1.1·1.3)
+- **음성 입력(STT)**: ChatScreen 마이크 UI → Web Speech 또는 로컬 STT (이번 개발 **제외**, 향후 확장)
 - **Skill 작성·게시**: 사용자 제작 skill(SKILL.md)을 platform에 publish(`POST /artifacts`) — 게시 UI 신설 (설치된 skill 관리는 MySkillsScreen이 이미 담당)
 - **Connector 제공 도구 가시화**: 연결된 Connector(MCP)가 노출하는 원자적 tool 목록을 ConnectorsScreen에서 확인
 - **artifact 디지털 서명**: 10장 Phase 2 분석 항목

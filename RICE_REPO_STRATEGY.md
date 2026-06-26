@@ -249,7 +249,7 @@ flowchart LR
 
 ### Phase 0 — 계약 고정 (가장 먼저)
 1. 4.1 app↔runtime IPC 방식 확정 + OpenAPI 스펙 초안
-2. 9장의 미결정 사항 중 패키징 방식 확정 (데모 시연 환경에 직결)
+2. 9장 패키징 방식 확정됨(PyInstaller) → 스파이크로 의존성 검증 (데모 시연 환경에 직결)
 
 ### Phase 1 — 데모 핵심
 1. `rice-runtime`
@@ -273,19 +273,19 @@ flowchart LR
 
 ---
 
-## 9. 미결정 사항 (구현 전 결정 필요)
+## 9. 구현 전 확정 사항 (요약)
 
-> 이 표는 **초기 스냅샷**이다. 확정 상태·근거의 단일 출처는 [DECISIONS.md](DECISIONS.md) + 각 설계 문서이며, #1·#2·#3·#5·#6은 이미 본문에 해소·반영됐다(RUNTIME_DESIGN·CONTRACTS). 남은 핵심은 #7(Connector OAuth = RD 9-A/CT 4-A) + 그 외 DECISIONS에 등록된 항목(LL-4·LL-5·LE-1~3 등).
+> 구현 전 확정이 필요했던 7개 항목 모두 **확정**되어 각 설계 문서 본문에 반영됐다(2026-06-26). 아래 표는 각 항목 → 확정 결과 → 정본 문서의 추적용 요약이다.
 
-| # | 항목 | 내용 | 영향 |
-|---|------|------|------|
-| 1 | **런타임 패키징** | 사용자 PC(macOS/Windows)에 Python 런타임을 어떻게 배포하는가 — PyInstaller 단일 바이너리 vs 임베디드 Python vs uv 기반 설치 | 데모 배포 가능 여부에 직결, Phase 0에서 결정 |
-| 2 | IPC 방식 확정 | 4.1의 제안(localhost HTTP + SSE/WS) 확정 여부 | 두 레포의 개발 시작 조건 |
-| 3 | 모델 프로바이더 | 어떤 LLM을 쓰는가 (SaaS=Claude / on-prem=Ollama), API 키 보관 위치 | Chat 화면의 "모델 선택" 범위 |
-| 4 | **Plugin/Skill artifact 스펙** | 마켓에서 배포되는 artifact의 실체 — manifest 형식, 파일 구조, Connector(MCP) 연동 방식 | rice-platform과 runtime의 plugin loading 양쪽에 걸친 계약 |
-| 5 | 설치 artifact 신뢰 | 마켓에서 받은 코드 실행에 대한 최소 안전장치 (데모 단계라도 sandbox 경계 정의) | runtime sandbox 설계 |
-| 6 | Hermes 차용 범위 | Hermes 구조 중 무엇을 가져오고 무엇을 단순화하는가 (예: curator를 데모에 포함할지, memory provider는 1개로 고정할지) | runtime 스코프 |
-| 7 | **Connector OAuth 흐름** | OAuth 2.0 Authorization Code Flow 구현 방안, 토큰 갱신 로직, Redirect URI 처리 (Electron 앱에서), 지원 대상 OAuth 프로바이더 | ConnectorsScreen 기능 구현, Plugin 권한 시스템 |
+| # | 항목 | 확정 결과 | 정본 |
+|---|------|----------|------|
+| 1 | **런타임 패키징** | **PyInstaller 단일 바이너리** (1~2일 스파이크로 의존성 검증 후 확정) | RUNTIME_DESIGN 8장 |
+| 2 | IPC 방식 | **localhost HTTP + SSE**(+POST), WS 미승격 | CONTRACTS 1.1·1.2 |
+| 3 | 모델 프로바이더 | SaaS=Claude / on-prem=Ollama, SaaS 키만 OS 키체인 | RUNTIME_DESIGN 6장 |
+| 4 | **artifact 스펙** | `rice-artifact.yaml` + skill=`SKILL.md`/plugin=`skills/` 묶음 | CONTRACTS 2장 |
+| 5 | 설치 artifact 신뢰 | 자식 프로세스 + env 스크럽(데모 신뢰), `execute_code`는 repo cwd 한정 | RUNTIME_DESIGN 5장 |
+| 6 | Hermes 차용 범위 | 차용표 확정 — Honcho 제외, Curator 수동 트리거, `execute_code` 포함 | RUNTIME_DESIGN 1장 |
+| 7 | **Connector OAuth 흐름** | **Gmail 단일 커넥터**만 진지 구현, OAuth 2.0 Authorization Code Flow | RUNTIME_DESIGN 9장 · CONTRACTS 4장 |
 
 ---
 

@@ -1,10 +1,8 @@
 # RICE Platform Design
 
-> 작성일: 2026-06-18 · 상태: **골격 (Phase 2)**
+> 작성일: 2026-06-18 (개정: 2026-06-26) · 상태: **확정 (Phase 2)**
 > 범위: `rice-platform`(원격 마켓 서버)의 설계 — 모듈 구조, catalog, artifact registry, publish, Blue Point, PostgreSQL 스키마
 > 관계: API 계약은 [RICE_CONTRACTS.md](RICE_CONTRACTS.md) 3장이 소유, artifact manifest는 [RICE_CONTRACTS.md](RICE_CONTRACTS.md) 2장이 단일 출처. 레포 책임은 [RICE_REPO_STRATEGY.md](RICE_REPO_STRATEGY.md) 5.3.
-
-**표기법**: ★ = 추천안 · ☐ = 결정 필요 · ✅ = 결정됨
 
 ---
 
@@ -14,7 +12,7 @@
 
 - 배포: Docker 컨테이너(FastAPI), 클라우드(AWS/GCP), `https://platform.rice.app`
 - 데모 단계 인증 없음(향후 SSO 확장 포인트)
-- Phase 1에는 platform 없이 **로컬 mock 카탈로그**(`file://`)로 동작([RICE_CONTRACTS.md](RICE_CONTRACTS.md) 결정 3-A)
+- Phase 1에는 platform 없이 **로컬 mock 카탈로그**(`file://`)로 동작([RICE_CONTRACTS.md](RICE_CONTRACTS.md) 3장)
 
 ---
 
@@ -104,9 +102,3 @@ downloads(id, artifact_id, version, installed_at)   -- popular 정렬·통계
 ```
 
 - 스키마는 manifest_json을 CONTRACTS 2.1과 정렬해 유지한다.
-
----
-
-## 8. 미결정
-
-이 문서의 결정은 모두 확정되어 위 본문에 반영됐다(미결정 없음). 전체 등록부는 [DECISIONS.md](DECISIONS.md) 참조.

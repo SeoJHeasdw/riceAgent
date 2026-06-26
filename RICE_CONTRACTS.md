@@ -1,14 +1,12 @@
 # RICE Contracts (레포 간 계약)
 
-> 작성일: 2026-06-12 (개정: 2026-06-22) · 상태: **골격 (결정 진행 중)**
+> 작성일: 2026-06-12 (개정: 2026-06-26) · 상태: **확정 (결정 완료)**
 > 범위: app↔runtime 로컬 API + 마켓 artifact 스펙 + platform API(개요)
-> 해소 대상: [RICE_REPO_STRATEGY.md](RICE_REPO_STRATEGY.md) 9장 미결정 #2, #4 (+#5 일부)
-
-**표기법**: ★ = 추천안 · ☐ = 결정 필요 · ✅ = 결정됨
+> 해소 대상(전건 확정): [RICE_REPO_STRATEGY.md](RICE_REPO_STRATEGY.md) 9장 #2, #4 (+#5 일부)
 
 ---
 
-## 1. app ↔ runtime 로컬 API (미결정 #2)
+## 1. app ↔ runtime 로컬 API (REPO_STRATEGY #2 해소)
 
 ### 1.1 프로세스 라이프사이클
 
@@ -44,7 +42,8 @@ Electron main process
 | POST | `/shutdown` | graceful 종료 |
 | POST | `/sessions` | 세션 생성 |
 | GET | `/sessions` / `/sessions/{id}` | 목록/상세 (히스토리 UI) |
-| POST | `/sessions/{id}/messages` | 메시지 전송(첨부/멀티모달 포함, ☐ 결정 1-C) → **SSE 스트림 응답** (9종 이벤트) |
+| POST | `/sessions/{id}/attachments` | **첨부 선업로드 (multipart, xlsx·png만) → `{attachment_id, kind}` 반환** |
+| POST | `/sessions/{id}/messages` | 메시지 전송(본문 + `attachment_ids[]` 참조) → **SSE 스트림 응답** (9종 이벤트) |
 | POST | `/sessions/{id}/abort` | 생성 중단 |
 | POST | `/sessions/{id}/tool-approval` | tool 실행 승인 응답 (`tool_approval_required` 이벤트에 대응, `approval_id` 포함) |
 | GET | `/sessions/{id}/pending-approvals` | 대기 중 승인 목록 (SSE 재연결 복구 — RUNTIME_DESIGN 5.1) |
@@ -91,15 +90,15 @@ Electron main process
 
 **Learning Impact(eval) 결과 노출**: MVP는 엔드포인트 없이 `eval/results/latest.json`을 **정적 fixture**로 노출하고 앱이 읽는다(스키마 정본 [RICE_LEARNING_EVAL.md](RICE_LEARNING_EVAL.md) 6.3). 향후 `GET /eval/runs`·`/eval/runs/{id}` 추가는 선택.
 
-☐ **결정 1-B**: 엔드포인트 초안 승인 (이후 OpenAPI YAML로 상세화)
-☐ **결정 1-C**: 메시지 첨부/멀티모달 입력 방식 (multipart 업로드 vs 사전 업로드 후 reference) + MVP 범위 여부 — ChatScreen에 첨부 UI 존재
-음성 입력(STT)은 **이번 개발 제외** (향후 Web Speech 또는 로컬 STT).
+**엔드포인트**: 위 초안을 정본으로 하며, `contracts/runtime.yaml`(OpenAPI)로 상세화한다.
 
-☐ **결정 LL-5 (LEARNING_LOOP 소유)**: 위 스킬 개선(patch) 관련 추가 — `skill_patched`·`skill_patch_proposed` 이벤트 + `/skills/{id}/patch|history|rollback` 엔드포인트. 본 절에 반영했으며 승인은 [DECISIONS.md](DECISIONS.md) LL-5에서 추적.
+**첨부/멀티모달 입력**: **MVP 포함, 대상은 xlsx·png 2종만**(벤치마크: Claude cowork의 파일 첨부). 방식은 **선업로드 후 참조**: 앱이 `POST /sessions/{id}/attachments`(multipart)로 먼저 올려 `attachment_id`를 받고, `POST /sessions/{id}/messages`는 `attachment_ids[]`로 참조한다. 이는 SSE 스트림 응답과 multipart 본문이 한 요청에서 충돌하는 것을 피하기 위함이다. 런타임은 xlsx·png 외 MIME은 **거부**(415)한다. 음성 입력(STT)은 **이번 개발 제외**(향후 Web Speech 또는 로컬 STT).
+
+**스킬 개선(patch) 계약** (LEARNING_LOOP 소유): `skill_patched`·`skill_patch_proposed` 이벤트 + `/skills/{id}/patch|history|rollback` 엔드포인트. 본 절에 반영 완료.
 
 ---
 
-## 2. Artifact 스펙 (미결정 #4)
+## 2. Artifact 스펙 (REPO_STRATEGY #4 해소)
 
 > Skill Market / Plugin Market에서 유통되는 패키지의 실체. runtime의 plugin loading과 platform의 catalog 양쪽이 이 스펙에 의존한다.
 
@@ -144,7 +143,7 @@ artifact.tar.gz (skill)              artifact.tar.gz (plugin)
 1. ★ Phase 1은 프로토타입 Connector(Gmail OAuth)만; MCP 서버 일반 어댑터는 Phase 2 확장 포인트로 명시
 2. 처음부터 광범위한 MCP 서버 형식 채택 — 생태계 호환 ↑, 그러나 데모 복잡도와 패키징(Node/uv 의존) 부담 ↑
 
-☐ **결정 2-B**: manifest/레이아웃 초안 승인
+**manifest/레이아웃**: 마켓 패키지의 실체는 `rice-artifact.yaml`(schema_version·type·name·version·requires.connectors·checksum 등) + skill은 `SKILL.md` 단일 파일, plugin은 `skills/` 묶음으로 고정한다. 이 스키마가 runtime·platform·app 3곳의 단일 출처다(5장).
 
 ### 2.3 설치 흐름
 
@@ -180,7 +179,7 @@ artifact.tar.gz (skill)              artifact.tar.gz (plugin)
 
 ### 4.1 Connector 개념
 
-**정의**: Plugin이 외부 서비스에 접근하기 위한 인증된 연결 (프로토타입 지원: **Gmail** — RUNTIME_DESIGN 결정 9-B)
+**정의**: Plugin이 외부 서비스에 접근하기 위한 인증된 연결 (프로토타입은 **Gmail 단일 커넥터만** 진지하게 구현 — RUNTIME_DESIGN 9장)
 
 **구성 요소**:
 - Connector ID (예: `gmail` — 프로토타입)
@@ -227,9 +226,3 @@ requires:
 
 - ✅ 각 API 제공 레포가 OpenAPI 스펙 소유 → 소비 레포 코드젠 (REPO_STRATEGY 4.3)
 - ✅ artifact manifest 스키마는 이 문서가 단일 출처 — runtime / platform / app 3곳에서 참조하므로 JSON Schema로 작성해 각 레포에 복사가 아닌 **스펙 파일 참조**로 배포
-
----
-
-## 6. 결정 현황
-
-이 문서 관련 결정(CT 1-A ~ 4-A)의 상태·근거는 **단일 등록부** [DECISIONS.md](DECISIONS.md) 2장에서 추적한다. (CT 4-A는 RD 9-A와 동일 결정 — Connector OAuth 상세). 스킬 개선(patch) 관련 계약 추가는 LL-5(LEARNING_LOOP 소유)에서 추적한다.
