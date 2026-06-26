@@ -9,7 +9,7 @@ import { floatingSurfaceCls } from '../ui/surfaces';
  * 자체 fixed 포지셔닝은 갖지 않는다.
  */
 
-export type NotificationVariant = 'success' | 'info' | 'error';
+export type NotificationVariant = 'success' | 'info' | 'warning' | 'error';
 
 export interface NotificationToastProps {
   message: string;
@@ -43,6 +43,16 @@ const variantConfig: Record<
     accent: 'text-interactive',
     ring: 'ring-interactive/30',
     glow: 'bg-interactive/15',
+  },
+  warning: {
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 32 32" fill="currentColor">
+        <path d="M16 2L1 29h30L16 2zm-1 10h2v9h-2v-9zm1 14a1.5 1.5 0 110-3 1.5 1.5 0 010 3z" />
+      </svg>
+    ),
+    accent: 'text-support-warning',
+    ring: 'ring-support-warning/30',
+    glow: 'bg-support-warning/15',
   },
   error: {
     icon: (

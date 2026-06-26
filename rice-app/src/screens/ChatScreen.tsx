@@ -12,6 +12,7 @@ import { sseClient } from '../lib/sse';
 import type { PendingApproval, ToolApprovalRequiredData, SkillPatchProposedData, SSEEvent } from '../lib/types';
 import { Icon, ResizeHandle, ConfirmDialog } from '../components/ui';
 import { FileViewerProvider } from '../lib/fileViewer/FileViewerContext';
+import { useToast } from '../lib/toast/ToastContext';
 
 /**
  * ChatScreen - Claude-Desktop-style chat with the learning-loop surface:
@@ -338,6 +339,7 @@ const SkillsPopover: React.FC<{
 
 function ChatScreen() {
   const { jumpToSkill, setSkills, setDetails, panelScrollRef } = useLearning();
+  const toast = useToast();
 
   const [thread, setThread] = useState<ThreadMessage[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -392,12 +394,46 @@ function ChatScreen() {
     return api.onEnabledChange(setConnected);
   }, []);
 
-  // When connected, load the real sessions persisted in state.db and open the
-  // most recent one — so a reload restores your last conversation (the whole
-  // point of "대화를 DB에 저장"). Falls back to a blank composer if none exist.
+  // When connected, restore persisted settings (model/provider/endpoint) from
+  // config.yaml via GET /settings, then load the session list.
   useEffect(() => {
     if (!connected) return;
     let cancelled = false;
+
+    // 1) Restore model settings saved by PUT /settings, then health-check when local
+    void api.getSettings().then(async (res) => {
+      if (cancelled || !res.success) return;
+      const prov = (res.data as { provider?: { kind?: string; model?: string; base_url?: string; temperature?: number } })?.provider;
+      if (prov) {
+        const restoredMode: 'saas' | 'local' = prov.kind === 'ollama' ? 'local' : 'saas';
+        setModelMode(restoredMode);
+        if (prov.model) setCurrentModel(prov.model);
+        if (prov.base_url || prov.temperature !== undefined) {
+          setModelSettings((prev) => ({
+            ...prev,
+            ...(prov.base_url ? { endpoint: prov.base_url } : {}),
+            ...(prov.temperature !== undefined ? { temperature: prov.temperature } : {}),
+          }));
+        }
+
+        // Local 모드일 때만: 설정된 모델이 실제 Ollama에 남아 있는지 확인
+        if (prov.kind === 'ollama' && prov.model) {
+          const hc = await api.checkOllamaModelHealth();
+          if (cancelled) return;
+          if (!hc.success) {
+            toast.notify({ message: 'Ollama에 연결할 수 없어요. 엔드포인트를 확인하세요.', variant: 'error' });
+          } else if (hc.data && !hc.data.exists) {
+            toast.notify({
+              message: `설정된 모델 "${prov.model}"이 Ollama에 없어요. 모델 설정을 열어 다시 선택하세요.`,
+              variant: 'warning',
+              duration: 8000,
+            });
+          }
+        }
+      }
+    });
+
+    // 2) Load sessions (independent of settings restore)
     void api.listSessions().then((res) => {
       if (cancelled || !res.success) return;
       const list = ((res.data as RawSession[]) ?? []).map(toSession);
@@ -405,6 +441,7 @@ function ChatScreen() {
       if (list.length > 0) void openLiveSession(list[0].id);
       else newChat();
     });
+
     return () => {
       cancelled = true;
     };
@@ -1238,13 +1275,32 @@ function ChatScreen() {
         onClose={() => setSettingsPanelOpen(false)}
         currentModel={currentModel}
         availableModels={availableModels}
-        onModelChange={setCurrentModel}
+        onModelChange={(modelId) => {
+          setCurrentModel(modelId);
+          // 모델 선택 시 즉시 백엔드에 반영 (다음 turn부터 적용, C-1)
+          if (connected) {
+            const kind = modelMode === 'local' ? 'ollama' : 'claude';
+            void api.updateSettings({ provider: { kind, model: modelId } });
+          }
+        }}
         settings={modelSettings}
-        onSettingsChange={setModelSettings}
+        onSettingsChange={(s) => {
+          setModelSettings(s);
+          // temperature/maxTokens 등 파라미터 변경 반영
+          if (connected) {
+            const kind = modelMode === 'local' ? 'ollama' : 'claude';
+            void api.updateSettings({
+              provider: { kind, model: currentModel, temperature: s.temperature, base_url: s.endpoint ?? null },
+            });
+          }
+        }}
         modelMode={modelMode}
         onModelModeChange={(mode) => {
           setModelMode(mode);
-          setCurrentModel(mockModels[mode][0].id);
+          // Local로 전환 시에는 모델이 아직 미결정 — kind만 변경
+          if (connected) {
+            void api.updateSettings({ provider: { kind: mode === 'local' ? 'ollama' : 'claude' } });
+          }
         }}
       />
 

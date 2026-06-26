@@ -74,7 +74,13 @@ def create_app(container: Container):
     # ── lifecycle ─────────────────────────────────────────────────────────────
     @app.get("/health")
     async def health():
-        return {"status": "ok", "provider": container.resolve_provider().name, "version": "0.1.0"}
+        cfg = container.config.provider
+        return {
+            "status": "ok",
+            "provider": container.resolve_provider().name,
+            "model": cfg.model,
+            "version": "0.1.0",
+        }
 
     @app.post("/shutdown")
     async def shutdown():
