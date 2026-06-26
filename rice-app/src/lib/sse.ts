@@ -110,6 +110,16 @@ export class SSEClient {
    * `body` is the message payload (text + optional attachments — CONTRACTS 1-C).
    */
   streamMessages(sessionId: string, body: unknown, handlers: StreamHandlers): StreamHandle {
+    return this._streamPost(`/sessions/${sessionId}/messages`, body, handlers);
+  }
+
+  /** re-answer the last user message — streams a fresh turn (POST /regenerate). */
+  regenerate(sessionId: string, handlers: StreamHandlers): StreamHandle {
+    return this._streamPost(`/sessions/${sessionId}/regenerate`, undefined, handlers);
+  }
+
+  /** Shared SSE-over-POST driver. `body===undefined` posts with no JSON body. */
+  private _streamPost(path: string, body: unknown, handlers: StreamHandlers): StreamHandle {
     if (!this.enabled) {
       handlers.onError?.('runtime offline');
       return { abort: () => {} };
@@ -122,10 +132,10 @@ export class SSEClient {
         const headers: Record<string, string> = { 'Content-Type': 'application/json', Accept: 'text/event-stream' };
         if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
 
-        const res = await fetch(`${this.baseUrl}/sessions/${sessionId}/messages`, {
+        const res = await fetch(`${this.baseUrl}${path}`, {
           method: 'POST',
           headers,
-          body: JSON.stringify(body),
+          body: body === undefined ? undefined : JSON.stringify(body),
           signal: controller.signal,
         });
 

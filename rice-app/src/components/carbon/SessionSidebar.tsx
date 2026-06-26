@@ -235,12 +235,13 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                           {session.title}
                         </span>
                         <span className="block max-w-full min-w-0 text-caption-01 text-text-helper truncate">
-                          {formatRelativeTime(session.timestamp)} · {session.messageCount} messages
+                          {formatRelativeTime(session.timestamp)}
+                          {session.messageCount > 0 ? ` · ${session.messageCount} messages` : ''}
                         </span>
                       </button>
 
-                      {/* Delete button on hover */}
-                      {hoveredSession === session.id && !isActive && (
+                      {/* Delete button on hover (incl. the active session) */}
+                      {hoveredSession === session.id && (
                         <button
                           onClick={(e) => {
                             e.stopPropagation();

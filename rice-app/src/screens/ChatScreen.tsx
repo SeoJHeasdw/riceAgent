@@ -5,11 +5,13 @@ import { LearningPanel } from '../components/carbon/LearningPanel';
 import { ChatTurn } from '../components/carbon/ChatMessage';
 import { useResizable } from '../hooks/useResizable';
 import { useLearning } from '../lib/learning/LearningContext';
-import { CONVERSATIONS, THREADS, placeholderThread, type ThreadMessage } from '../lib/learningData';
+import type { ThreadMessage } from '../lib/learningData';
 import { mockModels, mockModelSettings } from '../lib/mockData';
 import { api } from '../lib/api';
-import type { PendingApproval, ToolApprovalRequiredData, SkillPatchProposedData } from '../lib/types';
-import { Icon, ResizeHandle } from '../components/ui';
+import { sseClient } from '../lib/sse';
+import type { PendingApproval, ToolApprovalRequiredData, SkillPatchProposedData, SSEEvent } from '../lib/types';
+import { Icon, ResizeHandle, ConfirmDialog } from '../components/ui';
+import { FileViewerProvider } from '../lib/fileViewer/FileViewerContext';
 
 /**
  * ChatScreen - Claude-Desktop-style chat with the learning-loop surface:
@@ -18,18 +20,78 @@ import { Icon, ResizeHandle } from '../components/ui';
  * panel on the right.
  */
 
-// Korean demo sessions derived from the conversation list
-const groupOffset: Record<string, number> = {
-  오늘: 2 * 3600000,
-  '지난 7일': 3 * 86400000,
-  이전: 40 * 86400000,
+// ── live (state.db-backed) session/message mapping ─────────────────────────
+// Shapes returned by GET /sessions and GET /sessions/{id}/messages (CONTRACTS 1.3).
+type RawSession = { id: string; title: string | null; started_at?: string };
+type RawToolCall = { id: string; tool_name: string; arguments?: Record<string, unknown> };
+type RawMessage = {
+  role: string;
+  content: string;
+  tool_calls?: RawToolCall[];
+  metadata?: { thinking?: string; tool_call_id?: string } | null;
 };
-const demoSessions: Session[] = CONVERSATIONS.map((c, i) => ({
-  id: c.id,
-  title: c.title,
-  timestamp: new Date(Date.now() - (groupOffset[c.group] ?? 86400000) - i * 600000),
-  messageCount: 6 + ((i * 5) % 14),
-}));
+
+// Human-readable, per-tool copy for the HITL approval card — derived client-side
+// from the tool name + args, so the confirmation line is contextual with ZERO
+// added latency (no extra model call). Extend the map as builtins grow.
+const describeTool = (tool: string, args: Record<string, unknown>): { label: string; reason: string; approved: string; denied: string } => {
+  const path = typeof args.path === 'string' ? (args.path as string) : undefined;
+  switch (tool) {
+    case 'write_file':
+      return {
+        label: path ? `${path} 작성` : '파일 작성',
+        reason: '워크스페이스에 파일을 생성·수정합니다.',
+        approved: path ? `${path} 파일을 작성했어요` : '파일을 작성했어요',
+        denied: '파일을 작성하지 않았어요',
+      };
+    case 'read_file':
+      return {
+        label: path ? `${path} 읽기` : '파일 읽기',
+        reason: '워크스페이스 파일을 읽습니다.',
+        approved: path ? `${path} 파일을 읽었어요` : '파일을 읽었어요',
+        denied: '읽지 않았어요',
+      };
+    default:
+      return { label: tool, reason: '실행 전 승인이 필요합니다.', approved: `${tool} 실행했어요`, denied: '실행하지 않았어요' };
+  }
+};
+
+const toSession = (s: RawSession): Session => ({
+  id: s.id,
+  title: s.title || '제목 없는 대화',
+  // sqlite CURRENT_TIMESTAMP is UTC, "YYYY-MM-DD HH:MM:SS" — normalize to a Date.
+  timestamp: s.started_at ? new Date(s.started_at.replace(' ', 'T') + 'Z') : new Date(),
+  messageCount: 0, // list endpoint doesn't return a count; not shown for live sessions
+});
+
+// Reconstruct the full agentic trace from persisted messages so a reloaded
+// conversation looks like the live turn: reasoning (assistant `metadata.thinking`)
+// → tool call cards (assistant `tool_calls`) → results (role='tool', matched by
+// `metadata.tool_call_id`) → answer (assistant `content`).
+const toThread = (msgs: RawMessage[]): ThreadMessage[] => {
+  const out: ThreadMessage[] = [];
+  for (const m of msgs) {
+    if (m.role === 'user') {
+      if (m.content) out.push({ kind: 'user', text: m.content });
+    } else if (m.role === 'assistant') {
+      if (m.metadata?.thinking) out.push({ kind: 'thinking', duration: '', text: m.metadata.thinking, streaming: false });
+      for (const tc of m.tool_calls ?? [])
+        out.push({ kind: 'toolcall', callId: tc.id, tool: tc.tool_name, args: tc.arguments ?? {}, status: 'done' });
+      if (m.content) out.push({ kind: 'agent', text: m.content });
+    } else if (m.role === 'tool') {
+      // attach this result to its tool call card (by id, else the latest open one)
+      const callId = m.metadata?.tool_call_id;
+      for (let i = out.length - 1; i >= 0; i--) {
+        const b = out[i];
+        if (b.kind === 'toolcall' && (callId ? b.callId === callId : b.result == null && b.error == null)) {
+          out[i] = { ...b, result: m.content };
+          break;
+        }
+      }
+    }
+  }
+  return out;
+};
 
 // Map a parked approval (recovered after an SSE reconnect via
 // GET /sessions/{id}/pending-approvals, CONTRACTS 1.2) into a thread card so the
@@ -275,13 +337,17 @@ const SkillsPopover: React.FC<{
 };
 
 function ChatScreen() {
-  const { jumpToSkill, setSignals, setSkills, setDetails, panelScrollRef } = useLearning();
+  const { jumpToSkill, setSkills, setDetails, panelScrollRef } = useLearning();
 
-  const [thread, setThread] = useState<ThreadMessage[]>(THREADS.c1);
-  const [sessions] = useState<Session[]>(demoSessions);
-  const [activeSessionId, setActiveSessionId] = useState('c1');
+  const [thread, setThread] = useState<ThreadMessage[]>([]);
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState('');
+  // Reactive mirror of api.isEnabled. The connect probe (App bootstrap) is async,
+  // so we subscribe rather than read once — when it flips on, we load the real
+  // sessions persisted in state.db into the sidebar.
+  const [connected, setConnected] = useState(api.isEnabled);
   // which session's thread is currently mounted (gates the scroll-to-message effect)
-  const [loadedSession, setLoadedSession] = useState('c1');
+  const [loadedSession, setLoadedSession] = useState('');
   const [highlightMsg, setHighlightMsg] = useState<number | null>(null);
   const [pendingScroll, setPendingScroll] = useState<{ session: string; index: number } | null>(null);
   const [draft, setDraft] = useState('');
@@ -289,11 +355,16 @@ function ChatScreen() {
   // `command` holds the command token (e.g. "quarterly_sales_summary") or null;
   // `draft` then holds only the trailing arguments/instructions.
   const [command, setCommand] = useState<string | null>(null);
-  const [isEmpty, setIsEmpty] = useState(false);
+  const [isEmpty, setIsEmpty] = useState(true);
   const [sessionSidebarOpen, setSessionSidebarOpen] = useState(true);
   const [learningPanelOpen, setLearningPanelOpen] = useState(true);
   const [settingsPanelOpen, setSettingsPanelOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
+  // a live (runtime) turn is streaming — gates the composer so we can't double-send,
+  // and drives the "생성 중" affordance on the send button.
+  const [busy, setBusy] = useState(false);
+  // session pending delete-confirmation (ConfirmDialog target), null = closed
+  const [confirmDelete, setConfirmDelete] = useState<Session | null>(null);
   const [modelMode, setModelMode] = useState<'saas' | 'local'>('saas');
   const [currentModel, setCurrentModel] = useState('claude-sonnet-4-5');
   const [modelSettings, setModelSettings] = useState(mockModelSettings);
@@ -301,6 +372,12 @@ function ChatScreen() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Real backend session id for the live (runtime-connected) path. Created lazily
+  // on first send; reused for the rest of this mounted ChatScreen. Independent of
+  // the scripted demo sessions in the sidebar.
+  const liveSessionId = useRef<string | null>(null);
+  // handle to the in-flight SSE turn so the user can stop it (see stopTurn)
+  const streamHandleRef = useRef<{ abort: () => void } | null>(null);
 
   const sessionPanel = useResizable({ initial: 264, min: 200, max: 420, storageKey: 'rice.panel.sessions' });
   const learningPanel = useResizable({ initial: 320, min: 240, max: 480, storageKey: 'rice.panel.learning', invert: true });
@@ -309,16 +386,37 @@ function ChatScreen() {
   const selectedModel = availableModels.find((m) => m.id === currentModel) || availableModels[0];
   const activeSession = sessions.find((s) => s.id === activeSessionId);
 
-  // load the scripted thread for the active session when switched from the sidebar
+  // Keep `connected` in sync with the (async) runtime connect probe.
   useEffect(() => {
-    setThread(THREADS[activeSessionId] ?? placeholderThread(activeSession?.title ?? '이 작업'));
-    setLoadedSession(activeSessionId);
-    setIsEmpty(false);
-  }, [activeSessionId, activeSession?.title]);
+    setConnected(api.isEnabled);
+    return api.onEnabledChange(setConnected);
+  }, []);
+
+  // When connected, load the real sessions persisted in state.db and open the
+  // most recent one — so a reload restores your last conversation (the whole
+  // point of "대화를 DB에 저장"). Falls back to a blank composer if none exist.
+  useEffect(() => {
+    if (!connected) return;
+    let cancelled = false;
+    void api.listSessions().then((res) => {
+      if (cancelled || !res.success) return;
+      const list = ((res.data as RawSession[]) ?? []).map(toSession);
+      setSessions(list);
+      if (list.length > 0) void openLiveSession(list[0].id);
+      else newChat();
+    });
+    return () => {
+      cancelled = true;
+    };
+    // openLiveSession/newChat are stable enough for the MVP; we intentionally run
+    // this only on connect transitions.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connected]);
 
   // SSE reconnect recovery: re-fetch approvals still parked on the server and
   // re-render their cards (CONTRACTS 1.2). No-op offline / in the scripted demo.
   useEffect(() => {
+    if (!activeSessionId) return; // no active session (fresh chat) → nothing to recover
     let cancelled = false;
     void api.getPendingApprovals(activeSessionId).then((res) => {
       if (cancelled || !res.success || !res.data?.length) return;
@@ -357,37 +455,11 @@ function ChatScreen() {
     setPendingScroll(null);
   }, [pendingScroll, loadedSession, thread]);
 
-  // user corrected an answer → write a memory, add a user-model signal, AND
-  // persist the correction as a real rule on the target skill (visible in My Skills).
+  // 교정("가르치기") = 정정 내용을 실제 사용자 턴으로 보낸다. 에이전트가 그에 맞춰
+  // 답하고, 런타임 학습 루프(observe)가 선호/메모리를 추출한다 — mock 아님, 실 경로.
   const handleCorrect = (text: string) => {
-    const ruleText = text.length > 60 ? text.slice(0, 60) + '…' : text;
-    setThread((p) => [
-      ...p,
-      { kind: 'user', text },
-      { kind: 'agent', text: '알려주셔서 고마워요. 바로 반영하고, 다음에도 그렇게 하도록 기억해둘게요.' },
-      {
-        kind: 'memory',
-        text: '기억했습니다',
-        facts: [text],
-        target: { kind: 'skill', id: 's1', label: '분기 매출 요약 v3' },
-      },
-    ]);
-    setSignals((arr) => [
-      ...arr,
-      {
-        id: 'u' + Date.now(),
-        label: '교정',
-        value: text.length > 28 ? text.slice(0, 28) + '…' : text,
-        conf: 0.95,
-        source: '방금 가르침',
-      },
-    ]);
-    // 교정 → s1 스킬의 학습한 규칙으로 누적 (My Skills 상세에서 바로 확인)
-    setDetails((d) =>
-      d.s1
-        ? { ...d, s1: { ...d.s1, rules: [...d.s1.rules, { id: 'cr' + Date.now(), text: ruleText, source: '교정에서 학습', on: true }] } }
-        : d,
-    );
+    if (busy || !api.isEnabled) return;
+    runLiveTurn(text);
   };
 
   // chat "스킬로 저장" → actually register the skill in the learning store
@@ -488,24 +560,254 @@ function ChatScreen() {
     void api.respondToolApproval(activeSessionId, { approval_id: m.approvalId, decision });
   };
 
+  // 재생성 = 마지막 사용자 메시지에 대한 답변을 다시 생성. 서버가 이전 어시스턴트
+  // 턴을 교체(delete_after)하므로, 화면에서도 직전 턴 블록을 걷어내고 새로 스트리밍한다.
   const regenerate = () => {
+    if (busy || !api.isEnabled || !liveSessionId.current) return;
+    setBusy(true);
+    setThread((p) => {
+      let end = p.length; // strip trailing assistant turn (blocks after the last user msg)
+      for (let i = p.length - 1; i >= 0; i--) {
+        if (p[i].kind === 'user') break;
+        end = i;
+      }
+      return [...p.slice(0, end), { kind: 'thinking', duration: '', text: '', streaming: true, startedAt: Date.now() }];
+    });
+    streamHandleRef.current = sseClient.regenerate(liveSessionId.current, buildStreamHandlers());
+  };
+
+  // ── live-turn thread reducers (multi-round: thinking ↔ tool ↔ approval ↔ answer) ──
+  // Each is a setThread updater so it reads the latest thread; events arrive
+  // sequentially over SSE and mutate the trailing blocks.
+
+  // Append to the trailing streaming thinking block, or start a new one.
+  const appendThinking = (delta: string) =>
+    setThread((p) => {
+      const copy = [...p];
+      const last = copy[copy.length - 1];
+      if (last?.kind === 'thinking' && last.streaming) {
+        copy[copy.length - 1] = { ...last, text: (last.text ?? '') + delta };
+      } else {
+        copy.push({ kind: 'thinking', duration: '', text: delta, streaming: true, startedAt: Date.now() });
+      }
+      return copy;
+    });
+
+  // Close the trailing thinking block (stamp duration); drop it if it stayed empty.
+  const finalizeThinking = () =>
+    setThread((p) => {
+      const copy = [...p];
+      const last = copy[copy.length - 1];
+      if (last?.kind === 'thinking' && last.streaming) {
+        if (!last.text) copy.pop();
+        else {
+          const secs = Math.max(1, Math.round((Date.now() - (last.startedAt ?? Date.now())) / 1000));
+          copy[copy.length - 1] = { ...last, streaming: false, duration: `${secs}초` };
+        }
+      }
+      return copy;
+    });
+
+  // Append to / create the streaming answer bubble.
+  const appendAnswer = (d: { delta?: string; content?: string }) =>
+    setThread((p) => {
+      const copy = [...p];
+      const last = copy[copy.length - 1];
+      const text = typeof d.content === 'string' ? d.content : undefined;
+      if (last?.kind === 'agent') {
+        const next = text ?? (last.text ?? '') + (d.delta ?? '');
+        copy[copy.length - 1] = { ...last, text: next };
+      } else {
+        copy.push({ kind: 'agent', text: text ?? d.delta ?? '' });
+      }
+      return copy;
+    });
+
+  const pushAgentText = (text: string) => setThread((p) => [...p, { kind: 'agent', text }]);
+
+  // Live path: stream a real turn from the local runtime over SSE.
+  // SSE event handlers for a live turn — shared by sendLive (new turn) and
+  // regenerateLive (re-answer). The multi-round reducer (thinking ↔ tool ↔
+  // approval ↔ answer) lives here so both entry points behave identically.
+  const buildStreamHandlers = () => ({
+    onEvent: (e: SSEEvent) => {
+      if (e.type === 'thinking') {
+        const d = e.data as { text?: string };
+        if (typeof d.text === 'string') appendThinking(d.text);
+      } else if (e.type === 'tool_call') {
+        // a tool round begins → close the reasoning block, push a running trace card
+        finalizeThinking();
+        const d = e.data as { tool_call_id: string; tool_name: string; arguments?: Record<string, unknown> };
+        setThread((p) => [
+          ...p,
+          { kind: 'toolcall', callId: d.tool_call_id, tool: d.tool_name, args: d.arguments ?? {}, status: 'running' },
+        ]);
+      } else if (e.type === 'tool_approval_required') {
+        // HITL gate — render the approval card; the backend stream stays parked
+        // until the user posts a decision (handleToolApproval), then resumes.
+        const d = e.data as { approval_id: string; tool_name: string; arguments?: Record<string, unknown>; reason?: string };
+        const desc = describeTool(d.tool_name, d.arguments ?? {});
+        setThread((p) => [
+          ...p,
+          {
+            kind: 'approval',
+            approvalId: d.approval_id,
+            tool: d.tool_name,
+            label: desc.label,
+            scope: { name: d.tool_name, mode: '실행' },
+            reason: d.reason ?? desc.reason,
+            approvedText: desc.approved,
+            deniedText: desc.denied,
+          },
+        ]);
+      } else if (e.type === 'tool_result') {
+        const d = e.data as { tool_call_id: string; ok: boolean; result?: unknown; error?: string };
+        setThread((p) => {
+          const copy = [...p];
+          for (let i = copy.length - 1; i >= 0; i--) {
+            const b = copy[i];
+            if (b.kind === 'toolcall' && b.callId === d.tool_call_id) {
+              copy[i] = {
+                ...b,
+                status: d.ok ? 'done' : 'error',
+                result: d.ok ? (typeof d.result === 'string' ? d.result : JSON.stringify(d.result, null, 2)) : undefined,
+                error: d.ok ? undefined : d.error ?? '실패',
+              };
+              break;
+            }
+          }
+          return copy;
+        });
+      } else if (e.type === 'message') {
+        finalizeThinking();
+        appendAnswer(e.data as { delta?: string; content?: string });
+      } else if (e.type === 'done') {
+        finalizeThinking();
+        setBusy(false);
+        if (connected) void refreshSessions();
+      } else if (e.type === 'error') {
+        finalizeThinking();
+        const d = e.data as { message?: string };
+        pushAgentText(`⚠️ 오류: ${d.message ?? '실행 실패'}`);
+        setBusy(false);
+      }
+    },
+    onError: (msg: string) => {
+      finalizeThinking();
+      pushAgentText(`⚠️ 연결 오류: ${msg}`);
+      setBusy(false);
+    },
+    onClose: () => {
+      finalizeThinking();
+      setBusy(false);
+    },
+  });
+
+  const sendLive = async (q: string) => {
+    // Ensure a real backend session exists (lazy, reused across sends).
+    if (!liveSessionId.current) {
+      const res = await api.createSession();
+      if (res.success && res.data?.id) {
+        liveSessionId.current = res.data.id;
+        setActiveSessionId(res.data.id); // highlight the new session in the sidebar
+      } else {
+        finalizeThinking();
+        pushAgentText(`⚠️ 런타임 세션 생성 실패: ${res.error ?? '알 수 없는 오류'}`);
+        setBusy(false);
+        return;
+      }
+    }
+    streamHandleRef.current = sseClient.streamText(liveSessionId.current, q, buildStreamHandlers());
+  };
+
+  // Open a DB-backed session: load its persisted messages and make it the live
+  // target so subsequent sends continue the same conversation.
+  const openLiveSession = async (id: string) => {
+    setActiveSessionId(id);
+    liveSessionId.current = id;
+    setIsEmpty(false);
+    const res = await api.getMessages(id);
+    const msgs = res.success ? ((res.data as { messages?: RawMessage[] })?.messages ?? []) : [];
+    setThread(toThread(msgs));
+    setLoadedSession(id);
+  };
+
+  // Re-pull the session list (after a turn the new session + its derived title
+  // need to appear/update in the sidebar).
+  const refreshSessions = async () => {
+    const res = await api.listSessions();
+    if (res.success) setSessions(((res.data as RawSession[]) ?? []).map(toSession));
+  };
+
+  // Sidebar selection: load from DB when connected, else the scripted demo thread.
+  const handleSelectSession = (id: string) => {
+    if (connected) void openLiveSession(id);
+    else setActiveSessionId(id);
+  };
+
+  // Delete: confirm first (ConfirmDialog), then remove server-side + locally.
+  const requestDeleteSession = (id: string) => {
+    const s = sessions.find((x) => x.id === id);
+    if (s) setConfirmDelete(s);
+  };
+
+  const performDelete = async () => {
+    const target = confirmDelete;
+    setConfirmDelete(null);
+    if (!target) return;
+    if (connected) {
+      const res = await api.deleteSession(target.id);
+      if (!res.success) return; // leave the list as-is on failure
+    }
+    const remaining = sessions.filter((s) => s.id !== target.id);
+    setSessions(remaining);
+    // If the deleted session was open, move to the next most recent or a blank chat.
+    if (activeSessionId === target.id || liveSessionId.current === target.id) {
+      liveSessionId.current = null;
+      if (connected && remaining.length > 0) void openLiveSession(remaining[0].id);
+      else newChat();
+    }
+  };
+
+  // Stop an in-flight turn: close the SSE stream client-side AND tell the runtime
+  // to abort (orchestrator stops the loop + cancels parked approvals).
+  const stopTurn = () => {
+    streamHandleRef.current?.abort();
+    streamHandleRef.current = null;
+    if (liveSessionId.current) void api.abort(liveSessionId.current);
+    finalizeThinking();
+    setBusy(false);
+  };
+
+  // Push the user bubble + a live "생각 중…" placeholder, then stream the turn.
+  // Shared by send() and handleCorrect() (a correction is just a user turn).
+  const runLiveTurn = (q: string) => {
+    setIsEmpty(false);
+    setBusy(true);
     setThread((p) => [
       ...p,
-      {
-        kind: 'agent',
-        text: '다시 생성했어요. 같은 데이터로 표현을 조금 바꿨습니다.',
-        bullets: ['총 매출 $9.3M (전주 +6.2%)', 'APAC $3.8M — 주간 1위', 'watsonx.ai 라인 61% 기여'],
-      },
+      { kind: 'user', text: q },
+      { kind: 'thinking', duration: '', text: '', streaming: true, startedAt: Date.now() },
     ]);
+    void sendLive(q);
   };
 
   const send = () => {
+    if (busy) return; // a live turn is still streaming — ignore re-entrant sends
     const body = draft.trim();
     if (!command && !body) return;
     const q = command ? `/${command}${body ? ' ' + body : ''}` : body;
     setDraft('');
     setCommand(null);
     setIsEmpty(false);
+
+    // Runtime connected → real streaming turn.
+    if (api.isEnabled) {
+      runLiveTurn(q);
+      return;
+    }
+
+    // Offline (design demo) → scripted mock turn.
     const runId = 'r' + Date.now();
     setThread((p) => [...p, { kind: 'user', text: q }]);
 
@@ -604,6 +906,14 @@ function ChatScreen() {
   const newChat = () => {
     setIsEmpty(true);
     setThread([]);
+    // Start a fresh backend session — otherwise the next send reuses the previous
+    // liveSessionId and the model still sees the whole prior history (the "새 대화가
+    // 다 기억함" bug). A new session id is created lazily on the next send.
+    liveSessionId.current = null;
+    setBusy(false);
+    // Clear the sidebar highlight so no existing session looks active (connected
+    // only — offline keeps activeSessionId so its scripted thread stays loadable).
+    if (connected) setActiveSessionId('');
   };
 
   const manageFromPopover = () => {
@@ -710,15 +1020,15 @@ function ChatScreen() {
   });
 
   return (
-    <>
+    <FileViewerProvider>
       <div className="flex flex-1 min-w-0 overflow-hidden">
         {/* Session Sidebar */}
         <SessionSidebar
           sessions={sessions}
           activeSessionId={activeSessionId}
-          onSelectSession={setActiveSessionId}
+          onSelectSession={handleSelectSession}
           onNewSession={newChat}
-          onDeleteSession={() => {}}
+          onDeleteSession={requestDeleteSession}
           isOpen={sessionSidebarOpen}
           onToggle={() => setSessionSidebarOpen(!sessionSidebarOpen)}
           width={sessionPanel.width}
@@ -740,7 +1050,7 @@ function ChatScreen() {
           {/* Header */}
           <div className="h-[52px] flex-shrink-0 flex items-center gap-3 px-4 border-b border-border-subtle-01">
             <span className="text-body-short-01 font-semibold text-text-primary truncate">
-              {isEmpty ? '새 대화' : activeSession?.title || '분기 매출 리포트 자동화'}
+              {isEmpty ? '새 대화' : activeSession?.title || '대화'}
             </span>
 
             <div className="ml-auto flex items-center gap-1">
@@ -839,7 +1149,10 @@ function ChatScreen() {
                   value={draft}
                   onChange={(e) => handleDraftChange(e.target.value, e.target.selectionStart ?? undefined)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
+                    // `isComposing` guard: while a Korean/IME composition is being
+                    // committed, Enter fires a keydown too — without this the turn
+                    // sends twice (the message + the trailing jamo). Skip those.
+                    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                       e.preventDefault();
                       send();
                     }
@@ -881,14 +1194,18 @@ function ChatScreen() {
                   </div>
                   <div className="flex-1" />
                   <button
-                    onClick={send}
-                    disabled={!command && !draft.trim()}
+                    onClick={busy ? stopTurn : send}
+                    disabled={!busy && !command && !draft.trim()}
                     className={`p-1.5 rounded-md transition-colors ${
-                      command || draft.trim() ? 'bg-blue-60 hover:bg-blue-70 cursor-pointer' : 'bg-layer-02 cursor-not-allowed opacity-50'
+                      busy
+                        ? 'bg-layer-02 hover:bg-layer-hover-02 cursor-pointer'
+                        : command || draft.trim()
+                        ? 'bg-blue-60 hover:bg-blue-70 cursor-pointer'
+                        : 'bg-layer-02 cursor-not-allowed opacity-50'
                     }`}
-                    title="전송"
+                    title={busy ? '생성 중지' : '전송'}
                   >
-                    <Icon name="send" size={16} className="text-white" />
+                    <Icon name={busy ? 'close' : 'send'} size={16} className={busy ? 'text-text-primary' : 'text-white'} />
                   </button>
                 </div>
               </div>
@@ -930,7 +1247,24 @@ function ChatScreen() {
           setCurrentModel(mockModels[mode][0].id);
         }}
       />
-    </>
+
+      {/* Delete-session confirmation (irreversible) */}
+      <ConfirmDialog
+        open={!!confirmDelete}
+        title="대화를 삭제할까요?"
+        description={
+          <>
+            <span className="font-medium text-text-primary">{confirmDelete?.title}</span> 대화와 모든 메시지가 영구
+            삭제됩니다. 되돌릴 수 없어요.
+          </>
+        }
+        confirmLabel="삭제"
+        tone="danger"
+        confirmIcon="trash"
+        onConfirm={performDelete}
+        onClose={() => setConfirmDelete(null)}
+      />
+    </FileViewerProvider>
   );
 }
 

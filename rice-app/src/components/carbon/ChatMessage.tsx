@@ -2,6 +2,13 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button, Icon, Tag } from '../ui';
 import { connectorIdForScope, type ThreadMessage, type ToolCall, type SkillRef, type EditDiffRow } from '../../lib/learningData';
+import { useFileViewer } from '../../lib/fileViewer/FileViewerContext';
+import { Markdown } from './Markdown';
+
+// A workspace-file-looking inline code chip (e.g. `hello.txt`, `./src/a.ts`) →
+// rendered clickable to open the shared file viewer. Tightly scoped to real file
+// extensions so command/identifier chips (`db2.query`) stay plain.
+const FILE_CHIP_RE = /^\.?\/?[\w.-]+\.(txt|md|markdown|json|jsonl|csv|tsv|log|ya?ml|py|js|ts|tsx|jsx|sh|bash|html?|css|scss|sql|toml|ini|env|xml|svg)$/i;
 
 /**
  * ChatMessage — renders one thread message. Handles the new learning-loop
@@ -19,21 +26,52 @@ const AILabel: React.FC = () => (
 
 // ── inline rich text — renders `backtick` spans as mono code chips ─────────
 // 본격 마크다운이 아니라 인라인 코드만 (chat1/chat3 의 `localhost:8080` 류 하이라이트).
-const Rich: React.FC<{ text: string }> = ({ text }) => (
-  <>
-    {text.split(/(`[^`]+`)/g).map((part, i) =>
-      part.startsWith('`') && part.endsWith('`') && part.length > 1 ? (
-        <code
-          key={i}
-          className="font-mono text-[0.86em] bg-layer-02 text-[#78a9ff] border border-border-subtle-01 rounded px-1 py-px"
-        >
-          {part.slice(1, -1)}
-        </code>
-      ) : (
-        <React.Fragment key={i}>{part}</React.Fragment>
-      ),
-    )}
-  </>
+const Rich: React.FC<{ text: string }> = ({ text }) => {
+  const { openFile } = useFileViewer();
+  const chipCls =
+    'font-mono text-[0.86em] bg-layer-02 text-[#78a9ff] border border-border-subtle-01 rounded px-1 py-px';
+  return (
+    <>
+      {text.split(/(`[^`]+`)/g).map((part, i) => {
+        if (part.startsWith('`') && part.endsWith('`') && part.length > 1) {
+          const inner = part.slice(1, -1);
+          if (FILE_CHIP_RE.test(inner.trim())) {
+            return (
+              <button
+                key={i}
+                onClick={() => openFile(inner)}
+                title="파일 열기"
+                className={`${chipCls} hover:bg-layer-hover-02 hover:underline cursor-pointer`}
+              >
+                {inner}
+              </button>
+            );
+          }
+          return (
+            <code key={i} className={chipCls}>
+              {inner}
+            </code>
+          );
+        }
+        return <React.Fragment key={i}>{part}</React.Fragment>;
+      })}
+    </>
+  );
+};
+
+// ── streaming typing indicator ───────────────────────────────
+// Shown in an assistant bubble that has no text yet (live SSE turn in flight),
+// so the user can tell RICE is generating a response and isn't stuck.
+const TypingDots: React.FC = () => (
+  <span className="inline-flex items-center gap-1 py-1" aria-label="응답 생성 중">
+    {[0, 1, 2].map((i) => (
+      <span
+        key={i}
+        className="w-1.5 h-1.5 rounded-full bg-icon-secondary animate-bounce"
+        style={{ animationDelay: `${i * 0.15}s` }}
+      />
+    ))}
+  </span>
 );
 
 // ── avatar ───────────────────────────────────────────────────
@@ -520,24 +558,33 @@ const MemoryIndicator: React.FC<{
 
 // ── collapsible thinking trace ───────────────────────────────
 const ThinkingBlock: React.FC<{ m: Extract<ThreadMessage, { kind: 'thinking' }> }> = ({ m }) => {
-  const [open, setOpen] = useState(false);
+  // While streaming, default to open so the live reasoning is visible (the
+  // "motion"); once done it auto-collapses — unless the user toggled it.
+  const [userOpen, setUserOpen] = useState<boolean | null>(null);
+  const open = userOpen ?? !!m.streaming;
+  const steps = m.steps ?? [];
   return (
     <div className="my-1.5 max-w-[640px]">
       <button
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => setUserOpen(!open)}
         className="flex items-center gap-1.5 text-caption-01 text-text-helper hover:text-text-secondary transition-colors"
       >
-        <Icon name="idea" size={14} className="opacity-70" />
-        <span>{m.duration} 동안 생각함</span>
+        <Icon name="idea" size={14} className={`opacity-70 ${m.streaming ? 'animate-pulse' : ''}`} />
+        <span>{m.streaming ? '생각 중…' : m.duration ? `${m.duration} 동안 생각함` : '추론 과정'}</span>
         <Icon name={open ? 'chevron-up' : 'chevron-down'} size={14} />
       </button>
-      {open && (
+      {open && m.text != null && (
+        <div className="mt-2 pl-1 text-caption-01 text-text-helper whitespace-pre-wrap leading-relaxed border-l-2 border-border-subtle-01 pl-3">
+          {m.text || '…'}
+        </div>
+      )}
+      {open && m.text == null && (
         <div className="mt-2 pl-1 flex flex-col">
-          {m.steps.map((s, i) => (
+          {steps.map((s, i) => (
             <div key={i} className="flex gap-2.5">
               <div className="flex flex-col items-center flex-shrink-0">
                 <div className="w-1.5 h-1.5 rounded-full bg-border-strong-01 mt-[7px]" />
-                {i < m.steps.length - 1 && <div className="w-px flex-1 min-h-[14px] bg-border-subtle-01 my-0.5" />}
+                {i < steps.length - 1 && <div className="w-px flex-1 min-h-[14px] bg-border-subtle-01 my-0.5" />}
               </div>
               <div className="pb-2 min-w-0">
                 <div className="flex items-center gap-1.5 flex-wrap">
@@ -552,6 +599,102 @@ const ThinkingBlock: React.FC<{ m: Extract<ThreadMessage, { kind: 'thinking' }> 
               </div>
             </div>
           ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ── generic builtin/connector tool call trace ───────────────
+// One card per live tool call: shows the tool + args while running, then the
+// result/error once the runtime sends tool_result.
+// Render a flat object as aligned key→value rows (replaces a raw JSON dump). A
+// `path` value is rendered as a clickable file link.
+const KeyVals: React.FC<{ obj: Record<string, unknown>; onFile: (p: string) => void }> = ({ obj, onFile }) => (
+  <div className="flex flex-col gap-1">
+    {Object.entries(obj).map(([k, v]) => {
+      const val = typeof v === 'string' ? v : JSON.stringify(v);
+      return (
+        <div key={k} className="flex gap-2 text-caption-01">
+          <span className="text-text-helper font-mono min-w-[80px] flex-shrink-0">{k}</span>
+          {k === 'path' && typeof v === 'string' ? (
+            <button onClick={() => onFile(v)} className="text-[#78a9ff] font-mono break-all text-left hover:underline">
+              {val}
+            </button>
+          ) : (
+            <span className="text-text-secondary font-mono break-all whitespace-pre-wrap">{val}</span>
+          )}
+        </div>
+      );
+    })}
+  </div>
+);
+
+const BuiltinToolCard: React.FC<{ m: Extract<ThreadMessage, { kind: 'toolcall' }> }> = ({ m }) => {
+  const [open, setOpen] = useState(false);
+  const { openFile } = useFileViewer();
+  const path = typeof m.args.path === 'string' ? (m.args.path as string) : null;
+  const dot =
+    m.status === 'running' ? 'bg-[#f1c21b] animate-pulse' : m.status === 'error' ? 'bg-[#fa4d56]' : 'bg-[#42be65]';
+
+  // tool results arrive as a string; pretty-render it as key→values when it's a JSON object
+  const resultObj: Record<string, unknown> | null = (() => {
+    if (m.result == null) return null;
+    try {
+      const o = JSON.parse(m.result);
+      return o && typeof o === 'object' && !Array.isArray(o) ? (o as Record<string, unknown>) : null;
+    } catch {
+      return null;
+    }
+  })();
+
+  return (
+    <div className="my-1.5 max-w-[640px]">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-2 w-full text-left text-caption-01 text-text-secondary hover:text-text-primary transition-colors"
+      >
+        <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dot}`} />
+        <span className="font-mono text-[#78a9ff]">{m.tool}</span>
+        {path && <span className="font-mono text-text-helper truncate">{path}</span>}
+        <span className="text-text-helper">
+          {m.status === 'running' ? '실행 중…' : m.status === 'error' ? '실패' : '완료'}
+        </span>
+        <Icon name={open ? 'chevron-up' : 'chevron-down'} size={14} className="ml-auto flex-shrink-0" />
+      </button>
+      {open && (
+        <div className="mt-2 ml-3.5 border-l-2 border-border-subtle-01 pl-3 flex flex-col gap-2.5">
+          {Object.keys(m.args).length > 0 && (
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-text-helper mb-1">arguments</div>
+              <KeyVals obj={m.args} onFile={openFile} />
+            </div>
+          )}
+          {(m.result != null || m.error != null) && (
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-text-helper mb-1">
+                {m.error != null ? 'error' : 'result'}
+              </div>
+              {m.error != null ? (
+                <span className="text-caption-01 font-mono text-[#fa4d56] break-all">{m.error}</span>
+              ) : resultObj ? (
+                <KeyVals obj={resultObj} onFile={openFile} />
+              ) : (
+                <pre className="text-caption-01 font-mono text-text-secondary whitespace-pre-wrap break-all m-0">
+                  {m.result}
+                </pre>
+              )}
+            </div>
+          )}
+          {path && (
+            <button
+              onClick={() => openFile(path)}
+              className="self-start inline-flex items-center gap-1.5 text-caption-01 text-link-primary hover:underline"
+            >
+              <Icon name="document" size={13} />
+              {path} 열어보기
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -642,11 +785,11 @@ const ApprovalCard: React.FC<{
           </div>
         ) : state === 'approved' ? (
           <span className="inline-flex items-center gap-1.5 text-caption-01 text-support-success">
-            <Icon name="check-circle" size={13} /> 승인됨 · 메일을 발송했어요
+            <Icon name="check-circle" size={13} /> 승인됨 · {m.approvedText ?? '실행했어요'}
           </span>
         ) : (
           <span className="inline-flex items-center gap-1.5 text-caption-01 text-text-helper">
-            <Icon name="close" size={13} /> 거부됨 · 발송하지 않았어요
+            <Icon name="close" size={13} /> 거부됨 · {m.deniedText ?? '실행하지 않았어요'}
           </span>
         )}
       </div>
@@ -864,6 +1007,7 @@ const AssistantBlock: React.FC<{
   showActions?: boolean;
   actionsCopyText?: string;
 }> = ({ m, onCorrect, onJumpSkill, onRegenerate, onSaveSkill, onApprovePatch, onRespondApproval, showActions, actionsCopyText }) => {
+  const { openFile } = useFileViewer();
   if (m.kind === 'thinking') return <ThinkingBlock m={m} />;
   if (m.kind === 'toolrun') return <ToolCallCard m={m} onJumpSkill={onJumpSkill} />;
   if (m.kind === 'memory') {
@@ -909,6 +1053,7 @@ const AssistantBlock: React.FC<{
       </>
     );
 
+  if (m.kind === 'toolcall') return <BuiltinToolCard m={m} />;
   if (m.kind === 'tool_bash') return <BashCard m={m} />;
   if (m.kind === 'tool_read') return <ReadCard m={m} />;
   if (m.kind === 'tool_edit') return <EditCard m={m} />;
@@ -922,8 +1067,11 @@ const AssistantBlock: React.FC<{
           <UsedSkillBadge skill={m.usedSkill} onJump={onJumpSkill} />
         </div>
       )}
-      <div className="text-body-short-02 text-text-primary leading-relaxed break-words whitespace-pre-wrap">
-        <Rich text={m.text} />
+      {/* Markdown render (bold/lists/headings/code blocks). The arbitrary-variant
+          overrides lift the shared Markdown's body text to primary + trim the
+          trailing block margin so it sits flush above the action bar. */}
+      <div className="text-body-short-02 text-text-primary leading-relaxed break-words [&_p]:text-text-primary [&_li]:text-text-secondary [&_p]:mb-2 [&_p:last-child]:mb-0 [&>div>*:last-child]:mb-0">
+        {m.text ? <Markdown source={m.text} onFileClick={openFile} /> : <TypingDots />}
       </div>
       {m.bullets && (
         <ul className="mt-2.5 pl-5 flex flex-col gap-1.5 list-disc">

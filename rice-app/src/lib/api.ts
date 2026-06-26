@@ -25,6 +25,10 @@ class ApiClient {
    *  and screens fall back to scripted mock data. Flipped on at startup once
    *  Electron reports the runtime running (App bootstrap). */
   private enabled = false;
+  /** Subscribers notified when the runtime connects/disconnects. The connect
+   *  probe (App bootstrap) is async, so screens can't read `isEnabled` once at
+   *  mount — they subscribe here to react when it flips on. */
+  private enabledListeners = new Set<(enabled: boolean) => void>();
 
   constructor(baseUrl: string = 'http://localhost:8080') {
     this.baseUrl = baseUrl;
@@ -35,7 +39,15 @@ class ApiClient {
   }
 
   setEnabled(v: boolean) {
+    const changed = this.enabled !== v;
     this.enabled = v;
+    if (changed) this.enabledListeners.forEach((cb) => cb(v));
+  }
+
+  /** Subscribe to connect/disconnect; returns an unsubscribe fn. */
+  onEnabledChange(cb: (enabled: boolean) => void): () => void {
+    this.enabledListeners.add(cb);
+    return () => this.enabledListeners.delete(cb);
   }
 
   get isEnabled(): boolean {
@@ -104,12 +116,24 @@ class ApiClient {
   getSession(id: string): Promise<ApiResponse> {
     return this.get(`/sessions/${id}`);
   }
+  /** delete a session and its messages (history sidebar) */
+  deleteSession(id: string): Promise<ApiResponse> {
+    return this.send('DELETE', `/sessions/${id}`);
+  }
   /** paginated history load */
   getMessages(id: string, cursor?: string): Promise<ApiResponse> {
     return this.get(`/sessions/${id}/messages${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`);
   }
   abort(id: string): Promise<ApiResponse> {
     return this.send('POST', `/sessions/${id}/abort`);
+  }
+  /** read a workspace file (builtin file-tool sandbox) — text content */
+  readWorkspaceFile(path: string): Promise<ApiResponse> {
+    return this.get(`/workspace/file?path=${encodeURIComponent(path)}`);
+  }
+  /** open a workspace file in the user's OS default app (Excel→office, .txt→editor…) */
+  openWorkspaceFile(path: string): Promise<ApiResponse> {
+    return this.send('POST', '/workspace/open', { path });
   }
   regenerate(id: string, messageId: string): Promise<ApiResponse> {
     return this.send('POST', `/sessions/${id}/messages/${messageId}/regenerate`);

@@ -6,19 +6,36 @@ import React from 'react';
  * frontmatter, headings, lists, code fences, quotes, hr, and inline `code`/**bold**.
  */
 
+// A workspace-file-looking code chip (e.g. `hello.txt`) → clickable when an
+// `onFileClick` handler is supplied (chat answers). Scoped to real file
+// extensions so command/identifier chips stay plain.
+const FILE_CHIP_RE = /^\.?\/?[\w.-]+\.(txt|md|markdown|json|jsonl|csv|tsv|log|ya?ml|py|js|ts|tsx|jsx|sh|bash|html?|css|scss|sql|toml|ini|env|xml|svg)$/i;
+
 /** Render `inline code`, **bold** segments within a line of text. */
-const renderInline = (text: string, keyBase: string): React.ReactNode[] => {
+const renderInline = (text: string, keyBase: string, onFileClick?: (path: string) => void): React.ReactNode[] => {
   const parts: React.ReactNode[] = [];
   // split on `code` first
   const codeSplit = text.split(/(`[^`]+`)/g);
   codeSplit.forEach((seg, i) => {
     if (seg.startsWith('`') && seg.endsWith('`')) {
+      const inner = seg.slice(1, -1);
+      const codeCls = 'font-mono text-[0.8125rem] bg-layer-02 text-link-primary rounded px-1.5 py-0.5';
+      if (onFileClick && FILE_CHIP_RE.test(inner.trim())) {
+        parts.push(
+          <button
+            key={`${keyBase}-c${i}`}
+            onClick={() => onFileClick(inner)}
+            title="파일 열기"
+            className={`${codeCls} cursor-pointer hover:underline`}
+          >
+            {inner}
+          </button>
+        );
+        return;
+      }
       parts.push(
-        <code
-          key={`${keyBase}-c${i}`}
-          className="font-mono text-[0.8125rem] bg-layer-02 text-link-primary rounded px-1.5 py-0.5"
-        >
-          {seg.slice(1, -1)}
+        <code key={`${keyBase}-c${i}`} className={codeCls}>
+          {inner}
         </code>
       );
       return;
@@ -41,7 +58,7 @@ const renderInline = (text: string, keyBase: string): React.ReactNode[] => {
 };
 
 /** Minimal markdown → JSX. Handles headings, lists, code fences, quotes, hr. */
-export const Markdown: React.FC<{ source: string }> = ({ source }) => {
+export const Markdown: React.FC<{ source: string; onFileClick?: (path: string) => void }> = ({ source, onFileClick }) => {
   const blocks: React.ReactNode[] = [];
   const lines = source.replace(/\r\n/g, '\n').split('\n');
   let i = 0;
@@ -122,7 +139,7 @@ export const Markdown: React.FC<{ source: string }> = ({ source }) => {
           : 'text-body-short-02 font-semibold text-text-primary mt-3 mb-1.5';
       blocks.push(
         <div key={`h-${key++}`} className={cls}>
-          {renderInline(h[2], `h${key}`)}
+          {renderInline(h[2], `h${key}`, onFileClick)}
         </div>
       );
       i++;
@@ -141,7 +158,7 @@ export const Markdown: React.FC<{ source: string }> = ({ source }) => {
           key={`q-${key++}`}
           className="mb-4 border-l-2 border-link-primary/50 pl-3 text-body-short-01 text-text-secondary italic"
         >
-          {renderInline(quote.join(' '), `q${key}`)}
+          {renderInline(quote.join(' '), `q${key}`, onFileClick)}
         </blockquote>
       );
       continue;
@@ -167,7 +184,7 @@ export const Markdown: React.FC<{ source: string }> = ({ source }) => {
         >
           {items.map((it, k) => (
             <li key={k} className="leading-5 marker:text-text-helper">
-              {renderInline(it, `li${key}-${k}`)}
+              {renderInline(it, `li${key}-${k}`, onFileClick)}
             </li>
           ))}
         </ListTag>
@@ -192,7 +209,7 @@ export const Markdown: React.FC<{ source: string }> = ({ source }) => {
     }
     blocks.push(
       <p key={`p-${key++}`} className="mb-4 text-body-short-01 leading-relaxed text-text-secondary">
-        {renderInline(para.join(' '), `p${key}`)}
+        {renderInline(para.join(' '), `p${key}`, onFileClick)}
       </p>
     );
   }

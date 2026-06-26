@@ -154,21 +154,43 @@ function App() {
   // not spawned) we stay offline: clients no-op and screens use scripted mock
   // data, so no failing localhost requests hit the console.
   useEffect(() => {
+    const connect = (baseUrl: string, token: string | null = null) => {
+      api.setBaseUrl(baseUrl);
+      api.setToken(token);
+      api.setEnabled(true);
+      sseClient.setBaseUrl(baseUrl);
+      sseClient.setToken(token);
+      sseClient.setEnabled(true);
+      console.info('[RICE] runtime connected:', baseUrl);
+    };
+
     const bridge = (window as { electronAPI?: { runtime?: RuntimeBridge } }).electronAPI?.runtime;
-    if (!bridge) return;
-    bridge
-      .getStatus()
-      .then((status) => {
-        if (status?.running && status.port) {
-          const baseUrl = `http://localhost:${status.port}`;
-          api.setBaseUrl(baseUrl);
-          api.setEnabled(true);
-          sseClient.setBaseUrl(baseUrl);
-          sseClient.setEnabled(true);
-        }
+    if (bridge) {
+      bridge
+        .getStatus()
+        .then((status) => {
+          if (status?.running && status.port) connect(`http://localhost:${status.port}`);
+        })
+        .catch(() => {
+          /* runtime not reachable — stay offline */
+        });
+      return;
+    }
+
+    // Renderer-only dev (no Electron IPC): connect directly to a locally-run
+    // runtime if VITE_RICE_RUNTIME_URL is set AND /health answers. The health
+    // probe means we silently stay on scripted mock data when the runtime is
+    // down — no failing requests, no console noise.
+    const env = import.meta.env as Record<string, string | undefined>;
+    const devUrl = env.VITE_RICE_RUNTIME_URL;
+    if (!devUrl) return;
+    const token = env.VITE_RICE_RUNTIME_TOKEN ?? null;
+    void fetch(`${devUrl}/health`)
+      .then((r) => {
+        if (r.ok) connect(devUrl, token);
       })
       .catch(() => {
-        /* runtime not reachable — stay offline */
+        /* dev runtime not up — stay on mock */
       });
   }, []);
 
