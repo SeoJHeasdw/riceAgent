@@ -1,9 +1,6 @@
-# Hermes Agent Learning Loop Architecture (참조 분석)
+# Hermes Agent Learning Loop Architecture
 
-> **작성일**: 2026-06-10  
-> **목적**: Hermes Agent의 "쓸수록 나에게 맞춰 학습·진화하는" 메커니즘 상세 분석
->
-> **⚠️ 문서 성격**: 이 문서는 **RICE의 설계 문서가 아니라**, RICE의 learning loop 설계에 참조할 외부 시스템(Hermes Agent)의 코드 분석 문서다. Hermes의 어떤 구조를 RICE에 차용/단순화할지는 [RICE_REPO_STRATEGY.md](RICE_REPO_STRATEGY.md)의 9장 미결정 사항에서 별도로 결정한다.
+> Hermes Agent의 "쓸수록 나에게 맞춰 학습·진화하는" 메커니즘 코드 분석 참조 문서.
 
 ---
 
@@ -15,18 +12,24 @@
 4. [Learning Loop 흐름](#learning-loop-흐름)
 5. [오케스트레이션 계층](#오케스트레이션-계층)
 6. [Tool 생성 메커니즘](#tool-생성-메커니즘)
-7. [실제 코드 위치](#실제-코드-위치)
-8. [확인 필요 사항 (해소됨)](#확인-필요-사항-2026-06-11-소스-검증으로-전부-해소)
+7. [데이터 저장 방식](#데이터-저장-방식)
+8. [실제 코드 위치](#실제-코드-위치)
 
 ---
 
 ## 개요
 
-Hermes Agent는 3개의 핵심 시스템으로 "경험에서 학습하고 진화"하는 기능을 구현:
+Hermes Agent의 "쓸수록 나에게 맞춰 학습·진화"는 **5개 축**으로 구현된다:
 
-1. **Skill Lifecycle System** - 경험에서 스킬 생성 → 사용하며 개선
-2. **Memory System** - 세션을 넘나드는 user modeling
-3. **Tool Creation System** - 런타임에 새 도구 생성
+| 축 | 주체 | 타이밍 | 지속성 |
+|----|------|--------|--------|
+| **1. Skill 자율 생성/패치** | LLM (프롬프트 가이드 기반) | 턴 중 즉시 | 영구 (SKILL.md) |
+| **2. Background Review 포크** | daemon 스레드 AIAgent | 매 턴 종료 후 | 영구 (메모리+스킬) |
+| **3. Built-in Memory (MEMORY.md/USER.md)** | memory 도구 | 즉시 (다음 세션 반영) | 영구 (Markdown) |
+| **4. External Memory Provider** | MemoryManager → 플러그인 | 매 턴 백그라운드 sync | 원격/로컬 DB |
+| **5. Curator 자동 스킬 정리** | 백그라운드 스레드 | 7일 주기 opportunistic | 스킬 아카이브/통합 |
+
+**핵심 설계 원칙**: 프롬프트 캐시를 절대 깨지 않는다. 모든 학습 쓰기는 **현재 세션의 시스템 프롬프트를 건드리지 않고** 다음 세션에 반영된다 (단, Background Review 포크는 메모리/스킬 파일을 디스크에 쓰되 현재 대화에 영향 없음).
 
 ---
 
@@ -36,7 +39,7 @@ Hermes Agent는 3개의 핵심 시스템으로 "경험에서 학습하고 진화
 
 #### 1.1 Skill Usage Telemetry (`tools/skill_usage.py`)
 
-**위치**: `tools/skill_usage.py` (852줄)
+**위치**: `tools/skill_usage.py` (900줄)
 
 **역할**: 스킬 사용 추적 및 생애주기 상태 관리
 
@@ -62,17 +65,15 @@ archive_skill(skill_name)      # 아카이브로 이동
 restore_skill(skill_name)      # 복원
 ```
 
-**검증됨**: ✅ 코드 확인 완료
-
 #### 1.2 Curator (자동 스킬 관리)
 
-**위치**: `agent/curator.py` (1844줄)
+**위치**: `agent/curator.py` (1,916줄)
 
 **역할**: 주기적 스킬 검토 및 생애주기 관리
 
 **두 단계 프로세스**:
 
-1. **자동 전환 (규칙 기반, LLM 없음)**:
+1. **자동 전환 (규칙 기반, LLM 없음)** — 기본 동작:
 ```python
 def apply_automatic_transitions(now: Optional[datetime] = None):
     """사용 패턴 기반 자동 상태 전이"""
@@ -80,7 +81,7 @@ def apply_automatic_transitions(now: Optional[datetime] = None):
     # 핀된 스킬은 제외
 ```
 
-2. **LLM 리뷰 (독립 AIAgent 포크)**:
+2. **LLM 통합 패스 (독립 AIAgent 포크)** — **기본 OFF** (`DEFAULT_CONSOLIDATE = False`):
 ```python
 def _run_llm_review(prompt: str):
     """별도 AIAgent 생성하여 스킬 검토"""
@@ -92,12 +93,25 @@ def _run_llm_review(prompt: str):
     # 중복 스킬 통합, 품질 개선 제안
 ```
 
+> ⚠️ **중요**: LLM 통합 패스는 **기본적으로 실행되지 않음**.
+> 활성화 방법:
+> - `config.yaml`에 `curator.consolidate: true` 설정, 또는
+> - CLI에서 `hermes curator run --consolidate` 명시적 실행
+> 기본 동작은 결정론적 규칙 기반 비활성 프루닝(자동 전환)만 수행.
+
+**Curator 상태 파일**: `~/.hermes/skills/.curator_state`
+- `last_run_at`, `paused`, `run_count` 등 저장
+- 최초 실행 시 `last_run_at`를 현재 시각으로 seeding → 설치 직후 바로 실행되지 않도록 설계
+
 **실행 방식**:
 - 백그라운드 스레드 (비동기)
 - 사용자 대화 방해 안 함
-- 설정: `curator.enabled`, `curator.interval_hours`
-
-**검증됨**: ✅ 코드 확인 완료
+- 설정: `curator.enabled`, `curator.interval_hours`, `curator.consolidate`
+- 기본 주기: 7일 (`DEFAULT_INTERVAL_HOURS = 24 * 7`)
+- 추가 게이트: 유휴 2시간 이상일 때만 (`DEFAULT_MIN_IDLE_HOURS = 2`)
+- 상태 전이 기본값: stale 30일, archive 90일
+- 트리거: `maybe_run_curator()` 호출 시 interval/idle/enabled 조건을 검사하는 **기회적(opportunistic) 실행**
+- Gateway에서도 실행됨 (`gateway/run.py`에서 `maybe_run_curator()` 호출)
 
 #### 1.3 Curator Backup System
 
@@ -110,21 +124,20 @@ def _run_llm_review(prompt: str):
 - `~/.hermes/skills/.curator_backups/` 저장
 - 롤백 가능
 
-**검증됨**: ✅ 파일 존재 확인 (내용 미확인)
-
 ### 2. Memory System
 
 #### 2.1 Memory Manager
 
-**위치**: `agent/memory_manager.py` (653줄)
+**위치**: `agent/memory_manager.py` (1,081줄)
 
 **역할**: 여러 메모리 제공자 통합 관리
 
 **핵심 메서드**:
 ```python
 class MemoryManager:
-    def sync_turn(user_content, assistant_content, session_id, messages)
-        """매 대화 턴마다 메모리 동기화"""
+    def sync_all(user_content, assistant_content, session_id, messages)
+        """매 대화 턴마다 메모리 동기화 — ThreadPoolExecutor(max_workers=1)로 백그라운드 실행
+        (개별 provider ABC의 메서드명은 sync_turn()이며, MemoryManager는 내부에서 provider.sync_turn()을 호출)"""
     
     def prefetch_all(query, session_id)
         """다음 턴 전에 관련 컨텍스트 미리 로드"""
@@ -136,15 +149,41 @@ class MemoryManager:
         """서브에이전트 작업 결과 기록"""
 ```
 
+> 💡 **백그라운드 실행 설계**: `sync_all()`은 `ThreadPoolExecutor(max_workers=1)`로 백그라운드 실행됨.
+> 싱글 워커로 순서 보장(turn N이 turn N+1보다 먼저 도착), 느린 provider가 메인 루프를 블록하지 않음.
+
 **라이프사이클 훅**:
 - `on_turn_start` - 턴 시작
 - `on_session_end` - 세션 종료
 - `on_pre_compress` - 컨텍스트 압축 전
 - `on_memory_write` - 메모리 쓰기 시
 
-**검증됨**: ✅ 코드 확인 완료
+**Provider 정책**:
+- builtin provider는 **항상** 첫 번째로 등록
+- 외부 provider는 **동시에 1개만 허용** — 두 번째 등록 시도는 경고와 함께 거부됨
+- 선택은 `memory.provider` 설정으로
+- 한 provider의 실패가 다른 provider를 막지 않음 (failure isolation)
 
-#### 2.2 Honcho Plugin (Cross-session User Modeling)
+#### 2.2 Memory Tool 파일 구조 (`tools/memory_tool.py`)
+
+**두 가지 파일**로 메모리를 관리:
+
+| 파일 | 역할 | 내용 |
+|------|------|------|
+| `MEMORY.md` | 에이전트 개인 메모 | 학습한 패턴, 작업 컨텍스트, 기술적 메모 |
+| `USER.md` | 사용자 프로파일 | 사용자 선호도, 스타일, 배경 정보 |
+
+**세션 내 동작**:
+```
+세션 시작: MEMORY.md + USER.md → frozen snapshot → 시스템 프롬프트에 주입
+세션 중: memory_write() → 디스크에 즉시 저장 (시스템 프롬프트는 변경 안 함)
+다음 세션: 변경된 내용이 새 snapshot으로 시스템 프롬프트에 반영
+```
+
+> ⚠️ **캐시 보호 설계**: 세션 중 메모리 쓰기는 디스크에만 저장되고 시스템 프롬프트를 즉시 변경하지 않음.
+> 이는 프롬프트 캐시를 보호하기 위한 의도적 설계. 변경 사항은 **다음 세션**부터 반영됨.
+
+#### 2.3 Honcho Plugin (Cross-session User Modeling)
 
 **위치**: `plugins/memory/honcho/__init__.py`
 
@@ -160,11 +199,35 @@ honcho_context    # 현재 세션 전체 컨텍스트
 
 **Dialectic Q&A**: LLM 기반 추론으로 사용자 행동 패턴 학습
 
-**검증됨**: ✅ 코드 확인 완료
+### 3. Background Review 포크
 
-### 3. Cron Scheduler (자동 실행)
+**위치**: `agent/background_review.py`
 
-**위치**: `cron/scheduler.py` (2216줄)
+**역할**: 매 턴 종료 후 daemon 스레드로 포크된 AIAgent가 대화를 검토하여 메모리/스킬 저장 여부 판단
+
+**동작 방식**:
+```
+응답 반환 직후
+  ↓
+daemon 스레드 포크 (메인 루프 블록 없음)
+  ↓
+AIAgent 대화 스냅샷 replay
+  ↓
+3가지 리뷰 프롬프트 중 선택:
+  - _MEMORY_REVIEW_PROMPT  → 메모리만 검토
+  - _SKILL_REVIEW_PROMPT   → 스킬만 검토
+  - _COMBINED_REVIEW_PROMPT → 메모리 + 스킬 동시 검토
+  ↓
+저장할 게 있으면 memory_write() 또는 skill_manage() 호출
+```
+
+**캐시 최적화**:
+- 같은 모델: warm cache 재사용 (대화 prefix 공유)
+- 다른 모델: digest 압축 → cold-write 최소화
+
+### 4. Cron Scheduler (자동 실행)
+
+**위치**: `cron/scheduler.py` (3,042줄)
 
 **역할**: 스케줄 기반 작업 실행
 
@@ -172,8 +235,12 @@ honcho_context    # 현재 세션 전체 컨텍스트
 - 작업당 독립 AIAgent
 - 멀티 플랫폼 전달 (Telegram, Discord 등)
 - 3분 하드 인터럽트 (무한 루프 방지)
+- `skip_memory=True` 기본값 — 크론 세션에서는 메모리 프로바이더 실행 안 함
 
-**검증됨**: ✅ 코드 확인 완료
+**스킬·컨텍스트 통합 기능**:
+- `skills` 필드: 특정 스킬을 해당 job에서만 로드
+- `context_from`: 이전 job의 마지막 출력을 다음 job의 프롬프트에 체인
+- `workdir`: 특정 디렉토리에서 실행하고 해당 `AGENTS.md` / `CLAUDE.md` 로드
 
 ---
 
@@ -226,8 +293,6 @@ _HERMES_CORE_TOOLS = [
 ]
 ```
 
-**검증됨**: ✅ 코드 확인 완료
-
 ### Skill (절차적 지식 문서)
 
 **본질**: 마크다운 문서 (SKILL.md)
@@ -275,15 +340,42 @@ ruff check .
 - ✅ 도구 조합 방법
 - ✅ 베스트 프랙티스, 함정, 검증 방법
 
-**시스템 프롬프트 주입**:
+**스킬 주입 방식**:
+
+> ❌ 스킬은 시스템 프롬프트에 직접 주입되지 않음
+> ✅ 슬래시 커맨드 방식으로 on-demand 주입
+
 ```python
-# agent/prompt_builder.py
-def build_skills_system_prompt():
-    """활성화된 스킬들을 시스템 프롬프트에 주입"""
-    # SKILL.md 내용을 읽어서 프롬프트에 포함
+# agent/skill_commands.py
+def scan_skill_commands():
+    """~/.hermes/skills/ 스캔 → /skill-name 슬래시 커맨드 등록"""
+
+def build_skill_invocation_message(skill_name):
+    """사용자가 /skill-name 입력 시 SKILL.md 전체를 user 메시지로 주입"""
 ```
 
-**검증됨**: ✅ 코드 확인 완료
+**실제 흐름**:
+```
+1. 시작 시: scan_skill_commands() → 각 스킬을 /skill-name 커맨드로 등록
+2. 사용자: /github-code-review 입력
+3. build_skill_invocation_message() → SKILL.md 전체 내용을 user 메시지로 전송
+4. 스킬 내용이 프롬프트 캐시를 깨지 않고 user 턴에 주입됨
+```
+
+> 💡 **설계 의도**: 시스템 프롬프트에 미리 주입하면 로드된 스킬마다 캐시가 무효화됨.
+> user 메시지로 주입함으로써 **프롬프트 캐시(stable prefix) 보호**.
+
+**스킬 생성 트리거**: 프로그램적 감지 로직은 없고, **시스템 프롬프트의 명시적 가이드라인**으로 LLM이 자율 판단한다.
+
+`agent/prompt_builder.py`의 `SKILLS_GUIDANCE`:
+> "After completing a complex task (**5+ tool calls**), fixing a tricky error, or discovering a non-trivial workflow, save the approach as a skill with skill_manage so you can reuse it next time."
+
+추가로 스킬 사용 중 내용이 낡았으면 **묻지 않고 즉시 patch**하라는 지시도 포함:
+> "When using a skill and finding it outdated, incomplete, or wrong, patch it immediately with skill_manage(action='patch') — don't wait to be asked."
+
+**Skill vs Plugin 선택 기준**: 생성 주체로 구분된다.
+- **Skill**: 에이전트가 자율 생성/패치 (시스템 프롬프트에 생성 가이드 존재, Curator 관리 대상)
+- **Plugin**: 사람(사용자/개발자)이 직접 작성하는 확장 포인트
 
 ### 비교표
 
@@ -292,7 +384,7 @@ def build_skills_system_prompt():
 | **본질** | 실행 가능한 함수 | 절차적 지식 문서 |
 | **형태** | Python 코드 | Markdown 문서 |
 | **위치** | `tools/*.py` | `skills/*/SKILL.md` |
-| **LLM 접근** | tool_calls로 직접 호출 | 시스템 프롬프트에 주입 |
+| **LLM 접근** | tool_calls로 직접 호출 | `/skill-name` 입력 시 user 메시지로 주입 |
 | **역할** | "무엇을 할 수 있는가" | "어떻게 해야 하는가" |
 | **생성** | 개발자가 코드로 구현 | 에이전트가 경험에서 학습 |
 | **진화** | 코드 업데이트 필요 | 자동으로 개선/통합 |
@@ -309,21 +401,31 @@ def build_skills_system_prompt():
    ↓
 2. AIAgent.run_conversation()
    ↓
-3. Memory prefetch (관련 컨텍스트 로드)
+3. 시스템 프롬프트 구성 (3계층)
+   - stable:   정체성 + 도구 가이드 + 스킬 인덱스     ← 세션 내 불변 (캐시 보호)
+   - context:  AGENTS.md, .cursorrules               ← 세션 내 불변
+   - volatile: MEMORY.md + USER.md 스냅샷, 타임스탬프  ← 세션마다 갱신
    ↓
-4. LLM 추론 + Tool 호출
+4. Memory prefetch (관련 컨텍스트 로드)
    ↓
-5. Tool 실행 (handle_function_call)
+5. LLM 추론 + Tool 호출
    ↓
-6. skill_usage.bump_use() 자동 호출 (텔레메트리)
+6. Tool 실행 (handle_function_call)
    ↓
-7. Memory sync (턴 종료 시)
+7. skill_usage.bump_use() 자동 호출 (텔레메트리)
    ↓
-8. 응답 반환
+8. Memory sync (턴 종료 시) — 백그라운드 스레드
    ↓
-9. (백그라운드) Curator 주기적 실행
-   - 자동 상태 전이
-   - LLM 리뷰 (중복 통합, 품질 개선)
+9. 응답 반환
+   ↓
+10. (백그라운드 daemon) Background Review 포크
+    - 대화 스냅샷을 replay하며 메모리/스킬 저장 검토
+    - 같은 모델: warm cache 재사용
+    - 다른 모델: digest 압축 → cold-write 최소화
+   ↓
+11. (백그라운드) Curator 주기적 실행
+    - 규칙 기반 자동 상태 전이 (항상)
+    - LLM 통합 패스 (consolidate=true 일 때만)
 ```
 
 ### 시나리오별 상세 흐름
@@ -345,12 +447,10 @@ tools/web_tools.py의 web_search_tool() 실행
    ↓
 결과 반환 → 사용자에게 응답
    ↓
-memory_manager.sync_turn(user_msg, assistant_response)
+memory_manager.sync_all(user_msg, assistant_response)
    ↓
 끝 (스킬 생성 없음 - web_search는 이미 built-in)
 ```
-
-**검증됨**: ✅ 흐름 확인 완료
 
 #### 시나리오 B: 복잡한 작업 → 스킬 생성
 
@@ -376,11 +476,10 @@ skill_manage(action="create", name="github-pr-review", content="...")
 skill_usage.mark_agent_created("github-pr-review")
    ↓
 다음 세션에서:
-  - 스킬 자동 로드 (시스템 프롬프트에 주입)
+  - scan_skill_commands()가 /github-pr-review 슬래시 커맨드 등록
+  - 사용자가 /github-pr-review 입력 시 SKILL.md → user 메시지로 주입
   - LLM이 문서화된 절차 따라서 더 빠르고 정확하게 수행
 ```
-
-**확인 필요**: ⚠️ LLM이 언제 스킬 생성을 판단하는지 정확한 트리거 조건
 
 ---
 
@@ -428,11 +527,9 @@ skill_usage.mark_agent_created("github-pr-review")
 
 **핵심**: 중앙 집중식 플래너가 아닌 **분산 자율 시스템**
 
-**검증됨**: ✅ 아키텍처 확인 완료
-
 ### AIAgent 핵심 루프
 
-**위치**: `run_agent.py` (약 12,000줄)
+**위치**: `run_agent.py` (~5,577줄)
 
 ```python
 class AIAgent:
@@ -470,12 +567,10 @@ class AIAgent:
                 break
         
         # 4. 메모리 동기화
-        self._memory_manager.sync_turn(user_msg, assistant_response)
+        self._memory_manager.sync_all(user_msg, assistant_response)
         
         return response
 ```
-
-**검증됨**: ✅ 코드 확인 완료
 
 ---
 
@@ -485,7 +580,7 @@ class AIAgent:
 
 #### 1. `execute_code` - 프로그래밍 방식 도구 생성 (PTC)
 
-**위치**: `tools/code_execution_tool.py` (약 2,000줄)
+**위치**: `tools/code_execution_tool.py` (~1,848줄)
 
 **원리**: 
 1. LLM이 Python 스크립트 작성
@@ -522,39 +617,23 @@ SANDBOX_ALLOWED_TOOLS = frozenset([
 ])
 ```
 
-**예시**:
-```python
-execute_code(code="""
-import hermes_tools as ht
-import json
+**제한값**:
+- 타임아웃: 기본 5분 (`DEFAULT_TIMEOUT = 300`)
+- 최대 도구 호출: 50회 (`DEFAULT_MAX_TOOL_CALLS = 50`)
+- stdout 50KB / stderr 10KB 캡
+- 환경 변수 스크러빙 (allowlist 기반, API 키 등 시크릿 차단)
 
-def analyze_pr(pr_number):
-    # PR 정보 가져오기
-    pr_info = ht.terminal(f"gh pr view {pr_number} --json files")
-    files = json.loads(pr_info)['files']
-    
-    # 각 파일 분석
-    issues = []
-    for file in files:
-        content = ht.read_file(file['path'])
-        if 'password' in content.lower():
-            issues.append(f"{file['path']}: 하드코딩된 비밀번호")
-    
-    return {"issues": issues, "file_count": len(files)}
-
-result = analyze_pr(123)
-print(json.dumps(result))
-""")
-```
+**백엔드별 격리 수준**:
+| 백엔드 | 격리 수준 |
+|--------|----------|
+| local (자식 프로세스) | **파일시스템/네트워크 격리 없음** — env 스크럽 + 도구 제한만 |
+| docker / singularity / modal / daytona | 컨테이너 격리 + 리소스 제한 (기본 CPU 1, 메모리 5120MB, 디스크 51200MB) |
 
 **특징**:
 - ✅ 런타임에 새 도구 생성
 - ✅ 기존 도구 조합
 - ✅ 즉시 실행
-- ✅ 재사용 가능 (같은 코드 재실행)
 - ❌ 일회성 (디스크 저장 안 됨)
-
-**검증됨**: ✅ 코드 확인 완료
 
 #### 2. Skill 내 스크립트 - 재사용 가능한 도구
 
@@ -563,44 +642,12 @@ print(json.dumps(result))
 2. `~/.hermes/skills/<skill>/scripts/` 디렉토리에 저장
 3. `terminal("python scripts/tool.py ...")` 로 호출
 
-**예시**:
-```markdown
-# skills/my-analyzer/SKILL.md
----
-name: my-analyzer
----
-
-## Scripts
-
-### scripts/analyze.py
-```python
-#!/usr/bin/env python3
-import sys, json, subprocess
-
-def analyze_codebase(path):
-    result = subprocess.run(['ruff', 'check', path], capture_output=True)
-    issues = parse_ruff_output(result.stdout)
-    return {"issues": issues}
-
-if __name__ == "__main__":
-    result = analyze_codebase(sys.argv[1])
-    print(json.dumps(result))
-```
-
-## Usage
-```bash
-python ~/.hermes/skills/my-analyzer/scripts/analyze.py /path/to/code
-```
-```
-
 **특징**:
 - ✅ 영구 저장 (디스크)
 - ✅ 버전 관리 가능 (Git)
 - ✅ Curator 관리 대상
 - ✅ 세션 간 재사용
 - ❌ Built-in처럼 tool_calls로 직접 호출 불가
-
-**검증됨**: ✅ 패턴 확인 완료 (실제 예시는 미확인)
 
 #### 3. Plugin System - 진짜 새 도구 등록
 
@@ -611,14 +658,6 @@ python ~/.hermes/skills/my-analyzer/scripts/analyze.py /path/to/code
 ~/.hermes/plugins/my-tool/
 ├── plugin.yaml
 └── __init__.py
-```
-
-**예시**:
-```yaml
-# plugin.yaml
-name: my-custom-tool
-version: 1.0.0
-description: Custom tool for X
 ```
 
 ```python
@@ -651,8 +690,6 @@ def register(ctx):
 - ✅ 영구 등록 (재시작 후에도 사용)
 - ✅ 완전한 통합
 
-**검증됨**: ✅ 플러그인 시스템 확인 완료
-
 ### 비교표
 
 | 방법 | 생성 방식 | 지속성 | 사용 방식 | Built-in 동등 |
@@ -663,59 +700,7 @@ def register(ctx):
 
 ---
 
-## 실제 코드 위치
-
-### 핵심 파일
-
-| 파일 | 줄 수 | 역할 |
-|------|------|------|
-| `run_agent.py` | ~12,000 | AIAgent 클래스, 메인 대화 루프 |
-| `model_tools.py` | ~150 | 도구 오케스트레이션, 디스패치 |
-| `tools/registry.py` | ~150 | 도구 등록 시스템 |
-| `toolsets.py` | ~100 | 도구셋 정의 |
-| `tools/skill_usage.py` | 852 | 스킬 텔레메트리 |
-| `agent/curator.py` | 1,844 | 스킬 생애주기 관리 |
-| `agent/memory_manager.py` | 653 | 메모리 통합 관리 |
-| `tools/code_execution_tool.py` | ~2,000 | PTC (execute_code) |
-| `cron/scheduler.py` | 2,216 | 스케줄 작업 실행 |
-| `gateway/run.py` | ~2,000+ | 메시징 게이트웨이 |
-| `cli.py` | ~11,000 | CLI 인터페이스 |
-
-### 디렉토리 구조
-
-```
-hermes-agent/
-├── run_agent.py          # AIAgent 클래스
-├── model_tools.py        # 도구 오케스트레이션
-├── toolsets.py           # 도구셋 정의
-├── cli.py                # CLI 인터페이스
-├── agent/                # 에이전트 내부
-│   ├── curator.py        # 스킬 생애주기
-│   ├── memory_manager.py # 메모리 관리
-│   └── prompt_builder.py # 프롬프트 구성
-├── tools/                # 도구 구현
-│   ├── registry.py       # 도구 등록
-│   ├── skill_usage.py    # 텔레메트리
-│   ├── code_execution_tool.py  # PTC
-│   ├── web_tools.py      # 웹 도구
-│   └── ...
-├── skills/               # 번들 스킬
-│   ├── github/
-│   │   └── github-code-review/
-│   │       └── SKILL.md
-│   └── ...
-├── plugins/              # 플러그인
-│   ├── memory/
-│   │   └── honcho/
-│   └── ...
-├── gateway/              # 메시징 게이트웨이
-│   └── run.py
-└── cron/                 # 스케줄러
-    └── scheduler.py
-```
-
----
-## 데이터 저장 방식 (Data Storage Architecture)
+## 데이터 저장 방식
 
 ### 1. 세션 데이터 (Session Data)
 
@@ -724,7 +709,7 @@ hermes-agent/
 ```python
 # 위치: hermes_state.py
 DEFAULT_DB_PATH = get_hermes_home() / "state.db"
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 16
 
 # 주요 테이블
 sessions:
@@ -840,8 +825,6 @@ self._context_cache: dict[str, dict]   # Prefetch 결과 캐시
 
 ### 4. 기타 메모리 프로바이더
 
-**각 프로바이더는 독자적인 저장 방식 사용:**
-
 | 프로바이더 | 저장 방식 | 위치 |
 |-----------|----------|------|
 | **Honcho** | PostgreSQL + 임베딩 (원격) | Honcho 서버 |
@@ -852,8 +835,6 @@ self._context_cache: dict[str, dict]   # Prefetch 결과 캐시
 | **OpenViking** | 벡터DB | 설정에 따라 |
 
 ### 5. 설정 파일 (Configuration)
-
-**저장소: YAML + JSON**
 
 ```
 ~/.hermes/
@@ -892,96 +873,53 @@ self._context_cache: dict[str, dict]   # Prefetch 결과 캐시
 
 ---
 
+## 실제 코드 위치
 
-## 확인 필요 사항 (2026-06-11 소스 검증으로 전부 해소)
+### 핵심 파일
 
-> 아래 6개 항목은 `hermes-agent` 소스 직접 확인으로 해소됨.
+| 파일 | 줄 수 | 역할 |
+|------|------|------|
+| `run_agent.py` | ~5,577 | AIAgent 클래스, 메인 대화 루프 |
+| `model_tools.py` | ~1,255 | 도구 오케스트레이션, 디스패치 |
+| `tools/registry.py` | ~150 | 도구 등록 시스템 |
+| `toolsets.py` | ~100 | 도구셋 정의 |
+| `tools/skill_usage.py` | 900 | 스킬 텔레메트리 |
+| `agent/curator.py` | 1,916 | 스킬 생애주기 관리 |
+| `agent/memory_manager.py` | 1,081 | 메모리 통합 관리 |
+| `tools/code_execution_tool.py` | ~1,848 | PTC (execute_code) |
+| `cron/scheduler.py` | 3,042 | 스케줄 작업 실행 |
+| `gateway/run.py` | ~18,239 | 메시징 게이트웨이 |
+| `cli.py` | ~15,530 | CLI 인터페이스 |
 
-### 1. 스킬 생성 트리거 조건 ✅
+### 디렉토리 구조
 
-**답**: 프로그램적 감지 로직은 없고, **시스템 프롬프트의 명시적 가이드라인**으로 LLM이 자율 판단한다.
-
-`agent/prompt_builder.py`의 `SKILLS_GUIDANCE`:
-> "After completing a complex task (**5+ tool calls**), fixing a tricky error, or discovering a non-trivial workflow, save the approach as a skill with skill_manage so you can reuse it next time."
-
-추가로 스킬 사용 중 내용이 낡았으면 **묻지 않고 즉시 patch**하라는 지시도 포함:
-> "When using a skill and finding it outdated, incomplete, or wrong, patch it immediately with skill_manage(action='patch') — don't wait to be asked."
-
-- 사용자 명시 요청 불필요 (에이전트 자율)
-- 반복 작업 감지 같은 별도 로직 없음 — 순수 프롬프트 기반
-
-### 2. Curator 실행 주기 ✅
-
-**답** (`agent/curator.py`):
-- 기본 주기: `DEFAULT_INTERVAL_HOURS = 24 * 7` (**7일**)
-- 추가 게이트: `DEFAULT_MIN_IDLE_HOURS = 2` (사용자 유휴 2시간 이상일 때만)
-- 상태 전이 기본값: stale 30일, archive 90일
-- 트리거: 타이머가 아니라 `maybe_run_curator()` 호출 시점에 내부적으로 interval/idle/enabled 조건을 검사하는 **기회적(opportunistic) 실행**
-- Gateway에서도 실행됨 (`gateway/run.py`에서 `maybe_run_curator()` 호출 확인)
-
-### 3. Memory Provider 선택 ✅
-
-**답** (`agent/memory_manager.py`):
-- builtin provider는 **항상** 첫 번째로 등록
-- 외부 provider는 **동시에 1개만 허용** — 두 번째 등록 시도는 경고와 함께 거부됨
-- 선택은 `memory.provider` 설정으로
-- 한 provider의 실패가 다른 provider를 막지 않음 (failure isolation)
-
-### 4. execute_code 보안 ✅
-
-**답** (`tools/code_execution_tool.py`): 보안 수준은 **백엔드에 따라 다름**.
-
-공통 제한:
-- 환경 변수 스크러빙 (allowlist 기반, API 키 등 시크릿 차단)
-- 샌드박스 내 도구 7개로 제한: `web_search`, `web_extract`, `read_file`, `write_file`, `search_files`, `patch`, `terminal`
-- 타임아웃 기본 5분, 툴 호출 최대 50회, stdout 50KB / stderr 10KB 캡
-
-백엔드별:
-| 백엔드 | 격리 수준 |
-|--------|----------|
-| local (자식 프로세스) | **파일시스템/네트워크 격리 없음** — env 스크럽 + 도구 제한만 |
-| docker / singularity / modal / daytona | 컨테이너 격리 + 리소스 제한 (기본 CPU 1, 메모리 5120MB, 디스크 51200MB) |
-
-→ RICE 시사점: 마켓에서 받은 코드를 실행한다면 local 백엔드 수준으로는 부족하고, 컨테이너 백엔드에 준하는 경계가 필요.
-
-### 5. Skill vs Plugin 선택 기준 ✅
-
-**답**: 공식 가이드라인 문서는 없음. 다만 코드 구조상 역할이 명확히 갈림:
-- **Skill**: 에이전트가 자율 생성/패치 (시스템 프롬프트에 생성 가이드 존재, Curator 관리 대상)
-- **Plugin**: 사람(사용자/개발자)이 직접 작성하는 확장 포인트 (에이전트에게 plugin 생성 가이드는 프롬프트에 없음)
-
-즉 기존 추측("Skill = 절차 지식, Plugin = 새 기능/외부 통합")이 맞으며, 생성 주체로도 구분된다: **Skill은 에이전트가, Plugin은 사람이 만든다.**
-
-### 6. 프롬프트 캐싱 ✅
-
-**답**:
-- 스킬은 시스템 프롬프트에 주입되고, 시스템 프롬프트 전체가 **prefix caching** 대상
-- 설계 의도가 코드 주석에 명시됨: "token cost is paid once at install and then amortised across all sessions via prefix caching"
-- `anthropic_prompt_cache_policy()` (`agent/agent_runtime_helpers.py`)가 프로바이더별로 `cache_control` 마커 적용 여부와 배치 레이아웃(native vs envelope)을 결정
-- 별도의 명시적 캐시 무효화 전략은 없음 — 스킬 변경 시 프롬프트 prefix가 바뀌어 **자연스럽게 캐시 미스 → 재캐시**되는 구조 (변경이 드물다는 전제)
-
----
-
-## 결론
-
-Hermes Agent의 학습·진화 메커니즘은 다음 3가지 축으로 구현됨:
-
-1. **Skill Lifecycle** - 경험을 문서화하고 자동으로 관리
-2. **Memory System** - 사용자 패턴을 학습하고 세션 간 유지
-3. **Tool Creation** - 런타임에 새 도구를 프로그래밍으로 생성
-
-핵심은 **분산 자율 시스템**:
-- 중앙 플래너 없음
-- 각 컴포넌트가 자율적으로 판단
-- LLM은 전술적 도구 선택
-- 규칙 엔진은 전략적 생애주기 관리
-
-**검증 상태**:
-- ✅ 핵심 코드 확인 완료
-- ✅ "확인 필요 사항" 6개 항목 전부 소스 검증으로 해소 (2026-06-11)
-
----
-
-**문서 버전**: 1.1  
-**최종 업데이트**: 2026-06-11  
-**작성자**: 코드 분석 기반 정리
+```
+hermes-agent/
+├── run_agent.py          # AIAgent 클래스
+├── model_tools.py        # 도구 오케스트레이션
+├── toolsets.py           # 도구셋 정의
+├── cli.py                # CLI 인터페이스
+├── agent/                # 에이전트 내부
+│   ├── curator.py        # 스킬 생애주기
+│   ├── memory_manager.py # 메모리 관리
+│   └── prompt_builder.py # 프롬프트 구성
+├── tools/                # 도구 구현
+│   ├── registry.py       # 도구 등록
+│   ├── skill_usage.py    # 텔레메트리
+│   ├── code_execution_tool.py  # PTC
+│   ├── web_tools.py      # 웹 도구
+│   └── ...
+├── skills/               # 번들 스킬
+│   ├── github/
+│   │   └── github-code-review/
+│   │       └── SKILL.md
+│   └── ...
+├── plugins/              # 플러그인
+│   ├── memory/
+│   │   └── honcho/
+│   └── ...
+├── gateway/              # 메시징 게이트웨이
+│   └── run.py
+└── cron/                 # 스케줄러
+    └── scheduler.py
+```
