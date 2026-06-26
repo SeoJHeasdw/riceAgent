@@ -148,7 +148,7 @@
 | 형태 | Provider | 모델 (프로토타입) | 접속/인증 |
 |------|----------|-------------------|-----------|
 | **SaaS** | Claude (Anthropic API) | Claude Sonnet 4.5 | API 키 → OS 키체인, prompt caching 지원 |
-| **on-prem** | Ollama (로컬 모델) | Qwen3.6-27B / Qwen3-1.7B / Qwen-3.5-9B | `base_url` (키 불필요), 사내·오프라인 |
+| **on-prem** | Ollama (로컬 모델) | Qwen3.6-27B / Qwen3.5-9B (MLX) / Qwen3.5-9B | `base_url` (키 불필요), 사내·오프라인 |
 
 > 모델은 프로토타입 기준. OpenAI 호환 게이트웨이 추상화는 Phase 2. (※ Claude 최신은 Sonnet 4.6(`claude-sonnet-4-6`) — 필요 시 교체)
 

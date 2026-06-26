@@ -30,9 +30,9 @@ export const mockModels: { saas: Model[]; local: Model[] } = {
       badge: '오프라인',
     },
     {
-      id: 'qwen3-1.7b',
-      name: 'Qwen3 1.7B',
-      description: 'Ollama · 로컬 · 경량 · 빠름',
+      id: 'qwen3.5:9b',
+      name: 'Qwen3.5 9B (MLX)',
+      description: 'Ollama · 로컬 · 균형 · Apple MLX',
       badge: '오프라인',
     },
   ],

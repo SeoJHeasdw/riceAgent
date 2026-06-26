@@ -2494,7 +2494,7 @@ export const MODELS: { saas: ModelOption[]; local: ModelOption[] } = {
   local: [
     { id: 'qwen3.6-27b', name: 'Qwen3.6 27B', sub: 'Ollama · 로컬 · 고성능', badge: '오프라인' },
     { id: 'qwen-3.5-9b', name: 'Qwen3.5 9B', sub: 'Ollama · 로컬 · 균형' },
-    { id: 'qwen3-1.7b', name: 'Qwen3 1.7B', sub: 'Ollama · 로컬 · 경량·빠름' },
+    { id: 'qwen3.5:9b', name: 'Qwen3.5 9B (MLX)', sub: 'Ollama · 로컬 · 균형 · Apple MLX' },
   ],
 };
 
