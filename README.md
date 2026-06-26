@@ -3,6 +3,27 @@
 > RICE: 사용자 경험을 축적하며 학습·진화하는 개인 에이전트 + 내부 마켓 생태계 (IBM 내부용 데스크톱 앱)
 > Claude Desktop · Hermes Agent를 벤치마킹한 애플리케이션
 
+## 로컬 실행 (개발)
+
+```bash
+./dev.sh            # 백엔드(:8080) + 프론트(:5273) 한방 실행. Ctrl-C로 함께 종료
+```
+
+→ 브라우저에서 http://localhost:5273 열고 채팅 한 줄 보내면 end-to-end(렌더러→런타임→ollama qwen) 확인.
+모델 호출은 **Ollama 데몬(:11434)** 이 떠 있어야 함 (`ollama serve`, `ollama list` 로 `qwen3.5:9b-mlx` 확인).
+
+수동으로 따로 띄우려면:
+
+```bash
+# 백엔드
+cd rice-runtime && source .venv/bin/activate && rice-runtime --port 8080 --token ""
+# 프론트 (※ npm run dev 아님 — electron 플러그인이 크래시함)
+cd rice-app && npx vite --config vite.renderer.config.ts
+```
+
+> 렌더러 단독 dev는 브라우저라 런타임을 **cross-origin**으로 호출 → 런타임이 localhost CORS를
+> 허용한다([server/app.py](rice-runtime/src/rice_runtime/server/app.py)). Electron 빌드는 IPC라 무관.
+
 ## 문서 구성 (읽는 순서)
 
 | 순서 | 문서 | 성격 | 상태 |

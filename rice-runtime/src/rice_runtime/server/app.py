@@ -33,6 +33,7 @@ def create_app(container: Container):
     from .routes import plugins as plugins_routes
     from .routes import settings as settings_routes
     from .routes import skills as skills_routes
+    from .routes import workspace as workspace_routes
 
     app = FastAPI(title="rice-runtime", version="0.1.0")
     app.state.container = container
@@ -41,11 +42,29 @@ def create_app(container: Container):
     @app.middleware("http")
     async def auth_guard(request: Request, call_next):
         token = container.args.token
-        if token and request.url.path != "/health":
+        # CORS preflight (OPTIONS) carries no Authorization header by design — let
+        # it through so CORSMiddleware can answer it; real requests still gated.
+        if token and request.method != "OPTIONS" and request.url.path != "/health":
             header = request.headers.get("authorization", "")
             if header != f"Bearer {token}":
                 return JSONResponse({"success": False, "error": "unauthorized"}, status_code=401)
         return await call_next(request)
+
+    # ── CORS (renderer-only dev) ──────────────────────────────────────────────
+    # The Electron build talks to the runtime over IPC (same origin), so this is a
+    # no-op there. But `vite.renderer.config.ts` runs the React app in a plain
+    # browser (http://localhost:5273) that fetches this localhost API cross-origin,
+    # which the browser blocks without these headers. Scoped to localhost only;
+    # added last so it sits OUTERMOST and answers preflight before the auth guard.
+    from fastapi.middleware.cors import CORSMiddleware
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?",
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     # ── uniform error envelope ────────────────────────────────────────────────
     @app.exception_handler(RiceError)
@@ -69,6 +88,7 @@ def create_app(container: Container):
     app.include_router(plugins_routes.router)
     app.include_router(connectors_routes.router)
     app.include_router(settings_routes.router)
+    app.include_router(workspace_routes.router)
     return app
 
 

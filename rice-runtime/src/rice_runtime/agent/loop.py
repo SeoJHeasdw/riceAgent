@@ -67,6 +67,7 @@ class AgentLoop:
                 break
 
             assistant_parts: list[str] = []
+            thinking_parts: list[str] = []
             pending_calls = []
             stop_reason = "end_turn"
 
@@ -81,6 +82,7 @@ class AgentLoop:
                     result.aborted = True
                     break
                 if chunk.kind == "thinking" and chunk.text:
+                    thinking_parts.append(chunk.text)
                     yield ev_thinking(chunk.text)
                 elif chunk.kind == "text" and chunk.text:
                     assistant_parts.append(chunk.text)
@@ -94,7 +96,14 @@ class AgentLoop:
                 break  # stop without emitting a partial answer as final
 
             assistant_text = "".join(assistant_parts)
-            messages.append(Message(role="assistant", content=assistant_text, tool_calls=tuple(pending_calls)))
+            # Stash this round's reasoning on the assistant message so it persists
+            # for trace reconstruction on reload. Providers ignore metadata when
+            # assembling history, so the model never re-sees stale thinking.
+            thinking_text = "".join(thinking_parts)
+            metadata = {"thinking": thinking_text} if thinking_text else {}
+            messages.append(
+                Message(role="assistant", content=assistant_text, tool_calls=tuple(pending_calls), metadata=metadata)
+            )
 
             # No tool calls → this is the final answer for the turn.
             if not pending_calls:

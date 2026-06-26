@@ -19,6 +19,7 @@ import logging
 from dataclasses import dataclass
 from typing import Callable
 
+from ..agent.builtins import build_builtin_tools
 from ..agent.interfaces import IAgent, IApprovalGate
 from ..agent.orchestrator import Orchestrator
 from ..agent.providers.interfaces import ILLMProvider, IProviderRegistry
@@ -99,6 +100,9 @@ def build_container(args: RuntimeArgs | None = None, *, paths: RicePaths | None 
             log.warning("provider %r unavailable (%s) → falling back to echo", kind, exc)
             return providers.get("echo")
 
+    # ── builtin tools (in-process; advertised to the LLM + dispatched directly) ─
+    builtin_specs, builtins = build_builtin_tools(paths)
+
     # ── the convergence point ─────────────────────────────────────────────────
     # `sessions` (a SessionManager) satisfies both ISessionStore (UI) and
     # ITranscript (agent) structurally — one object, two seams (invariant 1/3).
@@ -110,6 +114,8 @@ def build_container(args: RuntimeArgs | None = None, *, paths: RicePaths | None 
         plugins=plugins,
         approvals=approvals,
         transcript=sessions,
+        builtins=builtins,
+        builtin_specs=builtin_specs,
     )
 
     return Container(

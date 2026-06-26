@@ -114,6 +114,11 @@ class OllamaProvider(ILLMProvider):
             "model": self._cfg.model,
             "messages": ([{"role": "system", "content": system}] if system else []) + _to_ollama_messages(messages),
             "stream": True,
+            # Surface the model's reasoning as a separate `message.thinking` stream
+            # (qwen3.x etc. support this) so the agent loop can emit `thinking`
+            # events — the trace the ChatScreen renders. Non-thinking models simply
+            # return no `thinking` field; the chunk below is then never yielded.
+            "think": True,
             "options": {"temperature": temperature},
             "keep_alive": "5m",
         }
@@ -124,6 +129,9 @@ class OllamaProvider(ILLMProvider):
         try:
             async for item in self._stream_chat(payload):
                 message = item.get("message") or {}
+                thinking = message.get("thinking")
+                if thinking:
+                    yield ProviderChunk(kind="thinking", text=thinking)
                 content = message.get("content")
                 if content:
                     yield ProviderChunk(kind="text", text=content)

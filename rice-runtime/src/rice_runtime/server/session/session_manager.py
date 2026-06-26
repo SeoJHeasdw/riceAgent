@@ -36,10 +36,24 @@ class SessionManager(ISessionStore):
         rows = self._db.query_all("SELECT * FROM sessions ORDER BY started_at DESC")
         return [self._to_info(r) for r in rows]
 
+    def set_title(self, session_id: str, title: str) -> None:
+        self._db.execute("UPDATE sessions SET title = ? WHERE id = ?", (title, session_id))
+
+    def delete(self, session_id: str) -> None:
+        # messages cascade via FK (PRAGMA foreign_keys=ON); explicit for clarity +
+        # so the FTS delete-triggers fire for each removed message row.
+        self._db.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
+        self._db.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+
+    def delete_after(self, session_id: str, ts: int) -> None:
+        """Drop messages strictly newer than `ts` (used by regenerate to remove the
+        stale assistant turn while keeping the user message that precedes it)."""
+        self._db.execute("DELETE FROM messages WHERE session_id = ? AND ts > ?", (session_id, ts))
+
     # ── messages ──────────────────────────────────────────────────────────────
     def append(self, session_id: str, message: Message) -> None:
         self._db.execute(
-            "INSERT INTO messages(id, session_id, role, content, tool_calls, ts) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO messages(id, session_id, role, content, tool_calls, metadata, ts) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 message.id,
                 session_id,
@@ -48,6 +62,9 @@ class SessionManager(ISessionStore):
                 json.dumps([{"id": c.id, "tool_name": c.tool_name, "arguments": c.arguments} for c in message.tool_calls])
                 if message.tool_calls
                 else None,
+                # metadata carries the reasoning trace (assistant `thinking`) + tool_call_id
+                # linkage so a reloaded conversation reconstructs the full trace.
+                json.dumps(message.metadata, ensure_ascii=False) if message.metadata else None,
                 message.ts,
             ),
         )
@@ -103,10 +120,13 @@ class SessionManager(ISessionStore):
                 ToolCall(tool_name=c["tool_name"], arguments=c["arguments"], id=c["id"])
                 for c in json.loads(raw_calls)
             )
+        raw_meta = row["metadata"] if "metadata" in row.keys() else None
+        metadata = json.loads(raw_meta) if raw_meta else {}
         return Message(
             role=row["role"],
             content=row["content"],
             id=row["id"],
             ts=row["ts"] or now_ms(),
             tool_calls=calls,
+            metadata=metadata,
         )

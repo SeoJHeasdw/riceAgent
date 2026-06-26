@@ -49,6 +49,7 @@ from ..core.types import (
     ApprovalRequest,
     Message,
     SSEEvent,
+    ToolSpec,
     TurnContext,
     TurnOutcome,
     ev_done,
@@ -93,6 +94,7 @@ class Orchestrator:
         approvals: IApprovalGate,
         transcript: ITranscript,
         builtins: dict[str, BuiltinTool] | None = None,
+        builtin_specs: tuple[ToolSpec, ...] = (),
     ) -> None:
         # `resolve_provider` is a thunk, not a captured instance, so a runtime
         # model switch (PUT /settings) takes effect next turn (C-1). Likewise
@@ -105,17 +107,38 @@ class Orchestrator:
         self._approvals = approvals
         self._transcript = transcript
         self._builtins = builtins
+        self._builtin_specs_catalog = builtin_specs
         self._aborts: dict[str, asyncio.Event] = {}
 
     # ── IAgent.run_turn ──────────────────────────────────────────────────────
     async def run_turn(self, session_id: str, user_message: str) -> AsyncIterator[SSEEvent]:
+        # 1. PERSIST user turn, then drive the turn over the (now-updated) history.
+        self._transcript.append(session_id, Message(role="user", content=user_message))
+        async for event in self._drive_turn(session_id, user_message):
+            yield event
+
+    # ── IAgent.regenerate ─────────────────────────────────────────────────────
+    async def regenerate(self, session_id: str) -> AsyncIterator[SSEEvent]:
+        """Re-answer the last user message. The route already dropped the stale
+        assistant turn (delete_after), so history ends with that user message —
+        we drive a fresh turn on it WITHOUT re-persisting a duplicate user row."""
+        history = self._transcript.history(session_id)
+        last_user = next((m for m in reversed(history) if m.role == "user"), None)
+        if last_user is None:
+            yield ev_error("no_user_message", "재생성할 사용자 메시지가 없습니다.")
+            yield ev_done()
+            return
+        async for event in self._drive_turn(session_id, last_user.content):
+            yield event
+
+    async def _drive_turn(self, session_id: str, user_message: str) -> AsyncIterator[SSEEvent]:
+        """Steps 2–7 of a turn (prefetch → assemble → loop → persist → observe →
+        surface), shared by run_turn and regenerate. The user message is assumed
+        already persisted as the tail of history."""
         abort = self._aborts.setdefault(session_id, asyncio.Event())
         abort.clear()
         cfg = self._config_store.config  # snapshot for this turn (live across turns)
         try:
-            # 1. PERSIST user turn
-            self._transcript.append(session_id, Message(role="user", content=user_message))
-
             # 2. PREFETCH (learning assembles injectable context)
             pf = self._learning.prefetch(session_id, user_message)
 
@@ -234,7 +257,8 @@ class Orchestrator:
 
     # ── builtin tool catalog (override/extend in composition root) ───────────
     def _builtin_specs(self):
-        """Default skeleton exposes no builtin tools; the composition root can
-        inject `builtins=` and a matching catalog. Kept as a method so subclasses/
-        wiring can supply specs without touching the loop."""
-        return ()
+        """The builtin catalog advertised to the LLM. Empty unless the composition
+        root injects `builtins=` (name→handler) + `builtin_specs=` (the matching
+        ToolSpecs). Kept as a method so wiring can supply specs without touching
+        the loop."""
+        return self._builtin_specs_catalog

@@ -57,6 +57,14 @@ async def get_session(session_id: str, c: Container = Depends(get_container)):
     return {"success": True, "data": info.__dict__}
 
 
+@router.delete("/sessions/{session_id}")
+async def delete_session(session_id: str, c: Container = Depends(get_container)):
+    if c.sessions.get(session_id) is None:
+        raise NotFoundError(f"session {session_id} not found")
+    c.sessions.delete(session_id)
+    return {"success": True}
+
+
 @router.get("/sessions/{session_id}/messages")
 async def get_messages(session_id: str, cursor: str | None = None, c: Container = Depends(get_container)):
     page = c.sessions.page(session_id, cursor)
@@ -68,9 +76,30 @@ async def get_messages(session_id: str, cursor: str | None = None, c: Container 
 
 @router.post("/sessions/{session_id}/messages")
 async def post_message(session_id: str, body: MessageIn, c: Container = Depends(get_container)):
+    info = c.sessions.get(session_id)
+    if info is None:
+        raise NotFoundError(f"session {session_id} not found")
+    # Label a fresh (untitled) session from its first user message so the history
+    # sidebar shows something meaningful instead of a blank row.
+    if not info.title:
+        first_line = body.content.strip().splitlines()[0] if body.content.strip() else ""
+        c.sessions.set_title(session_id, first_line[:60] or "새 대화")
+    stream = to_sse_stream(c.agent.run_turn(session_id, body.content))
+    return StreamingResponse(stream, media_type="text/event-stream")
+
+
+@router.post("/sessions/{session_id}/regenerate")
+async def regenerate(session_id: str, c: Container = Depends(get_container)):
     if c.sessions.get(session_id) is None:
         raise NotFoundError(f"session {session_id} not found")
-    stream = to_sse_stream(c.agent.run_turn(session_id, body.content))
+    # Drop the stale assistant turn (everything after the last user message) so the
+    # re-run replaces it rather than appending a second answer.
+    history = c.sessions.history(session_id)
+    last_user = next((m for m in reversed(history) if m.role == "user"), None)
+    if last_user is None:
+        raise ConflictError("재생성할 사용자 메시지가 없습니다.")
+    c.sessions.delete_after(session_id, last_user.ts)
+    stream = to_sse_stream(c.agent.regenerate(session_id))
     return StreamingResponse(stream, media_type="text/event-stream")
 
 

@@ -1,0 +1,179 @@
+[
+  {
+    "id": "c1",
+    "title": "분기 매출 리포트 자동화",
+    "group": "오늘",
+    "turns": [
+      {
+        "role": "user",
+        "content": "지난 분기 Db2 매출 데이터로 임원 보고용 요약 만들어줘. 지난번처럼 핵심만 불릿으로."
+      },
+      {
+        "role": "assistant",
+        "content": "먼저 데이터 소스부터 확인할게요. `db2-prod.sales` 에 붙어서 스키마가 예상과 맞는지 보겠습니다."
+      },
+      {
+        "role": "assistant",
+        "content": "스키마는 예상대로예요 — `REVENUE` 는 `DECIMAL(38)`. 2026 Q1 합계부터 뽑아보겠습니다."
+      },
+      {
+        "role": "assistant",
+        "content": "잠깐 — 합계가 `4,820,000,000` 이에요. 전분기가 $43M 수준이었는데 100배가 나올 리는 없죠. `REVENUE` 가 달러가 아니라 센트 단위로 적재돼 있을 가능성이 커요. 샘플 몇 줄로 단위부터 확인해볼게요."
+      },
+      {
+        "role": "assistant",
+        "content": "역시 센트 단위네요 — `129900` 은 $1,299.00, `4500000` 은 $45,000.00 입니다. 집계에 `/ 100` 을 넣어 달러로 환산해 다시 뽑겠습니다."
+      },
+      {
+        "role": "assistant",
+        "content": "센트→달러 보정까지 끝내고 `db2-prod.sales` 의 2026 Q1 데이터를 요약했습니다. 단위만 맞추니 전분기 대비 +11.4%로 깔끔하게 떨어지네요."
+      },
+      {
+        "role": "user",
+        "content": "APAC 시장은 항상 맨 위에 보여줘. 그리고 숫자엔 단위 꼭 붙이고."
+      },
+      {
+        "role": "assistant",
+        "content": "네, 바로 반영할게요. 앞으로 「분기 매출 요약」에서는 APAC을 항상 맨 위에 두고, 모든 수치엔 단위를 붙이겠습니다."
+      },
+      {
+        "role": "user",
+        "content": "좋아. 이번 주 신규 데이터로 다시 뽑아줘."
+      },
+      {
+        "role": "assistant",
+        "content": "이번 주 데이터로 다시 뽑았어요. 배운 규칙대로 APAC을 맨 위에, 숫자엔 단위를 붙였습니다."
+      },
+      {
+        "role": "user",
+        "content": "참, 매출 원본이 watsonx.data로 옮겨졌어. 이제 db2-prod 말고 거기서 읽어줘."
+      },
+      {
+        "role": "assistant",
+        "content": "알겠어요. 「분기 매출 요약」 스킬 본문부터 확인해볼게요."
+      },
+      {
+        "role": "assistant",
+        "content": "역시 1단계가 아직 `db2-prod.sales` 를 가리키고 있네요. 본문을 이렇게 고치면 다음 실행부터 자동으로 새 소스를 씁니다. 적용 전에 확인해 주세요."
+      },
+      {
+        "role": "user",
+        "content": "이 요약을 Gmail로 임원진께 보내줘."
+      },
+      {
+        "role": "assistant",
+        "content": "보내기 전에 확인이 필요해요. 외부로 메일을 발송하는 작업이라 실행 전에 승인을 받을게요."
+      }
+    ]
+  },
+  {
+    "id": "c2",
+    "title": "Db2 → watsonx.data 마이그레이션 점검",
+    "group": "오늘",
+    "turns": [
+      {
+        "role": "user",
+        "content": "Db2 prod 스키마를 watsonx.data로 옮기기 전에 깨질 만한 거 점검해줘."
+      },
+      {
+        "role": "assistant",
+        "content": "스킬이 불일치 7건을 짚어줬어요. 그런데 리포트만 믿긴 일러요 — 이전을 실제로 막는 건 NOT NULL 누락뿐이라, 규모부터 실데이터로 확인해볼게요."
+      },
+      {
+        "role": "assistant",
+        "content": "잠깐, 이건 스킬이 못 짚은 부분이에요. `region` NULL은 1,204건(2.6%)이라 예상대로인데 — `contract_end` 가 8,351건, 18%나 비어 있네요. 스킬 v2 리포트엔 `region` 만 있었거든요. `contract_end` 를 NOT NULL로 묶으면 적재가 통째로 깨지니, 핸드북에서 이런 고(高)NULL 케이스를 어떻게 다루라는지 확인해볼게요."
+      },
+      {
+        "role": "assistant",
+        "content": "핸드북도 같은 결론이에요 — NULL 비율이 높으면 NOT NULL을 지금 걸지 말고, nullable로 옮긴 뒤 적재 후 채우라네요. 그래서 `region` 은 NOT NULL(누락 적음), `contract_end` 는 nullable 유지로 가르고, 정밀도·타임존까지 한 번에 DDL에 반영하겠습니다."
+      },
+      {
+        "role": "assistant",
+        "content": "아, 막혔어요. `watsonx.data` 카탈로그는 `WITH TIME ZONE` 자체를 안 받네요 — 핸드북 권장 문구와 카탈로그 실제 지원이 어긋나는 지점이에요. 타임존은 컬럼 타입이 아니라 적재 단계에서 UTC로 정규화하는 게 맞겠어요. 카탈로그가 정확히 뭘 지원하는지 보고 고치겠습니다."
+      },
+      {
+        "role": "assistant",
+        "content": "이번엔 통과했어요. 남은 경고 2건은 이전을 막는 건 아니고 적재 후 정리 항목입니다 — `region` 의 임시 DEFAULT는 backfill이 끝나면 떼고, `revenue` 반올림 12건은 원장과 대조만 해두면 돼요."
+      },
+      {
+        "role": "assistant",
+        "content": "정리하면 — 핸드북 권장안과 카탈로그 실제 지원을 맞추느라 DDL을 두 번 고쳐 dry-run을 통과시켰어요. 이전 순서는 ① `region` NOT NULL(차단 요인) → ② 정밀도·타임존 타입 정리 → ③ 적재 후 `contract_end`·`region` backfill 입니다. 다음은 운영 데이터 일부로 적재 리허설을 한 번 돌려보는 걸 추천해요."
+      }
+    ]
+  },
+  {
+    "id": "c3",
+    "title": "고객 이탈 분석 스킬 만들기",
+    "group": "지난 7일",
+    "turns": [
+      {
+        "role": "user",
+        "content": "구독 데이터로 이탈 위험 고객 좀 뽑아줘. 처음 해보는 작업이야."
+      },
+      {
+        "role": "assistant",
+        "content": "이탈 위험 고객을 뽑았어요. 점수 0.7 이상을 위험군으로 봤습니다."
+      }
+    ]
+  },
+  {
+    "id": "c4",
+    "title": "PR 리뷰 코멘트 요약 워크플로",
+    "group": "지난 7일",
+    "turns": [
+      {
+        "role": "user",
+        "content": "이 PR 리뷰 스레드 좀 요약해줘. 머지 막는 코멘트 위주로."
+      },
+      {
+        "role": "assistant",
+        "content": "머지 차단 코멘트를 맨 위에 정리했어요. 아직 다듬는 중인 스킬이라 정확도는 점점 좋아져요."
+      }
+    ]
+  },
+  {
+    "id": "c5",
+    "title": "사내 보안 정책 Q&A",
+    "group": "지난 7일",
+    "turns": [
+      {
+        "role": "user",
+        "content": "사내 보안 정책 Q&A 관련해서 도와줘."
+      },
+      {
+        "role": "assistant",
+        "content": "이 대화는 데모 시드예요. 왼쪽에서 다른 대화를 골라 학습 루프가 어떻게 도는지 확인하거나, 아래에 직접 입력해보세요."
+      }
+    ]
+  },
+  {
+    "id": "c6",
+    "title": "Jira 스프린트 회고 정리",
+    "group": "이전",
+    "turns": [
+      {
+        "role": "user",
+        "content": "Jira 스프린트 회고 정리 관련해서 도와줘."
+      },
+      {
+        "role": "assistant",
+        "content": "이 대화는 데모 시드예요. 왼쪽에서 다른 대화를 골라 학습 루프가 어떻게 도는지 확인하거나, 아래에 직접 입력해보세요."
+      }
+    ]
+  },
+  {
+    "id": "c7",
+    "title": "한↔영 기술문서 번역 정리",
+    "group": "이전",
+    "turns": [
+      {
+        "role": "user",
+        "content": "한↔영 기술문서 번역 정리 관련해서 도와줘."
+      },
+      {
+        "role": "assistant",
+        "content": "이 대화는 데모 시드예요. 왼쪽에서 다른 대화를 골라 학습 루프가 어떻게 도는지 확인하거나, 아래에 직접 입력해보세요."
+      }
+    ]
+  }
+]

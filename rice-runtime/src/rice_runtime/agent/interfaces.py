@@ -61,6 +61,11 @@ class IAgent(Protocol):
         `done`. Errors surface as a terminal `error` event, then `done`."""
         ...
 
+    def regenerate(self, session_id: str) -> AsyncIterator[SSEEvent]:
+        """Re-answer the last user message, streaming a fresh turn. The caller
+        removes the previous assistant turn first (so it's a replace, not append)."""
+        ...
+
     async def abort(self, session_id: str) -> None:
         """Cancel the in-flight turn for `session_id` (POST /sessions/{id}/abort).
         Cancels any parked approvals for that session (RUNTIME_DESIGN §5.1)."""

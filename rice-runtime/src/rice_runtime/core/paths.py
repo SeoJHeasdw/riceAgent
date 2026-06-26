@@ -62,6 +62,13 @@ class RicePaths:
     def logs(self) -> Path:
         return self.root / "logs"
 
+    @property
+    def workspace(self) -> Path:
+        """`~/.rice/workspace/` — the sandbox root for builtin file tools. All
+        read/write/search is confined here so the agent can't touch arbitrary
+        paths (RUNTIME_DESIGN §10 — least authority)."""
+        return self.root / "workspace"
+
     def skill_history(self, name: str) -> Path:
         """`~/.rice/skills/<name>/.history/` — prior SKILL.md versions for
         rollback/diff (LEARNING_LOOP §5.2.4)."""
@@ -69,6 +76,6 @@ class RicePaths:
 
     def ensure(self) -> "RicePaths":
         """Create the directory skeleton if missing. Idempotent."""
-        for d in (self.root, self.skills, self.plugins, self.connectors, self.logs):
+        for d in (self.root, self.skills, self.plugins, self.connectors, self.logs, self.workspace):
             d.mkdir(parents=True, exist_ok=True)
         return self
