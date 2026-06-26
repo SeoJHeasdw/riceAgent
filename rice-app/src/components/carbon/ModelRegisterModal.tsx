@@ -20,6 +20,10 @@ export interface RegisterPayload {
   providerLabel: string;
   modelId: string;
   apiKey: string;
+  /** OpenAI 호환 커스텀 엔드포인트 / watsonx 지역 엔드포인트 */
+  baseUrl?: string;
+  /** watsonx project id */
+  projectId?: string;
 }
 
 interface ProviderSpec {
@@ -30,6 +34,14 @@ interface ProviderSpec {
   keyPlaceholder: string;
   /** 빠른 선택용 모델명 제안 */
   suggestions: string[];
+  /** Base URL 필드 노출 여부 */
+  baseUrl?: 'none' | 'optional' | 'required';
+  baseUrlLabel?: string;
+  baseUrlPlaceholder?: string;
+  /** watsonx project id 필요 여부 */
+  needsProjectId?: boolean;
+  /** API 키 입력 라벨 (기본 'API 키') */
+  keyLabel?: string;
 }
 
 const PROVIDERS: ProviderSpec[] = [
@@ -39,6 +51,7 @@ const PROVIDERS: ProviderSpec[] = [
     keyPrefix: 'sk-ant-',
     keyPlaceholder: 'sk-ant-...',
     suggestions: ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
+    baseUrl: 'none',
   },
   {
     id: 'openai',
@@ -46,20 +59,31 @@ const PROVIDERS: ProviderSpec[] = [
     keyPrefix: 'sk-',
     keyPlaceholder: 'sk-...',
     suggestions: ['gpt-4o', 'gpt-4o-mini', 'o3-mini'],
+    baseUrl: 'optional',
+    baseUrlLabel: 'Base URL (선택)',
+    baseUrlPlaceholder: 'https://api.openai.com/v1',
   },
   {
-    id: 'google',
-    label: 'Google Gemini',
-    keyPrefix: 'AIza',
-    keyPlaceholder: 'AIza...',
-    suggestions: ['gemini-2.5-pro', 'gemini-2.5-flash'],
+    id: 'watsonx',
+    label: 'IBM watsonx',
+    keyPrefix: '',
+    keyLabel: 'IBM Cloud API 키',
+    keyPlaceholder: 'IBM Cloud API 키',
+    suggestions: ['ibm/granite-3-8b-instruct', 'meta-llama/llama-3-3-70b-instruct'],
+    baseUrl: 'required',
+    baseUrlLabel: '지역 엔드포인트',
+    baseUrlPlaceholder: 'https://us-south.ml.cloud.ibm.com',
+    needsProjectId: true,
   },
   {
     id: 'custom',
-    label: '기타 / 커스텀',
+    label: 'OpenAI 호환 (커스텀)',
     keyPrefix: '',
     keyPlaceholder: 'API 키를 입력하세요',
     suggestions: [],
+    baseUrl: 'required',
+    baseUrlLabel: 'Base URL',
+    baseUrlPlaceholder: 'https://my-gateway/v1',
   },
 ];
 
@@ -78,6 +102,8 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
   const [providerId, setProviderId] = useState<string>('anthropic');
   const [modelId, setModelId] = useState('');
   const [apiKey, setApiKey] = useState('');
+  const [baseUrl, setBaseUrl] = useState('');
+  const [projectId, setProjectId] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [test, setTest] = useState<TestState>('idle');
   const toast = useToast();
@@ -93,6 +119,8 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
       setProviderId(defaults?.provider ?? 'anthropic');
       setModelId(defaults?.modelId ?? '');
       setApiKey('');
+      setBaseUrl('');
+      setProjectId('');
       setShowKey(false);
       setTest('idle');
     }
@@ -102,15 +130,25 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
 
   const trimmedKey = apiKey.trim();
   const trimmedId = modelId.trim();
-  const fieldsReady = trimmedKey.length > 0 && trimmedId.length > 0;
+  const trimmedBaseUrl = baseUrl.trim();
+  const trimmedProjectId = projectId.trim();
+  const needsBaseUrl = provider.baseUrl === 'required';
+  const needsProjectId = !!provider.needsProjectId;
+  const fieldsReady =
+    trimmedKey.length > 0 &&
+    trimmedId.length > 0 &&
+    (!needsBaseUrl || trimmedBaseUrl.length > 0) &&
+    (!needsProjectId || trimmedProjectId.length > 0);
   const canTest = fieldsReady && test !== 'testing';
   const canRegister = test === 'ok';
 
-  // provider / 모델명 / 키가 바뀌면 이전 테스트 결과는 무효
+  // provider / 입력값이 바뀌면 이전 테스트 결과는 무효
   const invalidateTest = () => setTest((t) => (t === 'idle' ? t : 'idle'));
 
   const handleProvider = (id: string) => {
     setProviderId(id);
+    setBaseUrl('');
+    setProjectId('');
     invalidateTest();
   };
 
@@ -134,6 +172,8 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
       providerLabel: provider.label,
       modelId: trimmedId,
       apiKey: trimmedKey,
+      ...(provider.baseUrl !== 'none' && trimmedBaseUrl ? { baseUrl: trimmedBaseUrl } : {}),
+      ...(needsProjectId && trimmedProjectId ? { projectId: trimmedProjectId } : {}),
     });
   };
 
@@ -245,9 +285,43 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
           )}
         </div>
 
+        {/* watsonx project id */}
+        {needsProjectId && (
+          <div>
+            <label className="text-label-01 text-text-secondary mb-1.5 block">project_id</label>
+            <input
+              type="text"
+              value={projectId}
+              onChange={(e) => { setProjectId(e.target.value); invalidateTest(); }}
+              placeholder="watsonx 프로젝트 ID"
+              autoComplete="off"
+              spellCheck={false}
+              className="w-full h-10 px-3.5 bg-field-01 text-text-primary font-mono text-body-short-01 border border-border-strong-01 rounded-lg outline-none transition-colors focus:border-focus focus:ring-1 focus:ring-focus placeholder:text-text-placeholder placeholder:font-sans"
+            />
+          </div>
+        )}
+
+        {/* Base URL (openai 선택 / 커스텀·watsonx 필수) */}
+        {provider.baseUrl !== 'none' && (
+          <div>
+            <label className="text-label-01 text-text-secondary mb-1.5 block">
+              {provider.baseUrlLabel ?? 'Base URL'}
+            </label>
+            <input
+              type="text"
+              value={baseUrl}
+              onChange={(e) => { setBaseUrl(e.target.value); invalidateTest(); }}
+              placeholder={provider.baseUrlPlaceholder}
+              autoComplete="off"
+              spellCheck={false}
+              className="w-full h-10 px-3.5 bg-field-01 text-text-primary font-mono text-body-short-01 border border-border-strong-01 rounded-lg outline-none transition-colors focus:border-focus focus:ring-1 focus:ring-focus placeholder:text-text-placeholder placeholder:font-sans"
+            />
+          </div>
+        )}
+
         {/* API 키 — 모노스페이스 + show/hide 토글 */}
         <div>
-          <label className="text-label-01 text-text-secondary mb-1.5 block">API 키</label>
+          <label className="text-label-01 text-text-secondary mb-1.5 block">{provider.keyLabel ?? 'API 키'}</label>
           <div className="relative">
             <input
               type={showKey ? 'text' : 'password'}
@@ -301,7 +375,7 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
             전송되지 않습니다.
             <br />
             <span className="text-text-placeholder">
-              현재는 프로토타입 단계로 브라우저 로컬 저장소에 보관됩니다.
+              로컬 데이터베이스(state.db)에 평문으로 보관됩니다.
             </span>
           </p>
         </div>

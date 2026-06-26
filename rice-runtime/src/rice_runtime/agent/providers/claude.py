@@ -117,9 +117,11 @@ def _map_stop_reason(stop_reason: str | None) -> str:
 class ClaudeProvider(ILLMProvider):
     name = "claude"
 
-    def __init__(self, cfg: ProviderConfig) -> None:
+    def __init__(self, cfg: ProviderConfig, *, api_key: str | None = None) -> None:
         self._cfg = cfg
-        self._api_key = _load_api_key()
+        # Prefer the key registered in state.db (passed by the registry); fall back
+        # to the OS keychain / ANTHROPIC_API_KEY for the env-configured path.
+        self._api_key = api_key or _load_api_key()
 
     def capabilities(self) -> ProviderCapabilities:
         return ProviderCapabilities(

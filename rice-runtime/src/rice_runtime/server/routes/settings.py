@@ -1,14 +1,15 @@
 """Settings, models, memories (CONTRACTS §1.3) — SettingsScreen + personalization.
 
-  GET /settings        model/provider/temperature, language, theme, font
-  PUT /settings        update (api_key → OS keychain, not stored in config)
-  GET /models          available providers (echo/claude/ollama)
+  GET /settings        provider/temperature/configured + registered_models (state.db)
+  PUT /settings        update config + replace registered SaaS models (model+key+extra)
+  GET /models          available provider kinds (echo/claude/ollama/openai/watsonx)
   GET /ollama/models   list models installed in the local Ollama daemon
   GET /memories        personalization visualization
 """
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import httpx
@@ -34,17 +35,23 @@ class SettingsIn(BaseModel):
 
 def _load_registered_models(c: Container) -> list[dict[str, Any]]:
     rows = c.db.query_all(
-        "SELECT model_id, provider, provider_label, api_key FROM provider_models ORDER BY created_at"
+        "SELECT model_id, provider, provider_label, api_key, extra FROM provider_models ORDER BY created_at"
     )
-    return [
-        {
-            "modelId": r["model_id"],
-            "provider": r["provider"],
-            "providerLabel": r["provider_label"],
-            "apiKey": r["api_key"],
-        }
-        for r in rows
-    ]
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        extra = json.loads(r["extra"]) if r["extra"] else {}
+        out.append(
+            {
+                "modelId": r["model_id"],
+                "provider": r["provider"],
+                "providerLabel": r["provider_label"],
+                "apiKey": r["api_key"],
+                # provider-specific (없으면 생략)
+                **({"baseUrl": extra["base_url"]} if extra.get("base_url") else {}),
+                **({"projectId": extra["project_id"]} if extra.get("project_id") else {}),
+            }
+        )
+    return out
 
 
 @router.get("/settings")
@@ -66,18 +73,27 @@ async def update_settings(body: SettingsIn, c: Container = Depends(get_container
     # 등록 모델 목록이 오면 전체 교체 (프론트가 항상 전체 목록을 보낸다)
     if body.registered_models is not None:
         c.db.execute("DELETE FROM provider_models")
-        c.db.executemany(
-            "INSERT INTO provider_models(model_id, provider, provider_label, api_key) VALUES (?, ?, ?, ?)",
-            [
+        rows = []
+        for m in body.registered_models:
+            if not m.get("modelId"):
+                continue
+            extra = {
+                k: v
+                for k, v in (("base_url", m.get("baseUrl")), ("project_id", m.get("projectId")))
+                if v
+            }
+            rows.append(
                 (
                     m.get("modelId"),
                     m.get("provider"),
                     m.get("providerLabel"),
                     m.get("apiKey", ""),
+                    json.dumps(extra) if extra else None,
                 )
-                for m in body.registered_models
-                if m.get("modelId")
-            ],
+            )
+        c.db.executemany(
+            "INSERT INTO provider_models(model_id, provider, provider_label, api_key, extra) VALUES (?, ?, ?, ?, ?)",
+            rows,
         )
 
     data = new_cfg.to_dict()

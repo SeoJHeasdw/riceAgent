@@ -24,10 +24,14 @@ export interface RegisteredModel {
   modelId: string;
   /** Masked / stored API key */
   apiKey: string;
-  /** Provider id (anthropic | openai | google | custom) */
+  /** Provider id (anthropic | openai | watsonx | custom) */
   provider?: string;
   /** Provider display label, e.g. "Anthropic" */
   providerLabel?: string;
+  /** OpenAI-compatible custom endpoint / watsonx region endpoint */
+  baseUrl?: string;
+  /** watsonx project id */
+  projectId?: string;
 }
 
 export interface ModelSettings {
@@ -170,6 +174,8 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
           apiKey: payload.apiKey,
           provider: payload.provider,
           providerLabel: payload.providerLabel,
+          ...(payload.baseUrl ? { baseUrl: payload.baseUrl } : {}),
+          ...(payload.projectId ? { projectId: payload.projectId } : {}),
         },
       ],
     }));

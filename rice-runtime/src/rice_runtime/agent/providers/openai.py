@@ -1,0 +1,78 @@
+"""OpenAI (and OpenAI-compatible) provider adapter (RUNTIME_DESIGN §6).
+
+Covers two UI cases with one impl:
+  - "openai":   default base_url https://api.openai.com/v1
+  - "기타" custom OpenAI-compatible endpoint: caller-supplied base_url
+    (OpenRouter, groq, vLLM, a corporate gateway, …)
+
+Wire format + streaming-delta assembly live in `_openai_compat`; this file only
+owns the HTTP call (httpx) and bearer auth. Network is isolated behind
+`_stream_raw` so unit tests replace it with a fake.
+"""
+
+from __future__ import annotations
+
+import json
+from collections.abc import AsyncIterable, AsyncIterator, Sequence
+from typing import Any
+
+from ...core.config import ProviderConfig
+from ...core.errors import ProviderError
+from ...core.types import Message, ToolSpec
+from . import _openai_compat as oai
+from .interfaces import ILLMProvider, ProviderCapabilities, ProviderChunk
+
+_DEFAULT_BASE_URL = "https://api.openai.com/v1"
+
+
+class OpenAIProvider(ILLMProvider):
+    name = "openai"
+
+    def __init__(self, cfg: ProviderConfig, *, api_key: str, base_url: str | None = None) -> None:
+        self._cfg = cfg
+        self._api_key = api_key
+        self._base_url = (base_url or _DEFAULT_BASE_URL).rstrip("/")
+
+    def capabilities(self) -> ProviderCapabilities:
+        return ProviderCapabilities(native_tool_calling=True, streaming=True, prompt_caching=False, vision=False)
+
+    async def _stream_raw(self, payload: dict[str, Any]) -> AsyncIterable[dict[str, Any]]:
+        """POST /chat/completions (SSE). Yields parsed chunk dicts; skips `[DONE]`."""
+        import httpx  # noqa: PLC0415 - optional dependency by design
+
+        headers = {"Authorization": f"Bearer {self._api_key}", "Content-Type": "application/json"}
+        async with httpx.AsyncClient(base_url=self._base_url, timeout=120.0) as client:
+            async with client.stream("POST", "/chat/completions", json=payload, headers=headers) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line or not line.startswith("data:"):
+                        continue
+                    data = line[len("data:"):].strip()
+                    if data == "[DONE]":
+                        break
+                    yield json.loads(data)
+
+    async def stream(
+        self,
+        *,
+        system: str,
+        messages: Sequence[Message],
+        tools: Sequence[ToolSpec] = (),
+        temperature: float = 0.7,
+    ) -> AsyncIterator[ProviderChunk]:
+        payload: dict[str, Any] = {
+            "model": self._cfg.model,
+            "messages": oai.to_oai_messages(system, messages),
+            "stream": True,
+            "temperature": temperature,
+        }
+        if tools:
+            payload["tools"] = oai.to_oai_tools(tools)
+
+        try:
+            async for chunk in oai.assemble_stream(self._stream_raw(payload)):
+                yield chunk
+        except ProviderError:
+            raise
+        except Exception as exc:  # pragma: no cover - exercised via mocks in tests
+            raise ProviderError(f"openai stream failed: {exc}") from exc

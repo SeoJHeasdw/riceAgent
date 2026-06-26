@@ -16,6 +16,20 @@ import { FileViewerProvider } from '../lib/fileViewer/FileViewerContext';
 import { useToast } from '../lib/toast/ToastContext';
 import type { RegisteredModel } from '../components/carbon/ModelSettingsPanel';
 
+// 등록 모델의 provider(UI) → 런타임 provider kind 매핑.
+// 'custom'(OpenAI 호환)도 openai kind로 — 같은 어댑터에 base_url만 다르다.
+const providerKind = (provider?: string): 'claude' | 'openai' | 'watsonx' => {
+  switch (provider) {
+    case 'openai':
+    case 'custom':
+      return 'openai';
+    case 'watsonx':
+      return 'watsonx';
+    default:
+      return 'claude'; // anthropic + fallback
+  }
+};
+
 /**
  * ChatScreen - Claude-Desktop-style chat with the learning-loop surface:
  * multi-step tool-call cards, the memory-written indicator, clickable
@@ -403,14 +417,18 @@ function ChatScreen() {
     setModelSettings(settings);
     setModelMode(mode);
     if (connected) {
+      // SaaS는 등록 모델의 provider로 런타임 kind를 정한다. base_url/project_id 같은
+      // 연결정보는 provider_models(state.db)에서 모델별로 읽으므로 config엔 안 넣는다.
+      const activeEntry = settings.registeredModels.find((r) => r.modelId === modelId);
+      const kind = mode === 'local' ? 'ollama' : providerKind(activeEntry?.provider);
       // 활성 모델 선택 + 등록 모델 목록(키 포함)을 런타임 state.db에 영속화.
       // configured:true → 다음 실행부터 온보딩을 건너뛰고 저장된 모델을 쓴다 (C-1).
       void api.updateSettings({
         provider: {
-          kind: mode === 'local' ? 'ollama' : 'claude',
+          kind,
           model: modelId,
           temperature: settings.temperature,
-          base_url: settings.endpoint ?? null,
+          base_url: mode === 'local' ? settings.endpoint ?? null : null,
           configured: true,
         },
         registered_models: settings.registeredModels,

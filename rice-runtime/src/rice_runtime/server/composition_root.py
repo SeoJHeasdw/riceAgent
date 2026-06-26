@@ -23,7 +23,7 @@ from ..agent.builtins import build_builtin_tools
 from ..agent.interfaces import IAgent, IApprovalGate
 from ..agent.orchestrator import Orchestrator
 from ..agent.providers.interfaces import ILLMProvider, IProviderRegistry
-from ..agent.providers.registry import ProviderRegistry
+from ..agent.providers.registry import ProviderCredentials, ProviderRegistry
 from ..connector.interfaces import IConnectorService
 from ..connector.service import ConnectorService
 from ..core.config import Config, ConfigStore, RuntimeArgs, load_config
@@ -87,7 +87,24 @@ def build_container(args: RuntimeArgs | None = None, *, paths: RicePaths | None 
     approvals: IApprovalGate = ApprovalRegistry()
 
     # ── provider selection (one mapping point) ────────────────────────────────
-    providers: IProviderRegistry = ProviderRegistry(config_store)
+    # Registered SaaS credentials live in state.db (provider_models), keyed by the
+    # active model id — looked up at resolve time so a model switch picks up its key.
+    def credentials_for(model_id: str) -> ProviderCredentials | None:
+        import json  # noqa: PLC0415
+
+        row = db.query_one(
+            "SELECT api_key, extra FROM provider_models WHERE model_id = ?", (model_id,)
+        )
+        if row is None:
+            return None
+        extra = json.loads(row["extra"]) if row["extra"] else {}
+        return ProviderCredentials(
+            api_key=row["api_key"] or None,
+            base_url=extra.get("base_url"),
+            project_id=extra.get("project_id"),
+        )
+
+    providers: IProviderRegistry = ProviderRegistry(config_store, credentials_for)
 
     def resolve_provider() -> ILLMProvider:
         """Resolve the *current* provider, falling back to `echo` so the runtime
