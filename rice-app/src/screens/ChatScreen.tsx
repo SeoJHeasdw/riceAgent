@@ -378,6 +378,8 @@ function ChatScreen() {
   // on first send; reused for the rest of this mounted ChatScreen. Independent of
   // the scripted demo sessions in the sidebar.
   const liveSessionId = useRef<string | null>(null);
+  // 새 세션의 첫 턴 완료 후 사이드바 제목 갱신이 필요할 때만 true — 기존 세션 연속 전송 시 refreshSessions를 skip한다.
+  const needsTitleRefresh = useRef(false);
   // handle to the in-flight SSE turn so the user can stop it (see stopTurn)
   const streamHandleRef = useRef<{ abort: () => void } | null>(null);
 
@@ -721,7 +723,12 @@ function ChatScreen() {
       } else if (e.type === 'done') {
         finalizeThinking();
         setBusy(false);
-        if (connected) void refreshSessions();
+        // 새 세션의 첫 턴이 끝났을 때만 제목 갱신을 위해 목록을 다시 가져온다.
+        // 기존 세션에 계속 대화하는 경우엔 제목이 이미 있으므로 skip.
+        if (connected && needsTitleRefresh.current) {
+          needsTitleRefresh.current = false;
+          void refreshSessions();
+        }
       } else if (e.type === 'error') {
         finalizeThinking();
         const d = e.data as { message?: string };
@@ -747,6 +754,7 @@ function ChatScreen() {
       if (res.success && res.data?.id) {
         liveSessionId.current = res.data.id;
         setActiveSessionId(res.data.id); // highlight the new session in the sidebar
+        needsTitleRefresh.current = true; // 첫 턴 완료 후 사이드바 제목 갱신 필요
       } else {
         finalizeThinking();
         pushAgentText(`⚠️ 런타임 세션 생성 실패: ${res.error ?? '알 수 없는 오류'}`);
@@ -762,6 +770,7 @@ function ChatScreen() {
   const openLiveSession = async (id: string) => {
     setActiveSessionId(id);
     liveSessionId.current = id;
+    needsTitleRefresh.current = false; // 기존 세션 — 제목 이미 있음
     setIsEmpty(false);
     const res = await api.getMessages(id);
     const msgs = res.success ? ((res.data as { messages?: RawMessage[] })?.messages ?? []) : [];
