@@ -57,7 +57,8 @@ rice-runtime/                                # 배포물 ② : 로컬 단일 프
 │   ├── agent/                               # ▣ #1 대화 루프  + #2 tool dispatch
 │   │   ├── interfaces.py                    #   IAgent / ILLMProvider (Protocol)
 │   │   ├── loop.py                          # ▣ #1 conversation/agent 루프 (max_iterations)
-│   │   ├── tool_dispatch.py                 # ▣ #2 tool 라우팅·결과 수집
+│   │   ├── tool_dispatch.py                 # ▣ #2 스키마 조립·가용성 필터(check_fn식)·라우팅·결과 수집
+│   │   │                                    #     연결 안 된 Connector tool 제외 (RUNTIME_DESIGN 2.1)
 │   │   ├── orchestrator.py                  #   얇은 조율: learning/connector/execution 호출
 │   │   ├── providers/                       #   모델 교체 지점 (Claude SaaS ↔ Ollama on-prem)
 │   │   │   ├── interfaces.py                #     ILLMProvider (tool_use·streaming·caching 정규화)
@@ -132,7 +133,7 @@ rice-runtime/                                # 배포물 ② : 로컬 단일 프
 | # | 책임 | 위치 |
 |---|------|------|
 | #1 | 대화 루프 | `agent/loop.py` |
-| #2 | tool dispatch | `agent/tool_dispatch.py` |
+| #2 | tool dispatch (스키마 조립·가용성 필터·라우팅) | `agent/tool_dispatch.py` |
 | #3 | memory manager | `learning/memory/` |
 | #4 | skill lifecycle (생성·상태전이·개선patch) | `learning/skill/` |
 | #5 | curator | `learning/curator/` |

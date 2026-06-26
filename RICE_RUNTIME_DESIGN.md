@@ -9,7 +9,7 @@
 
 ## 1. Hermes 차용 결정표
 
-> Hermes 분석([HERMES_LEARNING_LOOP_REFERENCE.md](HERMES_LEARNING_LOOP_REFERENCE.md)) 기준, 컴포넌트별로 차용/단순화/제외를 결정한다. 이 표가 runtime의 전체 스코프를 정의한다.
+> Hermes 분석([HERMES_LEARNING_LOOP_REFERENCE.md](HERMES_LEARNING_LOOP_REFERENCE.md) · [HERMES_TOOL_SYSTEM_REFERENCE.md](HERMES_TOOL_SYSTEM_REFERENCE.md)) 기준, 컴포넌트별로 차용/단순화/제외를 결정한다. 이 표가 runtime의 전체 스코프를 정의한다.
 
 | Hermes 컴포넌트 | 결정 | 근거 |
 |----------------|------|------|
@@ -24,6 +24,10 @@
 | Cron Scheduler | ★ **제외** | 데모 범위 밖 |
 | Gateway (메시징) | ★ **제외** | RICE는 데스크톱 앱 단일 접점 |
 | FTS5 세션 검색 | ★ **차용** | 세션 간 컨텍스트 유지 데모에 직접 기여, SQLite 내장이라 비용 낮음 |
+| Tool registry + 조건부 노출 (`check_fn`) | ★ **차용** (단순화) | built-in/plugin/connector tool을 한 곳에서 모아 LLM 스키마로 조립하고 **연결 안 된 Connector tool은 스키마에서 제외**. Hermes의 30s TTL 캐시는 생략(단일 세션, 연결 상태 직접 조회) — 2.1장 |
+| Toolset (플랫폼별 묶음) | ★ **제외** | 데스크톱 단일 접점이라 telegram/discord류 플랫폼 toolset 불필요 |
+| Tool Search (progressive disclosure) | ★ **연기 (Phase 2)** | MCP tool이 토큰 예산 초과 시 `tool_search/describe/call`로 접기. MVP는 Connector 1개라 미발생 — 11장 |
+| Webhook-safe toolset (인젝션 방어) | ★ **차용 (재해석)** | RICE엔 webhook 없으나 **Gmail 본문 = 신뢰불가 외부 콘텐츠** → 동일 방어 적용 — 10장 |
 
 위 차용표가 runtime 전체 스코프의 정본이다 — Honcho **제외**(외부 SaaS), Curator **수동 트리거** 포함, `execute_code` **포함**(repo 단위 코드 실행 도구, sandbox 경계는 5장). Hermes를 기준으로 가깝게 벤치마킹하며, 추후 개선·확장은 본 표를 갱신하는 방식으로 추적한다.
 
@@ -44,6 +48,20 @@
 - ★ 스킬 주입: Hermes처럼 시스템 프롬프트에 활성 스킬 전체 주입 + prefix caching 의존 (Hermes 검증 #6: 명시적 무효화 없이 자연 재캐시로 충분)
 
 동시 세션은 **1개**(단일 활성 대화, 프로토타입)로 한다.
+
+### 2.1 Tool 노출·조립 (스키마 게이팅)
+
+> 출처: [HERMES_TOOL_SYSTEM_REFERENCE.md](HERMES_TOOL_SYSTEM_REFERENCE.md) §2·§3. Hermes의 registry + `check_fn` + toolset 구조에서 RICE에 필요한 부분만 차용.
+
+매 턴 시스템 프롬프트를 구성할 때 LLM에 넘길 tool 스키마는 **한 곳에서 모아 거른다**(Hermes `get_tool_definitions()` 대응). 책임 모듈은 `agent/tool_dispatch.py`([RICE_RUNTIME_DIRECTORY.md](RICE_RUNTIME_DIRECTORY.md) #2) — 호출 라우팅뿐 아니라 **스키마 조립 + 가용성 필터**를 소유한다.
+
+- **수집 대상**: built-in tool + 활성 plugin이 요구하는 tool + 연결된 Connector(MCP) tool
+- **조건부 노출 (`check_fn` 차용·단순화)**: tool은 **사용 가능할 때만** 스키마에 포함한다.
+  - **연결 안 된 Connector의 tool은 스키마에서 제외** — 예: Gmail 미연결이면 `gmail_*` tool을 LLM에 노출하지 않는다(못 쓸 도구로 인한 토큰 낭비·환각성 호출 방지).
+  - Hermes의 30s TTL 캐시는 **생략** — RICE는 단일 활성 세션이라 턴 시작에 연결 상태를 직접 조회하면 충분.
+- **노출 ≠ 실행**: 이 게이팅은 *노출*(스키마 포함 여부)이다. 9.4장 Permission 검증·5장 실행 승인(HITL)은 *실행*(호출 직전) 단계로, 서로 **별개의 방어선**이다.
+- **플랫폼별 toolset은 제외**: Hermes의 `hermes-telegram`류 묶음은 데스크톱 단일 접점인 RICE엔 불필요.
+- **예산 초과 대응은 Phase 2**: MCP tool이 토큰 예산을 넘으면 progressive disclosure로 접는다(11장). MVP는 Connector 1개라 미발생.
 
 ---
 
@@ -279,6 +297,7 @@ def check_plugin_permission(plugin_id: str, connector_type: str) -> bool:
 3. **마켓 artifact 실행 경계**: 5장 결정에 따름 + artifact 체크섬 검증 (CONTRACTS 문서)
    - **Phase 2 백로그 (MVP 밖, 결정 아님)**: 체크섬만으로는 위변조 방지가 약함 → 디지털 서명(GPG/X.509) + platform 측 서명 키 관리 + runtime 측 신뢰 체인 검증 (우선순위 🟢 낮음, 담당: 보안 팀 + Platform 팀)
 4. **Connector Credential**: OS 키체인 저장, 메모리에서 즉시 삭제, 로그 금지
+5. **신뢰불가 외부 콘텐츠 격리 (프롬프트 인젝션 방어)**: Connector로 가져온 **외부 콘텐츠(예: Gmail 메일 본문)는 신뢰할 수 없다** — 공격자가 메일에 심은 지시문이 에이전트를 탈취해 위험 tool(`execute_code`·terminal·파일 삭제·네트워크)을 호출하게 만들 수 있다(Hermes webhook-safe toolset의 교훈, [HERMES_TOOL_SYSTEM_REFERENCE.md](HERMES_TOOL_SYSTEM_REFERENCE.md) §6.3 재해석). 대응: (a) 외부 콘텐츠는 **데이터로 명시 구분**(지시문으로 취급하지 않음), (b) 위험 tool 실행은 5장 HITL 승인을 **반드시** 거치게 함, (c) 향후 외부 콘텐츠 주도 턴에서 위험 tool **노출 자체를 축소**(restricted toolset). MVP는 (a)+(b)로 최소 방어, (c)는 11장 백로그.
 
 ---
 
@@ -292,6 +311,9 @@ def check_plugin_permission(plugin_id: str, connector_type: str) -> bool:
 - **Connector 제공 도구 가시화**: 연결된 Connector(MCP)가 노출하는 원자적 tool 목록을 ConnectorsScreen에서 확인
 - **artifact 디지털 서명**: 10장 Phase 2 분석 항목
 - **세션 검색·관리 보강**: FTS5 기반 세션 검색 UI, 이름변경/보관
+- **Tool Search (progressive disclosure)**: 설치 plugin/Connector가 늘어 MCP tool 스키마가 토큰 예산([RICE_LEARNING_LOOP_DESIGN.md](RICE_LEARNING_LOOP_DESIGN.md) 7장 MCP ~15K)을 넘으면, core tool은 유지하고 비-core tool을 `tool_search`/`tool_describe`/`tool_call` 3개 브릿지 도구로 접는다([HERMES_TOOL_SYSTEM_REFERENCE.md](HERMES_TOOL_SYSTEM_REFERENCE.md) §6.4). MVP는 Connector 1개라 미발생 — Phase 2 솔기.
+- **MCP 동적 갱신 (Phase 2)**: MCP 어댑터 구현 시, 서버가 `notifications/tools/list_changed`를 보내면 해당 서버 tool을 전부 deregister 후 재등록(nuke-and-repave, [HERMES_TOOL_SYSTEM_REFERENCE.md](HERMES_TOOL_SYSTEM_REFERENCE.md) §7.3).
+- **외부 콘텐츠 주도 턴의 restricted toolset**: 10장-5의 (c) — 신뢰불가 외부 콘텐츠가 주도하는 턴에서 위험 tool 노출을 축소.
 
 ---
 

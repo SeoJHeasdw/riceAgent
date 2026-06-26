@@ -217,6 +217,7 @@ T1/T3 제안은 다음을 산출한다:
 
 - 활성 스킬은 시스템 프롬프트에 전체 주입 + prefix caching 의존(Claude `cache_control`, Hermes 검증 #6). Ollama는 caching 미지원 → 컨텍스트 재사용으로 대체([RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md) 6장).
 - **스킬 예산(~40K) 초과 구간에서만 검색이 스킬을 선별**하므로 retrieval 취약성이 노출된다(MVP 대응·진단: [RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md) 3장 + `skill_hit`).
+- **MCP 도구는 연결된 Connector 것만 주입**한다(미연결 Connector tool은 스키마에서 제외 — [RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md) 2.1). MCP 예산(~15K) 초과 시 progressive disclosure로 접는 것은 Phase 2([RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md) 11장).
 - **서브에이전트 컨텍스트 격리**: 서브에이전트 실행은 **새 대화를 여는 것과 동일하게** 독립된 컨텍스트(별도 270K 윈도)에서 작업시켜 부모 대화의 컨텍스트 오염을 막는다. 토큰 사용량은 늘지만 정확도를 우선하는 위 원칙과 일관된다.
 
 > 학습 측정(eval)은 [RICE_LEARNING_EVAL.md](RICE_LEARNING_EVAL.md) 참조.
