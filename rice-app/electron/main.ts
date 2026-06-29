@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu } from 'electron';
 import path from 'path';
 import { promises as fs } from 'fs';
 import { fileURLToPath } from 'url';
@@ -23,6 +23,7 @@ function createWindow() {
     minHeight: 700,
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 16, y: 16 },
+    autoHideMenuBar: true, // Windows 상단 메뉴바(File/Edit/View...) 숨김
     backgroundColor: '#161616', // IBM Carbon gray-100
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -44,6 +45,11 @@ function createWindow() {
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
+}
+
+// Windows에서 상단 네이티브 메뉴바(File/Edit/View/Window/Help) 완전 제거
+if (process.platform !== 'darwin') {
+  Menu.setApplicationMenu(null);
 }
 
 // App lifecycle
