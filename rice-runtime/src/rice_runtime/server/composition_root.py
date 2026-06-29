@@ -128,8 +128,25 @@ def build_container(args: RuntimeArgs | None = None, *, paths: RicePaths | None 
         info = sessions.get(session_id)
         return info.title if info else None
 
+    def resolve_titler_provider() -> ILLMProvider:
+        """Like resolve_provider, but returns an OllamaProvider with think=False.
+        Title generation is a single short request — disabling reasoning tokens
+        eliminates the httpx stream-drain stall and avoids an unnecessary GPU pass.
+        Non-Ollama providers are returned as-is (they have no think option)."""
+        kind = config_store.config.provider.kind
+        try:
+            provider = providers.get(kind)
+        except ProviderError as exc:
+            log.warning("provider %r unavailable (%s) → falling back to echo", kind, exc)
+            return providers.get("echo")
+        if kind == "ollama":
+            from ..agent.providers.ollama import OllamaProvider  # noqa: PLC0415
+            cfg = config_store.config.provider
+            return OllamaProvider(cfg, think=False)
+        return provider
+
     titler = SessionTitler(
-        resolve_provider=resolve_provider,
+        resolve_provider=resolve_titler_provider,
         get_title=_session_title,
         set_title=sessions.set_title,
     )

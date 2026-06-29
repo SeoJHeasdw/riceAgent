@@ -85,8 +85,12 @@ def _extract_tool_calls(message: dict[str, Any]) -> list[ToolCall]:
 class OllamaProvider(ILLMProvider):
     name = "ollama"
 
-    def __init__(self, cfg: ProviderConfig) -> None:
+    def __init__(self, cfg: ProviderConfig, *, think: bool = True) -> None:
         self._cfg = cfg
+        # think=False: disable reasoning tokens — used by the session titler so a
+        # short title generation doesn't pay for a full reasoning pass (and avoids
+        # the httpx stream-drain stall that occurs when the caller breaks early).
+        self._think = think
 
     def capabilities(self) -> ProviderCapabilities:
         return ProviderCapabilities(native_tool_calling=True, streaming=True, prompt_caching=False, vision=False)
@@ -102,6 +106,17 @@ class OllamaProvider(ILLMProvider):
                     if line:
                         yield json.loads(line)
 
+    async def _post_chat(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Single non-streaming POST — used when streaming is unnecessary (titler).
+        No iterator, no drain stall: the full response arrives in one round-trip."""
+        import httpx  # noqa: PLC0415 - optional dependency by design
+
+        base_url = (self._cfg.base_url or "http://localhost:11434").rstrip("/")
+        async with httpx.AsyncClient(base_url=base_url, timeout=60.0) as client:
+            response = await client.post("/api/chat", json=payload)
+            response.raise_for_status()
+            return response.json()
+
     async def stream(
         self,
         *,
@@ -110,6 +125,32 @@ class OllamaProvider(ILLMProvider):
         tools: Sequence[ToolSpec] = (),
         temperature: float = 0.7,
     ) -> AsyncIterator[ProviderChunk]:
+        if not self._think:
+            # ── non-streaming path (titler) ───────────────────────────────────
+            # think=False instances are used for short single-answer requests
+            # (e.g. session title). A non-streaming POST avoids the httpx
+            # stream-drain stall that happens when the caller breaks out of the
+            # async-for early: with stream=False Ollama returns one JSON object,
+            # httpx closes the connection cleanly, and no drain is needed.
+            payload = {
+                "model": self._cfg.model,
+                "messages": ([{"role": "system", "content": system}] if system else []) + _to_ollama_messages(messages),
+                "stream": False,
+                "think": False,
+                "options": {"temperature": 0.0, "num_predict": 20},
+                "keep_alive": "5m",
+            }
+            try:
+                item = await self._post_chat(payload)
+            except Exception as exc:
+                raise ProviderError(f"ollama post failed: {exc}") from exc
+            content = (item.get("message") or {}).get("content") or ""
+            if content:
+                yield ProviderChunk(kind="text", text=content)
+            yield ProviderChunk(kind="done", stop_reason="end_turn")
+            return
+
+        # ── streaming path (normal chat) ──────────────────────────────────────
         payload = {
             "model": self._cfg.model,
             "messages": ([{"role": "system", "content": system}] if system else []) + _to_ollama_messages(messages),
