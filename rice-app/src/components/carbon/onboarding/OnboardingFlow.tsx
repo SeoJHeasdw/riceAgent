@@ -98,12 +98,12 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
         {/* ── 우측 본문 ── */}
         <div className="flex flex-col flex-1 min-w-0">
           {/* 본문 (스텝 전환 시 페이드/슬라이드) */}
-          <div key={step.id} className="flex-1 overflow-y-auto px-8 py-8 sm:px-10" style={{ animation: 'onbStep 220ms ease' }}>
+          <div key={step.id} className="flex-1 overflow-y-auto px-6 py-6" style={{ animation: 'onbStep 220ms ease' }}>
             {step.render(ctx)}
           </div>
 
           {/* 푸터 네비게이션 */}
-          <div className="flex items-center gap-2 px-8 sm:px-10 py-2 border-t border-border-subtle-01">
+          <div className="flex items-center gap-2 px-6 py-2 border-t border-border-subtle-01">
             {index > 0 ? (
               <Button
                 kind="ghost"
@@ -160,16 +160,17 @@ const Stepper: React.FC<{
   index: number;
   onJump: (i: number) => void;
 }> = ({ steps, index, onJump }) => (
-  <ol className="flex flex-col gap-1">
+  <ol className="flex flex-col">
     {steps.map((s, i) => {
       const state = i < index ? 'done' : i === index ? 'active' : 'upcoming';
       const clickable = i < index;
+      const isLast = i === steps.length - 1;
       return (
-        <li key={s.id}>
+        <li key={s.id} className="flex flex-col">
           <button
             onClick={() => onJump(i)}
             disabled={!clickable}
-            className={`group flex items-center gap-3 w-full text-left px-2 py-2 rounded-lg transition-colors ${
+            className={`group flex items-center gap-3 w-full text-left px-2 py-1.5 rounded-lg transition-colors ${
               clickable ? 'hover:bg-layer-hover-02 cursor-pointer' : 'cursor-default'
             }`}
           >
@@ -197,6 +198,21 @@ const Stepper: React.FC<{
               )}
             </span>
           </button>
+
+          {/* 원과 원 사이 점선 — 마지막 스텝엔 없음
+              수평 위치: px-2(8px) + w-7 반지름(20px) = 28px → 선 중앙 보정 -1px = 27px
+              높이: button py-1.5(12px) × 2 = 24px (하단 패딩 + 다음 버튼 상단 패딩) */}
+          {!isLast && (
+            <div style={{ paddingLeft: '27px' }} aria-hidden>
+              <div
+                style={{
+                  width: '2px',
+                  height: '16px',
+                  backgroundImage: 'repeating-linear-gradient(to bottom, var(--cds-border-strong-02) 0px, var(--cds-border-strong-02) 2px, transparent 2px, transparent 5px)',
+                }}
+              />
+            </div>
+          )}
         </li>
       );
     })}

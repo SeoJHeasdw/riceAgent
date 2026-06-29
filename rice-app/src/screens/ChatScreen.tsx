@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { SessionSidebar, type Session } from '../components/carbon/SessionSidebar';
 import { ModelSettingsPanel } from '../components/carbon/ModelSettingsPanel';
-import { ModelOnboarding } from '../components/carbon/ModelOnboarding';
 import { LearningPanel } from '../components/carbon/LearningPanel';
 import { ChatTurn } from '../components/carbon/ChatMessage';
 import { useResizable } from '../hooks/useResizable';
@@ -377,8 +376,6 @@ function ChatScreen() {
   const [sessionSidebarOpen, setSessionSidebarOpen] = useState(true);
   const [learningPanelOpen, setLearningPanelOpen] = useState(true);
   const [settingsPanelOpen, setSettingsPanelOpen] = useState(false);
-  // 최초 실행 온보딩: 런타임 연결 후 provider.configured가 false면 모델 연결을 강제한다.
-  const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
   // a live (runtime) turn is streaming — gates the composer so we can't double-send,
   // and drives the "생성 중" affordance on the send button.
@@ -459,8 +456,6 @@ function ChatScreen() {
       // SaaS 등록 모델(키 포함)을 state.db에서 복원
       const registered = data?.registered_models ?? [];
       if (prov) {
-        // 최초 실행: 아직 모델을 연결·저장한 적이 없으면 온보딩을 강제한다.
-        if (!prov.configured) setOnboardingOpen(true);
         const restoredMode: 'saas' | 'local' = prov.kind === 'ollama' ? 'local' : 'saas';
         setModelMode(restoredMode);
         if (prov.model) setCurrentModel(prov.model);
@@ -1419,19 +1414,6 @@ function ChatScreen() {
         settings={modelSettings}
         modelMode={modelMode}
       />
-
-      {/* 최초 실행: 모델 미연결 시 전체 화면 온보딩 */}
-      {onboardingOpen && (
-        <ModelOnboarding
-          currentModel={currentModel}
-          modelMode={modelMode}
-          settings={modelSettings}
-          onComplete={(payload) => {
-            persistModelSelection(payload);
-            setOnboardingOpen(false);
-          }}
-        />
-      )}
 
       {/* Delete-session confirmation (irreversible) */}
       <ConfirmDialog

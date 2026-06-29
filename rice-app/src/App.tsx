@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { api } from './lib/api';
@@ -16,6 +16,10 @@ import { I18nProvider } from './lib/i18n/I18nContext';
 import { LearningProvider } from './lib/learning/LearningContext';
 import { MarketplaceProvider } from './lib/marketplace/MarketplaceContext';
 import { ToastProvider } from './lib/toast/ToastProvider';
+import { ModelOnboarding } from './components/carbon/ModelOnboarding';
+import { defaultModelSettings } from './lib/mockData';
+import type { ModelSettings } from './components/carbon/ModelSettingsPanel';
+import type { RegisteredModel } from './components/carbon/ModelSettingsPanel';
 
 // 좌측 레일 항목은 공용 네비게이션 매니페스트에서 파생한다(홈 허브와 동일 출처).
 const railItems = toRailItems();
@@ -55,7 +59,25 @@ function AppShell() {
 // renderer doesn't depend on the preload's global augmentation).
 type RuntimeBridge = { getStatus: () => Promise<{ running: boolean; port?: number }> };
 
+// 등록 모델의 provider(UI) → 런타임 provider kind 매핑.
+const providerKind = (provider?: string): 'claude' | 'openai' | 'watsonx' => {
+  switch (provider) {
+    case 'openai':
+    case 'custom':
+      return 'openai';
+    case 'watsonx':
+      return 'watsonx';
+    default:
+      return 'claude';
+  }
+};
+
 function App() {
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [modelMode, setModelMode] = useState<'saas' | 'local'>('saas');
+  const [currentModel, setCurrentModel] = useState('claude-sonnet-4-6');
+  const [modelSettings, setModelSettings] = useState<ModelSettings>(defaultModelSettings);
+
   // Connect the API/SSE clients to the local runtime only when Electron reports
   // it running (IPC — no network probe). In the design demo (browser, or runtime
   // not spawned) we stay offline: clients no-op and screens use scripted mock
@@ -101,6 +123,55 @@ function App() {
       });
   }, []);
 
+  // 런타임 연결 시 configured 여부를 확인해 온보딩을 트리거한다.
+  // 어떤 화면에서 시작하든 동작하도록 App 레벨에서 처리한다.
+  useEffect(() => {
+    return api.onEnabledChange((enabled) => {
+      if (!enabled) return;
+      void api.getSettings().then((res) => {
+        if (!res.success) return;
+        const data = res.data as {
+          provider?: { kind?: string; model?: string; base_url?: string; temperature?: number; configured?: boolean };
+          registered_models?: RegisteredModel[];
+        };
+        const prov = data?.provider;
+        if (!prov || prov.configured) return;
+
+        // configured: false → 온보딩 강제
+        const registered = data?.registered_models ?? [];
+        const restoredMode: 'saas' | 'local' = prov.kind === 'ollama' ? 'local' : 'saas';
+        setModelMode(restoredMode);
+        if (prov.model) setCurrentModel(prov.model);
+        setModelSettings((prev) => ({
+          ...prev,
+          registeredModels: registered,
+          ...(prov.base_url ? { endpoint: prov.base_url } : {}),
+          ...(prov.temperature !== undefined ? { temperature: prov.temperature } : {}),
+        }));
+        setOnboardingOpen(true);
+      });
+    });
+  }, []);
+
+  const handleOnboardingComplete = ({ modelId, settings, mode }: { modelId: string; settings: ModelSettings; mode: 'saas' | 'local' }) => {
+    setCurrentModel(modelId);
+    setModelSettings(settings);
+    setModelMode(mode);
+    const activeEntry = settings.registeredModels.find((r) => r.modelId === modelId);
+    const kind = mode === 'local' ? 'ollama' : providerKind(activeEntry?.provider);
+    void api.updateSettings({
+      provider: {
+        kind,
+        model: modelId,
+        temperature: settings.temperature,
+        base_url: mode === 'local' ? settings.endpoint ?? null : null,
+        configured: true,
+      },
+      registered_models: settings.registeredModels,
+    });
+    setOnboardingOpen(false);
+  };
+
   return (
     <I18nProvider>
       <LearningProvider>
@@ -108,6 +179,14 @@ function App() {
           <ToastProvider>
             <BrowserRouter>
               <AppShell />
+              {onboardingOpen && (
+                <ModelOnboarding
+                  currentModel={currentModel}
+                  modelMode={modelMode}
+                  settings={modelSettings}
+                  onComplete={handleOnboardingComplete}
+                />
+              )}
             </BrowserRouter>
           </ToastProvider>
         </MarketplaceProvider>
