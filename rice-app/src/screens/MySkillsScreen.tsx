@@ -1291,6 +1291,7 @@ const SkillDetailView: React.FC<{
 };
 
 function MySkillsScreen() {
+  const navigate = useNavigate();
   const { skills, setSkills, hydrating } = useLearning();
   const [filter, setFilter] = useState<Filter>('전체');
   const [sel, setSel] = useState<string | null>('s1');
@@ -1529,11 +1530,23 @@ function MySkillsScreen() {
         })}
         {list.length === 0 && (
           <div className="p-10 text-center text-body-short-01 text-text-helper">
-            {hydrating
-              ? '불러오는 중…'
-              : skills.length === 0
-                ? '아직 학습된 스킬이 없어요. 대화를 나누면 자동으로 스킬이 자라납니다.'
-                : '해당하는 스킬이 없어요.'}
+            {hydrating ? (
+              '불러오는 중…'
+            ) : skills.length === 0 ? (
+              <div className="flex flex-col items-center gap-3">
+                <span>아직 학습된 스킬이 없어요. 대화를 나누면 자동으로 스킬이 자라납니다.</span>
+                <button
+                  onClick={() => navigate('/skills')}
+                  className="inline-flex items-center gap-1.5 text-link-primary hover:underline text-body-short-01"
+                >
+                  <Icon name="skill" size={14} />
+                  Skill Market 둘러보기
+                  <Icon name="arrow-up-right" size={13} />
+                </button>
+              </div>
+            ) : (
+              '해당하는 스킬이 없어요.'
+            )}
           </div>
         )}
       </div>

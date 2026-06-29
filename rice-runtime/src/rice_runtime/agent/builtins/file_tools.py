@@ -7,6 +7,9 @@ is rejected — the agent operates under least authority (RUNTIME_DESIGN §10).
 Handlers are `async (dict) -> object`; the returned object becomes the
 `ToolResult.result` the loop feeds back to the model. `write_file` is marked
 `requires_approval=True` so it pauses on the shared HITL gate before touching disk.
+
+read_file auto-detects Office/notebook documents (.xlsx, .docx, .ipynb) and
+extracts them as text via `read_extract` (stdlib only — no extra dependencies).
 """
 
 from __future__ import annotations
@@ -16,6 +19,7 @@ from pathlib import Path
 from ...core.paths import RicePaths
 from ...core.types import ToolSpec
 from ..tool_dispatch import BuiltinTool
+from .read_extract import ExtractionError, extract_document_text, is_extractable_document
 
 # Caps so a tool result can't blow the context window or the disk.
 _MAX_READ_BYTES = 256 * 1024
@@ -36,13 +40,24 @@ def _resolve(root: Path, rel: str) -> Path:
 
 def _make_read(root: Path) -> BuiltinTool:
     async def read_file(args: dict) -> object:
-        path = _resolve(root, args.get("path", ""))
+        rel = args.get("path", "")
+        path = _resolve(root, rel)
         if not path.is_file():
-            raise FileNotFoundError(f"not a file: {args.get('path')}")
+            raise FileNotFoundError(f"not a file: {rel}")
+
+        # Auto-extract Office / notebook documents as readable text.
+        if is_extractable_document(str(path)):
+            try:
+                text = extract_document_text(str(path))
+                return {"path": rel, "content": text, "truncated": False, "extracted": True}
+            except ExtractionError:
+                # Fall through to raw bytes read on extraction failure.
+                pass
+
         data = path.read_bytes()[:_MAX_READ_BYTES]
         text = data.decode("utf-8", errors="replace")
         truncated = path.stat().st_size > _MAX_READ_BYTES
-        return {"path": args.get("path"), "content": text, "truncated": truncated}
+        return {"path": rel, "content": text, "truncated": truncated}
 
     return read_file
 

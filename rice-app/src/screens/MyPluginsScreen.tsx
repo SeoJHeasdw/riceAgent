@@ -298,6 +298,7 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
 };
 
 function MyPluginsScreen() {
+  const navigate = useNavigate();
   const { myPlugins, hydrating } = useLearning();
   const [filter, setFilter] = useState<Filter>('전체');
   const [sel, setSel] = useState<string | null>(myPlugins[0]?.id ?? null);
@@ -446,11 +447,23 @@ function MyPluginsScreen() {
         })}
         {list.length === 0 && (
           <div className="p-10 text-center text-body-short-01 text-text-helper">
-            {hydrating
-              ? '불러오는 중…'
-              : myPlugins.length === 0
-                ? '아직 설치된 플러그인이 없어요. 마켓에서 솔루션 전문가를 설치해보세요.'
-                : '해당하는 플러그인이 없어요.'}
+            {hydrating ? (
+              '불러오는 중…'
+            ) : myPlugins.length === 0 ? (
+              <div className="flex flex-col items-center gap-3">
+                <span>아직 설치된 플러그인이 없어요. 마켓에서 솔루션 전문가를 설치해보세요.</span>
+                <button
+                  onClick={() => navigate('/plugins')}
+                  className="inline-flex items-center gap-1.5 text-link-primary hover:underline text-body-short-01"
+                >
+                  <Icon name="plug" size={14} />
+                  Plugin Market 둘러보기
+                  <Icon name="arrow-up-right" size={13} />
+                </button>
+              </div>
+            ) : (
+              '해당하는 플러그인이 없어요.'
+            )}
           </div>
         )}
       </div>

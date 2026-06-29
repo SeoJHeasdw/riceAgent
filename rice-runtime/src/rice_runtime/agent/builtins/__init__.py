@@ -10,6 +10,11 @@ plugin needed). Ported in spirit from the Hermes tool system
 `build_builtin_tools(paths)` returns the catalog (ToolSpecs advertised to the LLM)
 and the name→handler map (`BuiltinTool`), which the composition root injects into
 the Orchestrator + ToolDispatcher.
+
+Registered builtin modules (add new ones here — one place):
+  file_tools    — read_file, write_file, search_files (+ xlsx/docx/ipynb extraction)
+  terminal_tool — terminal (shell command execution; requires_approval=True)
+  vision_tools  — vision_analyze (image download + base64; requires vision provider)
 """
 
 from __future__ import annotations
@@ -17,14 +22,15 @@ from __future__ import annotations
 from ...core.paths import RicePaths
 from ...core.types import ToolSpec
 from ..tool_dispatch import BuiltinTool
-from . import file_tools
+from . import file_tools, terminal_tool, vision_tools
 
 
 def build_builtin_tools(paths: RicePaths) -> tuple[tuple[ToolSpec, ...], dict[str, BuiltinTool]]:
     """Assemble every builtin tool. New builtin modules register here (one place)."""
     specs: list[ToolSpec] = []
     handlers: dict[str, BuiltinTool] = {}
-    for spec, handler in file_tools.tools(paths):
-        specs.append(spec)
-        handlers[spec.name] = handler
+    for module in (file_tools, terminal_tool, vision_tools):
+        for spec, handler in module.tools(paths):
+            specs.append(spec)
+            handlers[spec.name] = handler
     return tuple(specs), handlers
