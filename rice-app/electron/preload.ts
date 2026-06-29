@@ -23,6 +23,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getVersion: () => ipcRenderer.invoke('app:get-version'),
     getPath: (name: string) => ipcRenderer.invoke('app:get-path', name),
   },
+
+  // Artifact 다운로드 (platform tar.gz → 임시 경로 + 체크섬). 마켓 설치 파이프라인용.
+  artifact: {
+    download: (url: string) => ipcRenderer.invoke('artifact:download', url),
+  },
 });
 
 // Type definitions for the exposed API
@@ -45,6 +50,9 @@ export interface ElectronAPI {
   app: {
     getVersion: () => Promise<string>;
     getPath: (name: string) => Promise<string>;
+  };
+  artifact: {
+    download: (url: string) => Promise<{ path: string; checksum: string }>;
   };
 }
 

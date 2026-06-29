@@ -756,6 +756,69 @@ function ChatScreen() {
       } else if (e.type === 'message') {
         finalizeThinking();
         appendAnswer(e.data as { delta?: string; content?: string });
+      } else if (e.type === 'skill_created') {
+        // runtime이 새 스킬을 자동 생성했음을 알림 — learning store에 추가 + 패널 강조.
+        // 스킬 본문은 없으므로 최소 Skill 레코드로 등록하고, detail은 API로 지연 로드.
+        const d = e.data as { skill_id: string; title: string; version: number };
+        setSkills((arr) => {
+          if (arr.some((s) => s.id === d.skill_id)) return arr;
+          return [
+            ...arr,
+            {
+              id: d.skill_id,
+              name: d.title,
+              ver: `v${d.version}`,
+              uses: 0,
+              trend: '방금 생성',
+              enabled: true,
+              patches: 0,
+              command: d.skill_id,
+              state: 'active' as const,
+            },
+          ];
+        });
+        setDetails((prev) =>
+          prev[d.skill_id]
+            ? prev
+            : {
+                ...prev,
+                [d.skill_id]: {
+                  summary: d.title,
+                  createdFrom: '대화에서 자동 생성',
+                  lastUsed: '방금',
+                  shared: false,
+                  rules: [],
+                  versions: [{ ver: `v${d.version}`, when: '방금', note: '자동 생성', current: true }],
+                  usage: [{ kind: '대화', name: activeSession?.title ?? '대화', icon: 'chat' as const }],
+                  permissions: [],
+                },
+              },
+        );
+        jumpToSkill(d.skill_id);
+      } else if (e.type === 'memory_written') {
+        // runtime이 메모리에 사실/선호를 기록했음을 toast로 알림.
+        const d = e.data as { memory_type: 'fact' | 'preference'; content: string };
+        const label = d.memory_type === 'fact' ? '사실 기억됨' : '선호 기억됨';
+        toast.notify({ message: `💾 ${label}: ${d.content.slice(0, 60)}`, duration: 4000 });
+      } else if (e.type === 'skill_patch_proposed') {
+        // HITL gate — diff 카드 렌더링. 스트림은 계속 흐르지만 사용자 결정은
+        // POST /skills/{id}/patch 로 별도 전송 (pendingToThread 로직 재사용).
+        const d = e.data as SkillPatchProposedData;
+        const card = pendingToThread({
+          approval_id: d.approval_id,
+          kind: 'skill_patch',
+          payload: d,
+        });
+        if (card) setThread((p) => [...p, card]);
+      } else if (e.type === 'skill_patched') {
+        // 이전에 승인된 patch가 서버에서 적용 완료됨 (자동 경로: HITL 없이 적용된 경우).
+        // 로컬 skills 상태도 동기화.
+        const d = e.data as { skill_id: string; version: number };
+        setSkills((arr) =>
+          arr.map((s) =>
+            s.id === d.skill_id ? { ...s, ver: `v${d.version}`, patches: (s.patches ?? 0) + 1, trend: '개선됨' } : s,
+          ),
+        );
       } else if (e.type === 'done') {
         finalizeThinking();
         setBusy(false);

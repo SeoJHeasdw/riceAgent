@@ -1,11 +1,5 @@
-import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  INSTALLED_TOOLS,
-  MY_PLUGINS,
-  PROPOSALS,
-  SKILLS,
-  SKILL_DETAILS,
-  USER_MODEL,
   type InstalledTool,
   type MyPlugin,
   type Proposal,
@@ -13,8 +7,16 @@ import {
   type SkillDetail,
   type UserSignal,
 } from '../learningData';
-import type { Skill as MarketSkill } from '../types';
-import { installedSkillId, marketSkillToOwned } from '../skillBridge';
+import type { Skill as MarketSkill, Plugin as MarketPlugin } from '../types';
+import {
+  installedSkillId,
+  marketSkillToOwned,
+  installedPluginId,
+  marketPluginToMyPlugin,
+  platformArtifactToPlugin,
+  runtimePluginToMyPlugin,
+} from '../skillBridge';
+import { api, platform } from '../api';
 
 /**
  * LearningContext — single source of truth for the learning-loop state shared
@@ -24,6 +26,8 @@ import { installedSkillId, marketSkillToOwned } from '../skillBridge';
  */
 
 interface LearningContextValue {
+  /** 런타임 첫 hydrate 진행 중 (스켈레톤 vs 빈상태 구분용) */
+  hydrating: boolean;
   skills: Skill[];
   setSkills: React.Dispatch<React.SetStateAction<Skill[]>>;
   signals: UserSignal[];
@@ -44,6 +48,12 @@ interface LearningContextValue {
    */
   installSkillFromMarket: (market: MarketSkill) => string;
 
+  /**
+   * 마켓 플러그인을 "내 플러그인"으로 materialize 한다 — 플러그인 설치의 학습-store 측 배선.
+   * marketId 기준 멱등. 소유 id(inst-…)를 돌려준다. (installSkillFromMarket 와 대칭)
+   */
+  installPluginFromMarket: (market: MarketPlugin) => string;
+
   /** Skill id currently highlighted in the panel (after a chat "jump") */
   highlightedSkill: string | null;
   /** Highlight a skill in the panel for a short pulse */
@@ -55,28 +65,171 @@ interface LearningContextValue {
 
 const LearningCtx = createContext<LearningContextValue | null>(null);
 
-const cloneDetails = (): Record<string, SkillDetail> => {
-  const out: Record<string, SkillDetail> = {};
-  Object.keys(SKILL_DETAILS).forEach((k) => {
-    out[k] = { ...SKILL_DETAILS[k], rules: SKILL_DETAILS[k].rules.map((r) => ({ ...r })) };
-  });
-  return out;
-};
+/**
+ * runtime GET /skills 응답(SkillSummary.__dict__) → learningData.Skill 변환.
+ *
+ * runtime 스킬은 kebab-case name을 id로 쓴다. version은 정수(예: 3 → "v3").
+ * idleDays는 last_used_at에서 계산 (없으면 undefined).
+ */
+function runtimeSkillToLearning(s: {
+  id: string;
+  name: string;
+  version: number;
+  description: string;
+  state: 'active' | 'stale' | 'archived';
+  tags: string[];
+  use: number;
+  patch: number;
+  last_used_at: string | null;
+}): Skill {
+  const idleDays = (() => {
+    if (!s.last_used_at) return undefined;
+    const ms = Date.now() - new Date(s.last_used_at).getTime();
+    return Math.floor(ms / 86_400_000);
+  })();
+  const useTrend = s.use > 0 ? `${s.use}회 사용` : '아직 없음';
+  return {
+    id: s.id,
+    name: s.name,
+    ver: `v${s.version}`,
+    uses: s.use,
+    trend: useTrend,
+    enabled: s.state === 'active',
+    hot: s.use > 10,
+    patches: s.patch,
+    command: s.name, // runtime id(kebab) = slash command
+    state: s.state,
+    idleDays,
+    shared: false,
+  };
+}
+
+/**
+ * runtime GET /skills 응답으로 최소 SkillDetail을 생성.
+ * 규칙·버전 히스토리는 런타임이 별도 엔드포인트(GET /skills/{id}/history)로 제공하나
+ * 초기 로드엔 description만 있는 최소 detail로 채운다 (이후 상세 화면에서 lazy load).
+ */
+function runtimeSkillToDetail(s: {
+  id: string;
+  name: string;
+  version: number;
+  description: string;
+  state: string;
+  source: string | null;
+  last_used_at: string | null;
+}): SkillDetail {
+  return {
+    summary: s.description,
+    createdFrom: s.source ? `${s.source}` : '대화에서 자동 생성',
+    lastUsed: s.last_used_at ? new Date(s.last_used_at).toLocaleDateString('ko-KR') : '아직 없음',
+    shared: false,
+    rules: [],
+    versions: [{ ver: `v${s.version}`, when: s.last_used_at ?? '알 수 없음', note: '런타임 동기화', current: true }],
+    usage: [],
+    permissions: [],
+  };
+}
 
 export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [skills, setSkills] = useState<Skill[]>(() =>
-    SKILLS.map((s) => ({ ...s, shared: SKILL_DETAILS[s.id]?.shared })),
-  );
-  const [signals, setSignals] = useState<UserSignal[]>(() => USER_MODEL.map((s) => ({ ...s })));
-  const [installed, setInstalled] = useState<InstalledTool[]>(() => INSTALLED_TOOLS.map((t) => ({ ...t })));
-  const [details, setDetails] = useState<Record<string, SkillDetail>>(cloneDetails);
-  const [myPlugins, setMyPlugins] = useState<MyPlugin[]>(() =>
-    MY_PLUGINS.map((p) => ({ ...p, skills: p.skills.map((s) => ({ ...s })), examples: [...p.examples] })),
-  );
-  const [proposals, setProposals] = useState<Proposal[]>(() => PROPOSALS.map((p) => ({ ...p })));
+  // mock 시드 제거 — 전부 런타임에서 채운다(GET /skills·/memories·/plugins).
+  // 런타임 오프라인이면 빈 상태로 남고, 빈상태 UI가 이를 표시한다.
+  const [skills, setSkills] = useState<Skill[]>([]);
+  const [signals, setSignals] = useState<UserSignal[]>([]);
+  const [installed, setInstalled] = useState<InstalledTool[]>([]);
+  const [details, setDetails] = useState<Record<string, SkillDetail>>({});
+  const [myPlugins, setMyPlugins] = useState<MyPlugin[]>([]);
+  const [proposals, setProposals] = useState<Proposal[]>([]);
+  /** 런타임 첫 hydrate 진행 중 — 스크린이 스켈레톤 vs 빈상태를 구분하는 데 쓴다. */
+  const [hydrating, setHydrating] = useState(true);
   const [highlightedSkill, setHighlightedSkill] = useState<string | null>(null);
   const panelScrollRef = useRef<HTMLDivElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // runtime API에서 스킬 목록·메모리 로드 (GET /skills, GET /memories).
+  // 런타임 연결은 Electron health probe라 비동기 — provider 마운트 시점엔 아직 offline일 수
+  // 있다(그땐 ApiClient.get()이 { success: false } 반환). 그래서 마운트 때 한 번 시도하고,
+  // enabled가 true로 바뀌는 순간 다시 로드한다(api.onEnabledChange). 안 그러면 빈 목록으로 굳는다.
+  useEffect(() => {
+    const loadSkills = () => {
+      return api.getSkills().then((res) => {
+        if (!res.success || !res.data) return;
+        type RuntimeSkill = {
+          id: string; name: string; version: number; description: string;
+          state: 'active' | 'stale' | 'archived'; tags: string[];
+          use: number; patch: number; last_used_at: string | null; source?: string | null;
+        };
+        const raw = res.data as RuntimeSkill[];
+        const loadedSkills = raw.map(runtimeSkillToLearning);
+        const loadedDetails: Record<string, SkillDetail> = {};
+        raw.forEach((s) => { loadedDetails[s.id] = runtimeSkillToDetail({ ...s, source: s.source ?? null }); });
+        setSkills(loadedSkills);
+        setDetails(loadedDetails);
+      });
+    };
+    const loadMemories = () => {
+      return api.getMemories().then((res) => {
+        if (!res.success || !res.data) return;
+        type MemItem = { id: string; kind: 'fact' | 'preference'; content: string; created_at?: string };
+        const raw = res.data as { memories?: MemItem[] } | MemItem[];
+        const list: MemItem[] = Array.isArray(raw) ? raw : (raw.memories ?? []);
+        if (!list.length) return;
+        // 런타임 메모리를 UserSignal 형식으로 변환해 신호 목록에 병합.
+        setSignals((prev) => {
+          const existingIds = new Set(prev.map((s) => s.id));
+          const newSignals = list
+            .filter((m) => !existingIds.has(m.id))
+            .map((m): UserSignal => ({
+              id: m.id,
+              label: m.kind === 'fact' ? '사실' : '선호',
+              value: m.content,
+              conf: 0.8,
+              source: '런타임 메모리',
+            }));
+          return newSignals.length ? [...prev, ...newSignals] : prev;
+        });
+      });
+    };
+    // 설치된 플러그인 복원 (GET /plugins) → 내 플러그인. 런타임이 installed_artifacts에
+    // 영속하므로 재시작해도 남아야 한다(설치 후 사라지던 버그). platform 카탈로그와 교차참조해
+    // 스킬명·커넥터 설명까지 풍부하게 복원하고, 매칭이 없으면 런타임 메타로 폴백.
+    const loadPlugins = () => {
+      return Promise.all([api.getPlugins(), platform.getCatalog({ type: 'plugin' })]).then(
+        ([rt, cat]) => {
+          if (!rt.success || !rt.data) return; // 런타임 오프라인 → 빈 상태 유지
+          type RtPlugin = {
+            id: string; name: string; version: string; enabled: boolean;
+            required_connectors?: string[]; skill_count?: number; description?: string;
+          };
+          const installed = rt.data as unknown as RtPlugin[];
+          const catalog = cat.success && cat.data ? cat.data : [];
+          const byId = new Map(catalog.map((a) => [a.id, a] as const));
+          const mapped = installed.map((p): MyPlugin => {
+            const art = byId.get(p.id.replace(/^plugin:/, ''));
+            if (art) {
+              // 카탈로그 매칭: 마켓 Plugin으로 풍부하게, 단 정체성·상태는 런타임 기준.
+              return { ...marketPluginToMyPlugin(platformArtifactToPlugin(art)), id: p.id, enabled: p.enabled, version: p.version };
+            }
+            return runtimePluginToMyPlugin(p);
+          });
+          setMyPlugins(mapped);
+        },
+      );
+    };
+
+    // 첫 hydrate가 끝나면(성공/실패 무관) 로딩 플래그를 내려 빈상태/스켈레톤을 전환한다.
+    void Promise.allSettled([loadSkills(), loadMemories(), loadPlugins()]).then(() =>
+      setHydrating(false),
+    );
+    const unsub = api.onEnabledChange((enabled) => {
+      if (enabled) {
+        setHydrating(true);
+        void Promise.allSettled([loadSkills(), loadMemories(), loadPlugins()]).then(() =>
+          setHydrating(false),
+        );
+      }
+    });
+    return unsub;
+  }, []);
 
   const jumpToSkill = useCallback((id: string) => {
     setHighlightedSkill(id);
@@ -93,8 +246,17 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return id;
   }, []);
 
+  // install(plugin) = 마켓 → 내 플러그인 materialize. marketId 기준 멱등(중복 설치 방지).
+  const installPluginFromMarket = useCallback((market: MarketPlugin): string => {
+    const id = installedPluginId(market.id);
+    const myPlugin = marketPluginToMyPlugin(market);
+    setMyPlugins((prev) => (prev.some((p) => p.id === id) ? prev : [myPlugin, ...prev]));
+    return id;
+  }, []);
+
   const value = useMemo<LearningContextValue>(
     () => ({
+      hydrating,
       skills,
       setSkills,
       signals,
@@ -108,11 +270,12 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       proposals,
       setProposals,
       installSkillFromMarket,
+      installPluginFromMarket,
       highlightedSkill,
       jumpToSkill,
       panelScrollRef,
     }),
-    [skills, signals, installed, details, myPlugins, proposals, installSkillFromMarket, highlightedSkill, jumpToSkill],
+    [hydrating, skills, signals, installed, details, myPlugins, proposals, installSkillFromMarket, installPluginFromMarket, highlightedSkill, jumpToSkill],
   );
 
   return <LearningCtx.Provider value={value}>{children}</LearningCtx.Provider>;

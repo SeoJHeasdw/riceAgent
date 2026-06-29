@@ -15,8 +15,14 @@
 수동으로 따로 띄우려면:
 
 ```bash
-# 백엔드
+# 백엔드 (런타임 :8080)
 cd rice-runtime && source .venv/bin/activate && rice-runtime --port 8080 --token ""
+
+# 마켓 플랫폼 (rice-platform :7070) — 없어도 앱 동작, 마켓 카탈로그만 빈 상태
+cd rice-platform && python3 -m rice_platform --port 7070 --artifacts-dir ./artifacts
+# venv가 있으면:
+cd rice-platform && source .venv/bin/activate && rice-platform --port 7070 --artifacts-dir ./artifacts
+
 # 프론트 (※ npm run dev 아님 — electron 플러그인이 크래시함)
 cd rice-app && npx vite --config vite.renderer.config.ts
 ```
@@ -49,20 +55,3 @@ cd rice-app && npx vite --config vite.renderer.config.ts
 - rice-platform 설계(catalog·registry·publish)는 **PLATFORM_DESIGN**이 단일 출처다.
 - 모든 설계 결정은 확정되어 각 문서 본문에 평문으로 반영돼 있다 (별도 결정 등록부 없음).
 - **HERMES_LEARNING_LOOP_REFERENCE**는 읽기 전용 참조 자료다.
-
-## 현재 상태 (2026-06-26)
-
-- 단계: 아키텍처 확정 — 3레포 + rice-runtime 모듈화 모놀리스
-- 결정됨:
-  - 레포 3개: `rice-app` (Electron) / `rice-runtime` (로컬) / `rice-platform` (원격)
-  - 2개 백엔드 구조(로컬 runtime + 원격 platform), 7개 화면 매핑 검증
-  - rice-runtime 내부 6모듈(server·agent·execution·learning·connector·core) — Protocol 인터페이스 + composition_root.py DI
-  - Connector Management 설계 반영 (RUNTIME_DESIGN 9장, CONTRACTS 4장)
-  - **MVP 스코프 20건 확정**(2026-06-18): provider(Claude Sonnet 4.5 + Ollama Qwen), 단일 세션, FTS5만, PyInstaller, 자동업데이트 제외, Gmail 커넥터, SSE, STT 제외, 자체 artifact 스펙, 스킬 버전 히스토리·HITL 저장, platform 버전/검수/스키마, stale 3일·archive 7일, 마켓 실행=자식프로세스(데모 신뢰), tool 승인=SSE 이벤트+엔드포인트, mock 카탈로그 — 각 설계 문서 본문에 반영
-  - **데모 핵심 3건 설계 반영**(2026-06-22): ① 스킬 **개선(patch)** = 제안→HITL승인→적용(version++·.history, LEARNING_LOOP 5.2) ② 학습 **측정**(cold/warm ablation·eval harness·Learning Impact 패널, LEARNING_EVAL 신규) ③ HITL **승인 parking·timeout·재연결** 메커니즘(SSE+POST 고수, RUNTIME_DESIGN 5.1) — 검색(retrieval)은 MVP에서 견고화하지 않고 `skill_hit`으로 진단(RUNTIME_DESIGN 3장)
-- 설계 확정(2026-06-26): Hermes 차용표, `execute_code` 포함(repo 단위 코드 실행), Gmail 단일 커넥터, 엔드포인트 초안, 첨부 xlsx·png 선업로드, manifest/레이아웃, 270K 토큰 예산·서브에이전트 격리, 개선(patch), eval 패널(MySkillsScreen 구현)·WARM 스냅샷·결정적 성공체크 — 전부 각 설계 문서 본문에 반영.
-- 다음 액션:
-  1. composition_root.py 구현 + 모듈 간 Protocol 인터페이스 정의 (ILearningService, IConnectorService, IAgent 등)
-  2. PyInstaller 패키징 스파이크 (1~2일)
-  3. Connector(Gmail) OAuth 흐름 구현 (RUNTIME_DESIGN 9장) + `execute_code` 실행 경계(RUNTIME_DESIGN 5장) + 첨부 파이프라인(CONTRACTS 1.3)
-  4. 개선(patch) diff 카드 + Learning Impact 패널은 프론트 선구현 완료 → eval harness 골격(`rice-runtime/eval/`) + task 3~5개로 실측치 교체

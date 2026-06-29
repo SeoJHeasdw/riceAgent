@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Button, Icon, Tag, ResizeHandle, Toggle } from '../components/ui';
 import { useResizable } from '../hooks/useResizable';
 import { useLearning } from '../lib/learning/LearningContext';
+import { api } from '../lib/api';
 import { connectorIdForScope, type MyPlugin } from '../lib/learningData';
 
 /**
@@ -37,8 +38,17 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
   }
 
   const patch = (fn: (p: MyPlugin) => MyPlugin) => setMyPlugins((a) => a.map((x) => (x.id === pluginId ? fn(x) : x)));
-  const toggle = () => patch((x) => ({ ...x, enabled: !x.enabled }));
-  const remove = () => setMyPlugins((a) => a.filter((x) => x.id !== pluginId));
+  // 토글·삭제는 로컬 상태 + 런타임에도 반영해 재시작 후에도 일관되게 유지한다.
+  // (런타임 오프라인이거나 mock/낙관적 항목이면 api.isEnabled 가드로 no-op.)
+  const toggle = () => {
+    const next = !plugin.enabled;
+    patch((x) => ({ ...x, enabled: next }));
+    if (api.isEnabled) void api.setPluginEnabled(pluginId, next);
+  };
+  const remove = () => {
+    setMyPlugins((a) => a.filter((x) => x.id !== pluginId));
+    if (api.isEnabled) void api.removeArtifact(pluginId);
+  };
   const update = () =>
     plugin.update && patch((x) => ({ ...x, update: undefined, version: plugin.update!.version, updated: '방금' }));
   const addPermission = () =>
@@ -288,7 +298,7 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
 };
 
 function MyPluginsScreen() {
-  const { myPlugins } = useLearning();
+  const { myPlugins, hydrating } = useLearning();
   const [filter, setFilter] = useState<Filter>('전체');
   const [sel, setSel] = useState<string | null>(myPlugins[0]?.id ?? null);
 
@@ -434,7 +444,15 @@ function MyPluginsScreen() {
             </button>
           );
         })}
-        {list.length === 0 && <div className="p-10 text-center text-body-short-01 text-text-helper">해당하는 플러그인이 없어요.</div>}
+        {list.length === 0 && (
+          <div className="p-10 text-center text-body-short-01 text-text-helper">
+            {hydrating
+              ? '불러오는 중…'
+              : myPlugins.length === 0
+                ? '아직 설치된 플러그인이 없어요. 마켓에서 솔루션 전문가를 설치해보세요.'
+                : '해당하는 플러그인이 없어요.'}
+          </div>
+        )}
       </div>
 
       {/* List resize handle */}

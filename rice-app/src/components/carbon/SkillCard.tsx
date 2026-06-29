@@ -11,6 +11,7 @@ export interface SkillCardProps {
   description: string;
   author: string;
   team?: string;
+  version?: string;
   downloads: number;
   rating: number;
   points?: number;
@@ -25,6 +26,7 @@ export const SkillCard: React.FC<SkillCardProps> = ({
   description,
   author,
   team,
+  version,
   downloads,
   rating,
   points,
@@ -73,7 +75,7 @@ export const SkillCard: React.FC<SkillCardProps> = ({
             {name}
           </h3>
           <p className="text-caption-01 text-text-helper">
-            by {author}{team && ` · ${team}`}
+            by {author}{team && ` · ${team}`}{version && ` · v${version}`}
           </p>
         </div>
       </div>

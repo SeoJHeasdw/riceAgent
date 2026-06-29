@@ -78,13 +78,13 @@ Electron main process
 2. `tool_call` - Tool 호출 시작 (tool_name, arguments)
 3. `tool_result` - Tool 실행 결과
 4. `message` - 최종 응답 메시지 (delta 또는 complete)
-5. `skill_created` - 새 스킬 생성됨 (skill_id, title)
+5. `skill_created` - 새 스킬 생성됨 (skill_id, title, version)
 6. `memory_written` - 메모리 저장됨 (memory_type, content)
 7. `skill_patched` - 스킬 개선 적용됨 (skill_id, version) — LEARNING_LOOP 5.2
 8. `done` - 응답 완료
 9. `error` - 오류 발생 (error_code, message)
 
-> 제어 이벤트(별도, 각자 고유 `approval_id` 포함 — 정지/재개·timeout·재연결 처리는 1.2, 메커니즘은 RUNTIME_DESIGN 5.1): `tool_approval_required`(approval_id, tool_name, arguments) — 위험 tool 실행 전 발행 → 앱이 `POST /sessions/{id}/tool-approval`(approval_id 포함)로 응답. `skill_patch_proposed`(approval_id, skill_id, changelog, diff, trigger) — 스킬 개선 제안 발행 → 앱이 diff 카드 표시 후 `POST /skills/{id}/patch`(approval_id 포함)로 응답 (LEARNING_LOOP 5.2).
+> 제어 이벤트(별도, 각자 고유 `approval_id` 포함 — 정지/재개·timeout·재연결 처리는 1.2, 메커니즘은 RUNTIME_DESIGN 5.1): `tool_approval_required`(approval_id, tool_name, arguments) — 위험 tool 실행 전 발행 → 앱이 `POST /sessions/{id}/tool-approval`(approval_id 포함)로 응답. `skill_patch_proposed`(approval_id, skill_id, changelog, diff, trigger, from_version?, to_version?) — 스킬 개선 제안 발행 → 앱이 diff 카드 표시 후 `POST /skills/{id}/patch`(approval_id 포함)로 응답 (LEARNING_LOOP 5.2).
 
 - ✅ 스펙 소유: `rice-runtime`이 `contracts/runtime.yaml`(runtime OpenAPI 스펙)을 소유, `rice-app`은 코드젠 (REPO_STRATEGY 4.3, RUNTIME_DIRECTORY 1장)
 
@@ -163,7 +163,8 @@ artifact.tar.gz (skill)              artifact.tar.gz (plugin)
 | Method | Path | 용도 |
 |--------|------|------|
 | GET | `/catalog?type=&q=&category=&tags=&sort=` | 검색/목록/필터/정렬 |
-| GET | `/artifacts/{id}` / `/artifacts/{id}/download` | 상세/다운로드 |
+| GET | `/artifacts/{id}` / `/artifacts/{id}/download` | 상세/다운로드 (download는 `X-Checksum: sha256-…` 헤더 동봉) |
+| GET | `/artifacts/{id}/files/{path}` | artifact 내 개별 파일 내용 (app SkillFileBrowser lazy load) |
 | POST | `/artifacts` | 등록(publish) |
 | POST | `/artifacts/{id}/sponsor` | Blue Point 후원 (mock) |
 

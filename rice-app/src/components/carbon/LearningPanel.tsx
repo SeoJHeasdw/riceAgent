@@ -3,7 +3,6 @@ import { Icon, Tag, Toggle } from '../ui';
 import type { IconName } from '../ui/Icon';
 import { useLearning } from '../../lib/learning/LearningContext';
 import {
-  SESSION_DELTAS,
   type InstalledTool,
   type Proposal,
   type ProposalKind,
@@ -428,7 +427,7 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ isLearning = true,
         </PanelSection>
 
         {/* user model — editable signals */}
-        <PanelSection icon="user" title="나에 대한 모델" count={`신호 ${signals.length + 42}`}>
+        <PanelSection icon="user" title="나에 대한 모델" count={`신호 ${signals.length}`}>
           <div className="flex flex-col gap-2.5">
             {signals.map((u) => (
               <SignalRow
@@ -438,7 +437,9 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ isLearning = true,
                 onRemove={() => setSignals((arr) => arr.filter((x) => x.id !== u.id))}
               />
             ))}
-            {signals.length === 0 && <span className="text-caption-01 text-text-helper">모든 신호를 지웠어요.</span>}
+            {signals.length === 0 && (
+              <span className="text-caption-01 text-text-helper">아직 학습된 신호가 없어요. 대화에서 자동으로 쌓입니다.</span>
+            )}
           </div>
         </PanelSection>
 
@@ -490,18 +491,10 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ isLearning = true,
                 </div>
               );
             })}
+            {skills.length === 0 && (
+              <span className="text-caption-01 text-text-helper">아직 학습된 스킬이 없어요. 대화를 나누면 자동으로 자라납니다.</span>
+            )}
           </div>
-        </PanelSection>
-
-        {/* this session */}
-        <PanelSection icon="growth" title="이번 세션에서 배운 것">
-          <ul className="pl-4 flex flex-col gap-1.5 list-disc">
-            {SESSION_DELTAS.map((d, i) => (
-              <li key={i} className="text-caption-02 leading-[17px] text-text-secondary">
-                {d}
-              </li>
-            ))}
-          </ul>
         </PanelSection>
       </div>
     </div>

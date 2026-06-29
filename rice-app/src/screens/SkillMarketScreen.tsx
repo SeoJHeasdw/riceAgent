@@ -4,6 +4,7 @@ import { SkillCard } from '../components/carbon/SkillCard';
 import { MarketplaceHeader } from '../components/carbon/MarketplaceHeader';
 import { SponsorModal } from '../components/carbon/SponsorModal';
 import { ArtifactDetailModal } from '../components/carbon/ArtifactDetailModal';
+import { CardSkeletonGrid } from '../components/carbon/MarketSkeleton';
 import { NotificationVariant } from '../components/carbon/NotificationToast';
 import { SkillAuthorModal } from '../components/carbon/SkillAuthorModal';
 import { useToast } from '../lib/toast/ToastContext';
@@ -21,6 +22,7 @@ import { Skill } from '../lib/types';
 function SkillMarketScreen() {
   const {
     filteredSkills,
+    catalogLoading,
     searchQuery,
     setSearchQuery,
     sortBy,
@@ -236,7 +238,9 @@ function SkillMarketScreen() {
 
         {/* Skills Grid */}
         <div className="px-8 py-3 pb-10">
-          {categoryFilteredSkills.length > 0 ? (
+          {catalogLoading && categoryFilteredSkills.length === 0 ? (
+            <CardSkeletonGrid />
+          ) : categoryFilteredSkills.length > 0 ? (
             <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))' }}>
               {categoryFilteredSkills.map((skill) => {
                 const isNew = skill.id === highlightId;

@@ -1,5 +1,5 @@
-import type { Skill as MarketSkill, SkillFile } from './types';
-import type { Skill as OwnedSkill, SkillDetail } from './learningData';
+import type { Skill as MarketSkill, SkillFile, Plugin as MarketPlugin, PlatformArtifact } from './types';
+import type { Skill as OwnedSkill, SkillDetail, MyPlugin } from './learningData';
 import { getSkillFiles } from './skillFiles';
 
 /**
@@ -138,5 +138,118 @@ export function ownedSkillFiles(
 }
 
 export { toLearnVer };
+
+// ── 플러그인 브리지 (마켓 Plugin → 내 플러그인) ──────────────────────────────
+// 스킬의 marketSkillToOwned 와 대칭. 설치 시 마켓 Plugin을 "내 플러그인"(MyPlugin)으로
+// materialize 해 MyPluginsScreen에 즉시 뜨게 한다. marketId 기준 멱등.
+
+/** 설치된 마켓 플러그인의 안정적 소유 id. */
+export const installedPluginId = (marketId: string) => `inst-${marketId}`;
+
+// ── platform(rice-platform) artifact → 마켓 타입 변환 ────────────────────────
+// 카탈로그 응답(PlatformArtifact)을 앱 도메인(Skill·Plugin)으로. MarketplaceContext(카탈로그
+// 로드)와 LearningContext(설치목록 복원)가 공유한다.
+
+/** platform skill artifact → 마켓 Skill. files는 모달에서 lazy load 하므로 비움. */
+export function platformArtifactToSkill(a: PlatformArtifact): MarketSkill {
+  return {
+    id: `platform-${a.id}`,
+    name: a.display_name || a.name,
+    description: a.description,
+    version: a.version,
+    author: a.author_name || 'unknown',
+    team: a.author_team || undefined,
+    category: a.category,
+    tags: a.tags,
+    downloads: a.download_count,
+    rating: 0,
+    points: 0,
+    installed: false,
+    enabled: false,
+    files: undefined,
+  };
+}
+
+/**
+ * platform plugin artifact → 마켓 Plugin.
+ * plugin = skills 묶음 + 요구 connector (CONTRACTS §2.2). 카탈로그 메타로 구성:
+ * skillCount=skill_files 수, connectors=.mcp.json 상세(없으면 requires 이름), gains=태그.
+ */
+export function platformArtifactToPlugin(a: PlatformArtifact): MarketPlugin {
+  // skill_files("skills/<name>/SKILL.md") → 읽기 쉬운 스킬명. 내용(desc)은 모달에서 lazy load.
+  const skillNames = a.skill_files.map((f) =>
+    f.replace(/^skills\//, '').replace(/\/SKILL\.md$/i, '').replace(/\.md$/i, ''),
+  );
+  const connectors = a.connectors?.length
+    ? a.connectors.map((c) => ({ name: c.title || c.name, desc: c.description || undefined }))
+    : (a.requires?.connectors ?? []).map((c) => ({ name: c }));
+  return {
+    id: `platform-${a.id}`,
+    name: a.display_name || a.name,
+    description: a.description,
+    version: a.version,
+    author: a.author_name || 'unknown',
+    provider: a.author_team || a.author_name || 'community',
+    category: a.category,
+    tags: a.tags,
+    skillCount: a.skill_files.length,
+    gains: a.tags.length ? a.tags.slice(0, 4).join(' · ') : a.category,
+    useCases: [],
+    skills: skillNames.map((command) => ({ command, desc: '' })),
+    connectors,
+    installed: false,
+    enabled: false,
+  };
+}
+
+/**
+ * 런타임 GET /plugins(PluginInfo) → 내 플러그인(MyPlugin) 폴백 변환.
+ * 카탈로그에 매칭이 없을 때만 사용(설치는 됐으나 마켓엔 없는 경우). 풍부한 복원은
+ * LearningContext가 platform 카탈로그와 교차참조해 처리한다.
+ */
+export function runtimePluginToMyPlugin(p: {
+  id: string;
+  name: string;
+  version: string;
+  enabled: boolean;
+  required_connectors?: string[];
+  description?: string;
+}): MyPlugin {
+  return {
+    id: p.id,
+    name: p.name,
+    icon: 'plug',
+    enabled: p.enabled,
+    source: '설치됨 · 마켓',
+    version: p.version,
+    author: '',
+    updated: '설치됨',
+    summary: p.description || '',
+    skills: [],
+    knowledge: [],
+    permissions: (p.required_connectors ?? []).map((c) => ({ name: c, mode: '연결 필요' })),
+    examples: [],
+  };
+}
+
+export function marketPluginToMyPlugin(p: MarketPlugin): MyPlugin {
+  return {
+    id: installedPluginId(p.id),
+    name: p.name,
+    icon: 'plug',
+    enabled: true,
+    source: `Plugin Market · ${p.provider}`,
+    version: p.version,
+    author: p.author,
+    updated: '방금 설치',
+    summary: p.description,
+    // 마켓 PluginSkill { command, desc } → 내 PluginSkill { name, desc }
+    skills: (p.skills ?? []).map((s) => ({ name: s.command, desc: s.desc })),
+    knowledge: (p.knowledge ?? []).map((k) => ({ name: k.name, desc: k.desc, meta: k.meta ?? '' })),
+    // 요구 connector를 권한 항목으로 표시 (연결 필요 상태)
+    permissions: (p.connectors ?? []).map((c) => ({ name: c.name, mode: '연결 필요' })),
+    examples: p.useCases ?? [],
+  };
+}
 
 // Made with Bob

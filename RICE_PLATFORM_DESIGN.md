@@ -47,9 +47,37 @@ rice-platform/                              # 배포물 ③ : 원격 마켓 서�
 - **sort**: `popular`(다운로드수) | `recent`(게시일) | `name`
 - ★ 인덱스: `(type, category)`, GIN(tags), `tsvector`(q)
 
+### 3.1 카탈로그 응답 (파생 필드)
+
+manifest(CONTRACTS 2.1) 필드에 더해, registry가 artifact 디렉토리 구조에서 파생해 함께 노출하는 필드 — Anthropic skills 구조(SKILL.md + scripts/references/assets) 반영:
+
+- `license`: manifest `license` 또는 `LICENSE.txt` 존재 시 도출
+- `skill_files`: 진입점 파일 목록(skill=`SKILL.md`, plugin=`skills/*.md`) — app이 파일 내용을 lazy load 할 때 사용
+- `bundled_resources` / `has_bundled_resources`: 번들 리소스 디렉토리(`scripts`·`references`·`assets`·`templates`) 존재 여부
+- `description`: **LLM의 스킬 트리거 결정에 쓰이는 1차 메커니즘**이므로 트리거 조건을 포함해 완전하게 노출(요약·절단 금지)
+
+### 3.2 파일 내용 조회
+
+`GET /artifacts/{id}/files/{path}` — artifact 내 개별 파일 내용. app의 SkillFileBrowser가 `skill_files`를 받아 파일별로 lazy load 한다.
+
+- 텍스트: `{ path, content, language }` (language는 확장자에서 추론)
+- 바이너리(폰트·이미지): `{ path, content: null, language: "binary", binary: true }`
+- 보안: artifact 루트 밖으로 나가는 경로는 403 (resolve 후 루트 포함 검사)
+
 ---
 
 ## 4. Artifact Registry & 버전 관리
+
+### 4.0 다중 소스 (rice artifact + Claude 플러그인)
+
+registry는 두 종류의 소스를 함께 카탈로그로 노출한다 (artifact id = 디렉토리명):
+
+1. **rice 네이티브 artifact** — `artifacts/<name>/rice-artifact.yaml` (skill 중심)
+2. **실제 Claude Code 플러그인** — `.claude-plugin/{marketplace.json, plugin.json}` + `.mcp.json` 형식 (예: `claude-for-legal`). `RICE_PLUGIN_MARKETPLACES` 또는 레포 루트 자동 감지로 **in-place 인제스트**(복사·변환 없음). `.mcp.json`의 `mcpServers`가 `requires.connectors`로 매핑된다.
+
+> ★ skill ≠ plugin: skill은 단일 `SKILL.md`(선언적). plugin은 `skills/` + `agents/` + `hooks/` + MCP 커넥터 묶음 — sandbox 경계와 Connector 권한은 plugin에만 해당(CONTRACTS §2.2).
+
+### 4.1 버전 관리
 
 - artifact는 **다중 버전 보관**(semver). 설치 시 특정 버전 다운로드, `requires.runtime` 호환 검사([RICE_REPO_STRATEGY.md](RICE_REPO_STRATEGY.md) 4.4).
 - 각 버전: manifest + 패키지(`artifact.tar.gz`) + `checksum`(sha256) 저장. 다운로드 무결성은 runtime이 검증(CONTRACTS 2.3).

@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
+import { promises as fs } from 'fs';
 import { fileURLToPath } from 'url';
 import { RuntimeManager } from './runtime.js';
 
@@ -134,6 +135,31 @@ ipcMain.handle('app:get-path', (_event, name: string) => {
     throw new Error(`Disallowed path name: ${name}`);
   }
   return app.getPath(name as Parameters<typeof app.getPath>[0]);
+});
+
+// Artifact 다운로드 (platform tar.gz → 임시 파일).
+// 런타임 POST /artifacts/install 은 로컬 파일 *경로* + manifest(checksum)를 요구하므로
+// (CONTRACTS §2.3), 파일을 쓸 수 없는 렌더러 대신 main이 받아 임시 경로에 저장하고
+// 경로와 X-Checksum(sha256-<hex>)을 돌려준다. runtime이 이 체크섬으로 무결성을 검증한다.
+ipcMain.handle('artifact:download', async (_event, url: string) => {
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`artifact download failed: ${res.status} ${res.statusText}`);
+  }
+  const checksum = res.headers.get('x-checksum') ?? '';
+  const buf = Buffer.from(await res.arrayBuffer());
+
+  // URL ".../artifacts/{id}/download" 에서 안전한 파일명 추출 (영숫자·-_ 만 허용).
+  const segs = new URL(url).pathname.split('/').filter(Boolean);
+  const dlIdx = segs.lastIndexOf('download');
+  const rawId = dlIdx > 0 ? segs[dlIdx - 1] : `artifact-${Date.now()}`;
+  const safeId = rawId.replace(/[^a-zA-Z0-9._-]/g, '_');
+
+  const dir = path.join(app.getPath('temp'), 'rice-artifacts');
+  await fs.mkdir(dir, { recursive: true });
+  const filePath = path.join(dir, `${safeId}.tar.gz`);
+  await fs.writeFile(filePath, buf);
+  return { path: filePath, checksum };
 });
 
 // Made with Bob

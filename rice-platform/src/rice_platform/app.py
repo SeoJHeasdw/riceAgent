@@ -30,7 +30,13 @@ from fastapi import FastAPI, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
-from .registry import build_download_package, get_artifact, list_artifacts, _artifacts_dir
+from .registry import (
+    build_download_package,
+    get_artifact,
+    list_artifacts,
+    _artifacts_dir,
+    _resolve_artifact_dir,
+)
 
 log = logging.getLogger("rice.platform")
 
@@ -85,6 +91,62 @@ async def artifact_detail(artifact_id: str):
 
 
 # ── download (CONTRACTS §2.3) ─────────────────────────────────────────────────
+
+@app.get("/artifacts/{artifact_id}/files/{file_path:path}")
+async def artifact_file(artifact_id: str, file_path: str):
+    """artifact 내 개별 파일 내용 반환 (프론트 SkillFileBrowser 연결용).
+
+    GET /artifacts/caveman/files/SKILL.md
+    GET /artifacts/algorithmic-art/files/templates/viewer.html
+
+    응답: { success, data: { path, content, language } }
+    sandbox: artifact 루트 밖 경로 거부.
+    """
+    artifact_dir = _resolve_artifact_dir(artifact_id)
+    if artifact_dir is None or not artifact_dir.is_dir():
+        raise HTTPException(status_code=404, detail=f"artifact not found: {artifact_id}")
+
+    # sandbox: artifact 루트 밖 경로 거부
+    target = (artifact_dir / file_path).resolve()
+    resolved_root = artifact_dir.resolve()
+    if resolved_root not in target.parents and target != resolved_root:
+        raise HTTPException(status_code=403, detail="path escapes artifact root")
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail=f"file not found: {file_path}")
+
+    # 바이너리 파일(폰트, 이미지 등)은 내용 대신 메타만 반환
+    binary_exts = {'.ttf', '.otf', '.woff', '.woff2', '.png', '.jpg', '.jpeg', '.gif', '.ico', '.pdf'}
+    if target.suffix.lower() in binary_exts:
+        return {"success": True, "data": {"path": file_path, "content": None, "language": "binary", "binary": True}}
+
+    try:
+        content = target.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    language = _language_from_path(file_path)
+    return {"success": True, "data": {"path": file_path, "content": content, "language": language}}
+
+
+def _language_from_path(path: str) -> str:
+    """파일 경로에서 언어 추론 (프론트 SkillFileLanguage 타입과 일치)."""
+    ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
+    mapping = {
+        "md": "markdown",
+        "py": "python",
+        "sh": "shell",
+        "bash": "shell",
+        "html": "html",
+        "htm": "html",
+        "json": "json",
+        "js": "text",
+        "ts": "text",
+        "txt": "text",
+        "yaml": "text",
+        "yml": "text",
+    }
+    return mapping.get(ext, "text")
+
 
 @app.get("/artifacts/{artifact_id}/download")
 async def artifact_download(artifact_id: str):
@@ -155,6 +217,9 @@ async def publish(request: Request):
 
     artifact_dir = _artifacts_dir() / name
     artifact_dir.mkdir(parents=True, exist_ok=True)
+    # 샌드박스 비교는 양쪽 모두 resolve 한 경로로 한다 (artifact_file 핸들러와 동일 규칙).
+    # 한쪽만 resolve 하면 심볼릭링크가 낀 경로에서 정상 파일이 조용히 누락될 수 있다.
+    resolved_dir = artifact_dir.resolve()
 
     # manifest 저장
     with (artifact_dir / "rice-artifact.yaml").open("w", encoding="utf-8") as f:
@@ -168,7 +233,7 @@ async def publish(request: Request):
             continue
         target = (artifact_dir / rel_path).resolve()
         # sandbox: artifact_dir 밖으로 나가는 경로 거부
-        if artifact_dir not in target.parents and target != artifact_dir:
+        if resolved_dir not in target.parents and target != resolved_dir:
             continue
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")

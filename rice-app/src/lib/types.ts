@@ -267,4 +267,42 @@ export interface AppSettings {
   };
 }
 
+// ── Platform API types (rice-platform, localhost:7070) ──────────
+// registry._to_catalog_entry() 응답 스키마와 1:1 대응.
+export interface PlatformArtifact {
+  id: string;
+  type: 'skill' | 'plugin';
+  name: string;
+  display_name: string;
+  description: string;
+  version: string;
+  category: string;
+  tags: string[];
+  license: string;
+  author_name: string;
+  author_team: string;
+  download_count: number;
+  checksum: string;
+  /** manifest.requires — runtime 버전 제약 + plugin이 요구하는 connector 목록 (CONTRACTS §2.1) */
+  requires: { runtime?: string; connectors?: string[] };
+  published_at: string;
+  bundled_resources: string[];
+  skill_files: string[];
+  has_bundled_resources: boolean;
+  /** plugin이 요구하는 외부 연결 (.mcp.json mcpServers) — 이름·제목·설명 */
+  connectors: { name: string; title?: string; description?: string }[];
+}
+
+export interface PlatformFileResponse {
+  path: string;
+  content: string | null;
+  language: string;
+  binary?: boolean;
+}
+
+export interface PlatformPublishPayload {
+  manifest: Record<string, unknown>;
+  files: { path: string; content: string }[];
+}
+
 // Made with Bob

@@ -1291,7 +1291,7 @@ const SkillDetailView: React.FC<{
 };
 
 function MySkillsScreen() {
-  const { skills, setSkills } = useLearning();
+  const { skills, setSkills, hydrating } = useLearning();
   const [filter, setFilter] = useState<Filter>('전체');
   const [sel, setSel] = useState<string | null>('s1');
   // "학습 효과" (Learning Impact) panel swaps into the detail pane (LE-1: keep 7 screens)
@@ -1527,7 +1527,15 @@ function MySkillsScreen() {
             </button>
           );
         })}
-        {list.length === 0 && <div className="p-10 text-center text-body-short-01 text-text-helper">해당하는 스킬이 없어요.</div>}
+        {list.length === 0 && (
+          <div className="p-10 text-center text-body-short-01 text-text-helper">
+            {hydrating
+              ? '불러오는 중…'
+              : skills.length === 0
+                ? '아직 학습된 스킬이 없어요. 대화를 나누면 자동으로 스킬이 자라납니다.'
+                : '해당하는 스킬이 없어요.'}
+          </div>
+        )}
       </div>
 
       {/* List resize handle */}

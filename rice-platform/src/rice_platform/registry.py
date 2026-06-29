@@ -13,17 +13,21 @@ MVP: PostgreSQL 대신 로컬 디렉토리를 registry로 사용.
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import io
+import json
 import os
 import tarfile
 import tempfile
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 _DEFAULT_ARTIFACTS_DIR = Path(__file__).parent.parent.parent / "artifacts"
+_REPO_ROOT = _DEFAULT_ARTIFACTS_DIR.parent.parent  # <repo>/
 
 
 def _artifacts_dir() -> Path:
@@ -32,16 +36,142 @@ def _artifacts_dir() -> Path:
 
 
 def _load_manifest(artifact_dir: Path) -> dict[str, Any] | None:
-    """rice-artifact.yaml 읽기. 없으면 None."""
+    """artifact manifest 읽기.
+
+    1순위: rice-artifact.yaml (rice 네이티브 artifact)
+    2순위: .claude-plugin/plugin.json (실제 Claude Code 플러그인 — skill 묶음이 아니라
+           agents·hooks·skills·MCP 커넥터를 포함하는 패키지)
+    없으면 None.
+    """
     yaml_path = artifact_dir / "rice-artifact.yaml"
-    if not yaml_path.exists():
-        return None
+    if yaml_path.exists():
+        try:
+            with yaml_path.open(encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+            return data if isinstance(data, dict) else None
+        except Exception:
+            return None
+    if (artifact_dir / ".claude-plugin" / "plugin.json").exists():
+        return _claude_plugin_manifest(artifact_dir)
+    return None
+
+
+# ── Claude Code 플러그인 마켓플레이스 인제스트 ────────────────────────────────
+# 실제 Anthropic 플러그인(claude-for-legal 등)은 rice-artifact.yaml 대신
+# .claude-plugin/{marketplace.json, plugin.json} + .mcp.json 형식을 쓴다.
+# registry가 이 형식을 직접 읽어 카탈로그에 노출한다(파일 복사·변환 없이 in-place).
+
+
+def _marketplace_dirs() -> list[Path]:
+    """Claude 플러그인 마켓플레이스 디렉토리들 (.claude-plugin/marketplace.json 보유).
+
+    RICE_PLUGIN_MARKETPLACES(os.pathsep 구분) 우선, 없으면 레포 루트의 claude-for-legal 자동 감지.
+    """
+    env = os.environ.get("RICE_PLUGIN_MARKETPLACES")
+    if env:
+        return [Path(p) for p in env.split(os.pathsep) if p.strip()]
+    default = _REPO_ROOT / "claude-for-legal"
+    if (default / ".claude-plugin" / "marketplace.json").exists():
+        return [default]
+    return []
+
+
+def _iter_claude_plugins() -> Iterator[tuple[str, Path, dict[str, Any]]]:
+    """마켓플레이스의 각 플러그인 → (id, plugin_dir, marketplace_entry)."""
+    for mkt in _marketplace_dirs():
+        manifest_path = mkt / ".claude-plugin" / "marketplace.json"
+        try:
+            data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        for entry in data.get("plugins", []):
+            name = entry.get("name", "")
+            source = entry.get("source", "")
+            if not name or not source:
+                continue
+            plugin_dir = (mkt / source).resolve()
+            if plugin_dir.is_dir():
+                yield name, plugin_dir, entry
+
+
+def _read_json(path: Path) -> dict[str, Any]:
     try:
-        with yaml_path.open(encoding="utf-8") as f:
-            data = yaml.safe_load(f)
-        return data if isinstance(data, dict) else None
-    except Exception:
-        return None
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _claude_plugin_manifest(plugin_dir: Path, entry: dict[str, Any] | None = None) -> dict[str, Any]:
+    """.claude-plugin/plugin.json + .mcp.json (+ marketplace entry) → rice manifest dict.
+
+    - connectors: .mcp.json 의 mcpServers 키 (예: Slack, Google Drive) — plugin이 요구하는 외부 연결
+    - tags: .mcp.json 의 recommendedCategories
+    - display_name/description: marketplace entry 우선(거기에만 displayName이 있음), 없으면 plugin.json
+    """
+    entry = entry or {}
+    pj = _read_json(plugin_dir / ".claude-plugin" / "plugin.json")
+
+    mcp = _read_json(plugin_dir / ".mcp.json")
+    connectors = list((mcp.get("mcpServers") or {}).keys())
+    tags = list(mcp.get("recommendedCategories") or [])
+
+    author = entry.get("author") or pj.get("author") or {}
+    if not isinstance(author, dict):
+        author = {"name": str(author)}
+
+    requires: dict[str, Any] = {}
+    if connectors:
+        requires["connectors"] = connectors
+
+    return {
+        "schema_version": 1,
+        "type": "plugin",
+        "name": entry.get("name") or pj.get("name", plugin_dir.name),
+        "version": pj.get("version", "1.0.0"),
+        "display_name": entry.get("displayName") or pj.get("name", plugin_dir.name),
+        "description": (entry.get("description") or pj.get("description", "")).strip(),
+        "category": "",
+        "tags": tags,
+        "author": author,
+        "requires": requires,
+        "license": "",
+    }
+
+
+def _iter_artifacts() -> list[tuple[Path, dict[str, Any]]]:
+    """카탈로그 대상 (artifact_dir, manifest) 전체 — rice artifacts + Claude 플러그인.
+
+    dir 이름이 곧 artifact id. 같은 id가 양쪽에 있으면 rice artifacts 를 우선한다.
+    """
+    out: list[tuple[Path, dict[str, Any]]] = []
+    seen: set[str] = set()
+
+    root = _artifacts_dir()
+    if root.exists():
+        for d in sorted(root.iterdir()):
+            if not d.is_dir():
+                continue
+            manifest = _load_manifest(d)
+            if manifest is not None:
+                out.append((d, manifest))
+                seen.add(d.name)
+
+    for name, pdir, entry in _iter_claude_plugins():
+        if name in seen:
+            continue
+        out.append((pdir, _claude_plugin_manifest(pdir, entry)))
+        seen.add(name)
+
+    return out
+
+
+def _resolve_artifact_dir(artifact_id: str) -> Path | None:
+    """artifact id → 실제 디렉토리 (rice artifacts 또는 Claude 플러그인). 파일/다운로드 공용."""
+    for d, _m in _iter_artifacts():
+        if d.name == artifact_id:
+            return d
+    return None
 
 
 def list_artifacts(
@@ -60,18 +190,8 @@ def list_artifacts(
     tags:          manifest tags 필터 (AND)
     sort:          popular | recent | name
     """
-    root = _artifacts_dir()
-    if not root.exists():
-        return []
-
     results: list[dict[str, Any]] = []
-    for artifact_dir in sorted(root.iterdir()):
-        if not artifact_dir.is_dir():
-            continue
-        manifest = _load_manifest(artifact_dir)
-        if manifest is None:
-            continue
-
+    for artifact_dir, manifest in _iter_artifacts():
         # type 필터
         if artifact_type and manifest.get("type") != artifact_type:
             continue
@@ -112,14 +232,10 @@ def list_artifacts(
 
 def get_artifact(artifact_id: str) -> dict[str, Any] | None:
     """단일 artifact 상세 조회 (GET /artifacts/{id})."""
-    root = _artifacts_dir()
-    artifact_dir = root / artifact_id
-    if not artifact_dir.is_dir():
-        return None
-    manifest = _load_manifest(artifact_dir)
-    if manifest is None:
-        return None
-    return _to_catalog_entry(manifest, artifact_dir)
+    for artifact_dir, manifest in _iter_artifacts():
+        if artifact_dir.name == artifact_id:
+            return _to_catalog_entry(manifest, artifact_dir)
+    return None
 
 
 def build_download_package(artifact_id: str) -> tuple[bytes, str] | None:
@@ -129,14 +245,25 @@ def build_download_package(artifact_id: str) -> tuple[bytes, str] | None:
          production에서는 미리 만들어 캐싱해야 한다.
     Returns (archive_bytes, checksum_hex) 또는 None (artifact 없음).
     """
-    root = _artifacts_dir()
-    artifact_dir = root / artifact_id
-    if not artifact_dir.is_dir():
+    artifact_dir = _resolve_artifact_dir(artifact_id)
+    if artifact_dir is None:
         return None
 
+    # 결정적(reproducible) tar.gz: 정렬된 파일 + 고정 mtime/uid/gid + gzip mtime=0.
+    # → 내용이 같으면 항상 같은 체크섬(요청마다 흔들리지 않음 = 캐시 키 + 무결성 앵커).
+    def _norm(ti: tarfile.TarInfo) -> tarfile.TarInfo:
+        ti.mtime = 0
+        ti.uid = ti.gid = 0
+        ti.uname = ti.gname = ""
+        return ti
+
+    files = sorted(p for p in artifact_dir.rglob("*") if p.is_file())
     buf = io.BytesIO()
-    with tarfile.open(fileobj=buf, mode="w:gz") as tf:
-        tf.add(str(artifact_dir), arcname=artifact_id)
+    with gzip.GzipFile(fileobj=buf, mode="wb", mtime=0) as gz:
+        with tarfile.open(fileobj=gz, mode="w") as tf:
+            for p in files:
+                arcname = f"{artifact_id}/{p.relative_to(artifact_dir).as_posix()}"
+                tf.add(str(p), arcname=arcname, filter=_norm)
     data = buf.getvalue()
     checksum = hashlib.sha256(data).hexdigest()
     return data, checksum
@@ -145,21 +272,77 @@ def build_download_package(artifact_id: str) -> tuple[bytes, str] | None:
 # ── 내부 헬퍼 ─────────────────────────────────────────────────────────────────
 
 def _to_catalog_entry(manifest: dict[str, Any], artifact_dir: Path) -> dict[str, Any]:
-    """manifest dict → catalog API response dict."""
+    """manifest dict → catalog API response dict.
+
+    Anthropic skills 구조 반영 (spec §Anatomy of a Skill):
+    - description: LLM의 스킬 트리거 결정에 쓰이는 1차 메커니즘 → 그대로 노출
+    - license: manifest 또는 LICENSE.txt에서 추출
+    - bundled_resources: scripts/, references/, assets/ 등 서브디렉토리 존재 여부
+    - skill_files: SKILL.md 파일 목록 (skill 타입)
+    """
     author = manifest.get("author") or {}
+
+    # license: manifest 필드 우선, 없으면 LICENSE.txt 존재 여부로 판단
+    license_val = manifest.get("license", "")
+    if not license_val and (artifact_dir / "LICENSE.txt").exists():
+        license_val = "See LICENSE.txt"
+
+    # bundled resources 존재 여부.
+    #  - skill 계열: scripts/, references/, assets/, templates/
+    #  - plugin 계열(실제 Claude 플러그인): agents/, hooks/, commands/, skills/
+    resource_dirs = ["scripts", "references", "assets", "templates", "agents", "hooks", "commands", "skills"]
+    bundled_resources = [d for d in resource_dirs if (artifact_dir / d).is_dir()]
+
+    # skill_files: skill 타입은 SKILL.md, plugin 타입은 skills/ 묶음.
+    # plugin 레이아웃은 표준 skills/<name>/SKILL.md (CONTRACTS §2.2, Anthropic skills 구조)이며,
+    # 평면 skills/*.md 도 느슨하게 허용한다.
+    skill_files: list[str] = []
+    if (artifact_dir / "SKILL.md").exists():
+        skill_files.append("SKILL.md")
+    skills_subdir = artifact_dir / "skills"
+    if skills_subdir.is_dir():
+        skill_files.extend(f"skills/{p.name}" for p in sorted(skills_subdir.glob("*.md")))
+        skill_files.extend(
+            f"skills/{sub.name}/SKILL.md"
+            for sub in sorted(skills_subdir.iterdir())
+            if sub.is_dir() and (sub / "SKILL.md").exists()
+        )
+
+    # connectors(상세): plugin의 .mcp.json 에서 title·description까지 추출(프론트 커넥터 섹션용).
+    # .mcp.json 이 없으면 requires.connectors 이름만으로 폴백.
+    connectors: list[dict[str, str]] = []
+    mcp_path = artifact_dir / ".mcp.json"
+    if mcp_path.exists():
+        servers = _read_json(mcp_path).get("mcpServers") or {}
+        connectors = [
+            {"name": k, "title": (v or {}).get("title", k), "description": (v or {}).get("description", "")}
+            for k, v in servers.items()
+        ]
+    if not connectors:
+        req_conns = (manifest.get("requires") or {}).get("connectors") or []
+        connectors = [{"name": c, "title": c, "description": ""} for c in req_conns]
+
     return {
         "id": artifact_dir.name,
         "type": manifest.get("type", "skill"),
         "name": manifest.get("name", artifact_dir.name),
         "display_name": manifest.get("display_name") or manifest.get("name", ""),
+        # description은 LLM 트리거 메커니즘 — 트리거 조건을 포함해 완전하게 노출
         "description": manifest.get("description", ""),
         "version": manifest.get("version", "1.0.0"),
         "category": manifest.get("category", ""),
         "tags": manifest.get("tags") or [],
+        "license": license_val,
         "author_name": author.get("name", "") if isinstance(author, dict) else "",
         "author_team": author.get("team", "") if isinstance(author, dict) else "",
         "download_count": manifest.get("download_count", 0),
         "checksum": "",  # 다운로드 시점에 계산
         "requires": manifest.get("requires") or {},
         "published_at": manifest.get("published_at", ""),
+        # Anthropic 구조 반영: 스킬에 번들된 리소스 존재 여부
+        "bundled_resources": bundled_resources,
+        "skill_files": skill_files,
+        "has_bundled_resources": len(bundled_resources) > 0,
+        # plugin이 요구하는 외부 연결(.mcp.json) — 이름·제목·설명
+        "connectors": connectors,
     }

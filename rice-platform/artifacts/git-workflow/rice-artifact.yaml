@@ -4,9 +4,10 @@ name: git-workflow
 version: 1.2.0
 display_name: "Git Workflow Assistant"
 description: >
-  체계적인 Git 워크플로우를 안내합니다. 브랜치 전략, 커밋 메시지 작성,
-  PR 생성, 충돌 해결까지 단계별로 도와줍니다.
-  /git-commit, /git-pr, /git-conflict 커맨드로 호출하세요.
+  체계적인 Git 워크플로우를 안내합니다. 브랜치 전략, 커밋 메시지(Conventional Commits),
+  PR 작성, 충돌 해결까지 단계별로 가이드합니다. 커밋 메시지 작성, PR 설명 작성,
+  Git 충돌 해결, 브랜치 전략을 묻는 모든 요청에서 이 스킬을 사용하세요.
+  /git-commit, /git-pr, /git-conflict 커맨드로 호출 가능.
 category: "개발"
 tags: ["git", "workflow", "vcs", "collaboration", "commit"]
 author:

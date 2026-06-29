@@ -1,15 +1,7 @@
-import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Skill, Plugin } from '../types';
-import { mockSkills, mockPlugins } from '../mockData';
-import { SKILLS, SKILL_DETAILS } from '../learningData';
-import { ownedToMarketSkill } from '../skillBridge';
-
-// 시드에서 이미 공유된 내 스킬(detail.shared)을 마켓에도 게시된 상태로 올린다 —
-// "공유됨" 표시가 실제 마켓 등재와 일치하도록. (이후 내 스킬에서 공유 토글로 추가/제거)
-const seededPublishedSkills = (): Skill[] =>
-  SKILLS.filter((s) => SKILL_DETAILS[s.id]?.shared).map((s) =>
-    ownedToMarketSkill({ ...s, shared: true }, SKILL_DETAILS[s.id]),
-  );
+import { platformArtifactToSkill, platformArtifactToPlugin } from '../skillBridge';
+import { platform, api } from '../api';
 
 /**
  * MarketplaceContext — single source of truth for the skill/plugin market,
@@ -34,6 +26,8 @@ export interface MarketplaceContextValue {
   skills: Skill[];
   plugins: Plugin[];
   isLoading: boolean;
+  /** 카탈로그 첫 로드 진행 중 (스켈레톤 vs 빈상태 구분용) */
+  catalogLoading: boolean;
   searchQuery: string;
   setSearchQuery: (query: string) => void;
   sortBy: string;
@@ -59,13 +53,27 @@ export interface MarketplaceContextValue {
 const MarketplaceCtx = createContext<MarketplaceContextValue | null>(null);
 
 export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [skills, setSkills] = useState<Skill[]>(() => [...seededPublishedSkills(), ...mockSkills]);
-  const [plugins, setPlugins] = useState<Plugin[]>(mockPlugins);
+  // mock 시드 제거 — 마켓은 전적으로 platform 카탈로그에서 채운다. platform 오프라인이면 빈 상태.
+  const [skills, setSkills] = useState<Skill[]>([]);
+  const [plugins, setPlugins] = useState<Plugin[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  /** 카탈로그 첫 로드 진행 중 — 스크린이 스켈레톤/빈상태를 구분하는 데 쓴다. */
+  const [catalogLoading, setCatalogLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState('popular');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [bluePointBalance, setBluePointBalance] = useState(12480);
+
+  // platform 카탈로그 로드 (skill + plugin). 오프라인이면 빈 상태로 남는다(빈상태 UI가 처리).
+  useEffect(() => {
+    const loadSkills = platform.getCatalog({ type: 'skill', sort: 'popular' }).then((res) => {
+      if (res.success && res.data) setSkills(res.data.map(platformArtifactToSkill));
+    });
+    const loadPlugins = platform.getCatalog({ type: 'plugin', sort: 'popular' }).then((res) => {
+      if (res.success && res.data) setPlugins(res.data.map(platformArtifactToPlugin));
+    });
+    void Promise.allSettled([loadSkills, loadPlugins]).then(() => setCatalogLoading(false));
+  }, []);
 
   const toggleTag = useCallback((tag: string) => {
     setSelectedTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]));
@@ -135,7 +143,49 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   const installArtifact = useCallback(async (id: string, type: 'skill' | 'plugin') => {
     setIsLoading(true);
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    // platform 스킬(id: "platform-{name}")이면 실제 설치 파이프라인 실행 (CONTRACTS §2.3):
+    //   1) Electron main이 platform에서 tar.gz를 받아 임시 경로에 저장 (+ X-Checksum)
+    //   2) artifact 상세로 manifest 구성 (checksum 포함 → runtime이 무결성 검증)
+    //   3) runtime POST /artifacts/install { path, manifest } 로 설치
+    // runtime(api.isEnabled)·Electron 브리지가 모두 있어야 실제 경로를 타고,
+    // 그 외에는 mock 지연으로 폴백한다 (렌더러-only dev / 오프라인).
+    const bridge = (
+      window as {
+        electronAPI?: { artifact?: { download: (url: string) => Promise<{ path: string; checksum: string }> } };
+      }
+    ).electronAPI?.artifact;
+    if (id.startsWith('platform-') && api.isEnabled && bridge) {
+      const artifactId = id.slice('platform-'.length);
+      try {
+        const [detail, dl] = await Promise.all([
+          platform.getArtifact(artifactId),
+          bridge.download(platform.downloadUrl(artifactId)),
+        ]);
+        if (detail.success && detail.data && dl?.path) {
+          const a = detail.data;
+          await api.installArtifact({
+            path: dl.path,
+            manifest: {
+              schema_version: 1,
+              type: a.type,
+              name: a.name,
+              version: a.version,
+              display_name: a.display_name,
+              description: a.description,
+              category: a.category,
+              tags: a.tags,
+              requires: a.requires,
+              checksum: dl.checksum,
+            },
+          });
+        }
+      } catch (err) {
+        console.error('platform skill install failed', err);
+      }
+    } else {
+      // mock / 오프라인: 지연 시뮬레이션
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
     if (type === 'skill') {
       setSkills((prev) => prev.map((skill) => (skill.id === id ? { ...skill, installed: true, enabled: true } : skill)));
     } else {
@@ -157,7 +207,13 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   const sponsorSkill = useCallback(async (id: string, amount: number) => {
     setIsLoading(true);
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    // platform 스킬이면 실제 sponsor API 호출 (Blue Point mock)
+    if (id.startsWith('platform-')) {
+      const artifactId = id.slice('platform-'.length);
+      await platform.sponsorArtifact(artifactId, amount);
+    } else {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
     setSkills((prev) => prev.map((skill) => (skill.id === id ? { ...skill, points: skill.points + amount } : skill)));
     setBluePointBalance((prev) => Math.max(0, prev - amount));
     setIsLoading(false);
@@ -208,6 +264,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
       skills,
       plugins,
       isLoading,
+      catalogLoading,
       searchQuery,
       setSearchQuery,
       sortBy,
@@ -230,6 +287,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
       skills,
       plugins,
       isLoading,
+      catalogLoading,
       searchQuery,
       sortBy,
       selectedTags,

@@ -4,9 +4,10 @@ name: data-analysis
 version: 2.0.0
 display_name: "데이터 분석 워크플로우"
 description: >
-  데이터 파일(CSV, Excel)을 분석하고 인사이트를 도출합니다.
-  기술 통계, 이상값 탐지, 시각화 추천, 리포트 작성까지 단계별 절차를 제공합니다.
-  /analyze 커맨드로 호출하세요.
+  CSV, Excel 등 데이터 파일을 분석하고 인사이트를 도출합니다. 기술 통계, 이상값 탐지,
+  시각화 추천, 분석 리포트 작성까지 단계별로 수행합니다. 데이터 파일 분석, 통계 요약,
+  이상값 확인, 데이터 정제를 요청하는 모든 상황에서 사용하세요 — 파일명을 언급하는
+  경우도 포함. /analyze 커맨드로 호출 가능.
 category: "데이터 분석"
 tags: ["data", "analysis", "csv", "excel", "statistics", "visualization"]
 author:

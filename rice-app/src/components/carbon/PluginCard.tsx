@@ -16,6 +16,9 @@ export interface PluginCardProps {
   icon?: string;
   gains?: string;
   useCases: string[];
+  /** 구성 스트립용 — plugin이 끌어오는 커넥터/지식 (스킬보다 "무겁다"는 신호) */
+  connectors?: { name: string }[];
+  knowledge?: { name: string }[];
   onInstall: () => void;
   onToggle: () => void;
   onOpenDetails?: () => void;
@@ -25,14 +28,24 @@ export const PluginCard: React.FC<PluginCardProps> = ({
   name,
   description,
   author,
+  skillCount,
   installed,
   enabled,
   gains,
   useCases,
+  connectors,
+  knowledge,
   onInstall,
   onToggle,
   onOpenDetails,
 }) => {
+  const connectorCount = connectors?.length ?? 0;
+  const knowledgeCount = knowledge?.length ?? 0;
+  const composition = [
+    { n: skillCount, label: '스킬', accent: 'text-[#a56eff]' },
+    { n: connectorCount, label: '커넥터', accent: 'text-interactive' },
+    { n: knowledgeCount, label: '지식', accent: 'text-support-success' },
+  ].filter((c, i) => i === 0 || c.n > 0); // 스킬은 항상, 커넥터·지식은 있을 때만
   return (
     <Card
       padding="md"
@@ -82,6 +95,19 @@ export const PluginCard: React.FC<PluginCardProps> = ({
       <p className="relative text-body-short-01 text-text-secondary mb-3 flex-1 line-clamp-2">
         {description}
       </p>
+
+      {/* Composition — plugin의 "무게"(스킬·커넥터·지식)를 한눈에. skill 카드와 구분되는 지점. */}
+      <div className="relative flex flex-wrap items-center gap-x-2.5 gap-y-1 mb-2.5 text-caption-01">
+        {composition.map((c, i) => (
+          <React.Fragment key={c.label}>
+            {i > 0 && <span className="text-text-helper/50" aria-hidden="true">·</span>}
+            <span className="inline-flex items-baseline gap-1">
+              <span className={`font-semibold tabular-nums ${c.accent}`}>{c.n}</span>
+              <span className="text-text-helper">{c.label}</span>
+            </span>
+          </React.Fragment>
+        ))}
+      </div>
 
       {/* Gains */}
       {gains && (

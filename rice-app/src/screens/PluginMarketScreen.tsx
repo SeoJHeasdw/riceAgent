@@ -3,9 +3,11 @@ import { TwoColumnLayout } from '../components/TwoColumnLayout';
 import { PluginCard } from '../components/carbon/PluginCard';
 import { MarketplaceHeader } from '../components/carbon/MarketplaceHeader';
 import { ArtifactDetailModal } from '../components/carbon/ArtifactDetailModal';
+import { CardSkeletonGrid } from '../components/carbon/MarketSkeleton';
 import { NotificationVariant } from '../components/carbon/NotificationToast';
 import { useToast } from '../lib/toast/ToastContext';
 import { useMarketplace } from '../hooks/useMarketplace';
+import { useLearning } from '../lib/learning/LearningContext';
 import { useResizable } from '../hooks/useResizable';
 import { Icon, ResizeHandle } from '../components/ui';
 import { pluginCategories } from '../lib/mockData';
@@ -18,6 +20,7 @@ import { Plugin } from '../lib/types';
 function PluginMarketScreen() {
   const {
     filteredPlugins,
+    catalogLoading,
     searchQuery,
     setSearchQuery,
     sortBy,
@@ -26,6 +29,7 @@ function PluginMarketScreen() {
     uninstallArtifact,
     togglePlugin,
   } = useMarketplace();
+  const { installPluginFromMarket } = useLearning();
 
   const [selectedCategory, setSelectedCategory] = useState('전체');
   const [detailModalPlugin, setDetailModalPlugin] = useState<Plugin | null>(null);
@@ -73,6 +77,8 @@ function PluginMarketScreen() {
     }
 
     await installArtifact(plugin.id, 'plugin');
+    // 설치를 "내 플러그인"에도 즉시 반영 (스킬의 installSkillFromMarket 와 대칭).
+    installPluginFromMarket(plugin);
     job.done('success', '설치 완료');
     // The toast lingers, then animates itself out automatically.
   };
@@ -198,7 +204,9 @@ function PluginMarketScreen() {
 
         {/* Plugins Grid */}
         <div className="px-8 py-5 pb-10">
-          {categoryFilteredPlugins.length > 0 ? (
+          {catalogLoading && categoryFilteredPlugins.length === 0 ? (
+            <CardSkeletonGrid />
+          ) : categoryFilteredPlugins.length > 0 ? (
             <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))' }}>
               {categoryFilteredPlugins.map((plugin) => (
                 <PluginCard

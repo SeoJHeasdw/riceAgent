@@ -5,6 +5,9 @@ import type {
   PendingApproval,
   ToolApprovalDecision,
   SkillPatchDecision,
+  PlatformArtifact,
+  PlatformFileResponse,
+  PlatformPublishPayload,
 } from './types';
 
 /**
@@ -256,5 +259,140 @@ class ApiClient {
 // Export singleton instance
 export const api = new ApiClient();
 export default api;
+
+// ── Platform API client (rice-platform, localhost:7070) ──────────────────────
+/**
+ * PlatformApiClient — rice-platform 마켓 서버 클라이언트.
+ * 런타임(api)과 완전히 분리된 별도 인스턴스. 인증 없음(데모 단계).
+ * platform 오프라인 시에는 메서드가 { success: false }를 반환하고
+ * 호출 측(MarketplaceContext)에서 mock 폴백을 유지한다.
+ */
+class PlatformApiClient {
+  private baseUrl: string;
+
+  constructor(baseUrl: string = 'http://localhost:7070') {
+    this.baseUrl = baseUrl;
+  }
+
+  setBaseUrl(url: string) {
+    this.baseUrl = url;
+  }
+
+  get base(): string {
+    return this.baseUrl;
+  }
+
+  private async get<T>(endpoint: string): Promise<ApiResponse<T>> {
+    try {
+      const res = await fetch(`${this.baseUrl}${endpoint}`);
+      return await res.json();
+    } catch {
+      return { success: false, error: 'platform offline' };
+    }
+  }
+
+  private async send<T>(
+    method: 'POST' | 'PUT' | 'DELETE',
+    endpoint: string,
+    data?: unknown,
+  ): Promise<ApiResponse<T>> {
+    try {
+      const res = await fetch(`${this.baseUrl}${endpoint}`, {
+        method,
+        headers: data ? { 'Content-Type': 'application/json' } : {},
+        body: data ? JSON.stringify(data) : undefined,
+      });
+      return await res.json();
+    } catch {
+      return { success: false, error: 'platform offline' };
+    }
+  }
+
+  /** 서버 상태 확인 */
+  health(): Promise<ApiResponse<{ status: string; version: string }>> {
+    return this.get('/health');
+  }
+
+  /**
+   * GET /catalog — artifact 목록.
+   * platform 오프라인 시 { success: false, error: 'platform offline' }.
+   */
+  getCatalog(params?: {
+    type?: 'skill' | 'plugin';
+    q?: string;
+    category?: string;
+    tags?: string[];
+    sort?: 'popular' | 'recent' | 'name';
+  }): Promise<ApiResponse<PlatformArtifact[]>> {
+    const qs = new URLSearchParams();
+    if (params?.type) qs.set('type', params.type);
+    if (params?.q) qs.set('q', params.q);
+    if (params?.category) qs.set('category', params.category);
+    params?.tags?.forEach((t) => qs.append('tags', t));
+    if (params?.sort) qs.set('sort', params.sort);
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return this.get<PlatformArtifact[]>(`/catalog${suffix}`);
+  }
+
+  /** GET /artifacts/{id} — 단일 artifact 상세 */
+  getArtifact(id: string): Promise<ApiResponse<PlatformArtifact>> {
+    return this.get<PlatformArtifact>(`/artifacts/${id}`);
+  }
+
+  /**
+   * GET /artifacts/{id}/files/{path} — 개별 파일 내용.
+   * SkillFileBrowser 에서 파일 내용을 lazy load 할 때 사용.
+   */
+  getArtifactFile(id: string, filePath: string): Promise<ApiResponse<PlatformFileResponse>> {
+    // 경로 구분자(/)는 보존하고 각 세그먼트만 인코딩 — 서버의 {file_path:path} 매칭을 깨지 않으면서
+    // 공백·특수문자가 든 파일명도 안전하게 전달한다.
+    const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
+    return this.get<PlatformFileResponse>(`/artifacts/${encodeURIComponent(id)}/files/${encodedPath}`);
+  }
+
+  /**
+   * 모든 skill_files를 한꺼번에 로드해 SkillFile[] 로 반환하는 편의 메서드.
+   * 바이너리 파일은 content=null 이므로 자동 필터링.
+   */
+  async getArtifactFiles(
+    artifact: PlatformArtifact,
+  ): Promise<import('./types').SkillFile[]> {
+    const results = await Promise.all(
+      artifact.skill_files.map((p) => this.getArtifactFile(artifact.id, p)),
+    );
+    return results
+      .map((res, i) => {
+        if (!res.success || !res.data || res.data.content === null) return null;
+        const { path, content, language } = res.data;
+        return {
+          path: path ?? artifact.skill_files[i],
+          language: language as import('./types').SkillFileLanguage,
+          content,
+        };
+      })
+      .filter((f): f is import('./types').SkillFile => f !== null);
+  }
+
+  /** POST /artifacts/{id}/sponsor — Blue Point 후원 */
+  sponsorArtifact(id: string, points: number): Promise<ApiResponse<{ artifact_id: string; total_points: number }>> {
+    return this.send('POST', `/artifacts/${id}/sponsor`, { points });
+  }
+
+  /**
+   * GET /artifacts/{id}/download 의 URL을 반환 — runtime의 POST /artifacts/install 에 전달.
+   * 실제 다운로드는 runtime 측에서 수행한다 (CONTRACTS §2.3).
+   */
+  downloadUrl(id: string): string {
+    return `${this.baseUrl}/artifacts/${id}/download`;
+  }
+
+  /** POST /artifacts — artifact 게시(publish) */
+  publish(payload: PlatformPublishPayload): Promise<ApiResponse<{ id: string; name: string; version: string }>> {
+    return this.send('POST', '/artifacts', payload);
+  }
+}
+
+/** rice-platform 마켓 서버 싱글턴 */
+export const platform = new PlatformApiClient();
 
 // Made with Bob

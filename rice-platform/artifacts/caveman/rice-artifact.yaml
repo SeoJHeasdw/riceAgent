@@ -5,10 +5,12 @@ version: 1.0.0
 display_name: "Caveman Mode"
 description: >
   Ultra-compressed communication mode. Cuts token usage ~75% by speaking like caveman
-  while keeping full technical accuracy. Supports intensity levels: lite, full (default),
-  ultra, wenyan-lite, wenyan-full, wenyan-ultra.
+  while keeping full technical accuracy. Use when users ask for less tokens, brevity,
+  caveman mode, or want faster/cheaper responses. Supports intensity levels: lite,
+  full (default), ultra, wenyan. Trigger even if user just says "be brief" or "less words".
 category: "생산성"
 tags: ["token-saving", "brevity", "communication", "productivity"]
+license: "MIT"
 author:
   name: "Julius Brussee"
   team: "community"

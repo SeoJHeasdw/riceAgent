@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Button, Tag, Toggle } from '../ui';
 import { dialogBackdropCls } from '../ui/surfaces';
-import { Skill, Plugin } from '../../lib/types';
+import { Skill, Plugin, SkillFile, PlatformArtifact } from '../../lib/types';
 import { getSkillFiles } from '../../lib/skillFiles';
+import { platform } from '../../lib/api';
 import { SkillFileBrowser } from './SkillFileBrowser';
 
 /**
@@ -30,10 +31,44 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
   onSponsor,
   onToggle,
 }) => {
+  const isSkill = type === 'skill';
+  const skill = isSkill && artifact ? (artifact as Skill) : null;
+  // 플랫폼 스킬(id: "platform-{id}")은 실제 SKILL.md를 platform 서버에서 가져온다.
+  const isPlatformSkill = !!skill && skill.id.startsWith('platform-');
+
+  // 플랫폼 스킬 파일 lazy load — modal이 열릴 때 GET /artifacts/{id} → /files/{path}.
+  // mock/제작 스킬은 메타데이터에서 합성한 파일(getSkillFiles)을 그대로 쓴다.
+  // null = 로딩 중, [] = 표시할 파일 없음.
+  const [platformFiles, setPlatformFiles] = useState<SkillFile[] | null>(null);
+  // 실제 아티팩트 메타(license·번들 리소스·버전) — 헤더/메타 스트립에서 "진짜 패키지"임을 보여준다.
+  const [platformArtifact, setPlatformArtifact] = useState<PlatformArtifact | null>(null);
+  useEffect(() => {
+    if (!isOpen || !skill || !isPlatformSkill) {
+      setPlatformFiles(null);
+      setPlatformArtifact(null);
+      return;
+    }
+    let cancelled = false;
+    const artifactId = skill.id.slice('platform-'.length);
+    void platform.getArtifact(artifactId).then(async (res) => {
+      if (cancelled) return;
+      if (!res.success || !res.data) {
+        setPlatformFiles([]);
+        return;
+      }
+      setPlatformArtifact(res.data);
+      const files = await platform.getArtifactFiles(res.data);
+      if (!cancelled) setPlatformFiles(files);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // skill 객체 전체가 아닌 정체성(id)에만 반응 — 부모 리렌더로 새 객체가 와도 불필요한 재요청 방지.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, isPlatformSkill, skill?.id]);
+
   if (!isOpen || !artifact) return null;
 
-  const isSkill = type === 'skill';
-  const skill = isSkill ? (artifact as Skill) : null;
   const plugin = !isSkill ? (artifact as Plugin) : null;
 
   return (
@@ -76,8 +111,8 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
               )}
             </div>
             <div className="text-caption-01 text-text-helper">
-              {isSkill && skill ? `${skill.author}${skill.team ? ` · ${skill.team}` : ''}` : ''}
-              {!isSkill && plugin ? `제공: ${plugin.provider}` : ''}
+              {isSkill && skill ? `${skill.author}${skill.team ? ` · ${skill.team}` : ''} · v${skill.version}` : ''}
+              {!isSkill && plugin ? `제공: ${plugin.provider} · v${plugin.version}` : ''}
             </div>
             {isSkill && skill?.forkedFrom && (
               <div className="mt-1 inline-flex items-center gap-1 text-caption-01 text-text-helper">
@@ -143,10 +178,33 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
                 </div>
               </div>
 
+              {/* 패키지 메타 — 실제 아티팩트의 license·번들 리소스(platform skill). "진짜 패키지" 신호. */}
+              {platformArtifact && (platformArtifact.license || platformArtifact.bundled_resources.length > 0) && (
+                <div className="mb-5 flex flex-wrap items-center gap-2">
+                  {platformArtifact.license && (
+                    <Tag type="gray" size="sm">라이선스 · {platformArtifact.license}</Tag>
+                  )}
+                  {platformArtifact.bundled_resources.map((r) => (
+                    <Tag key={r} type="outline" size="sm">{r}/</Tag>
+                  ))}
+                </div>
+              )}
+
               {/* Bundled files (README / SKILL.md / scripts …) */}
               <div className="mb-5">
                 <div className="text-label-01 text-text-secondary mb-2">파일</div>
-                <SkillFileBrowser files={getSkillFiles(skill)} />
+                {isPlatformSkill ? (
+                  platformFiles === null ? (
+                    <div className="px-1 py-3 text-caption-01 text-text-helper">파일 불러오는 중…</div>
+                  ) : platformFiles.length ? (
+                    // key로 강제 remount → SkillFileBrowser의 초기 선택이 첫 파일로 잡힌다.
+                    <SkillFileBrowser key={platformFiles.map((f) => f.path).join('|')} files={platformFiles} />
+                  ) : (
+                    <div className="px-1 py-3 text-caption-01 text-text-helper">표시할 파일이 없습니다.</div>
+                  )
+                ) : (
+                  <SkillFileBrowser files={getSkillFiles(skill)} />
+                )}
               </div>
             </>
           )}

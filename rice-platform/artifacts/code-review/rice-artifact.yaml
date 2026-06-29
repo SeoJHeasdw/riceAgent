@@ -4,9 +4,10 @@ name: code-review
 version: 1.0.0
 display_name: "Code Review Assistant"
 description: >
-  코드 리뷰를 체계적으로 도와줍니다. 보안 취약점, 성능 문제, 가독성,
-  테스트 커버리지를 검토하고 건설적인 피드백을 제공합니다.
-  /review 커맨드로 호출하세요.
+  코드 리뷰를 체계적으로 수행합니다. 보안(SQL Injection, XSS, 인증 누락), 성능(N+1, 메모리 누수),
+  가독성, 테스트 커버리지를 체크리스트로 검토하고 라인별 피드백을 제공합니다.
+  코드를 리뷰해달라는 요청, PR 검토, 코드 품질 점검 등 모든 코드 리뷰 상황에서 사용하세요.
+  /review 커맨드로 호출 가능.
 category: "개발"
 tags: ["code-review", "quality", "security", "refactoring"]
 author:
