@@ -269,6 +269,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       {modelName && onOpenModelSettings && (
         <button
           onClick={onOpenModelSettings}
+          data-tour="model-settings"
           className="flex items-center gap-2.5 border-t border-border-subtle-01 px-3 py-3 text-left flex-shrink-0 hover:bg-layer-hover-01 transition-colors"
           title="모델 설정"
         >

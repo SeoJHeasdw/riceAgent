@@ -1226,6 +1226,7 @@ function ChatScreen() {
             <div className="ml-auto flex items-center gap-1">
               <button
                 onClick={() => setLearningPanelOpen((o) => !o)}
+                data-tour="learning-loop"
                 className={`flex items-center gap-1.5 px-2 py-0.5 border border-border-subtle-01 hover:bg-layer-hover-01 transition-colors text-text-secondary text-caption-01 rounded-md ${
                   learningPanelOpen ? 'bg-layer-selected-01' : ''
                 }`}
@@ -1296,7 +1297,7 @@ function ChatScreen() {
                   inlineMode
                 />
               )}
-              <div className="bg-layer-01 border border-border-strong-01 rounded-xl shadow-elevation-1 transition-colors focus-within:border-focus">
+              <div data-tour="chat-input" className="bg-layer-01 border border-border-strong-01 rounded-xl shadow-elevation-1 transition-colors focus-within:border-focus">
                 {/* Active slash-command chip — the command lives here, not in the textarea */}
                 {command && (
                   <div className="flex items-center gap-2 px-3 pt-3 pb-1">

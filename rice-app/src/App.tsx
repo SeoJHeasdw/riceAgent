@@ -17,6 +17,7 @@ import { LearningProvider } from './lib/learning/LearningContext';
 import { MarketplaceProvider } from './lib/marketplace/MarketplaceContext';
 import { ToastProvider } from './lib/toast/ToastProvider';
 import { ModelOnboarding } from './components/carbon/ModelOnboarding';
+import { TourOverlay, TOUR_STEPS, TOUR_DONE_KEY } from './components/carbon/tour';
 import { defaultModelSettings } from './lib/mockData';
 import type { ModelSettings } from './components/carbon/ModelSettingsPanel';
 import type { RegisteredModel } from './components/carbon/ModelSettingsPanel';
@@ -24,7 +25,12 @@ import type { RegisteredModel } from './components/carbon/ModelSettingsPanel';
 // 좌측 레일 항목은 공용 네비게이션 매니페스트에서 파생한다(홈 허브와 동일 출처).
 const railItems = toRailItems();
 
-function AppShell() {
+interface AppShellProps {
+  tourActive: boolean;
+  onTourDone: () => void;
+}
+
+function AppShell({ tourActive, onTourDone }: AppShellProps) {
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -33,25 +39,36 @@ function AppShell() {
     'home';
 
   return (
-    <Layout
-      railItems={railItems}
-      activeRailId={activeRailId}
-      onNavigate={(_, path) => navigate(path)}
-    >
-      <Routes>
-        <Route path="/" element={<Navigate to="/home" replace />} />
-        <Route path="/home" element={<HomeScreen />} />
-        <Route path="/chat" element={<ChatScreen />} />
-        <Route path="/my-skills" element={<MySkillsScreen />} />
-        <Route path="/my-plugins" element={<MyPluginsScreen />} />
-        <Route path="/skills" element={<SkillMarketScreen />} />
-        <Route path="/plugins" element={<PluginMarketScreen />} />
-        <Route path="/connectors" element={<ConnectorsScreen />} />
-        <Route path="/connectors/:id" element={<ConnectorsScreen />} />
-        <Route path="/settings" element={<SettingsScreen />} />
-        <Route path="*" element={<Navigate to="/home" replace />} />
-      </Routes>
-    </Layout>
+    <>
+      <Layout
+        railItems={railItems}
+        activeRailId={activeRailId}
+        onNavigate={(_, path) => navigate(path)}
+      >
+        <Routes>
+          <Route path="/" element={<Navigate to="/chat" replace />} />
+          <Route path="/home" element={<HomeScreen />} />
+          <Route path="/chat" element={<ChatScreen />} />
+          <Route path="/my-skills" element={<MySkillsScreen />} />
+          <Route path="/my-plugins" element={<MyPluginsScreen />} />
+          <Route path="/skills" element={<SkillMarketScreen />} />
+          <Route path="/plugins" element={<PluginMarketScreen />} />
+          <Route path="/connectors" element={<ConnectorsScreen />} />
+          <Route path="/connectors/:id" element={<ConnectorsScreen />} />
+          <Route path="/settings" element={<SettingsScreen />} />
+          <Route path="*" element={<Navigate to="/chat" replace />} />
+        </Routes>
+      </Layout>
+
+      {tourActive && (
+        <TourOverlay
+          steps={TOUR_STEPS}
+          currentPath={location.pathname}
+          onNavigate={(path) => navigate(path)}
+          onDone={onTourDone}
+        />
+      )}
+    </>
   );
 }
 
@@ -74,6 +91,7 @@ const providerKind = (provider?: string): 'claude' | 'openai' | 'watsonx' => {
 
 function App() {
   const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [tourActive, setTourActive] = useState(false);
   const [modelMode, setModelMode] = useState<'saas' | 'local'>('saas');
   const [currentModel, setCurrentModel] = useState('claude-sonnet-4-6');
   const [modelSettings, setModelSettings] = useState<ModelSettings>(defaultModelSettings);
@@ -170,6 +188,15 @@ function App() {
       registered_models: settings.registeredModels,
     });
     setOnboardingOpen(false);
+    // 투어를 아직 본 적 없으면 바로 시작
+    if (!localStorage.getItem(TOUR_DONE_KEY)) {
+      setTourActive(true);
+    }
+  };
+
+  const handleTourDone = () => {
+    localStorage.setItem(TOUR_DONE_KEY, '1');
+    setTourActive(false);
   };
 
   return (
@@ -178,7 +205,7 @@ function App() {
         <MarketplaceProvider>
           <ToastProvider>
             <BrowserRouter>
-              <AppShell />
+              <AppShell tourActive={tourActive} onTourDone={handleTourDone} />
               {onboardingOpen && (
                 <ModelOnboarding
                   currentModel={currentModel}

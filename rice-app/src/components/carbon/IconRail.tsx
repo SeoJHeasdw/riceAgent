@@ -40,6 +40,7 @@ const RailButton: React.FC<{
 
     <button
       onClick={() => onNavigate(item.id, item.path)}
+      data-tour={`nav-${item.id}`}
       className={`
         flex items-center justify-center w-9 h-9 rounded-[10px]
         transition-all duration-150 active:scale-95
