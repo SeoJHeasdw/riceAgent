@@ -1,0 +1,18 @@
+schema_version: 1
+type: skill
+name: caveman
+version: 1.0.0
+display_name: "Caveman Mode"
+description: >
+  Ultra-compressed communication mode. Cuts token usage ~75% by speaking like caveman
+  while keeping full technical accuracy. Supports intensity levels: lite, full (default),
+  ultra, wenyan-lite, wenyan-full, wenyan-ultra.
+category: "생산성"
+tags: ["token-saving", "brevity", "communication", "productivity"]
+author:
+  name: "Julius Brussee"
+  team: "community"
+requires:
+  runtime: ">=0.1"
+download_count: 4821
+published_at: "2026-06-01T00:00:00Z"

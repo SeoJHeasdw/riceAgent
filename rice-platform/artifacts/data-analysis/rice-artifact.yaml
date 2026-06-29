@@ -1,0 +1,18 @@
+schema_version: 1
+type: skill
+name: data-analysis
+version: 2.0.0
+display_name: "데이터 분석 워크플로우"
+description: >
+  데이터 파일(CSV, Excel)을 분석하고 인사이트를 도출합니다.
+  기술 통계, 이상값 탐지, 시각화 추천, 리포트 작성까지 단계별 절차를 제공합니다.
+  /analyze 커맨드로 호출하세요.
+category: "데이터 분석"
+tags: ["data", "analysis", "csv", "excel", "statistics", "visualization"]
+author:
+  name: "RICE Team"
+  team: "data"
+requires:
+  runtime: ">=0.1"
+download_count: 5120
+published_at: "2026-04-10T00:00:00Z"

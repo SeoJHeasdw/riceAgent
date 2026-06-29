@@ -14,6 +14,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNTIME_DIR="$ROOT/rice-runtime"
 APP_DIR="$ROOT/rice-app"
 PORT="${RICE_PORT:-8080}"
+PLATFORM_PORT="${RICE_PLATFORM_PORT:-7070}"
+PLATFORM_DIR="$ROOT/rice-platform"
 
 # 자식 프로세스(백엔드/프론트)를 종료 시 함께 정리.
 pids=()
@@ -46,7 +48,21 @@ for _ in $(seq 1 30); do
   echo -n "."; sleep 0.5
 done
 
-# ── 2) React 프론트 (electron 빼고 브라우저 전용 dev) ───────────────────────
+# ── 2) rice-platform (마켓 API, :7070) ──────────────────────────────────────
+if [ -d "$PLATFORM_DIR" ]; then
+  echo "▶ 플랫폼: rice-platform --port $PLATFORM_PORT"
+  (
+    cd "$PLATFORM_DIR"
+    if [ -x ".venv/bin/rice-platform" ]; then
+      exec .venv/bin/rice-platform --port "$PLATFORM_PORT" --artifacts-dir ./artifacts
+    else
+      exec python3 -m rice_platform --port "$PLATFORM_PORT" --artifacts-dir ./artifacts
+    fi
+  ) &
+  pids+=($!)
+fi
+
+# ── 3) React 프론트 (electron 빼고 브라우저 전용 dev) ───────────────────────
 echo "▶ 프론트: vite --config vite.renderer.config.ts → http://localhost:5273"
 (
   cd "$APP_DIR"
@@ -55,6 +71,9 @@ echo "▶ 프론트: vite --config vite.renderer.config.ts → http://localhost:
 pids+=($!)
 
 echo ""
-echo "✅ 떴습니다. 브라우저에서 http://localhost:5273 → 채팅 한 줄로 end-to-end 확인."
-echo "   종료: Ctrl-C (백엔드/프론트 함께 정리됨)"
+echo "✅ 떴습니다."
+echo "   앱:       http://localhost:5273"
+echo "   runtime:  http://localhost:$PORT/health"
+echo "   platform: http://localhost:$PLATFORM_PORT/health"
+echo "   종료: Ctrl-C (모두 함께 정리됨)"
 wait

@@ -1,0 +1,18 @@
+schema_version: 1
+type: skill
+name: git-workflow
+version: 1.2.0
+display_name: "Git Workflow Assistant"
+description: >
+  체계적인 Git 워크플로우를 안내합니다. 브랜치 전략, 커밋 메시지 작성,
+  PR 생성, 충돌 해결까지 단계별로 도와줍니다.
+  /git-commit, /git-pr, /git-conflict 커맨드로 호출하세요.
+category: "개발"
+tags: ["git", "workflow", "vcs", "collaboration", "commit"]
+author:
+  name: "RICE Team"
+  team: "platform"
+requires:
+  runtime: ">=0.1"
+download_count: 2340
+published_at: "2026-05-15T00:00:00Z"
