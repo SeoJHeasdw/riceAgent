@@ -20,7 +20,7 @@ Seams defined here:
 
 from __future__ import annotations
 
-from typing import AsyncIterator, Protocol, runtime_checkable
+from typing import AsyncIterator, Protocol, Sequence, runtime_checkable
 
 from ..core.types import (
     ApprovalRequest,
@@ -48,6 +48,23 @@ class ITranscript(Protocol):
 
     def append(self, session_id: str, message: Message) -> None: ...
     def history(self, session_id: str) -> tuple[Message, ...]: ...
+
+
+@runtime_checkable
+class ISessionTitler(Protocol):
+    """Names an untitled session from its opening exchange, post-answer (the "name
+    this chat" step, ChatGPT/Claude-style). **Consumer-defined here** — the
+    orchestrator triggers it after the first turn; implemented by `agent/titler.py`.
+
+    Kept off `ITranscript` on purpose: titling is a session-metadata concern, not
+    the message append/read slice the loop needs, so the minimal transcript seam
+    stays minimal."""
+
+    async def maybe_title(self, session_id: str, history: Sequence[Message]) -> str | None:
+        """If `session_id` has no title yet, generate one from `history`, persist it,
+        and return it. Returns None when already titled, on too-little content, or on
+        any provider/parse failure (titling must never break a turn)."""
+        ...
 
 
 @runtime_checkable

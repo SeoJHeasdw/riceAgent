@@ -20,8 +20,9 @@ from dataclasses import dataclass
 from typing import Callable
 
 from ..agent.builtins import build_builtin_tools
-from ..agent.interfaces import IAgent, IApprovalGate
+from ..agent.interfaces import IAgent, IApprovalGate, ISessionTitler
 from ..agent.orchestrator import Orchestrator
+from ..agent.titler import SessionTitler
 from ..agent.providers.interfaces import ILLMProvider, IProviderRegistry
 from ..agent.providers.registry import ProviderCredentials, ProviderRegistry
 from ..connector.interfaces import IConnectorService
@@ -59,6 +60,7 @@ class Container:
     providers: IProviderRegistry
     resolve_provider: Callable[[], ILLMProvider]
     agent: IAgent
+    titler: ISessionTitler
 
     @property
     def config(self) -> Config:
@@ -120,6 +122,18 @@ def build_container(args: RuntimeArgs | None = None, *, paths: RicePaths | None 
     # ── builtin tools (in-process; advertised to the LLM + dispatched directly) ─
     builtin_specs, builtins = build_builtin_tools(paths)
 
+    # ── session titler (names a new chat from its opening exchange, post-answer) ─
+    # Decoupled from the store via two callables, so it binds to neither seam.
+    def _session_title(session_id: str) -> str | None:
+        info = sessions.get(session_id)
+        return info.title if info else None
+
+    titler = SessionTitler(
+        resolve_provider=resolve_provider,
+        get_title=_session_title,
+        set_title=sessions.set_title,
+    )
+
     # ── the convergence point ─────────────────────────────────────────────────
     # `sessions` (a SessionManager) satisfies both ISessionStore (UI) and
     # ITranscript (agent) structurally — one object, two seams (invariant 1/3).
@@ -149,4 +163,5 @@ def build_container(args: RuntimeArgs | None = None, *, paths: RicePaths | None 
         providers=providers,
         resolve_provider=resolve_provider,
         agent=agent,
+        titler=titler,
     )

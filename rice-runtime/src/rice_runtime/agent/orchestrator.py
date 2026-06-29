@@ -66,17 +66,13 @@ from ..learning.interfaces import (
     PatchProposal,
     SkillCreated,
 )
+from ..prompts.system import compose_system_prompt
 from .interfaces import IApprovalGate, ITranscript
 from .loop import AgentLoop, LoopResult
 from .providers.interfaces import ILLMProvider
 from .tool_dispatch import BuiltinTool, ToolDispatcher
 
 log = logging.getLogger("rice.agent.orchestrator")
-
-_BASE_SYSTEM_PROMPT = (
-    "You are RICE, a personal agent that learns from experience. "
-    "Be precise and concise. Use tools when they help."
-)
 
 
 class Orchestrator:
@@ -148,9 +144,7 @@ class Orchestrator:
                 + tuple(self._connectors.list_tools())
                 + tuple(self._plugins.list_tools())
             )
-            system_prompt = _BASE_SYSTEM_PROMPT
-            if pf.system_prompt_additions:
-                system_prompt = f"{system_prompt}\n\n{pf.system_prompt_additions}"
+            system_prompt = compose_system_prompt(pf.system_prompt_additions)
             base_history = self._transcript.history(session_id)
             ctx = TurnContext(
                 session_id=session_id,

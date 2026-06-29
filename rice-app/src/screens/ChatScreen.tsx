@@ -397,7 +397,7 @@ function ChatScreen() {
   // on first send; reused for the rest of this mounted ChatScreen. Independent of
   // the scripted demo sessions in the sidebar.
   const liveSessionId = useRef<string | null>(null);
-  // 새 세션의 첫 턴 완료 후 사이드바 제목 갱신이 필요할 때만 true — 기존 세션 연속 전송 시 refreshSessions를 skip한다.
+  // 새 세션의 첫 턴 완료 후 제목 생성(POST /title)이 필요할 때만 true — 기존 세션 연속 전송 시 skip.
   const needsTitleRefresh = useRef(false);
   // handle to the in-flight SSE turn so the user can stop it (see stopTurn)
   const streamHandleRef = useRef<{ abort: () => void } | null>(null);
@@ -759,11 +759,17 @@ function ChatScreen() {
       } else if (e.type === 'done') {
         finalizeThinking();
         setBusy(false);
-        // 새 세션의 첫 턴이 끝났을 때만 제목 갱신을 위해 목록을 다시 가져온다.
-        // 기존 세션에 계속 대화하는 경우엔 제목이 이미 있으므로 skip.
+        // First turn of a new session → ask the runtime to name it from the opening
+        // exchange. Separate, non-blocking call (POST /title): it does NOT hold up
+        // this stream, and we patch just that row's title in place — no list refetch.
         if (connected && needsTitleRefresh.current) {
           needsTitleRefresh.current = false;
-          void refreshSessions();
+          const sid = liveSessionId.current;
+          if (sid)
+            void api.generateTitle(sid).then((res) => {
+              const title = res.success ? (res.data as { title?: string } | undefined)?.title : undefined;
+              if (title) setSessions((prev) => prev.map((s) => (s.id === sid ? { ...s, title } : s)));
+            });
         }
       } else if (e.type === 'error') {
         finalizeThinking();
@@ -788,9 +794,15 @@ function ChatScreen() {
     if (!liveSessionId.current) {
       const res = await api.createSession();
       if (res.success && res.data?.id) {
-        liveSessionId.current = res.data.id;
-        setActiveSessionId(res.data.id); // highlight the new session in the sidebar
-        needsTitleRefresh.current = true; // 첫 턴 완료 후 사이드바 제목 갱신 필요
+        const id = res.data.id;
+        liveSessionId.current = id;
+        setActiveSessionId(id); // highlight the new session in the sidebar
+        needsTitleRefresh.current = true; // 첫 턴 완료 후 제목 생성 필요
+        // Show the new chat in the sidebar IMMEDIATELY (ChatGPT-style) with a
+        // truncated first-message label instead of waiting for the turn to end.
+        // The real LLM title (POST /title) replaces this once the first turn ends.
+        const provisional = q.replace(/\s+/g, ' ').trim().slice(0, 40) || '제목 없는 대화';
+        setSessions((prev) => [{ id, title: provisional, timestamp: new Date(), messageCount: 0 }, ...prev]);
       } else {
         finalizeThinking();
         pushAgentText(`⚠️ 런타임 세션 생성 실패: ${res.error ?? '알 수 없는 오류'}`);
@@ -834,13 +846,6 @@ function ChatScreen() {
         .filter((mm): mm is ThreadMessage => mm !== null);
       return recovered.length ? [...prev, ...recovered] : prev;
     });
-  };
-
-  // Re-pull the session list (after a turn the new session + its derived title
-  // need to appear/update in the sidebar).
-  const refreshSessions = async () => {
-    const res = await api.listSessions();
-    if (res.success) setSessions(((res.data as RawSession[]) ?? []).map(toSession));
   };
 
   // Sidebar selection: load from DB when connected, else the scripted demo thread.

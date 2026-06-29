@@ -5,6 +5,7 @@ This router owns the ChatScreen's hot path:
   GET  /sessions, /sessions/{id}              list / detail (history UI)
   GET  /sessions/{id}/messages?cursor=        paginated history
   POST /sessions/{id}/messages                → SSE stream (the turn)
+  POST /sessions/{id}/title                   name an untitled session (post-turn)
   POST /sessions/{id}/abort                   cancel in-flight turn
   POST /sessions/{id}/tool-approval           answer a tool_approval_required
   GET  /sessions/{id}/pending-approvals       reconnect recovery (§5.1)
@@ -79,13 +80,24 @@ async def post_message(session_id: str, body: MessageIn, c: Container = Depends(
     info = c.sessions.get(session_id)
     if info is None:
         raise NotFoundError(f"session {session_id} not found")
-    # Label a fresh (untitled) session from its first user message so the history
-    # sidebar shows something meaningful instead of a blank row.
-    if not info.title:
-        first_line = body.content.strip().splitlines()[0] if body.content.strip() else ""
-        c.sessions.set_title(session_id, first_line[:60] or "새 대화")
+    # Title is generated lazily by POST /sessions/{id}/title, which the client calls
+    # after this turn's first `done` — kept off the hot streaming path so a slow
+    # title model never delays the answer or holds the stream open.
     stream = to_sse_stream(c.agent.run_turn(session_id, body.content))
     return StreamingResponse(stream, media_type="text/event-stream")
+
+
+@router.post("/sessions/{session_id}/title")
+async def generate_title(session_id: str, c: Container = Depends(get_container)):
+    """Name an untitled session from its opening exchange (ChatGPT/Claude-style).
+    A separate, non-blocking call the client makes after the first turn's `done`, so
+    titling never holds up the message stream. Idempotent: returns the existing title
+    untouched if the session is already named (or the model can't summarize)."""
+    info = c.sessions.get(session_id)
+    if info is None:
+        raise NotFoundError(f"session {session_id} not found")
+    title = await c.titler.maybe_title(session_id, c.sessions.history(session_id))
+    return {"success": True, "data": {"title": title or info.title}}
 
 
 @router.post("/sessions/{session_id}/regenerate")

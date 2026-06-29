@@ -127,6 +127,12 @@ class ApiClient {
   abort(id: string): Promise<ApiResponse> {
     return this.send('POST', `/sessions/${id}/abort`);
   }
+  /** Name an untitled session from its opening exchange — called after the first
+   *  turn's `done`. Separate from the message stream so a slow title model never
+   *  delays the answer; returns the generated title (or null if not titled). */
+  generateTitle(id: string): Promise<ApiResponse<{ title: string | null }>> {
+    return this.send('POST', `/sessions/${id}/title`);
+  }
   /** read a workspace file (builtin file-tool sandbox) — text content */
   readWorkspaceFile(path: string): Promise<ApiResponse> {
     return this.get(`/workspace/file?path=${encodeURIComponent(path)}`);

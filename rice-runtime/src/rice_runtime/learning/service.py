@@ -24,6 +24,7 @@ from ..core.config import LearningConfig
 from ..core.paths import RicePaths
 from ..core.storage.sqlite import Database
 from ..core.types import InjectedSkill, MemoryItem, TurnOutcome, now_iso
+from ..prompts.system import SKILL_GUIDANCE
 from .curator.curator import Curator
 from .interfaces import (
     CurateResult,
@@ -45,11 +46,6 @@ from .skill.patch import build_diff, detect_patch_trigger
 from .skill.store import SkillData, SkillStore
 from .skill.usage import UsageStore
 from .user_model.profile import UserProfile
-
-_SKILL_GUIDANCE = (
-    "If you complete a reusable, multi-step procedure (e.g. 5+ tool calls), save it "
-    "as a SKILL.md — capture repeatable *methods*, not declarative facts."
-)
 
 # 토큰 추정: len(text) / 4 (대략적 — 정밀도 불필요, LEARNING_LOOP §7)
 _CHARS_PER_TOKEN = 4
@@ -154,7 +150,7 @@ class LearningService(ILearningService):
         mem_block = _render_memories(memories)
         skill_block = _render_skills(injected_skills)
         pref_block = self._user_profile.render_preference_block()
-        parts = [_SKILL_GUIDANCE]
+        parts = [SKILL_GUIDANCE]
         if skill_block:
             parts.append(skill_block)
         if mem_block:

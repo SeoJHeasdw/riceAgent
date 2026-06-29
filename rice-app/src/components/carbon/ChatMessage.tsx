@@ -575,7 +575,7 @@ const ThinkingBlock: React.FC<{ m: Extract<ThreadMessage, { kind: 'thinking' }> 
       </button>
       {open && m.text != null && (
         <div className="mt-2 pl-1 text-caption-01 text-text-helper whitespace-pre-wrap leading-relaxed border-l-2 border-border-subtle-01 pl-3">
-          {m.text || '…'}
+          {m.text || (m.streaming ? <TypingDots /> : '…')}
         </div>
       )}
       {open && m.text == null && (

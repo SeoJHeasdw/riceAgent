@@ -16,10 +16,11 @@ import pytest
 from rice_runtime import build_container
 from rice_runtime.agent.interfaces import ITranscript
 from rice_runtime.agent.orchestrator import Orchestrator
+from rice_runtime.agent.titler import SessionTitler
 from rice_runtime.agent.providers.interfaces import ProviderCapabilities, ProviderChunk
 from rice_runtime.core.config import Config, ProviderConfig, RuntimeArgs
 from rice_runtime.core.paths import RicePaths
-from rice_runtime.core.types import ApprovalRequest, ApprovalResponse, EventType, ToolCall, ToolSpec
+from rice_runtime.core.types import ApprovalRequest, ApprovalResponse, EventType, Message, ToolCall, ToolSpec
 from rice_runtime.server.approval import ApprovalRegistry
 
 
@@ -107,6 +108,91 @@ async def test_tool_path_persists_all_messages():
     roles = [m.role for m in c.sessions.history(s.id)]
     assert roles == ["user", "assistant", "tool", "assistant"]
     c.shutdown()
+
+
+class _TitleProvider:
+    """Fake provider that returns a fixed one-line title (drives the titler)."""
+
+    name = "fake"
+
+    def __init__(self, title: str = "Quarterly Sales Summary") -> None:
+        self._title = title
+
+    def capabilities(self):
+        return ProviderCapabilities()
+
+    async def stream(self, *, system, messages, tools=(), temperature=0.7):
+        yield ProviderChunk(kind="text", text=self._title)
+        yield ProviderChunk(kind="done", stop_reason="end_turn")
+
+
+@pytest.mark.asyncio
+async def test_titler_names_untitled_session_once():
+    """An untitled session is titled from its opening exchange, and never relabeled."""
+    titles: dict[str, str] = {}
+    titler = SessionTitler(
+        resolve_provider=lambda: _TitleProvider(),
+        get_title=titles.get,
+        set_title=lambda sid, t: titles.__setitem__(sid, t),
+    )
+    history = (
+        Message(role="user", content="이번 분기 매출 정리해줘"),
+        Message(role="assistant", content="정리했어요: 1) ... 2) ..."),
+    )
+    assert await titler.maybe_title("s1", history) == "Quarterly Sales Summary"
+    assert titles["s1"] == "Quarterly Sales Summary"
+    # already titled → no second model call, no relabel
+    assert await titler.maybe_title("s1", history) is None
+
+
+@pytest.mark.asyncio
+async def test_titler_skips_echo_fallback():
+    """The echo fallback (no model configured) can't summarize → leave it untitled."""
+
+    class _Echo:
+        name = "echo"
+
+        def capabilities(self):
+            return ProviderCapabilities()
+
+        async def stream(self, *, system, messages, tools=(), temperature=0.7):
+            yield ProviderChunk(kind="text", text="hi")
+            yield ProviderChunk(kind="done", stop_reason="end_turn")
+
+    titles: dict[str, str] = {}
+    titler = SessionTitler(
+        resolve_provider=lambda: _Echo(),
+        get_title=titles.get,
+        set_title=lambda sid, t: titles.__setitem__(sid, t),
+    )
+    assert await titler.maybe_title("s1", (Message(role="user", content="hi"),)) is None
+    assert titles == {}
+
+
+@pytest.mark.asyncio
+async def test_titler_caps_a_rambly_model():
+    """A model that won't stop is cut off, so titling can't run unbounded and stall
+    the client's post-turn title request (the ~30s blocking bug)."""
+
+    class _Rambly:
+        name = "fake"
+
+        def capabilities(self):
+            return ProviderCapabilities()
+
+        async def stream(self, *, system, messages, tools=(), temperature=0.7):
+            for _ in range(100_000):
+                yield ProviderChunk(kind="text", text="아주 긴 제목 ")
+            yield ProviderChunk(kind="done", stop_reason="end_turn")
+
+    titles: dict[str, str] = {}
+    titler = SessionTitler(
+        resolve_provider=lambda: _Rambly(),
+        get_title=titles.get,
+        set_title=lambda sid, t: titles.__setitem__(sid, t),
+    )
+    t = await titler.maybe_title("s1", (Message(role="user", content="hi"),))
+    assert t is not None and len(t) <= 60  # bounded by TITLE_MAX_CHARS
 
 
 @pytest.mark.asyncio
