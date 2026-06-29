@@ -15,7 +15,7 @@ import { toRailItems } from './lib/navigation';
 import { I18nProvider } from './lib/i18n/I18nContext';
 import { LearningProvider } from './lib/learning/LearningContext';
 import { MarketplaceProvider } from './lib/marketplace/MarketplaceContext';
-import { ToastProvider } from './lib/toast/ToastContext';
+import { ToastProvider } from './lib/toast/ToastProvider';
 
 // 좌측 레일 항목은 공용 네비게이션 매니페스트에서 파생한다(홈 허브와 동일 출처).
 const railItems = toRailItems();

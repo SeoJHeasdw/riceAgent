@@ -12,7 +12,7 @@ import { api } from '../lib/api';
 import { sseClient } from '../lib/sse';
 import type { PendingApproval, ToolApprovalRequiredData, SkillPatchProposedData, SSEEvent } from '../lib/types';
 import { Icon, ResizeHandle, ConfirmDialog } from '../components/ui';
-import { FileViewerProvider } from '../lib/fileViewer/FileViewerContext';
+import { FileViewerProvider } from '../lib/fileViewer/FileViewerProvider';
 import { useToast } from '../lib/toast/ToastContext';
 import type { RegisteredModel } from '../components/carbon/ModelSettingsPanel';
 

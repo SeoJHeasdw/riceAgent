@@ -1,6 +1,4 @@
-import React, { createContext, useCallback, useContext } from 'react';
-import { api } from '../api';
-import { useToast } from '../toast/ToastContext';
+import { createContext, useContext } from 'react';
 
 /**
  * FileViewerContext — "open a workspace file" capability shared across the chat.
@@ -9,31 +7,15 @@ import { useToast } from '../toast/ToastContext';
  * which asks the local runtime to open the file in the **OS default app** (Excel →
  * office suite, .txt → the user's editor, …). The runtime runs on the user's
  * machine, so this works the same in browser-dev and the packaged desktop app.
+ *
+ * Provider 컴포넌트는 ./FileViewerProvider 로 분리되어 있다(fast-refresh 규칙).
  */
-interface FileViewerValue {
+export interface FileViewerValue {
   openFile: (path: string) => void;
 }
 
-const FileViewerContext = createContext<FileViewerValue>({ openFile: () => {} });
+export const FileViewerContext = createContext<FileViewerValue>({ openFile: () => {} });
 
 export const useFileViewer = () => useContext(FileViewerContext);
 
-export const FileViewerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const toast = useToast();
-
-  const openFile = useCallback(
-    (path: string) => {
-      const clean = path.replace(/^\.\//, '').trim();
-      void api.openWorkspaceFile(clean).then((res) => {
-        if (res.success) {
-          toast.notify({ message: `시스템 기본 앱으로 열었어요 · ${clean}`, variant: 'success' });
-        } else {
-          toast.notify({ message: `파일을 열 수 없어요 · ${res.error ?? clean}`, variant: 'error' });
-        }
-      });
-    },
-    [toast],
-  );
-
-  return <FileViewerContext.Provider value={{ openFile }}>{children}</FileViewerContext.Provider>;
-};
+// Made with Bob
