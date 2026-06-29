@@ -493,8 +493,14 @@ function ChatScreen() {
       if (cancelled || !res.success) return;
       const list = ((res.data as RawSession[]) ?? []).map(toSession);
       setSessions(list);
-      if (list.length > 0) void openLiveSession(list[0].id);
-      else newChat();
+      if (list.length > 0) {
+        // (Re)connect recovery: open the most recent session, then re-paint any
+        // approval still parked on the server — covers an app reload / runtime
+        // reconnect that happened while a turn was awaiting an answer (§5.1).
+        void openLiveSession(list[0].id).then(() => {
+          if (!cancelled) void recoverPendingApprovals(list[0].id);
+        });
+      } else newChat();
     });
 
     return () => {
@@ -504,29 +510,6 @@ function ChatScreen() {
     // this only on connect transitions.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connected]);
-
-  // SSE reconnect recovery: re-fetch approvals still parked on the server and
-  // re-render their cards (CONTRACTS 1.2). No-op offline / in the scripted demo.
-  useEffect(() => {
-    if (!activeSessionId) return; // no active session (fresh chat) → nothing to recover
-    let cancelled = false;
-    void api.getPendingApprovals(activeSessionId).then((res) => {
-      if (cancelled || !res.success || !res.data?.length) return;
-      setThread((prev) => {
-        const have = new Set(
-          prev.flatMap((mm) => (mm.kind === 'approval' || mm.kind === 'patch' ? [mm.approvalId] : [])),
-        );
-        const recovered = res
-          .data!.filter((p) => !have.has(p.approval_id))
-          .map(pendingToThread)
-          .filter((mm): mm is ThreadMessage => mm !== null);
-        return recovered.length ? [...prev, ...recovered] : prev;
-      });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeSessionId]);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -831,6 +814,28 @@ function ChatScreen() {
     setLoadedSession(id);
   };
 
+  // Re-fetch approvals still parked on the server for a session and re-render their
+  // cards (CONTRACTS 1.2 / RUNTIME_DESIGN 5.1). A parked approval exists ONLY while a
+  // turn is suspended awaiting an answer, so this recovers something only when the
+  // connection dropped mid-turn (e.g. the app reloaded with a prompt still open) —
+  // hence it's tied to (re)connect, NOT to session selection (an idle room is always
+  // empty). The liveSessionId guard drops a stale paint if the user navigated away
+  // while the request was in flight.
+  const recoverPendingApprovals = async (sessionId: string) => {
+    const res = await api.getPendingApprovals(sessionId);
+    if (!res.success || !res.data?.length || liveSessionId.current !== sessionId) return;
+    setThread((prev) => {
+      const have = new Set(
+        prev.flatMap((mm) => (mm.kind === 'approval' || mm.kind === 'patch' ? [mm.approvalId] : [])),
+      );
+      const recovered = res
+        .data!.filter((p) => !have.has(p.approval_id))
+        .map(pendingToThread)
+        .filter((mm): mm is ThreadMessage => mm !== null);
+      return recovered.length ? [...prev, ...recovered] : prev;
+    });
+  };
+
   // Re-pull the session list (after a turn the new session + its derived title
   // need to appear/update in the sidebar).
   const refreshSessions = async () => {
@@ -840,6 +845,9 @@ function ChatScreen() {
 
   // Sidebar selection: load from DB when connected, else the scripted demo thread.
   const handleSelectSession = (id: string) => {
+    // 이미 열린 방을 다시 클릭하면 무시: 불필요한 재조회를 막고, 스트리밍 중이면
+    // DB 히스토리가 진행 중인 라이브 thread를 덮어쓰는 것도 방지한다.
+    if (id === activeSessionId) return;
     if (connected) void openLiveSession(id);
     else setActiveSessionId(id);
   };
