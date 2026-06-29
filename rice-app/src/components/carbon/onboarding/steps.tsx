@@ -126,10 +126,7 @@ const SkillProposalCard: React.FC<{ skillName: string; ver: string; desc: string
 const ChatBubble: React.FC<{ msg: MockChatMessage }> = ({ msg }) => {
   const isUser = msg.role === 'user';
   return (
-    <div
-      className={`flex items-end gap-2 animate-fade-in ${isUser ? 'flex-row-reverse' : 'flex-row'}`}
-      style={{ animationDelay: `${msg.delay}ms`, animationFillMode: 'both' }}
-    >
+    <div className={`flex items-end gap-2 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
       {/* 아바타 — agent만 표시, user는 말풍선만 */}
       {!isUser && (
         <div className="w-6 h-6 flex-shrink-0 flex items-center justify-center rounded-md bg-blue-60 text-white text-[10px] font-semibold font-mono self-start mt-0.5">
@@ -167,45 +164,24 @@ const ChatBubble: React.FC<{ msg: MockChatMessage }> = ({ msg }) => {
 };
 
 /** welcomeStep에 들어가는 채팅 미리보기 패널 */
-const WelcomeChatPreview: React.FC = () => {
-  const [visibleCount, setVisibleCount] = useState(0);
-
-  // 첫 메시지: 600ms 후 시작, 이후 450ms 간격으로 순차 표시
-  useEffect(() => {
-    if (visibleCount >= WELCOME_CHAT.length) return;
-    const timer = setTimeout(
-      () => setVisibleCount((n) => n + 1),
-      visibleCount === 0 ? 600 : 450,
-    );
-    return () => clearTimeout(timer);
-  }, [visibleCount]);
-
-  return (
-    <div className="mt-5 rounded-xl border border-border-subtle-01 bg-layer-01 shadow-elevation-2 overflow-hidden">
-      {/* 가짜 윈도우 헤더 — macOS 신호등 */}
-      <div className="flex items-center gap-1.5 px-3 py-2.5 border-b border-border-subtle-01 bg-layer-02">
-        <span className="w-2.5 h-2.5 rounded-full bg-[#ff5f57]" />
-        <span className="w-2.5 h-2.5 rounded-full bg-[#ffbd2e]" />
-        <span className="w-2.5 h-2.5 rounded-full bg-[#28c840]" />
-        <span className="ml-2 text-[10.5px] text-text-helper font-medium">RICE — 새 대화</span>
-      </div>
-
-      {/* 메시지 목록 */}
-      <div className="px-3 py-3 flex flex-col gap-3">
-        {WELCOME_CHAT.slice(0, visibleCount).map((msg) => (
-          <ChatBubble key={msg.id} msg={msg} />
-        ))}
-        {/* 마지막 메시지 전까지 타이핑 인디케이터 */}
-        {visibleCount > 0 && visibleCount < WELCOME_CHAT.length && (
-          <div className="flex items-center gap-2 pl-8">
-            <span className="ia-spinner w-3 h-3" />
-            <span className="text-[10.5px] text-text-helper">RICE가 작업 중이에요…</span>
-          </div>
-        )}
-      </div>
+const WelcomeChatPreview: React.FC = () => (
+  <div className="mt-5 rounded-xl border border-border-subtle-01 bg-layer-01 shadow-elevation-2 overflow-hidden">
+    {/* 가짜 윈도우 헤더 — macOS 신호등 */}
+    <div className="flex items-center gap-1.5 px-3 py-2.5 border-b border-border-subtle-01 bg-layer-02">
+      <span className="w-2.5 h-2.5 rounded-full bg-[#ff5f57]" />
+      <span className="w-2.5 h-2.5 rounded-full bg-[#ffbd2e]" />
+      <span className="w-2.5 h-2.5 rounded-full bg-[#28c840]" />
+      <span className="ml-2 text-[10.5px] text-text-helper font-medium">RICE — 새 대화</span>
     </div>
-  );
-};
+
+    {/* 메시지 목록 — 모두 즉시 표시 */}
+    <div className="px-3 py-3 flex flex-col gap-3">
+      {WELCOME_CHAT.map((msg) => (
+        <ChatBubble key={msg.id} msg={msg} />
+      ))}
+    </div>
+  </div>
+);
 
 // ── conceptStep 전용: Learning Loop 다이어그램 ──────────────────────────────
 
@@ -586,36 +562,42 @@ const readyStep: OnboardingStep = {
   navDescription: '시작하기',
   primaryLabel: '시작하기',
   render: (ctx) => (
-    <div className="flex flex-col h-full justify-center max-w-[460px]">
-      <span className="flex items-center justify-center w-14 h-14 rounded-2xl bg-support-success/15 text-support-success mb-5">
-        <LineIcon size={28}>{icons.check}</LineIcon>
-      </span>
-      <h2 className="text-heading-03 font-semibold text-text-primary">모두 준비됐어요</h2>
-      <p className="text-body-short-01 text-text-secondary mt-2">
-        <span className="font-mono text-text-primary">{ctx.draft.modelId || ctx.initial.currentModel}</span>
-        {' '}모델이 연결되었습니다. 이제 바로 대화를 시작할 수 있어요.
-      </p>
+    <div className="flex flex-col w-full gap-6">
+      {/* 헤더: 체크 아이콘을 제목 오른쪽에 나란히 배치 */}
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex flex-col gap-2">
+          <h2 className="text-heading-03 font-semibold text-text-primary">모두 준비됐어요</h2>
+          <p className="text-body-short-01 text-text-secondary">
+            <span className="font-mono text-text-primary">{ctx.draft.modelId || ctx.initial.currentModel}</span>
+            {' '}모델이 연결됐어요. 바로 대화를 시작할 수 있어요.
+          </p>
+        </div>
+        <span className="flex items-center justify-center w-12 h-12 rounded-2xl bg-support-success/15 text-support-success flex-shrink-0">
+          <LineIcon size={26}>{icons.check}</LineIcon>
+        </span>
+      </div>
 
-      <div className="mt-6 flex flex-col gap-2.5">
-        <div className="flex items-center gap-3 text-body-short-01 text-text-secondary">
-          <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-layer-02 text-blue-50 flex-shrink-0">
-            <LineIcon size={17}>{icons.slash}</LineIcon>
+      {/* 팁 목록 */}
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-layer-02 text-body-short-01 text-text-secondary">
+          <span className="flex items-center justify-center w-7 h-7 rounded-lg bg-layer-03 text-blue-50 flex-shrink-0">
+            <LineIcon size={15}>{icons.slash}</LineIcon>
           </span>
           <span>
             <span className="text-text-primary font-medium">슬래시(/) 명령</span>으로 저장된 스킬을 즉시 실행해요
           </span>
         </div>
-        <div className="flex items-center gap-3 text-body-short-01 text-text-secondary">
-          <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-layer-02 text-teal-60 flex-shrink-0">
-            <LineIcon size={17}>{icons.brain}</LineIcon>
+        <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-layer-02 text-body-short-01 text-text-secondary">
+          <span className="flex items-center justify-center w-7 h-7 rounded-lg bg-layer-03 text-teal-60 flex-shrink-0">
+            <LineIcon size={15}>{icons.brain}</LineIcon>
           </span>
           <span>
             대화를 이어갈수록 <span className="text-text-primary font-medium">학습 패널</span>에 내 작업 패턴이 쌓여요
           </span>
         </div>
-        <div className="flex items-center gap-3 text-body-short-01 text-text-secondary">
-          <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-layer-02 text-purple-60 flex-shrink-0">
-            <LineIcon size={17}>{icons.shield}</LineIcon>
+        <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-layer-02 text-body-short-01 text-text-secondary">
+          <span className="flex items-center justify-center w-7 h-7 rounded-lg bg-layer-03 text-purple-60 flex-shrink-0">
+            <LineIcon size={15}>{icons.shield}</LineIcon>
           </span>
           <span>
             모든 데이터는 <span className="text-text-primary font-medium">이 기기에만</span> 저장돼요
