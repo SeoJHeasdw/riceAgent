@@ -4,6 +4,8 @@ import { Button, Icon, Tag, ResizeHandle } from '../components/ui';
 import type { IconName } from '../components/ui/Icon';
 import { McpRegisterModal, ConnectorDirectoryModal, type McpRegisterPayload } from '../components/carbon';
 import { useResizable } from '../hooks/useResizable';
+import api from '../lib/api';
+import { openExternal } from '../lib/openExternal';
 import {
   CONNECTORS,
   connectorKind,
@@ -15,6 +17,66 @@ import {
 } from '../lib/learningData';
 
 type Kind = 'remote' | 'local-mcp';
+
+// ── 백엔드(runtime) 연동 — 런타임이 온라인일 때 'remote' 커넥터를 실데이터로 대체 ──
+
+/** GET /connectors 가 돌려주는 ConnectorInfo wire 형태 (CONTRACTS §4). */
+interface ConnectorInfoWire {
+  id: string;
+  connector_type: string;
+  display_name: string;
+  status: 'connected' | 'disconnected' | 'error';
+  scopes?: string[];
+  connected_at?: string | null;
+  last_verified_at?: string | null;
+}
+
+/** 백엔드 ConnectorInfo → UI Connector 매핑 (remote 전용). */
+const infoToConnector = (info: ConnectorInfoWire): Connector => {
+  const connected = info.status === 'connected';
+  const isGmail = info.connector_type === 'gmail';
+  // 연결된 Gmail 은 런타임이 노출하는 원자적 도구 3종을 보여준다(connector/service.py).
+  const scopes: ConnectorScope[] =
+    connected && isGmail
+      ? [
+          { name: 'gmail_search', mode: '읽기' },
+          { name: 'gmail_read', mode: '읽기' },
+          { name: 'gmail_send', mode: '쓰기' },
+        ]
+      : [];
+  return {
+    id: info.id,
+    name: info.display_name || info.connector_type,
+    icon: isGmail ? 'send' : 'plug',
+    category: isGmail ? '메일' : info.connector_type,
+    provider: isGmail ? 'Google' : info.connector_type,
+    kind: 'remote',
+    status: connected ? 'connected' : 'disconnected',
+    account: connected ? info.display_name || '연결됨' : undefined,
+    lastSync: info.last_verified_at ?? undefined,
+    summary: isGmail
+      ? '메일을 검색·읽기하고 메일을 발송합니다 (gmail_search · gmail_read · gmail_send).'
+      : `${info.connector_type} 커넥터`,
+    scopes,
+    usedBy: [],
+    examples: isGmail ? ['받은 편지함에서 최근 중요한 메일 요약해줘', '이 내용으로 메일 보내줘'] : [],
+  };
+};
+
+/** 백엔드에 연결 레코드가 아직 없을 때 노출하는 "연결 가능한" Gmail 카드(프로토타입). */
+const GMAIL_CONNECTABLE: Connector = {
+  id: 'gmail',
+  name: 'Gmail',
+  icon: 'send',
+  category: '메일',
+  provider: 'Google',
+  kind: 'remote',
+  status: 'disconnected',
+  summary: '연결하면 브라우저에서 구글 로그인이 열리고, 이후 메일 검색·읽기·발송 도구를 쓸 수 있어요.',
+  scopes: [],
+  usedBy: [],
+  examples: ['받은 편지함에서 최근 중요한 메일 요약해줘'],
+};
 
 /** stdio transport를 보기 좋은 한 줄 명령으로 렌더 */
 const transportLine = (t: McpTransport): string =>
@@ -149,7 +211,11 @@ const ConnectorDetailView: React.FC<{
   connectorId: string | null;
   connectors: Connector[];
   setConnectors: React.Dispatch<React.SetStateAction<Connector[]>>;
-}> = ({ connectorId, connectors, setConnectors }) => {
+  online: boolean;
+  busyId: string | null;
+  onRealConnect: (c: Connector) => void;
+  onRealDisconnect: (c: Connector) => void;
+}> = ({ connectorId, connectors, setConnectors, online, busyId, onRealConnect, onRealDisconnect }) => {
   const c = connectors.find((x) => x.id === connectorId);
 
   if (!c || !connectorId) {
@@ -158,8 +224,16 @@ const ConnectorDetailView: React.FC<{
 
   const connected = c.status === 'connected';
   const isMcp = connectorKind(c) === 'local-mcp';
+  const busy = busyId === c.id;
   const patch = (fn: (c: Connector) => Connector) => setConnectors((a) => a.map((x) => (x.id === connectorId ? fn(x) : x)));
-  const toggleConnect = () =>
+  const toggleConnect = () => {
+    // 런타임 온라인 + 원격 커넥터: 실제 OAuth 연결/해제 경로(백엔드 /connectors).
+    if (online && !isMcp) {
+      if (connected) onRealDisconnect(c);
+      else onRealConnect(c);
+      return;
+    }
+    // 오프라인(디자인 데모) 또는 로컬 MCP: 기존 목업 토글 유지.
     patch((x) =>
       x.status === 'connected'
         ? { ...x, status: 'disconnected', account: undefined, lastSync: undefined }
@@ -170,6 +244,7 @@ const ConnectorDetailView: React.FC<{
             lastSync: '방금',
           },
     );
+  };
   // 도구는 제공자가 정의하므로 추가/삭제하지 않고 "언제 호출할 수 있는가"만 바꾼다.
   const setScopePermission = (idx: number, perm: ScopePermission) =>
     patch((x) => ({ ...x, scopes: x.scopes.map((s, i) => (i === idx ? { ...s, permission: perm } : s)) }));
@@ -221,10 +296,21 @@ const ConnectorDetailView: React.FC<{
             <Button
               kind={connected ? 'secondary' : 'primary'}
               size="sm"
-              icon={<Icon name={connected ? 'close' : 'connect'} size={15} />}
+              disabled={busy}
+              icon={<Icon name={busy ? 'renew' : connected ? 'close' : 'connect'} size={15} />}
               onClick={toggleConnect}
             >
-              {isMcp ? (connected ? '중지' : '실행') : connected ? '연결 해제' : '연결'}
+              {busy
+                ? online && !connected
+                  ? '브라우저에서 로그인 대기…'
+                  : '처리 중…'
+                : isMcp
+                ? connected
+                  ? '중지'
+                  : '실행'
+                : connected
+                ? '연결 해제'
+                : '연결'}
             </Button>
           </div>
         </div>
@@ -386,6 +472,8 @@ const ConnectorDetailView: React.FC<{
 function ConnectorsScreen() {
   const { id } = useParams<{ id?: string }>();
   const [connectors, setConnectors] = useState<Connector[]>(CONNECTORS);
+  const [online, setOnline] = useState<boolean>(api.isEnabled);
+  const [busyId, setBusyId] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>('전체');
   const initial = id ? CONNECTORS.find((c) => c.id === id) : undefined;
   const [kind, setKind] = useState<Kind>(initial ? connectorKind(initial) : 'remote');
@@ -418,6 +506,91 @@ function ConnectorsScreen() {
       setKind(connectorKind(target));
     }
   }, [id, connectors]);
+
+  // ── 런타임 실연동: 온라인이면 'remote' 커넥터를 백엔드 실데이터로 대체(목업 제거) ──
+  // local-mcp 항목은 백엔드 관리 대상이 아니므로 목업 그대로 둔다(Phase 2).
+  const mergeRemote = (real: Connector[]) => {
+    setConnectors((prev) => {
+      const localMcp = prev.filter((x) => connectorKind(x) === 'local-mcp');
+      const hasGmail = real.some((x) => x.name.toLowerCase() === 'gmail');
+      const remote = hasGmail ? real : [...real, GMAIL_CONNECTABLE];
+      return [...remote, ...localMcp];
+    });
+  };
+
+  const refresh = async () => {
+    const res = await api.getConnectors();
+    if (res.success && Array.isArray(res.data)) {
+      mergeRemote((res.data as ConnectorInfoWire[]).map(infoToConnector));
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      if (!api.isEnabled) return;
+      setOnline(true);
+      const res = await api.getConnectors();
+      if (cancelled) return;
+      if (res.success && Array.isArray(res.data)) {
+        mergeRemote((res.data as ConnectorInfoWire[]).map(infoToConnector));
+      }
+    };
+    void load();
+    const unsub = api.onEnabledChange((en) => {
+      setOnline(en);
+      if (en) void load();
+    });
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 브라우저 OAuth 완료까지 connected 폴링(최대 ~2분).
+  const pollConnected = async (): Promise<boolean> => {
+    for (let i = 0; i < 48; i++) {
+      await new Promise((r) => setTimeout(r, 2500));
+      const res = await api.getConnectors();
+      if (res.success && Array.isArray(res.data)) {
+        const list = res.data as ConnectorInfoWire[];
+        if (list.some((x) => x.connector_type === 'gmail' && x.status === 'connected')) return true;
+      }
+    }
+    return false;
+  };
+
+  const handleRealConnect = async (c: Connector) => {
+    setBusyId(c.id);
+    try {
+      const res = await api.connectConnector('gmail');
+      const url = (res.data as { oauth_url?: string } | undefined)?.oauth_url;
+      if (!res.success || !url) return;
+      await openExternal(url); // 시스템 브라우저에서 구글 로그인
+      if (await pollConnected()) {
+        await refresh();
+        const res2 = await api.getConnectors();
+        const found =
+          res2.success && Array.isArray(res2.data)
+            ? (res2.data as ConnectorInfoWire[]).find((x) => x.connector_type === 'gmail' && x.status === 'connected')
+            : undefined;
+        if (found) setSel(found.id);
+      }
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleRealDisconnect = async (c: Connector) => {
+    setBusyId(c.id);
+    try {
+      await api.deleteConnector(c.id);
+      await refresh();
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   const isLocal = kind === 'local-mcp';
   const match = (c: Connector) =>
@@ -667,7 +840,15 @@ function ConnectorsScreen() {
       />
 
       {/* detail */}
-      <ConnectorDetailView connectorId={effectiveSel} connectors={connectors} setConnectors={setConnectors} />
+      <ConnectorDetailView
+        connectorId={effectiveSel}
+        connectors={connectors}
+        setConnectors={setConnectors}
+        online={online}
+        busyId={busyId}
+        onRealConnect={handleRealConnect}
+        onRealDisconnect={handleRealDisconnect}
+      />
 
       {/* 원격 커넥터 디렉터리 */}
       <ConnectorDirectoryModal

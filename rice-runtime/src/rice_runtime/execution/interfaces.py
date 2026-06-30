@@ -57,9 +57,14 @@ class ISandbox(Protocol):
         entrypoint: str,
         payload: dict[str, Any],
         timeout_s: float = 30.0,
+        sys_path: list[str] | None = None,
     ) -> SandboxResult:
         """Run `entrypoint` in an isolated child process (env-scrubbed) with the
-        given payload, enforcing a timeout. Never executes in-process."""
+        given payload, enforcing a timeout. Never executes in-process.
+
+        `sys_path`: extra import roots prepended to the child's module search path
+        (e.g. an installed plugin's dir) so `entrypoint`'s dotted module imports.
+        Still env-scrubbed — only these paths are added, no parent secrets."""
         ...
 
 
@@ -80,6 +85,7 @@ class IPluginLoader(Protocol):
 
     # ── management (routes/plugins.py, routes/artifacts.py) ──────────────────
     def list_plugins(self) -> list[PluginInfo]: ...
+    def get_plugin(self, plugin_id: str) -> PluginInfo | None: ...
     def set_enabled(self, plugin_id: str, enabled: bool) -> None: ...
     async def install(self, *, path: str, manifest: dict[str, Any]) -> PluginInfo:
         """Verify checksum, place under `~/.rice/{skills|plugins}/`, load

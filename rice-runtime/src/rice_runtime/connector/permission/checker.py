@@ -8,10 +8,14 @@
   - execution 모듈 구체에 의존하지 않는다 — plugin manifest 는 직접 파일에서 읽는다.
     manifest 를 찾지 못하면 fail-closed (False) (CONVENTIONS §7).
 
-manifest 위치: ~/.rice/plugins/<plugin_id>/rice-artifact.yaml (CONTRACTS §2.2)
+manifest 위치 (우선순위):
+  1) ~/.rice/plugins/<plugin_id>/rice-artifact.json  ← loader.install() 이 저장하는 형식
+  2) ~/.rice/plugins/<plugin_id>/rice-artifact.yaml  ← 손수 작성한 plugin(개발용)
+(CONTRACTS §2.2 / §2.3 — 설치 흐름은 manifest 를 JSON 으로 떨군다.)
 """
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 
@@ -19,20 +23,33 @@ log = logging.getLogger("rice.connector.permission")
 
 
 def _load_plugin_manifest(plugins_root: Path, plugin_id: str) -> dict:
-    """plugin manifest (rice-artifact.yaml) 를 읽어 dict 반환한다.
+    """plugin manifest 를 읽어 dict 반환한다 (JSON 우선, YAML 폴백).
 
     파일이 없거나 파싱 실패 시 빈 dict 반환 (fail-closed 처리는 호출자 책임).
+
+    NOTE(agent): loader.install() 은 rice-artifact.json 을 저장하므로 JSON 을 먼저
+    읽는다(v1 의 .yaml-only 버그 교정 — checker 와 loader 의 파일명 불일치 해소).
     """
-    manifest_path = plugins_root / plugin_id / "rice-artifact.yaml"
-    if not manifest_path.exists():
-        log.debug("plugin manifest not found: %s (fail-closed)", manifest_path)
-        return {}
-    try:
-        import yaml  # PyYAML — 기본 의존성 (pyproject.toml dependencies)
-        return yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
-    except Exception as exc:  # noqa: BLE001
-        log.warning("failed to parse plugin manifest %s: %s", manifest_path, exc)
-        return {}
+    plugin_dir = plugins_root / plugin_id
+    json_path = plugin_dir / "rice-artifact.json"
+    if json_path.exists():
+        try:
+            return json.loads(json_path.read_text(encoding="utf-8")) or {}
+        except (OSError, json.JSONDecodeError) as exc:
+            log.warning("failed to parse plugin manifest %s: %s", json_path, exc)
+            return {}
+
+    yaml_path = plugin_dir / "rice-artifact.yaml"
+    if yaml_path.exists():
+        try:
+            import yaml  # PyYAML — 기본 의존성 (pyproject.toml dependencies)
+            return yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+        except Exception as exc:  # noqa: BLE001
+            log.warning("failed to parse plugin manifest %s: %s", yaml_path, exc)
+            return {}
+
+    log.debug("plugin manifest not found for %s (fail-closed)", plugin_id)
+    return {}
 
 
 class PermissionChecker:

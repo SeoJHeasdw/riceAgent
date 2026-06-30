@@ -55,6 +55,7 @@ class ChildProcessSandbox(ISandbox):
         entrypoint: str,
         payload: dict[str, Any],
         timeout_s: float = 30.0,
+        sys_path: list[str] | None = None,
     ) -> SandboxResult:
         """Run `entrypoint` in an isolated child process.
 
@@ -62,7 +63,7 @@ class ChildProcessSandbox(ISandbox):
         """
         try:
             return await self._run_child(
-                entrypoint=entrypoint, payload=payload, timeout_s=timeout_s
+                entrypoint=entrypoint, payload=payload, timeout_s=timeout_s, sys_path=sys_path
             )
         except Exception as exc:  # noqa: BLE001
             # Unexpected errors (spawn failure, OS error, …) are also
@@ -75,6 +76,7 @@ class ChildProcessSandbox(ISandbox):
         entrypoint: str,
         payload: dict[str, Any],
         timeout_s: float,
+        sys_path: list[str] | None = None,
     ) -> SandboxResult:
         """Spawn the child, send the request, collect the response.
 
@@ -84,7 +86,7 @@ class ChildProcessSandbox(ISandbox):
         `communicate()` leaves the child running as an orphan.)
         """
         args = child_script_args()
-        kwargs = make_child_kwargs()
+        kwargs = make_child_kwargs(extra_path=sys_path)
         # asyncio subprocess: stdin/stdout are async streams.
         proc = await asyncio.create_subprocess_exec(
             *args,

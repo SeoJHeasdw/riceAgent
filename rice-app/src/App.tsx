@@ -75,7 +75,11 @@ function AppShell({ tourActive, onTourDone }: AppShellProps) {
 
 // Minimal shape of the Electron preload bridge we rely on (typed locally so the
 // renderer doesn't depend on the preload's global augmentation).
-type RuntimeBridge = { getStatus: () => Promise<{ running: boolean; port?: number }> };
+type RuntimeStatusMsg = { running: boolean; port?: number; token?: string };
+type RuntimeBridge = {
+  getStatus: () => Promise<RuntimeStatusMsg>;
+  onReady?: (cb: (status: RuntimeStatusMsg) => void) => () => void;
+};
 
 // 등록 모델의 provider(UI) → 런타임 provider kind 매핑.
 const providerKind = (provider?: string): 'claude' | 'openai' | 'watsonx' => {
@@ -114,15 +118,20 @@ function App() {
 
     const bridge = (window as { electronAPI?: { runtime?: RuntimeBridge } }).electronAPI?.runtime;
     if (bridge) {
+      // Runtime may already be up (fast restart) → probe once now …
       bridge
         .getStatus()
         .then((status) => {
-          if (status?.running && status.port) connect(`http://localhost:${status.port}`);
+          if (status?.running && status.port) connect(`http://localhost:${status.port}`, status.token ?? null);
         })
         .catch(() => {
-          /* runtime not reachable — stay offline */
+          /* runtime not reachable yet — wait for the ready push below */
         });
-      return;
+      // … and/or connect when main reports it healthy (window paints before spawn).
+      const off = bridge.onReady?.((status) => {
+        if (status?.running && status.port) connect(`http://localhost:${status.port}`, status.token ?? null);
+      });
+      return () => off?.();
     }
 
     // Renderer-only dev (no Electron IPC): connect directly to a locally-run

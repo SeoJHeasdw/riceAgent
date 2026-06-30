@@ -84,7 +84,9 @@ def build_container(args: RuntimeArgs | None = None, *, paths: RicePaths | None 
     # ── module services (each behind its interface) ───────────────────────────
     sessions: ISessionStore = SessionManager(db)
     learning: ILearningService = LearningService(db, config_store.config.learning, paths)
-    connectors: IConnectorService = ConnectorService(db, paths)
+    # port 를 넘겨 OAuth redirect_uri(http://localhost:{port}/connectors/oauth/callback)를
+    # 정확히 구성한다 (CONTRACTS §4.2). args.port 가 0 이면 flow 가 dev 기본(8080)으로 폴백.
+    connectors: IConnectorService = ConnectorService(db, paths, port=args.port or None)
     plugins: IPluginLoader = PluginLoaderService(db, ChildProcessSandbox(), paths)
     approvals: IApprovalGate = ApprovalRegistry()
 

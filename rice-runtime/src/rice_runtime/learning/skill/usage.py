@@ -111,3 +111,7 @@ class UsageStore:
         usage.patch += 1
         self._write(usage)
         return usage
+
+    def delete(self, name: str) -> None:
+        """usage 사이드카 파일을 삭제한다 (DELETE /skills/{id}). idempotent."""
+        self._usage_path(name).unlink(missing_ok=True)

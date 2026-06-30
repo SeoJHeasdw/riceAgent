@@ -42,6 +42,7 @@ class NoopSandbox(ISandbox):
         entrypoint: str,
         payload: dict[str, Any],
         timeout_s: float = 30.0,
+        sys_path: list[str] | None = None,
     ) -> SandboxResult:
         return SandboxResult(ok=False, error="sandbox not implemented — execution denied")
 
@@ -72,6 +73,9 @@ class PluginLoaderService(IPluginLoader):
 
     def list_plugins(self) -> list[PluginInfo]:
         return self._impl.list_plugins()
+
+    def get_plugin(self, plugin_id: str) -> PluginInfo | None:
+        return self._impl.get_plugin(plugin_id)
 
     def set_enabled(self, plugin_id: str, enabled: bool) -> None:
         self._impl.set_enabled(plugin_id, enabled)

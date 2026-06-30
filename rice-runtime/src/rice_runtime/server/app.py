@@ -24,6 +24,8 @@ log = logging.getLogger("rice.server")
 
 
 def create_app(container: Container):
+    from contextlib import asynccontextmanager
+
     from fastapi import Depends, FastAPI, Header, HTTPException, Request
     from fastapi.responses import JSONResponse
 
@@ -34,9 +36,28 @@ def create_app(container: Container):
     from .routes import settings as settings_routes
     from .routes import skills as skills_routes
     from .routes import workspace as workspace_routes
+    from .scheduler import CuratorScheduler
 
-    app = FastAPI(title="rice-runtime", version="0.1.0")
+    # 백그라운드 curator: 앱 수명주기에 묶어 시작/정리한다 (RUNTIME_DESIGN §3).
+    scheduler = CuratorScheduler(container)
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        scheduler.start()
+        try:
+            yield
+        finally:
+            await scheduler.stop()
+
+    app = FastAPI(title="rice-runtime", version="0.1.0", lifespan=lifespan)
     app.state.container = container
+
+    # Public paths that bypass the bearer-token guard:
+    #  - /health: liveness probe (supervisor).
+    #  - /connectors/oauth/callback: the OAuth redirect is hit by the *system
+    #    browser*, which carries no Authorization header (CONTRACTS §4.2). The
+    #    CSRF state token gates it instead.
+    _PUBLIC_PATHS = frozenset({"/health", "/connectors/oauth/callback"})
 
     # ── auth guard (CONTRACTS §1.1) ───────────────────────────────────────────
     @app.middleware("http")
@@ -44,7 +65,7 @@ def create_app(container: Container):
         token = container.args.token
         # CORS preflight (OPTIONS) carries no Authorization header by design — let
         # it through so CORSMiddleware can answer it; real requests still gated.
-        if token and request.method != "OPTIONS" and request.url.path != "/health":
+        if token and request.method != "OPTIONS" and request.url.path not in _PUBLIC_PATHS:
             header = request.headers.get("authorization", "")
             if header != f"Bearer {token}":
                 return JSONResponse({"success": False, "error": "unauthorized"}, status_code=401)
@@ -104,8 +125,10 @@ def serve(host: str | None = None, port: int | None = None, token: str = "") -> 
 
     from ..core.config import RuntimeArgs
 
-    container = build_container(RuntimeArgs(host=host or "127.0.0.1", port=port or 0, token=token))
+    # 실제 바인딩 포트를 먼저 확정한 뒤 컨테이너에 주입한다 — OAuth redirect_uri
+    # (http://localhost:{port}/connectors/oauth/callback)가 바인딩 포트와 일치해야 한다.
+    bind_port = port or 8080
+    container = build_container(RuntimeArgs(host=host or "127.0.0.1", port=bind_port, token=token))
     app = create_app(container)
-    bind_port = container.args.port or 8080
     log.info("rice-runtime listening on %s:%s", container.args.host, bind_port)
     uvicorn.run(app, host=container.args.host, port=bind_port, log_level="info")

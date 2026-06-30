@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import difflib
 
+from ..signals import has_correction_signal, has_failure_signal
+
 
 def build_diff(old_body: str, new_body: str) -> dict:
     """두 본문 문자열의 diff를 SkillDiff 형태로 반환한다.
@@ -60,51 +62,30 @@ def detect_patch_trigger(
     final_message: str,
     tool_calls_made: int,
     injected_skill_ids: tuple[str, ...],
+    user_text: str | None = None,
 ) -> str | None:
     """observe()에서 patch 트리거 여부를 판단한다 (LEARNING_LOOP §5.2.2).
 
     반환:
-      - "T1a" : 명시적 교정 신호가 final_message에 있을 때
-      - "T1b" : 주입된 스킬이 있는데 실패 신호가 final_message에 있을 때
+      - "T1a" : 명시적 교정 신호가 있을 때
+      - "T1b" : 주입된 스킬이 있는데 실패 신호가 있을 때
       - None  : 확실하지 않으면 제안 없음 (보수적)
 
-    WHY 보수적: 데모 안정성 > 적극적 제안. 애매한 경우는 제안하지 않는다.
-    분류기를 만들지 않는 원칙 — 프롬프트 가이드 기반만 (LEARNING_LOOP §5.2.2).
+    탐지 대상: 어시스턴트 최종 메시지 + (있으면) **직전 사용자 메시지**(user_text).
+    교정·실패 신호는 보통 사용자가 말하므로(예: "그게 아니라", "안 돼") 사용자 메시지를
+    함께 본다 — v1 은 final_message 만 봐서 한국어 교정을 거의 못 잡았다(버그#8).
 
-    NOTE(agent): 실제 LLM 응답에서 교정 신호를 100% 감지하는 것은 불가능하다.
-    이 구현은 패턴 매칭이며, 실제 배포 시에는 더 정교한 신호가 필요하다.
-    MVP 데모 범위에서 충분히 보수적인 선택이다.
+    신호셋은 learning/signals.py 에 한국어+영어로 중앙화되어 있다.
+    WHY 보수적: 데모 안정성 > 적극적 제안. 분류기를 만들지 않는 원칙(LEARNING_LOOP §5.2.2).
     """
     if not injected_skill_ids:
         # 주입된 스킬이 없으면 patch 대상이 없다.
         return None
 
-    msg_lower = final_message.lower()
+    haystack = final_message if not user_text else f"{final_message}\n{user_text}"
 
-    # T1a: 명시적 교정 신호 — "actually", "correction", "the correct way", etc.
-    correction_signals = [
-        "actually,",
-        "actually the",
-        "correction:",
-        "incorrect",
-        "the correct way",
-        "should be",
-        "i made a mistake",
-        "that was wrong",
-    ]
-    if any(sig in msg_lower for sig in correction_signals):
+    if has_correction_signal(haystack):  # T1a
         return "T1a"
-
-    # T1b: 실패 신호 — 스킬을 주입했는데 "failed", "error", "didn't work"
-    failure_signals = [
-        "failed",
-        "error occurred",
-        "didn't work",
-        "did not work",
-        "could not",
-        "couldn't",
-    ]
-    if any(sig in msg_lower for sig in failure_signals):
+    if has_failure_signal(haystack):  # T1b
         return "T1b"
-
     return None

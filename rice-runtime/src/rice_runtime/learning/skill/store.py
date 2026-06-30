@@ -31,6 +31,7 @@ frontmatter 파싱에 PyYAML을 사용한다. PyYAML이 없으면 최소 파서(
 from __future__ import annotations
 
 import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -232,9 +233,12 @@ class SkillStore:
         result = []
         for path in sorted(hist_dir.glob("v*.md")):
             try:
-                data = parse_skill_md(path.read_text(encoding="utf-8"))
+                # 파일을 한 번만 읽어 파싱/반환에 재사용한다 — 두 번 읽으면 그 사이
+                # 파일이 바뀔 때 버전과 본문이 어긋날 수 있다(버그#11).
+                text = path.read_text(encoding="utf-8")
+                data = parse_skill_md(text)
                 updated = data.updated_at or data.created_at or ""
-                result.append((data.version, updated, path.read_text(encoding="utf-8")))
+                result.append((data.version, updated, text))
             except Exception:
                 pass
         return result
@@ -246,6 +250,14 @@ class SkillStore:
         self._paths.skills.mkdir(parents=True, exist_ok=True)
         path = self._skill_path(skill.name)
         path.write_text(serialize_skill_md(skill), encoding="utf-8")
+
+    def delete(self, name: str) -> None:
+        """스킬 본문 파일과 히스토리 디렉토리를 삭제한다 (DELETE /skills/{id}).
+
+        usage 사이드카(.usage.json)는 UsageStore.delete 가 담당한다.
+        존재하지 않아도 조용히 통과(idempotent)."""
+        self._skill_path(name).unlink(missing_ok=True)
+        shutil.rmtree(self._paths.skills / name, ignore_errors=True)  # <name>/.history 포함
 
     def archive_to_history(self, name: str, version: int, full_text: str) -> None:
         """현재 버전을 .history/v<N>.md 로 보관한다 (apply_patch·rollback에서 호출).

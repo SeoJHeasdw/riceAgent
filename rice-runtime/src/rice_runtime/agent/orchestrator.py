@@ -66,7 +66,7 @@ from ..learning.interfaces import (
     PatchProposal,
     SkillCreated,
 )
-from ..prompts.system import compose_system_prompt
+from ..prompts.system import compose_system_prompt, render_skills_block
 from .interfaces import IApprovalGate, ITranscript
 from .loop import AgentLoop, LoopResult
 from .providers.interfaces import ILLMProvider
@@ -138,20 +138,34 @@ class Orchestrator:
             # 2. PREFETCH (learning assembles injectable context)
             pf = self._learning.prefetch(session_id, user_message)
 
+            # Plugin-provided SKILL.md bundles also inject into the system prompt
+            # (CONTRACTS §2.2 — "plugin = 머리에 추가되는 전문성"). v1 버그#2: the
+            # orchestrator never called injected_skills(), so plugin skills were
+            # silently dropped. Dedupe by name (a learned skill of the same name wins).
+            learned_names = {s.name for s in pf.skills}
+            plugin_skills = tuple(
+                s for s in self._plugins.injected_skills() if s.name not in learned_names
+            )
+
             # 3. ASSEMBLE context (tools from every tool-bearing module)
             tools = (
                 self._builtin_specs()
                 + tuple(self._connectors.list_tools())
                 + tuple(self._plugins.list_tools())
             )
-            system_prompt = compose_system_prompt(pf.system_prompt_additions)
+            # The model reads ctx.system_prompt only (the loop ignores injected_skills,
+            # which is telemetry) → plugin skills must be rendered INTO the prompt.
+            plugin_skill_block = render_skills_block(
+                plugin_skills, header="## Plugin Skills (from installed plugins — follow when relevant)"
+            )
+            system_prompt = compose_system_prompt(pf.system_prompt_additions, plugin_skill_block)
             base_history = self._transcript.history(session_id)
             ctx = TurnContext(
                 session_id=session_id,
                 system_prompt=system_prompt,
                 history=base_history,
                 tools=tools,
-                injected_skills=pf.skills,
+                injected_skills=pf.skills + plugin_skills,
                 injected_memories=pf.memories,
                 max_iterations=cfg.learning.max_iterations,
             )

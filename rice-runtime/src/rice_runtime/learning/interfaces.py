@@ -135,6 +135,35 @@ class ILearningService(Protocol):
     # ── management (routes/skills.py) ────────────────────────────────────────
     def list_skills(self) -> list[SkillSummary]: ...
     def get_skill(self, skill_id: str) -> SkillDetail | None: ...
+    def create_skill(
+        self,
+        *,
+        name: str,
+        body: str,
+        description: str = "",
+        tags: tuple[str, ...] = (),
+    ) -> SkillDetail:
+        """User-authored skill (POST /skills). Validates the name, refuses
+        collisions, writes a v1 active SKILL.md (source='user')."""
+        ...
+
+    def update_skill(
+        self,
+        skill_id: str,
+        *,
+        body: str | None = None,
+        description: str | None = None,
+        tags: tuple[str, ...] | None = None,
+        state: SkillState | None = None,
+    ) -> SkillDetail:
+        """Edit a skill in place (PUT /skills/{id}). A body change archives the prior
+        version to .history/ and bumps version (so diff/rollback still work)."""
+        ...
+
+    def delete_skill(self, skill_id: str) -> None:
+        """Delete a skill + its usage/history sidecars (DELETE /skills/{id})."""
+        ...
+
     def curate(self) -> CurateResult: ...
     def set_state(self, skill_id: str, state: SkillState) -> None: ...
     def history(self, skill_id: str) -> list[SkillVersion]: ...

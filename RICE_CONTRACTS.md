@@ -227,3 +227,34 @@ requires:
 
 - ✅ 각 API 제공 레포가 OpenAPI 스펙 소유 → 소비 레포 코드젠 (REPO_STRATEGY 4.3)
 - ✅ artifact manifest 스키마는 이 문서가 단일 출처 — runtime / platform / app 3곳에서 참조하므로 JSON Schema로 작성해 각 레포에 복사가 아닌 **스펙 파일 참조**로 배포
+
+---
+
+## 6. Skill·Plugin·Connector 고도화 반영 (2026-06-30, 분석 리포트 v1/v2 교정)
+
+> Skill/Plugin/Connector 심층 분석에서 발견한 계약-코드 갭을 코드에서 교정했고, 그중
+> **계약 표면이 바뀐 항목**만 여기 고정한다(상세 동작은 각 모듈 docstring).
+
+### 6.1 Skill CRUD (신규 — §1.3 보강)
+- `POST /skills` `{name(kebab), body, description?, tags?}` → 사용자 직접 스킬 생성(source=`user`).
+- `PUT /skills/{id}` `{body?, description?, tags?, state?}` → 직접 편집. **본문 변경 시 version+1 + .history 보관**.
+- `DELETE /skills/{id}` → 본문·usage·history 사이드카 모두 삭제.
+
+### 6.2 HITL 승인 응답 코드 (§1.2 준수)
+- `POST /sessions/{id}/tool-approval`, `POST /skills/{id}/patch`: 이미 처리/만료된 `approval_id` → **409 Conflict**(과거: 항상 200). `resolve()`가 처리 여부(bool)를 반환한다.
+- `POST /skills/{id}/patch`: URL `skill_id` 와 `approval_id` 의 대상 스킬이 **일치해야** 함(불일치 422).
+
+### 6.3 Artifact 설치 무결성 (§2.3)
+- `POST /artifacts/install` 에 선택 필드 **`checksum`** 추가 — 앱이 platform download 응답의 `X-Checksum` 헤더 값을 그대로 전달하면 manifest.checksum 보다 우선해 검증한다(빈 값이면 dev 모드).
+- manifest `version` 은 YAML 숫자(`1.0`)로 와도 문자열로 정규화(과거: ValidationError).
+- skill artifact 는 설치 시 **평면 `~/.rice/skills/<name>.md`** 로 배치되어 학습 루프 주입·lifecycle 대상이 된다.
+- plugin 의 `skills/<sub>/SKILL.md`(표준 레이아웃)도 주입 대상에 포함(과거: 평면 `*.md` 만).
+
+### 6.4 Plugin 활성화 게이트 (§4.4 실행)
+- `PATCH /plugins/{id}/enabled` (enable): `requires.connectors` 가 **모두 연결돼 있지 않으면 422** 로 차단(과거: 무검증 → 도구 실행 시 조용히 실패).
+- PermissionChecker 는 설치 manifest(`rice-artifact.json`)를 읽는다(과거: `.yaml` 만 찾아 항상 fail-closed).
+
+### 6.5 Connector(Gmail) 동작 (§4.2)
+- OAuth client 자격증명 해석 우선순위: env(`RICE_GMAIL_CLIENT_ID/SECRET`) → `RICE_GMAIL_CLIENT_SECRET_FILE` → `~/.rice/connectors/gmail_client_secret.json`(Google "installed" JSON).
+- `redirect_uri` 는 런타임 바인딩 포트로 구성: `http://localhost:{port}/connectors/oauth/callback`. 콜백은 **bearer 토큰 면제**(브라우저가 직접 호출) + 사람이 읽는 HTML 응답.
+- Gmail 도구 표면에 **`gmail_send`** 추가(send scope, requires_approval=True). 기존 `gmail_search`/`gmail_read` 유지.

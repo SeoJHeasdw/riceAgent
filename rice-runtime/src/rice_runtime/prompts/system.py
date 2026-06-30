@@ -30,3 +30,19 @@ def compose_system_prompt(*sections: str | None) -> str:
     parts = [BASE_SYSTEM_PROMPT]
     parts.extend(s.strip() for s in sections if s and s.strip())
     return "\n\n".join(parts)
+
+
+def render_skills_block(
+    skills,
+    header: str = "## Available Skills (follow these procedures when relevant)",
+) -> str:
+    """Render injected skills (InjectedSkill-like: .name/.version/.body) into a
+    system-prompt block. Shared by learning prefetch (learned skills) and the
+    orchestrator (plugin-provided skills) so the on-prompt format stays identical
+    (LEARNING_LOOP §7, CONTRACTS §2.2). Empty input → empty string."""
+    if not skills:
+        return ""
+    lines = [header]
+    for sk in skills:
+        lines.append(f"\n### [{sk.name}] (v{sk.version})\n{sk.body}")
+    return "\n".join(lines)

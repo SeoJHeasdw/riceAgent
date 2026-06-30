@@ -123,10 +123,13 @@ async def abort(session_id: str, c: Container = Depends(get_container)):
 
 @router.post("/sessions/{session_id}/tool-approval")
 async def tool_approval(session_id: str, body: ToolApprovalIn, c: Container = Depends(get_container)):
-    # Resolve the parked approval; late/duplicate ids are idempotent (§5.1).
-    c.approvals.resolve(
+    # Resolve the parked approval. A late/duplicate/expired id resolves nothing →
+    # 409 Conflict (CONTRACTS §1.2 — no longer a silent 200).
+    ok = c.approvals.resolve(
         body.approval_id, ApprovalResponse(approval_id=body.approval_id, decision=body.decision)  # type: ignore[arg-type]
     )
+    if not ok:
+        raise ConflictError(f"approval {body.approval_id} already resolved or expired")
     return {"success": True}
 
 

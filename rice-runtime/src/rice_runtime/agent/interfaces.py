@@ -119,9 +119,15 @@ class IApprovalGate(Protocol):
         response. On timeout the safe default is reject/cancel."""
         ...
 
-    def resolve(self, approval_id: str, response: ApprovalResponse) -> None:
-        """Resolve a parked approval. Late/duplicate ids are idempotent no-ops
-        (the route maps that to 409/410)."""
+    def resolve(self, approval_id: str, response: ApprovalResponse) -> bool:
+        """Resolve a parked approval. Returns True if a live parked approval was
+        resolved, False if the id is unknown/already-resolved/expired — the route
+        maps False to 409 (CONTRACTS §1.2, RUNTIME_DESIGN §5.1)."""
+        ...
+
+    def get(self, approval_id: str) -> ApprovalRequest | None:
+        """The parked request for `approval_id` (or None) — lets a route cross-check
+        kind/payload (e.g. skill_id) before resolving."""
         ...
 
     def pending(self, session_id: str) -> list[ApprovalRequest]:

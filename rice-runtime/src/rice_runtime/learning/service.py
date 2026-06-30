@@ -20,7 +20,10 @@ Implementation status per task batch:
 
 from __future__ import annotations
 
+import re
+
 from ..core.config import LearningConfig
+from ..core.errors import NotFoundError, ValidationError
 from ..core.paths import RicePaths
 from ..core.storage.sqlite import Database
 from ..core.types import InjectedSkill, MemoryItem, TurnOutcome, now_iso
@@ -41,6 +44,12 @@ from .interfaces import (
 )
 from .memory.search import MemorySearch
 from .memory.store import MemoryStore
+from .signals import (
+    FACT_PREFIXES,
+    PREF_PREFIXES,
+    extract_skill_name,
+    has_skill_creation_intent,
+)
 from .skill.lifecycle import SkillLifecycle
 from .skill.patch import build_diff, detect_patch_trigger
 from .skill.store import SkillData, SkillStore
@@ -49,6 +58,9 @@ from .user_model.profile import UserProfile
 
 # 토큰 추정: len(text) / 4 (대략적 — 정밀도 불필요, LEARNING_LOOP §7)
 _CHARS_PER_TOKEN = 4
+
+# 사용자 스킬 이름 규약: kebab-case ascii, 2~64자 (SKILL.md name 규약과 일치)
+_VALID_SKILL_NAME = re.compile(r"^[a-z][a-z0-9-]{1,63}$")
 
 
 def _estimate_tokens(text: str) -> int:
@@ -95,7 +107,7 @@ class LearningService(ILearningService):
         self._skill_store = SkillStore(self._paths)
         self._usage_store = UsageStore(self._paths)
         self._lifecycle = SkillLifecycle(self._skill_store, self._paths)
-        self._curator = Curator(self._skill_store, self._lifecycle, config)
+        self._curator = Curator(self._skill_store, self._lifecycle, config, self._usage_store)
         self._user_profile = UserProfile(self._mem_store)
 
     # ── turn-critical ─────────────────────────────────────────────────────────
@@ -215,12 +227,17 @@ class LearningService(ILearningService):
             except Exception:
                 pass
 
+        # 직전 사용자 메시지 — patch 트리거(교정/실패)는 보통 사용자가 말한다.
+        user_text = next(
+            (m.content for m in reversed(outcome.history) if m.role == "user"), None
+        )
+
         # ③ 스킬 생성 판단 (보수적: tool_calls_made >= 5 + 명시적 스킬화 의도)
         # 단, 주입된 스킬이 없을 때만 고려 (이미 있는 절차라면 생성 불필요)
         if (
             not outcome.injected_skill_ids
             and outcome.tool_calls_made >= 5
-            and _has_skill_creation_intent(msg)
+            and has_skill_creation_intent(msg)
         ):
             skill_effect = _try_create_skill(
                 final_message=msg,
@@ -233,7 +250,9 @@ class LearningService(ILearningService):
                 effects.append(skill_effect)
 
         # ④ patch 트리거 판단 (보수적: 주입된 스킬 + 명확한 신호가 있을 때만)
-        trigger = detect_patch_trigger(msg, outcome.tool_calls_made, outcome.injected_skill_ids)
+        trigger = detect_patch_trigger(
+            msg, outcome.tool_calls_made, outcome.injected_skill_ids, user_text=user_text
+        )
         if trigger is not None and outcome.injected_skill_ids:
             # 가장 최근에 주입된 스킬에 대한 patch 제안 (첫 번째)
             target_skill_id = outcome.injected_skill_ids[0]
@@ -241,6 +260,7 @@ class LearningService(ILearningService):
                 skill_id=target_skill_id,
                 trigger=trigger,
                 final_message=msg,
+                user_text=user_text,
                 skill_store=self._skill_store,
             )
             if patch_proposal is not None:
@@ -316,6 +336,10 @@ class LearningService(ILearningService):
             return None
         self._usage_store.increment_view(skill_id)
         usage = self._usage_store.read(skill_id)
+        return self._detail_from(skill, usage)
+
+    def _detail_from(self, skill: SkillData, usage) -> SkillDetail:
+        """SkillData + UsageData → SkillDetail DTO (view 카운터는 건드리지 않음)."""
         return SkillDetail(
             id=skill.name,
             name=skill.name,
@@ -330,6 +354,83 @@ class LearningService(ILearningService):
             last_used_at=usage.last_used_at,
             body=skill.body,
         )
+
+    def create_skill(
+        self,
+        *,
+        name: str,
+        body: str,
+        description: str = "",
+        tags: tuple[str, ...] = (),
+    ) -> SkillDetail:
+        """사용자 직접 스킬 생성 (POST /skills, CONTRACTS §1.3)."""
+        if not _VALID_SKILL_NAME.match(name):
+            raise ValidationError(
+                f"스킬 이름은 kebab-case(소문자/숫자/하이픈, 2~64자)여야 합니다: {name!r}"
+            )
+        try:
+            self._skill_store.read(name)
+            raise ValidationError(f"이미 존재하는 스킬입니다: {name!r}")
+        except NotFoundError:
+            pass
+
+        now = now_iso()
+        skill = SkillData(
+            name=name,
+            version=1,
+            description=description,
+            state="active",
+            body=body,
+            tags=list(tags),
+            source="user",
+            created_at=now,
+            updated_at=now,
+        )
+        self._skill_store.write(skill)
+        usage = self._usage_store.read(name)  # 0-초기화 사이드카 생성 보장
+        self._usage_store._write(usage)  # noqa: SLF001 (모듈 내부 일관 사용)
+        return self._detail_from(skill, usage)
+
+    def update_skill(
+        self,
+        skill_id: str,
+        *,
+        body: str | None = None,
+        description: str | None = None,
+        tags: tuple[str, ...] | None = None,
+        state: SkillState | None = None,
+    ) -> SkillDetail:
+        """스킬 직접 편집 (PUT /skills/{id}). 본문 변경 시 history 보관 + version+1."""
+        current = self._skill_store.read(skill_id)  # NotFoundError 위임
+
+        if state is not None and state not in ("active", "stale", "archived"):
+            raise ValidationError(f"Unknown skill state {state!r}")
+
+        body_changed = body is not None and body != current.body
+        if body_changed:
+            current_path = self._paths.skills / f"{skill_id}.md"
+            if current_path.exists():
+                self._skill_store.archive_to_history(
+                    skill_id, current.version, current_path.read_text(encoding="utf-8")
+                )
+            current.version += 1
+            current.body = body  # type: ignore[assignment]
+
+        if description is not None:
+            current.description = description
+        if tags is not None:
+            current.tags = list(tags)
+        if state is not None:
+            current.state = state
+        current.updated_at = now_iso()
+        self._skill_store.write(current)
+        return self._detail_from(current, self._usage_store.read(skill_id))
+
+    def delete_skill(self, skill_id: str) -> None:
+        """스킬 삭제 (DELETE /skills/{id}). 본문/usage/history 사이드카 모두 제거."""
+        self._skill_store.read(skill_id)  # 없으면 NotFoundError → 404
+        self._skill_store.delete(skill_id)
+        self._usage_store.delete(skill_id)
 
     def curate(self) -> CurateResult:
         """수동 "스킬 정리": 시간 규칙을 즉시 적용한다 (LEARNING_LOOP §5.1)."""
@@ -358,40 +459,8 @@ class LearningService(ILearningService):
 
 
 # ── observe 헬퍼 함수들 (모듈 수준, LearningService에서 호출) ─────────────────
-
-# fact 감지용 패턴 (LEARNING_LOOP §6: 선언적 사실만)
-_FACT_PREFIXES = (
-    "the project uses ",
-    "project uses ",
-    "the codebase uses ",
-    "we use ",
-    "i use ",
-    "the project is ",
-    "the language is ",
-    "프로젝트는 ",
-    "코드베이스는 ",
-)
-
-# preference 감지용 패턴
-_PREF_PREFIXES = (
-    "i prefer ",
-    "the user prefers ",
-    "please use ",
-    "사용자는 ",
-    "저는 ",
-    "please respond in ",
-)
-
-# 스킬화 의도 신호 (LEARNING_LOOP §4)
-_SKILL_INTENT_KEYWORDS = (
-    "here's a reusable procedure",
-    "reusable steps",
-    "skill.md",
-    "i'll save this as a skill",
-    "save this as a skill",
-    "these steps can be reused",
-    "you can reuse these steps",
-)
+# NL 신호셋(fact/pref 도입구, 스킬화 의도, patch 트리거)은 learning/signals.py 에
+# 한국어+영어로 중앙화되어 있다 (버그#8 교정 — v1 은 영어 전용이었다).
 
 
 def _try_extract_fact(message: str) -> str | None:
@@ -401,7 +470,7 @@ def _try_extract_fact(message: str) -> str | None:
     실제 배포에서는 LLM 기반 추출이 더 정확하겠지만 MVP에서는 보수적으로.
     """
     msg_lower = message.lower()
-    for prefix in _FACT_PREFIXES:
+    for prefix in FACT_PREFIXES:
         idx = msg_lower.find(prefix)
         if idx == -1:
             continue
@@ -420,7 +489,7 @@ def _try_extract_fact(message: str) -> str | None:
 def _try_extract_preference(message: str) -> str | None:
     """final_message에서 사용자 선호 문구를 추출한다."""
     msg_lower = message.lower()
-    for prefix in _PREF_PREFIXES:
+    for prefix in PREF_PREFIXES:
         idx = msg_lower.find(prefix)
         if idx == -1:
             continue
@@ -433,12 +502,6 @@ def _try_extract_preference(message: str) -> str | None:
         if len(candidate) >= 10:
             return candidate
     return None
-
-
-def _has_skill_creation_intent(message: str) -> bool:
-    """스킬화 의도 신호가 있는지 확인한다 (LEARNING_LOOP §4, 보수적)."""
-    msg_lower = message.lower()
-    return any(kw in msg_lower for kw in _SKILL_INTENT_KEYWORDS)
 
 
 def _try_create_skill(
@@ -454,14 +517,10 @@ def _try_create_skill(
     이름 충돌 시 생성을 건너뛴다 (fail-closed). 생성 HITL은 계약에 없으므로
     skill_created SSE 이벤트로 알림만 한다 (learning.md T3 주의사항).
     """
-    import re
-
-    # 스킬 이름 추출 시도 — "save this as a skill: <name>" 패턴
-    name_match = re.search(r"skill[:\s]+([a-z][a-z0-9-]{2,40})", final_message.lower())
-    if name_match:
-        skill_name = name_match.group(1).strip("-")
-    else:
-        # fallback: 세션 id 기반 (kebab-case)
+    # 스킬 이름 추출 — "save this as a skill: <name>" / "스킬: <name>" (kebab ascii).
+    # 신호/추출 로직은 signals.py 에 중앙화(한·영). 없으면 세션 id 기반 fallback.
+    skill_name = extract_skill_name(final_message)
+    if not skill_name:
         short = session_id[-8:] if session_id else "auto"
         skill_name = f"auto-{short}"
 
@@ -499,22 +558,39 @@ def _try_build_patch_proposal(
     trigger: str,
     final_message: str,
     skill_store: SkillStore,
+    user_text: str | None = None,
 ) -> PatchProposal | None:
     """스킬 patch 제안을 생성한다 (LEARNING_LOOP §5.2.3, 미적용 상태로 반환).
 
-    NOTE(agent): proposed_body는 단순히 final_message 일부를 붙여 넣는 형태다.
-    실제 배포에서는 LLM이 개선된 본문을 생성해야 하지만 MVP에서는 신호를 전달하는
-    것에 집중한다. HITL 승인 시 사용자가 edited_body를 제공할 수 있다.
+    proposed_body 는 기존 본문 끝에 **읽을 수 있는 Markdown 보완 섹션**을 덧붙인다
+    (v1 의 HTML 주석 노이즈 제거 — 버그#7). 주입 시 LLM 이 자연스럽게 읽고, HITL 에서
+    사용자가 edited_body 로 다듬을 수 있다. 보완 텍스트는 (사용자 교정 > 최종 메시지)
+    순으로 가장 의미 있는 신호를 사용한다.
+
+    NOTE(agent): 진짜 개선 본문 생성은 LLM 호출이 이상적이나(LEARNING_LOOP §5.2.3),
+    learning 서비스는 provider 를 보지 않는 순수 계층이라 MVP 는 '검토 필요' 메모로
+    신호를 전달하고 최종 품질은 HITL 편집에 맡긴다.
     """
     try:
         current = skill_store.read(skill_id)
     except Exception:
         return None
 
-    old_body = current.body or ""
+    old_body = (current.body or "").rstrip()
 
-    # 제안 본문: 기존 본문 + 교정 메모 (보수적: 기존 내용 보존)
-    proposed_body = old_body + f"\n\n<!-- Suggested improvement (trigger={trigger}): {final_message[:200]} -->\n"
+    note = (user_text or final_message or "").strip()
+    note = " ".join(note.split())  # 개행/연속공백 정리
+    if len(note) > 280:
+        note = note[:280].rstrip() + "…"
+    if not note:
+        return None
+
+    label = "사용자 교정 반영" if trigger == "T1a" else "실패 사례 보완"
+    # 기존 본문은 보존하고, 명확히 표시된 Markdown 섹션을 덧붙인다(검토 후 편집 전제).
+    proposed_body = (
+        f"{old_body}\n\n## 보완 사항 (검토 필요 · {label})\n"
+        f"- {note}\n"
+    )
 
     diff = build_diff(old_body, proposed_body)
     new_version = current.version + 1
@@ -525,7 +601,7 @@ def _try_build_patch_proposal(
 
     return PatchProposal(
         skill_id=skill_id,
-        changelog=f"Improvement suggested by trigger {trigger}",
+        changelog=f"{label} 제안 (트리거 {trigger})",
         diff=diff,
         trigger=trigger,  # type: ignore[arg-type]
         proposed_body=proposed_body,

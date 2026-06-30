@@ -130,6 +130,19 @@ async def _run_one(
     args = RuntimeArgs()
     container = build_container(args, paths=paths)
 
+    # 헤드리스 실행: 학습 루프가 patch 제안을 내면 orchestrator가 HITL 승인을 await
+    # 한다(기본 300s). eval에는 승인자가 없으므로 타임아웃을 0으로 줄여 즉시 reject
+    # 시켜 턴이 멈추지 않게 한다(승인은 retrieval 지표와 무관). 라이브 config는 매 턴
+    # config_store에서 읽히므로 여기서 한 번 교체하면 충분하다.
+    import dataclasses  # noqa: PLC0415
+
+    _cfg = container.config_store.config
+    container.config_store.update(
+        dataclasses.replace(
+            _cfg, learning=dataclasses.replace(_cfg.learning, approval_timeout_seconds=0)
+        )
+    )
+
     session = container.sessions.create(model="echo")
     prompt = task["prompt"]
 

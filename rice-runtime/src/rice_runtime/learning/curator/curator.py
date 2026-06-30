@@ -20,6 +20,7 @@ from ...core.paths import RicePaths
 from ..interfaces import CurateResult, SkillState
 from ..skill.lifecycle import SkillLifecycle, compute_transition
 from ..skill.store import SkillStore
+from ..skill.usage import UsageStore
 
 
 class Curator:
@@ -30,10 +31,12 @@ class Curator:
         store: SkillStore,
         lifecycle: SkillLifecycle,
         config: LearningConfig,
+        usage_store: UsageStore | None = None,
     ) -> None:
         self._store = store
         self._lifecycle = lifecycle
         self._config = config
+        self._usage_store = usage_store
 
     def curate(self) -> CurateResult:
         """스킬 전체를 순회해 시간 규칙을 즉시 적용한다.
@@ -47,10 +50,14 @@ class Curator:
         transitioned: list[tuple[str, SkillState]] = []
 
         for skill in skills:
+            last_used_at = (
+                self._usage_store.read(skill.name).last_used_at if self._usage_store else None
+            )
             new_state = compute_transition(
                 skill,
                 stale_after_days=self._config.stale_after_days,
                 archive_after_days=self._config.archive_after_days,
+                last_used_at=last_used_at,
             )
             if new_state is None:
                 continue

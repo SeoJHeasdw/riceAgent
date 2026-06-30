@@ -58,6 +58,9 @@ class LearningConfig:
     stale_after_days: int = 3  # active → stale (§5.1)
     archive_after_days: int = 7  # stale → archived
     approval_timeout_seconds: int = 300  # HITL safe-default reject (§5.1)
+    # 백그라운드 curator 주기(초). 0 이면 비활성(수동 POST /skills/curate 만).
+    # 기본 1시간 — 데스크톱 앱이 떠 있는 동안 stale/archive 전이를 자동 반영.
+    curator_interval_seconds: int = 3600
 
 
 @dataclass(frozen=True)

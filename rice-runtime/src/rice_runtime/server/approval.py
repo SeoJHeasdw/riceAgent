@@ -59,12 +59,19 @@ class ApprovalRegistry:
         finally:
             self._parked.pop(req.approval_id, None)
 
-    def resolve(self, approval_id: str, response: ApprovalResponse) -> None:
+    def resolve(self, approval_id: str, response: ApprovalResponse) -> bool:
         parked = self._parked.get(approval_id)
         if parked is None or parked.future.done():
-            # late/duplicate/unknown — idempotent no-op (route → 409/410)
-            return
+            # late/duplicate/unknown/expired — couldn't resolve a live approval.
+            # Caller (route) maps False → 409 (CONTRACTS §1.2). Still idempotent.
+            return False
         parked.future.set_result(response)
+        return True
+
+    def get(self, approval_id: str) -> ApprovalRequest | None:
+        """The parked request for `approval_id` (or None) — for route cross-checks."""
+        parked = self._parked.get(approval_id)
+        return parked.request if parked is not None else None
 
     def pending(self, session_id: str) -> list[ApprovalRequest]:
         return [p.request for p in self._parked.values() if p.session_id == session_id]

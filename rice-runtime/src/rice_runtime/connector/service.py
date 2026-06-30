@@ -73,19 +73,40 @@ _GMAIL_TOOLS: list[ToolSpec] = [
         source="connector",
         requires_approval=True,
     ),
+    ToolSpec(
+        name="gmail_send",
+        description="새 이메일을 보냅니다. to(받는사람)·subject(제목)·body(본문)가 필요합니다. 외부로 메일이 실제 발송되므로 승인이 필요합니다.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "to": {
+                    "type": "string",
+                    "description": "받는 사람 이메일 주소 (쉼표로 여러 명 가능)",
+                },
+                "subject": {"type": "string", "description": "메일 제목"},
+                "body": {"type": "string", "description": "메일 본문 (plain text)"},
+                "cc": {"type": "string", "description": "참조(cc) 주소 — 선택"},
+            },
+            "required": ["to", "subject", "body"],
+        },
+        source="connector",
+        requires_approval=True,
+    ),
 ]
 
 
 class ConnectorService(IConnectorService):
     """IConnectorService 의 실제 구현 — Gmail OAuth + 키체인 + 권한 검증."""
 
-    def __init__(self, db: Database, paths: RicePaths | None = None) -> None:
+    def __init__(self, db: Database, paths: RicePaths | None = None, *, port: int | None = None) -> None:
         self._db = db
         self._paths = paths
         self._keychain = KeychainStore()
-        self._manager = ConnectorManager(db, self._keychain)
+        # 단일 OAuth flow 인스턴스를 manager 와 공유한다 (자격증명·redirect 일관).
+        connectors_dir = paths.connectors if paths else None
+        self._gmail_flow = GmailOAuthFlow(connectors_dir=connectors_dir, port=port)
+        self._manager = ConnectorManager(db, self._keychain, self._gmail_flow)
         self._permission = PermissionChecker(paths.plugins if paths else None)
-        self._gmail_flow = GmailOAuthFlow()
 
     # ── tool surface ──────────────────────────────────────────────────────────
     def list_tools(self) -> list[ToolSpec]:
@@ -166,6 +187,8 @@ class ConnectorService(IConnectorService):
                 result = await _gmail_search(client, headers, call.arguments)
             elif call.tool_name == "gmail_read":
                 result = await _gmail_read(client, headers, call.arguments)
+            elif call.tool_name == "gmail_send":
+                result = await _gmail_send(client, headers, call.arguments)
             else:
                 return ToolResult(call.id, ok=False, error=f"unknown gmail tool: {call.tool_name}")
 
@@ -180,6 +203,13 @@ class ConnectorService(IConnectorService):
             # NOTE(agent): paths 가 None 으로 주입된 경우(테스트/골격) fail-closed
             return False
         return self._permission.check(plugin_id, connector_type)
+
+    def connected_types(self) -> set[str]:
+        """현재 connected 상태인 connector_type 집합 (CONTRACTS §4.4 — plugin 활성화 게이트)."""
+        rows = self._db.query_all(
+            "SELECT DISTINCT connector_type FROM connectors WHERE status='connected'"
+        )
+        return {r["connector_type"] for r in rows}
 
     # ── management ────────────────────────────────────────────────────────────
     def list_connectors(self) -> list[ConnectorInfo]:
@@ -255,6 +285,43 @@ async def _gmail_read(client, headers: dict, args: dict) -> dict:
         url,
         headers=headers,
         params={"format": "full"},
+        timeout=30.0,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+async def _gmail_send(client, headers: dict, args: dict) -> dict:
+    """Gmail 메일 발송 (Gmail API v1 users.messages.send).
+
+    RFC 2822 메시지를 base64url 로 인코딩해 {"raw": ...} 로 전송한다.
+    NOTE(agent): 응답 형태는
+    https://developers.google.com/gmail/api/reference/rest/v1/users.messages/send
+    참조 — 보낸 메시지의 id/threadId/labelIds 를 반환한다.
+    """
+    import base64
+    from email.message import EmailMessage
+
+    to = args.get("to", "")
+    subject = args.get("subject", "")
+    body = args.get("body", "")
+    cc = args.get("cc")
+    if not to:
+        raise ValueError("to is required")
+
+    msg = EmailMessage()
+    msg["To"] = to
+    msg["Subject"] = subject
+    if cc:
+        msg["Cc"] = cc
+    msg.set_content(body or "")
+
+    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
+    url = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
+    resp = await client.post(
+        url,
+        headers={**headers, "Content-Type": "application/json"},
+        json={"raw": raw},
         timeout=30.0,
     )
     resp.raise_for_status()

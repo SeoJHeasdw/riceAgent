@@ -1,140 +1,197 @@
-import type { ChildProcess } from 'child_process';
+import { spawn, type ChildProcess } from 'child_process';
+import net from 'net';
+import crypto from 'crypto';
+import path from 'path';
+import { existsSync } from 'fs';
+import { app } from 'electron';
 
 export interface RuntimeStatus {
   running: boolean;
   port?: number;
   pid?: number;
+  /** one-shot localhost bearer token (CONTRACTS §1.1) — renderer sends it as Bearer */
+  token?: string;
+}
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** Ask the OS for a free TCP port (bind :0, read it back, release). */
+function findFreePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.unref();
+    srv.on('error', reject);
+    srv.listen(0, '127.0.0.1', () => {
+      const addr = srv.address();
+      const port = typeof addr === 'object' && addr ? addr.port : 0;
+      srv.close(() => resolve(port));
+    });
+  });
 }
 
 /**
- * RuntimeManager handles the lifecycle of the RICE runtime process.
- * This is a stub implementation that will be expanded to manage the actual runtime.
+ * RuntimeManager — owns the rice-runtime child process lifecycle (CONTRACTS §1.1).
+ *
+ * On start it: picks a free port, mints a one-shot bearer token, spawns the
+ * Python runtime (`rice-runtime --port <p> --token <t>`, localhost-only), and
+ * waits for `/health` before reporting running. The renderer reads port+token via
+ * IPC and points the API/SSE clients at the live runtime.
+ *
+ * Command resolution (first match wins):
+ *   1. env `RICE_RUNTIME_BIN`            — explicit executable path
+ *   2. `<runtimeDir>/.venv/bin/rice-runtime` (POSIX) / `Scripts\rice-runtime.exe` (Win)
+ *   3. `python3 -m rice_runtime` with cwd=<runtimeDir> (PYTHONPATH=src)
+ * where <runtimeDir> = env `RICE_RUNTIME_DIR` → (dev) `<repo>/rice-runtime`
+ *   → (packaged) `<resources>/rice-runtime`.
+ *
+ * Spawn failures (no Python, etc.) are non-fatal: the app stays usable and the
+ * renderer falls back to scripted mock data (App bootstrap stays "offline").
  */
 export class RuntimeManager {
   private process: ChildProcess | null = null;
   private port: number | null = null;
-  private isRunning: boolean = false;
+  private token: string | null = null;
+  private isRunning = false;
 
-  constructor() {
-    // Default runtime port
-    this.port = 8080;
-  }
-
-  /**
-   * Initialize the runtime manager
-   */
   async initialize(): Promise<void> {
     console.log('[RuntimeManager] Initializing...');
-    // TODO: Implement runtime initialization
-    // - Check for runtime binary
-    // - Verify runtime dependencies
-    // - Set up runtime configuration
   }
 
-  /**
-   * Start the runtime process
-   */
-  async start(): Promise<void> {
+  /** Resolve the rice-runtime source/install dir. */
+  private runtimeDir(): string {
+    if (process.env.RICE_RUNTIME_DIR) return process.env.RICE_RUNTIME_DIR;
+    const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
+    if (isDev) {
+      // app.getAppPath() → rice-app in dev; the runtime is its sibling.
+      return path.resolve(app.getAppPath(), '..', 'rice-runtime');
+    }
+    return path.join(process.resourcesPath, 'rice-runtime');
+  }
+
+  /** (command, args) to launch, given the chosen port + token. */
+  private resolveCommand(dir: string, port: number, token: string): { cmd: string; args: string[] } {
+    const common = ['--port', String(port), '--token', token];
+
+    const explicit = process.env.RICE_RUNTIME_BIN;
+    if (explicit && existsSync(explicit)) return { cmd: explicit, args: common };
+
+    const venvBin = process.platform === 'win32'
+      ? path.join(dir, '.venv', 'Scripts', 'rice-runtime.exe')
+      : path.join(dir, '.venv', 'bin', 'rice-runtime');
+    if (existsSync(venvBin)) return { cmd: venvBin, args: common };
+
+    // Fallback: module run via python (PYTHONPATH=src set in spawn env).
+    const py = process.platform === 'win32' ? 'python' : 'python3';
+    return { cmd: py, args: ['-m', 'rice_runtime', ...common] };
+  }
+
+  /** Poll /health until the runtime answers (or timeout). */
+  private async waitForHealth(port: number, timeoutMs = 20000): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (!this.process || this.process.exitCode !== null) return false; // child died
+      try {
+        const res = await fetch(`http://127.0.0.1:${port}/health`);
+        if (res.ok) return true;
+      } catch {
+        /* not up yet */
+      }
+      await sleep(300);
+    }
+    return false;
+  }
+
+  async start(): Promise<RuntimeStatus> {
     if (this.isRunning) {
       console.log('[RuntimeManager] Runtime already running');
-      return;
+      return this.getStatus();
     }
 
-    console.log('[RuntimeManager] Starting runtime...');
+    const dir = this.runtimeDir();
+    const port = await findFreePort();
+    const token = crypto.randomBytes(24).toString('hex');
+    const { cmd, args } = this.resolveCommand(dir, port, token);
 
-    try {
-      // TODO: Implement actual runtime process spawning
-      // For now, this is a stub that simulates starting the runtime
-      
-      // Example of how to spawn the runtime process:
-      // const runtimePath = path.join(app.getAppPath(), 'runtime', 'rice-runtime');
-      // this.process = spawn(runtimePath, ['--port', this.port.toString()], {
-      //   stdio: 'pipe',
-      //   env: {
-      //     ...process.env,
-      //     RICE_PORT: this.port.toString(),
-      //   },
-      // });
-      //
-      // this.process.on('error', (error) => {
-      //   console.error('[RuntimeManager] Runtime process error:', error);
-      //   this.isRunning = false;
-      // });
-      //
-      // this.process.on('exit', (code) => {
-      //   console.log('[RuntimeManager] Runtime process exited with code:', code);
-      //   this.isRunning = false;
-      // });
+    console.log(`[RuntimeManager] Starting: ${cmd} ${args.join(' ')} (cwd=${dir})`);
+    this.process = spawn(cmd, args, {
+      cwd: dir,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        // module-run fallback needs the package importable from src/
+        PYTHONPATH: path.join(dir, 'src'),
+        PYTHONUNBUFFERED: '1',
+      },
+    });
 
-      this.isRunning = true;
-      console.log('[RuntimeManager] Runtime started successfully');
-    } catch (error) {
-      console.error('[RuntimeManager] Failed to start runtime:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Stop the runtime process
-   */
-  async stop(): Promise<void> {
-    if (!this.isRunning) {
-      console.log('[RuntimeManager] Runtime not running');
-      return;
-    }
-
-    console.log('[RuntimeManager] Stopping runtime...');
-
-    try {
-      if (this.process) {
-        this.process.kill('SIGTERM');
-        
-        // Wait for graceful shutdown
-        await new Promise<void>((resolve) => {
-          const timeout = setTimeout(() => {
-            if (this.process) {
-              this.process.kill('SIGKILL');
-            }
-            resolve();
-          }, 5000);
-
-          this.process?.once('exit', () => {
-            clearTimeout(timeout);
-            resolve();
-          });
-        });
-      }
-
+    this.process.stdout?.on('data', (d) => console.log(`[runtime] ${String(d).trimEnd()}`));
+    this.process.stderr?.on('data', (d) => console.warn(`[runtime] ${String(d).trimEnd()}`));
+    this.process.on('error', (err) => {
+      console.error('[RuntimeManager] spawn error:', err);
+      this.isRunning = false;
+    });
+    this.process.on('exit', (code) => {
+      console.log('[RuntimeManager] runtime exited:', code);
       this.isRunning = false;
       this.process = null;
-      console.log('[RuntimeManager] Runtime stopped successfully');
-    } catch (error) {
-      console.error('[RuntimeManager] Failed to stop runtime:', error);
-      throw error;
+    });
+
+    const healthy = await this.waitForHealth(port);
+    if (!healthy) {
+      console.error('[RuntimeManager] runtime did not become healthy — staying offline');
+      await this.stop();
+      return { running: false };
+    }
+
+    this.port = port;
+    this.token = token;
+    this.isRunning = true;
+    console.log(`[RuntimeManager] Runtime healthy on :${port}`);
+    return this.getStatus();
+  }
+
+  async stop(): Promise<void> {
+    const proc = this.process;
+    if (!proc) {
+      this.isRunning = false;
+      return;
+    }
+    console.log('[RuntimeManager] Stopping runtime...');
+    try {
+      // Ask the runtime to tear down gracefully first (best-effort), then signal.
+      proc.kill('SIGTERM');
+      await new Promise<void>((resolve) => {
+        const timeout = setTimeout(() => {
+          try { proc.kill('SIGKILL'); } catch { /* already gone */ }
+          resolve();
+        }, 5000);
+        proc.once('exit', () => { clearTimeout(timeout); resolve(); });
+      });
+    } finally {
+      this.isRunning = false;
+      this.process = null;
+      this.port = null;
+      this.token = null;
     }
   }
 
-  /**
-   * Get the current runtime status
-   */
   getStatus(): RuntimeStatus {
     return {
       running: this.isRunning,
       port: this.isRunning ? this.port ?? undefined : undefined,
       pid: this.process?.pid,
+      token: this.isRunning ? this.token ?? undefined : undefined,
     };
   }
 
-  /**
-   * Get the runtime port
-   */
   getPort(): number | null {
     return this.isRunning ? this.port : null;
   }
 
-  /**
-   * Shutdown the runtime manager
-   */
+  getToken(): string | null {
+    return this.isRunning ? this.token : null;
+  }
+
   async shutdown(): Promise<void> {
     console.log('[RuntimeManager] Shutting down...');
     await this.stop();

@@ -91,9 +91,13 @@ def parse_manifest(raw: dict[str, Any]) -> ArtifactManifest:
         raise ValidationError("manifest missing required field: name")
 
     # ── version ──────────────────────────────────────────────────────────────
-    version = raw.get("version")
-    if not version or not isinstance(version, str):
+    # YAML 에서 `version: 1.0` 은 float, `version: 1` 은 int 로 파싱된다. semver 문자열을
+    # 요구하되, 숫자로 와도 거부하지 않고 문자열로 정규화한다(v1 버그#13: float→
+    # ValidationError 로 설치 실패하던 문제). 빈 값/None 만 거부한다.
+    version_raw = raw.get("version")
+    if version_raw is None or (isinstance(version_raw, str) and not version_raw.strip()):
         raise ValidationError("manifest missing required field: version")
+    version = str(version_raw).strip()
 
     # ── checksum (required for install, optional at parse time) ──────────────
     # NOTE(agent): checksum is validated at *install* time (loader.py §checksum

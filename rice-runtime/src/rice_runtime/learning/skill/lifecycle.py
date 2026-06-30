@@ -30,37 +30,51 @@ SkillState = Literal["active", "stale", "archived"]
 _VALID_STATES: frozenset[str] = frozenset({"active", "stale", "archived"})
 
 
+def _parse_iso(ts: str | None) -> datetime.datetime | None:
+    """ISO8601(Z 허용) → naive UTC datetime. 파싱 불가/None 이면 None."""
+    if not ts:
+        return None
+    try:
+        return datetime.datetime.fromisoformat(ts.rstrip("Z"))
+    except ValueError:
+        return None
+
+
 def compute_transition(
     skill: SkillData,
     stale_after_days: int,
     archive_after_days: int,
     now: datetime.datetime | None = None,
+    last_used_at: str | None = None,
 ) -> SkillState | None:
     """time-rule 기반 상태 전이 대상 state를 반환한다. 전이 불필요하면 None.
 
     규칙 (LEARNING_LOOP §5.1):
-    - active → stale  : last_used_at(없으면 updated_at, 없으면 created_at)이
-                        stale_after_days 이전인 경우
+    - active → stale  : "마지막 활동" 시점이 stale_after_days 이전인 경우
     - stale  → archived: 같은 기준으로 archive_after_days 이전인 경우
     - archived: 자동 전이 없음(수동 activate만)
 
-    WHY: last_used_at을 우선하는 이유는 실제 '사용' 시점이 가장 의미 있는 신호이기
-    때문이다. 생성 후 한 번도 쓰이지 않았으면 created_at을 기준으로 삼는다.
+    "마지막 활동" = max(last_used_at, updated_at, created_at) 중 파싱 가능한 가장
+    최신 시각. last_used_at(usage.json 사이드카)을 우선한다는 설계 의도(주석 §44)를
+    실제로 반영한다 — 매일 쓰는 스킬이 본문 미수정만으로 stale 되던 v1 버그#5 교정.
+    UsageStore.last_used_at 은 호출자(Curator/service)가 주입한다.
     """
     if skill.state == "archived":
         return None
 
     _now = now or datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 
-    ref_str = skill.updated_at or skill.created_at
-    if ref_str is None:
+    # 사용·수정·생성 중 가장 최근 신호를 기준으로 삼는다(어떤 활동이든 신선도로 인정).
+    candidates = [
+        _parse_iso(last_used_at),
+        _parse_iso(skill.updated_at),
+        _parse_iso(skill.created_at),
+    ]
+    refs = [c for c in candidates if c is not None]
+    if not refs:
         # NOTE(agent): 기준 날짜가 없으면 전이하지 않는다 (fail-closed).
         return None
-
-    try:
-        ref = datetime.datetime.fromisoformat(ref_str.rstrip("Z"))
-    except ValueError:
-        return None
+    ref = max(refs)
 
     elapsed_days = (_now - ref).total_seconds() / 86400
 

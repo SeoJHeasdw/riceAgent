@@ -9,6 +9,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     stop: () => ipcRenderer.invoke('runtime:stop'),
     getStatus: () => ipcRenderer.invoke('runtime:status'),
     getPort: () => ipcRenderer.invoke('runtime:get-port'),
+    getToken: () => ipcRenderer.invoke('runtime:get-token'),
+    /** main pushes this once the runtime is healthy (App connects on it) */
+    onReady: (cb: (status: { running: boolean; port?: number; token?: string }) => void) => {
+      const listener = (_e: unknown, status: { running: boolean; port?: number; token?: string }) => cb(status);
+      ipcRenderer.on('runtime:ready', listener);
+      return () => ipcRenderer.removeListener('runtime:ready', listener);
+    },
   },
 
   // Window management
@@ -22,6 +29,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   app: {
     getVersion: () => ipcRenderer.invoke('app:get-version'),
     getPath: (name: string) => ipcRenderer.invoke('app:get-path', name),
+    /** open an http(s) URL in the system browser (OAuth consent — CONTRACTS §4.2) */
+    openExternal: (url: string) => ipcRenderer.invoke('app:open-external', url),
   },
 
   // Artifact 다운로드 (platform tar.gz → 임시 경로 + 체크섬). 마켓 설치 파이프라인용.
@@ -33,14 +42,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
 // Type definitions for the exposed API
 export interface ElectronAPI {
   runtime: {
-    start: () => Promise<void>;
+    start: () => Promise<{ running: boolean; port?: number; pid?: number; token?: string }>;
     stop: () => Promise<void>;
     getStatus: () => Promise<{
       running: boolean;
       port?: number;
       pid?: number;
+      token?: string;
     }>;
     getPort: () => Promise<number | null>;
+    getToken: () => Promise<string | null>;
+    onReady: (cb: (status: { running: boolean; port?: number; token?: string }) => void) => () => void;
   };
   window: {
     minimize: () => Promise<void>;
@@ -50,6 +62,7 @@ export interface ElectronAPI {
   app: {
     getVersion: () => Promise<string>;
     getPath: (name: string) => Promise<string>;
+    openExternal: (url: string) => Promise<boolean>;
   };
   artifact: {
     download: (url: string) => Promise<{ path: string; checksum: string }>;

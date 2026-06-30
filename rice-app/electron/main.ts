@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron';
 import path from 'path';
 import { promises as fs } from 'fs';
 import { fileURLToPath } from 'url';
@@ -54,11 +54,28 @@ if (process.platform !== 'darwin') {
 
 // App lifecycle
 app.whenReady().then(async () => {
-  // Initialize runtime manager
   runtimeManager = new RuntimeManager();
   await runtimeManager.initialize();
 
+  // Paint the window immediately, then start the runtime in the background
+  // (CONTRACTS §1.1). When it's healthy, push `runtime:ready` so the renderer
+  // connects its API/SSE clients (App bootstrap). Spawn failure is non-fatal:
+  // the renderer just stays "offline" and uses scripted mock data.
   createWindow();
+
+  void runtimeManager
+    .start()
+    .then((status) => {
+      if (status.running && mainWindow) {
+        const send = () => mainWindow?.webContents.send('runtime:ready', status);
+        if (mainWindow.webContents.isLoading()) {
+          mainWindow.webContents.once('did-finish-load', send);
+        } else {
+          send();
+        }
+      }
+    })
+    .catch((err) => console.error('[main] runtime start failed (app stays offline):', err));
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -109,6 +126,13 @@ ipcMain.handle('runtime:get-port', async () => {
   return runtimeManager.getPort();
 });
 
+ipcMain.handle('runtime:get-token', async () => {
+  if (!runtimeManager) {
+    throw new Error('Runtime manager not initialized');
+  }
+  return runtimeManager.getToken();
+});
+
 // Window management
 ipcMain.handle('window:minimize', () => {
   mainWindow?.minimize();
@@ -141,6 +165,23 @@ ipcMain.handle('app:get-path', (_event, name: string) => {
     throw new Error(`Disallowed path name: ${name}`);
   }
   return app.getPath(name as Parameters<typeof app.getPath>[0]);
+});
+
+// Open an external URL in the user's default browser (OAuth consent — CONTRACTS
+// §4.2 step 3). Restricted to http/https so the renderer can't launch arbitrary
+// schemes/executables.
+ipcMain.handle('app:open-external', async (_event, url: string) => {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error('invalid url');
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    throw new Error(`disallowed protocol: ${parsed.protocol}`);
+  }
+  await shell.openExternal(url);
+  return true;
 });
 
 // Artifact 다운로드 (platform tar.gz → 임시 파일).

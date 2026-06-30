@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 import tarfile
 import tempfile
@@ -111,6 +112,27 @@ def _parse_skill_md_minimal(text: str) -> dict[str, Any]:
     }
 
 
+def _canonicalize_skill_md(text: str, name: str) -> str:
+    """설치되는 SKILL.md 의 frontmatter `name` 을 manifest name 으로 맞춘다.
+
+    SkillStore 는 `<name>.md` 파일명과 frontmatter `name` 이 일치한다고 가정한다
+    (read/write/lifecycle 일관성). 시장 artifact 의 frontmatter 가 다르거나 없으면
+    여기서 교정한다 — 다른 frontmatter 필드(description/tags 등)는 보존한다.
+    """
+    if not text.lstrip().startswith("---"):
+        # frontmatter 없음 → 최소 frontmatter 로 감싼다.
+        return f"---\nname: {name}\nversion: 1\ndescription: \"\"\nstate: active\n---\n{text}"
+    parts = text.split("---", 2)
+    if len(parts) < 3:
+        return f"---\nname: {name}\nversion: 1\ndescription: \"\"\nstate: active\n---\n{text}"
+    fm = parts[1]
+    if re.search(r"(?m)^\s*name\s*:", fm):
+        fm = re.sub(r"(?m)^(\s*name\s*:).*$", rf"\1 {name}", fm, count=1)
+    else:
+        fm = f"\nname: {name}" + fm
+    return "---" + fm + "---" + parts[2]
+
+
 # ─── PluginLoader ─────────────────────────────────────────────────────────────
 
 class PluginLoader:
@@ -172,7 +194,11 @@ class PluginLoader:
             skills_dir = self._paths.plugins / info.id / "skills"
             if not skills_dir.is_dir():
                 continue
-            for md_path in sorted(skills_dir.glob("*.md")):
+            # Both layouts (CONTRACTS §2.2): flat `skills/*.md` AND the standard
+            # `skills/<sub>/SKILL.md`. v1 버그#10: only flat *.md was scanned, so the
+            # standard subdir layout (which platform/registry.py supports) was dropped.
+            md_paths = sorted(skills_dir.glob("*.md")) + sorted(skills_dir.glob("*/SKILL.md"))
+            for md_path in md_paths:
                 try:
                     text = md_path.read_text(encoding="utf-8")
                     fm = _parse_skill_md_minimal(text)
@@ -193,14 +219,48 @@ class PluginLoader:
     async def invoke(self, call: ToolCall) -> ToolResult:
         """Run a plugin tool through the sandbox (ISandbox.run is the choke point).
 
-        The entrypoint string passed to the sandbox is the tool name.
-        The sandbox runs it in a child process — never in-process.
+        Resolves the tool's **dotted entrypoint** (`module.func`) from the owning
+        plugin's manifest and adds that plugin's install dir to the child's import
+        path, so the real plugin code actually loads & runs (v1: the bare tool name
+        was eval'd in the child → always ImportError/NameError). Runs in a child
+        process — never in-process.
         """
+        entry, plugin_dir = self._resolve_tool_entry(call.tool_name)
+        if entry is None:
+            return ToolResult(
+                call.id, ok=False, error=f"no entrypoint registered for plugin tool '{call.tool_name}'"
+            )
         result: SandboxResult = await self._sandbox.run(
-            entrypoint=call.tool_name,
+            entrypoint=entry,
             payload=call.arguments,
+            sys_path=[str(plugin_dir)] if plugin_dir else None,
         )
         return ToolResult(call.id, ok=result.ok, result=result.result, error=result.error)
+
+    def _resolve_tool_entry(self, tool_name: str) -> tuple[str | None, Path | None]:
+        """Map a plugin tool name → (dotted entrypoint, plugin install dir).
+
+        Looks across enabled plugins' manifests. Each tool decl may carry an
+        `entry` (dotted `module.func`); if absent, falls back to
+        `<entrypoint.module>.<tool_name>`, else the bare tool name. The plugin's
+        install dir is returned so the sandbox can import its module.
+        Returns (None, None) if no enabled plugin declares the tool.
+        """
+        for info in self._list_enabled_plugin_infos():
+            manifest_path = self._paths.plugins / info.id / "rice-artifact.json"
+            if not manifest_path.exists():
+                continue
+            try:
+                raw: dict[str, Any] = json.loads(manifest_path.read_text())
+            except (OSError, json.JSONDecodeError):
+                continue
+            ep = raw.get("entrypoint", {}) or {}
+            module = ep.get("module")
+            for t in ep.get("tools", []) or []:
+                if isinstance(t, dict) and t.get("name") == tool_name:
+                    entry = t.get("entry") or (f"{module}.{tool_name}" if module else tool_name)
+                    return entry, self._paths.plugins / info.id
+        return None, None
 
     # ── management ────────────────────────────────────────────────────────────
 
@@ -222,7 +282,9 @@ class PluginLoader:
                     )
                     skills_dir = self._paths.plugins / r["id"] / "skills"
                     if skills_dir.is_dir():
-                        skill_count = len(list(skills_dir.glob("*.md")))
+                        skill_count = len(list(skills_dir.glob("*.md"))) + len(
+                            list(skills_dir.glob("*/SKILL.md"))
+                        )
                 except (OSError, json.JSONDecodeError):
                     pass
             infos.append(
@@ -238,6 +300,10 @@ class PluginLoader:
             )
         return infos
 
+    def get_plugin(self, plugin_id: str) -> PluginInfo | None:
+        """Single plugin's info (enabled state + required_connectors), or None."""
+        return next((p for p in self.list_plugins() if p.id == plugin_id), None)
+
     def set_enabled(self, plugin_id: str, enabled: bool) -> None:
         """Toggle a plugin's active state (CONTRACTS §1.3: PATCH /plugins/{id}/enabled)."""
         self._registry.set_enabled(plugin_id, enabled)
@@ -247,27 +313,21 @@ class PluginLoader:
 
         Steps:
           ① Validate and parse the manifest dict.
-          ② Verify sha256 checksum of the file at `path`.
-          ③ Unpack (tar.gz) or copy to ~/.rice/{skills|plugins}/<name>/.
-          ④ Persist a rice-artifact.json in the install directory.
-          ⑤ Record in `installed_artifacts` table (enabled=1 by default).
-        Raises `ValidationError` on checksum mismatch (fail-closed).
+          ② Verify sha256 checksum of the file at `path` (fail-closed on mismatch).
+          ③ Place the artifact:
+               plugin → ~/.rice/plugins/plugin:<name>/ (tree + rice-artifact.json)
+               skill  → ~/.rice/skills/<name>.md (FLAT — so SkillStore.list()/prefetch
+                        inject it like a learned skill; v1 버그#3 교정).
+          ④ Record in `installed_artifacts` (enabled=1 by default).
         """
         parsed = parse_manifest(manifest)
         await self._verify_checksum(path, parsed)
 
         artifact_id = f"{parsed.type}:{parsed.name}"
-        dest = self._install_dir(parsed)
-        dest.mkdir(parents=True, exist_ok=True)
-
-        # Unpack or copy the artifact.
-        await self._unpack(path, dest)
-
-        # Write a local copy of the manifest as JSON for later reads.
-        manifest_dest = dest / "rice-artifact.json"
-        manifest_dest.write_text(
-            json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        if parsed.type == "plugin":
+            await self._install_plugin(path, parsed, manifest)
+        else:
+            await self._install_skill(path, parsed)
 
         # Record in DB (upsert by id — re-install overwrites).
         self._db.execute(
@@ -298,19 +358,65 @@ class PluginLoader:
         )
         if row is None:
             raise NotFoundError(f"artifact not found: {artifact_id}")
-        dest = self._paths.plugins / artifact_id if row["type"] == "plugin" else self._paths.skills / artifact_id
-        if dest.exists():
-            shutil.rmtree(dest, ignore_errors=True)
+        if row["type"] == "plugin":
+            dest = self._paths.plugins / artifact_id
+            if dest.exists():
+                shutil.rmtree(dest, ignore_errors=True)
+        else:
+            # skill artifact installed FLAT as <name>.md (+ usage/history sidecars).
+            name = row["name"]
+            (self._paths.skills / f"{name}.md").unlink(missing_ok=True)
+            (self._paths.skills / f"{name}.usage.json").unlink(missing_ok=True)
+            shutil.rmtree(self._paths.skills / name, ignore_errors=True)  # .history dir
         self._db.execute("DELETE FROM installed_artifacts WHERE id = ?", (artifact_id,))
 
     # ── internal helpers ──────────────────────────────────────────────────────
 
-    def _install_dir(self, parsed: ArtifactManifest) -> Path:
-        """Target directory for the installed artifact."""
-        if parsed.type == "plugin":
-            return self._paths.plugins / f"{parsed.type}:{parsed.name}"
-        # skill artifacts go into the skills directory
-        return self._paths.skills / f"{parsed.type}:{parsed.name}"
+    async def _install_plugin(self, path: str, parsed: ArtifactManifest, manifest: dict[str, Any]) -> None:
+        """Place a plugin tree under ~/.rice/plugins/plugin:<name>/ + manifest.json."""
+        dest = self._paths.plugins / f"plugin:{parsed.name}"
+        dest.mkdir(parents=True, exist_ok=True)
+        await self._unpack(path, dest)
+        (dest / "rice-artifact.json").write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+    async def _install_skill(self, path: str, parsed: ArtifactManifest) -> None:
+        """Install a skill artifact as a FLAT <name>.md in the skills dir.
+
+        Skill artifacts are a single declarative SKILL.md (CONTRACTS §3.1). Writing
+        it flat (not under skill:<name>/) makes SkillStore.list() pick it up so the
+        prefetch loop actually injects it (the v1 버그#3: market skills never injected).
+        """
+        staging = Path(tempfile.mkdtemp(prefix="rice-skill-install-"))
+        try:
+            await self._unpack(path, staging)
+            md_text = self._find_skill_md_text(staging)
+            if md_text is None:
+                raise ValidationError(
+                    f"skill artifact '{parsed.name}' has no SKILL.md to install"
+                )
+            md_text = _canonicalize_skill_md(md_text, parsed.name)
+            self._paths.skills.mkdir(parents=True, exist_ok=True)
+            (self._paths.skills / f"{parsed.name}.md").write_text(md_text, encoding="utf-8")
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+
+    @staticmethod
+    def _find_skill_md_text(root: Path) -> str | None:
+        """Locate the SKILL.md body inside an unpacked skill artifact.
+
+        Prefers a file literally named SKILL.md; else the first *.md that is not a
+        manifest. Returns its text, or None if nothing usable is found.
+        """
+        named = sorted(root.rglob("SKILL.md"))
+        if named:
+            return named[0].read_text(encoding="utf-8")
+        for md in sorted(root.rglob("*.md")):
+            if md.name.lower().startswith("rice-artifact"):
+                continue
+            return md.read_text(encoding="utf-8")
+        return None
 
     async def _verify_checksum(self, path: str, parsed: ArtifactManifest) -> None:
         """Verify sha256 checksum (CONTRACTS §2.3). Fail-closed on mismatch.
@@ -344,7 +450,9 @@ class PluginLoader:
         if not src.exists():
             return  # checksum already validated existence
 
-        if tarfile.is_tarfile(str(src)):
+        # is_tarfile() opens the path → raises IsADirectoryError on a dir. Guard so
+        # directory sources fall through to copytree (dev/local installs).
+        if src.is_file() and tarfile.is_tarfile(str(src)):
             with tarfile.open(str(src), "r:gz") as tf:
                 # NOTE(agent): tarfile.extractall with filter="data" is the
                 # safe extraction mode (Python 3.12+ default). On 3.11- it

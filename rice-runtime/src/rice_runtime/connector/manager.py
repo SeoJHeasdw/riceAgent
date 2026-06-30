@@ -38,12 +38,13 @@ class ConnectorManager:
     service.py 는 이 manager 에 begin_connect / complete_oauth / delete 를 위임한다.
     """
 
-    def __init__(self, db: Database, keychain: KeychainStore) -> None:
+    def __init__(self, db: Database, keychain: KeychainStore, gmail_flow: GmailOAuthFlow | None = None) -> None:
         self._db = db
         self._keychain = keychain
-        # NOTE(agent): GmailOAuthFlow 는 환경변수에서 client_id/secret 을 읽는다.
-        # 미설정 시 begin_connect 호출 시점에 OAuthConfigError 가 발생한다.
-        self._gmail_flow = GmailOAuthFlow()
+        # NOTE(agent): GmailOAuthFlow 는 env > JSON(~/.rice/connectors) 순으로 자격증명을
+        # 읽는다. 미설정 시 begin_connect 시점에 OAuthConfigError 가 발생한다.
+        # ConnectorService 가 paths/port 를 아는 flow 를 주입한다(공유). 없으면 자체 생성.
+        self._gmail_flow = gmail_flow or GmailOAuthFlow()
 
         # state → connector_id 매핑 — OAuth callback 에서 state 로 connector 를 찾을 수 있게
         # 인메모리로 관리 (단일 활성 세션 전제 — RUNTIME_DESIGN §2).

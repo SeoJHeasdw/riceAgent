@@ -111,13 +111,20 @@ def resource_limit_preamble() -> str:
     )
 
 
-def make_child_kwargs(cwd: str | None = None) -> dict[str, Any]:
+def make_child_kwargs(cwd: str | None = None, extra_path: list[str] | None = None) -> dict[str, Any]:
     """Build the keyword-argument dict for `subprocess.Popen`.
 
     Centralises all sandbox-relevant Popen options so runner.py stays clean.
+
+    `extra_path`: import roots to expose to the child via PYTHONPATH (e.g. an
+    installed plugin's dir). Env stays scrubbed — only PYTHONPATH is added, set to
+    *exactly* these paths (never the parent's PYTHONPATH), so no secrets leak.
     """
+    env = scrub_env()
+    if extra_path:
+        env["PYTHONPATH"] = os.pathsep.join(str(p) for p in extra_path)
     return {
-        "env": scrub_env(),
+        "env": env,
         "cwd": cwd,
         # Redirect stdin/stdout for IPC; stderr is collected separately.
         "stdin": -1,   # PIPE
