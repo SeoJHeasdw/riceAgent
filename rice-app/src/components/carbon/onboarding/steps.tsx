@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ModelPicker } from '../ModelPicker';
-import { LineIcon } from './primitives';
+import { LineIcon, PencilCircle, PencilUnderline, PencilDoubleUnderline } from './primitives';
 import { icons } from './iconPaths';
 import { WELCOME_CHAT, LOOP_NODES, type MockChatMessage, type LoopNode } from './mockData';
 import type { OnboardingStep } from './types';
@@ -183,195 +183,224 @@ const WelcomeChatPreview: React.FC = () => (
   </div>
 );
 
-// ── conceptStep 전용: Learning Loop 다이어그램 ──────────────────────────────
+// ── conceptStep 전용: 자기개선 루프 다이어그램 ──────────────────────────────
+//
+// "대화 → 학습 → 스킬 → 개선"이 한 바퀴 돌 때마다 RICE가 더 똑똑해진다는 핵심을
+// 시각적으로 전달한다. rAF로 진행도(progress)를 연속 구동해 ① 궤도를 도는 혜성
+// 펄스 ② 펄스가 닿는 노드의 활성화 ③ 회전을 거듭할수록 차오르는 중앙 "맞춤도"
+// 게이지를 한 타임라인으로 동기화한다(따로 노는 점·칩 없이 루프 자체에 집중).
 
-/** 4개 노드를 원형으로 배치하는 SVG 다이어그램 */
-const LoopDiagram: React.FC<{ activeIdx: number }> = ({ activeIdx }) => {
-  // 노드 중심 좌표 (100x100 viewBox 기준, 정사각 배치)
-  const CX = 50, CY = 50, R = 32;
-  const positions = [
-    { x: CX,        y: CY - R },       // 상 (대화)
-    { x: CX + R,    y: CY },           // 우 (학습)
-    { x: CX,        y: CY + R },       // 하 (스킬 생성)
-    { x: CX - R,    y: CY },           // 좌 (자기개선)
-  ];
+/** 노드별 라인 아이콘 (LineIcon children) */
+const NODE_ICONS: Record<string, React.ReactNode> = {
+  chat: (
+    <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+  ),
+  learn: (
+    <>
+      <path d="M12 5a3 3 0 0 0-3 3 3 3 0 0 0-1.5 5.6A2.5 2.5 0 0 0 9 18a3 3 0 0 0 3 1" />
+      <path d="M12 5a3 3 0 0 1 3 3 3 3 0 0 1 1.5 5.6A2.5 2.5 0 0 1 15 18a3 3 0 0 1-3 1" />
+      <path d="M12 5v14" />
+    </>
+  ),
+  skill: (
+    <>
+      <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+      <path d="M17 21v-8H7v8M7 3v5h8" />
+    </>
+  ),
+  improve: (
+    <>
+      <path d="M3 17l5-5 4 4 8-8" />
+      <path d="M16 8h4v4" />
+    </>
+  ),
+};
 
-  // 화살표 path: node[i] → node[(i+1)%4], 약간 곡선
-  const arrowPaths = positions.map((from, i) => {
-    const to = positions[(i + 1) % 4];
-    // 중심 방향으로 살짝 당긴 제어점
-    const mx = (from.x + to.x) / 2 + (CX - (from.x + to.x) / 2) * 0.18;
-    const my = (from.y + to.y) / 2 + (CY - (from.y + to.y) / 2) * 0.18;
-    return `M ${from.x} ${from.y} Q ${mx} ${my} ${to.x} ${to.y}`;
-  });
+// 다이어그램 기하 (px = viewBox, 1:1) — 컨테이너를 D.W×D.H로 고정해 SVG/HTML 정렬
+const D = { W: 360, H: 300, cx: 180, cy: 150, rx: 130, ry: 112 };
+// 노드 각도(라디안): 0=상단, 시계방향(상→우→하→좌)
+const NODE_ANGLE = [0, Math.PI / 2, Math.PI, (3 * Math.PI) / 2];
+const pointAt = (theta: number) => ({
+  x: D.cx + D.rx * Math.sin(theta),
+  y: D.cy - D.ry * Math.cos(theta),
+});
+
+/** 중앙 게이지용 원호 path (시계방향) */
+const gaugeArc = (startDeg: number, endDeg: number, r: number) => {
+  const p = (deg: number) => {
+    const a = (deg * Math.PI) / 180;
+    return { x: D.cx + r * Math.cos(a), y: D.cy + r * Math.sin(a) };
+  };
+  const s = p(startDeg);
+  const e = p(endDeg);
+  const large = endDeg - startDeg > 180 ? 1 : 0;
+  return `M ${s.x.toFixed(1)} ${s.y.toFixed(1)} A ${r} ${r} 0 ${large} 1 ${e.x.toFixed(1)} ${e.y.toFixed(1)}`;
+};
+
+const GAUGE_START = 130;
+const GAUGE_SWEEP = 280;
+
+/** 궤도 링 + 혜성 펄스 + 중앙 맞춤도 게이지 (SVG 레이어) */
+const LoopDiagram: React.FC<{ progress: number; activeIdx: number; fill: number }> = ({
+  progress,
+  activeIdx,
+  fill,
+}) => {
+  const theta = progress * Math.PI * 2;
+  const head = pointAt(theta);
+  const tail = pointAt(theta - 0.5);
+  const accent = ACCENT_CLASSES[LOOP_NODES[activeIdx].accent].dot;
+  const tailPath = `M ${tail.x.toFixed(1)} ${tail.y.toFixed(1)} A ${D.rx} ${D.ry} 0 0 1 ${head.x.toFixed(1)} ${head.y.toFixed(1)}`;
+  const pct = Math.min(99, Math.round(fill * 100));
 
   return (
-    <svg viewBox="0 0 100 100" className="w-full h-full" aria-hidden>
+    <svg viewBox={`0 0 ${D.W} ${D.H}`} className="absolute inset-0 w-full h-full" aria-hidden>
       <defs>
-        <marker id="arrowhead" markerWidth="4" markerHeight="4" refX="3" refY="2" orient="auto">
-          <path d="M0,0 L0,4 L4,2 Z" fill="var(--cds-border-strong-01)" />
-        </marker>
-        <marker id="arrowhead-active" markerWidth="4" markerHeight="4" refX="3" refY="2" orient="auto">
-          <path d="M0,0 L0,4 L4,2 Z" fill={ACCENT_CLASSES[LOOP_NODES[activeIdx].accent].dot} />
-        </marker>
+        <filter id="loop-glow" x="-60%" y="-60%" width="220%" height="220%">
+          <feGaussianBlur stdDeviation="2.6" />
+        </filter>
       </defs>
 
-      {/* 화살표 연결선 */}
-      {arrowPaths.map((d, i) => {
-        const isActive = i === activeIdx;
-        return (
-          <path
-            key={i}
-            d={d}
-            fill="none"
-            stroke={isActive ? ACCENT_CLASSES[LOOP_NODES[activeIdx].accent].dot : 'var(--cds-border-strong-01)'}
-            strokeWidth={isActive ? '0.9' : '0.6'}
-            strokeDasharray={isActive ? 'none' : '2 1.5'}
-            markerEnd={isActive ? 'url(#arrowhead-active)' : 'url(#arrowhead)'}
-            opacity={isActive ? 1 : 0.4}
-            style={{ transition: 'stroke 0.4s, stroke-width 0.4s, opacity 0.4s' }}
-          />
-        );
-      })}
+      {/* 궤도 링 (점선) */}
+      <ellipse
+        cx={D.cx} cy={D.cy} rx={D.rx} ry={D.ry}
+        fill="none" stroke="var(--cds-border-subtle-01)" strokeWidth="1.5"
+        strokeDasharray="1 7" strokeLinecap="round"
+      />
 
-      {/* 노드 */}
-      {positions.map((pos, i) => {
-        const node = LOOP_NODES[i];
-        const ac = ACCENT_CLASSES[node.accent];
-        const isActive = i === activeIdx;
-        return (
-          <g key={node.id}>
-            <circle
-              cx={pos.x}
-              cy={pos.y}
-              r={isActive ? 7.5 : 6}
-              fill={isActive ? ac.dot : 'var(--cds-layer-02)'}
-              stroke={isActive ? ac.dot : 'var(--cds-border-strong-01)'}
-              strokeWidth={isActive ? '0' : '0.5'}
-              opacity={isActive ? 1 : 0.6}
-              style={{ transition: 'r 0.4s, fill 0.4s, opacity 0.4s' }}
-            />
-            {/* 라벨 */}
-            <text
-              x={pos.x}
-              y={pos.y + (i === 0 ? -10 : i === 2 ? 13 : 0)}
-              dx={i === 1 ? 11 : i === 3 ? -11 : 0}
-              textAnchor={i === 1 ? 'start' : i === 3 ? 'end' : 'middle'}
-              dominantBaseline={i === 0 ? 'auto' : i === 2 ? 'auto' : 'middle'}
-              fontSize="4.5"
-              fontWeight={isActive ? '700' : '500'}
-              fill={isActive ? ac.dot : 'var(--cds-text-helper)'}
-              style={{ transition: 'fill 0.4s, font-weight 0.3s', fontFamily: 'var(--font-sans)' }}
-            >
-              {node.label}
-            </text>
-          </g>
-        );
-      })}
+      {/* 혜성 꼬리 */}
+      <path d={tailPath} fill="none" stroke={accent} strokeWidth="3" strokeLinecap="round" opacity="0.5" filter="url(#loop-glow)" />
+      {/* 혜성 머리 (글로우 + 코어) */}
+      <circle cx={head.x} cy={head.y} r="6" fill={accent} filter="url(#loop-glow)" />
+      <circle cx={head.x} cy={head.y} r="3" fill="#fff" opacity="0.95" />
 
-      {/* 중심 로고 */}
-      <circle cx={CX} cy={CY} r={7} fill="var(--cds-interactive)" />
-      <text x={CX} y={CY} textAnchor="middle" dominantBaseline="middle" fontSize="4" fontWeight="700" fill="#fff" fontFamily="var(--font-sans)">
-        RICE
+      {/* 중앙 맞춤도 게이지 */}
+      <path d={gaugeArc(GAUGE_START, GAUGE_START + GAUGE_SWEEP, 50)} fill="none" stroke="var(--cds-layer-02)" strokeWidth="6" strokeLinecap="round" />
+      <path
+        d={gaugeArc(GAUGE_START, GAUGE_START + GAUGE_SWEEP * fill, 50)}
+        fill="none" stroke="var(--cds-interactive)" strokeWidth="6" strokeLinecap="round"
+        style={{ transition: 'stroke 0.4s' }}
+      />
+      <text x={D.cx} y={D.cy - 3} textAnchor="middle" fontSize="23" fontWeight="700" fill="var(--cds-text-primary)" fontFamily="var(--font-sans)" style={{ fontVariantNumeric: 'tabular-nums' }}>
+        {pct}%
+      </text>
+      <text x={D.cx} y={D.cy + 14} textAnchor="middle" fontSize="9.5" fontWeight="600" fill="var(--cds-text-helper)" fontFamily="var(--font-sans)" letterSpacing="0.03em">
+        나에게 맞춰짐
       </text>
     </svg>
   );
 };
 
-/** 노드 레이블 + 설명을 교체 표시하는 패널 */
+/** 궤도 위 4개 노드 카드 (HTML 레이어 — 가독성 ↑) */
+const NodeCards: React.FC<{ activeIdx: number }> = ({ activeIdx }) => (
+  <>
+    {LOOP_NODES.map((node, i) => {
+      const pt = pointAt(NODE_ANGLE[i]);
+      const ac = ACCENT_CLASSES[node.accent];
+      const active = i === activeIdx;
+      return (
+        <div
+          key={node.id}
+          className="absolute flex flex-col items-center text-center pointer-events-none"
+          style={{
+            left: pt.x,
+            top: pt.y,
+            width: 96,
+            transform: `translate(-50%, -50%) scale(${active ? 1.06 : 1})`,
+            transition: 'transform 320ms cubic-bezier(0.34,1.56,0.64,1)',
+          }}
+        >
+          <span
+            className="flex items-center justify-center w-11 h-11 rounded-2xl mb-1.5 transition-all duration-300"
+            style={{
+              background: active ? ac.dot : 'var(--cds-layer-01)',
+              color: active ? '#fff' : 'var(--cds-text-helper)',
+              boxShadow: active
+                ? `0 0 0 4px ${ac.dot}22, 0 8px 18px -5px ${ac.dot}aa`
+                : '0 0 0 1px var(--cds-border-subtle-01)',
+            }}
+          >
+            <LineIcon size={20}>{NODE_ICONS[node.id]}</LineIcon>
+          </span>
+          <span
+            className={`text-caption-01 font-semibold leading-tight whitespace-nowrap transition-colors duration-300 ${
+              active ? ac.text : 'text-text-secondary'
+            }`}
+          >
+            {node.label}
+          </span>
+          <span className="text-[10px] text-text-helper leading-tight whitespace-nowrap">{node.sublabel}</span>
+        </div>
+      );
+    })}
+  </>
+);
+
+/** 활성 노드의 상세 설명 (전환 시 페이드) */
 const LoopDescription: React.FC<{ node: LoopNode; idx: number }> = ({ node, idx }) => {
   const ac = ACCENT_CLASSES[node.accent];
   return (
     <div
       key={idx}
-      className="flex flex-col gap-2"
+      className="flex gap-3"
       style={{ animation: 'onbStep 280ms ease', animationFillMode: 'both' }}
     >
-      <div className={`inline-flex items-center gap-2 px-2.5 py-1 rounded-full w-fit ${ac.bg}`}>
-        <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0`} style={{ backgroundColor: ac.dot }} />
-        <span className={`text-caption-01 font-semibold ${ac.text}`}>{node.label}</span>
-        <span className="text-caption-01 text-text-helper">— {node.sublabel}</span>
+      <span className="w-1 rounded-full flex-shrink-0" style={{ background: ac.dot }} />
+      <div className="min-w-0">
+        <span className={`text-body-short-01 font-semibold ${ac.text}`}>{node.label}</span>
+        <span className="text-caption-01 text-text-helper ml-2">{node.sublabel}</span>
+        <p className="text-body-short-01 text-text-secondary leading-relaxed mt-1">{node.description}</p>
       </div>
-      <p className="text-body-short-01 text-text-secondary leading-relaxed">{node.description}</p>
     </div>
   );
 };
 
+/** 한 바퀴(ms) — 노드당 약 2.2초로 설명을 읽을 시간 확보 */
+const LOOP_DURATION = 8800;
+
 /** conceptStep에 들어가는 전체 다이어그램 섹션 */
 const LearningLoopDiagram: React.FC = () => {
-  const [activeIdx, setActiveIdx] = useState(0);
+  const [progress, setProgress] = useState(0);
+  const [total, setTotal] = useState(0); // 누적 회전수(연속, 0..∞)
+  const raf = useRef(0);
+  const startTs = useRef(0);
 
   useEffect(() => {
-    const id = setInterval(
-      () => setActiveIdx((i) => (i + 1) % LOOP_NODES.length),
-      2400,
-    );
-    return () => clearInterval(id);
+    const tick = (ts: number) => {
+      if (!startTs.current) startTs.current = ts;
+      const t = (ts - startTs.current) / LOOP_DURATION;
+      setTotal(t);
+      setProgress(t % 1);
+      raf.current = requestAnimationFrame(tick);
+    };
+    raf.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf.current);
   }, []);
+
+  const activeIdx = Math.round(progress * 4) % 4;
+  // 맞춤도: 회전을 거듭할수록 빠르게 차오르다 정밀화로 수렴(점근)
+  const fill = 1 - Math.pow(0.22, total);
 
   return (
     <div className="flex flex-col gap-5 w-full">
       <div>
-        <h2 className="text-heading-03 font-semibold text-text-primary">쓸수록 똑똑해지는 이유</h2>
+        <h2 className="text-heading-03 font-semibold text-text-primary">
+          <PencilUnderline>쓸수록 똑똑해지는 이유</PencilUnderline>
+        </h2>
         <p className="text-body-short-01 text-text-secondary mt-1.5">
-          RICE의 자기 개선 루프가 반복될수록 작업이 빨라지고 정확해져요.
+          대화 → 학습 → 스킬 → 개선이 한 바퀴 돌 때마다 RICE가 내게 더 맞춰져요.
         </p>
       </div>
 
-      <div className="flex gap-6 items-center">
-        {/* 다이어그램 — 크게 */}
-        <div className="w-[240px] h-[240px] flex-shrink-0">
-          <LoopDiagram activeIdx={activeIdx} />
-        </div>
-
-        {/* 설명 패널 */}
-        <div className="flex-1 min-w-0">
-          <LoopDescription node={LOOP_NODES[activeIdx]} idx={activeIdx} />
-
-          {/* 단계 인디케이터 (클릭 가능) */}
-          <div className="flex items-center gap-2 mt-5">
-            {LOOP_NODES.map((node, i) => {
-              const ac = ACCENT_CLASSES[node.accent];
-              return (
-                <button
-                  key={node.id}
-                  onClick={() => setActiveIdx(i)}
-                  title={node.label}
-                  className={`h-1.5 rounded-full transition-all duration-300 ${
-                    i === activeIdx ? `w-6 ${ac.bg.replace('/15', '/80').replace('/10', '/60')}` : 'w-1.5 bg-border-strong-01 hover:bg-border-strong-02'
-                  }`}
-                />
-              );
-            })}
-          </div>
-        </div>
+      {/* 루프 다이어그램 (SVG 궤도 + HTML 노드 카드) */}
+      <div className="relative mx-auto" style={{ width: D.W, height: D.H }}>
+        <LoopDiagram progress={progress} activeIdx={activeIdx} fill={fill} />
+        <NodeCards activeIdx={activeIdx} />
       </div>
 
-      {/* 4개 노드 요약 칩 */}
-      <div className="grid grid-cols-2 gap-2">
-        {LOOP_NODES.map((node, i) => {
-          const ac = ACCENT_CLASSES[node.accent];
-          const isActive = i === activeIdx;
-          return (
-            <button
-              key={node.id}
-              onClick={() => setActiveIdx(i)}
-              className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl border text-left transition-all duration-200 ${
-                isActive
-                  ? `border-transparent ring-1 ${ac.ring} ${ac.bg}`
-                  : 'border-border-subtle-01 bg-layer-02 hover:border-border-strong-01'
-              }`}
-            >
-              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: ac.dot, opacity: isActive ? 1 : 0.5 }} />
-              <div className="min-w-0">
-                <div className={`text-body-short-01 font-semibold ${isActive ? ac.text : 'text-text-secondary'}`}>
-                  {node.label}
-                </div>
-                <div className="text-caption-01 text-text-helper leading-tight mt-0.5">{node.sublabel}</div>
-              </div>
-            </button>
-          );
-        })}
+      {/* 활성 단계 설명 */}
+      <div className="w-full min-h-[64px]">
+        <LoopDescription node={LOOP_NODES[activeIdx]} idx={activeIdx} />
       </div>
     </div>
   );
@@ -389,7 +418,7 @@ const welcomeStep: OnboardingStep = {
       <h1 className="text-heading-04 font-semibold text-text-primary leading-tight">
         나와 함께 똑똑해지는
         <br />
-        AI 워크스페이스, RICE
+        AI 워크스페이스, <PencilCircle>RICE</PencilCircle>
       </h1>
       <p className="text-body-long-01 text-text-secondary mt-3">
         RICE는 단순한 챗봇이 아니에요. 대화하며 일할수록{' '}
@@ -425,11 +454,10 @@ const conceptStep: OnboardingStep = {
 const EcoCard: React.FC<{
   accent: 'blue' | 'teal' | 'purple';
   icon: React.ReactNode;
-  badge: string;
   title: string;
   desc: string;
   items: string[];
-}> = ({ accent, icon, badge, title, desc, items }) => {
+}> = ({ accent, icon, title, desc, items }) => {
   const accentMap = {
     blue:   { bg: 'bg-blue-60/12',   text: 'text-blue-50',   border: 'border-blue-60/20',   dot: '#4589ff' },
     teal:   { bg: 'bg-teal-60/12',   text: 'text-teal-60',   border: 'border-teal-60/20',   dot: '#009d9a' },
@@ -438,25 +466,25 @@ const EcoCard: React.FC<{
   const ac = accentMap[accent];
   return (
     <div className={`flex-1 min-w-0 rounded-xl border ${ac.border} bg-layer-02 p-4 flex flex-col`}>
-      {/* 아이콘 + 뱃지 */}
-      <div className="flex items-center gap-2.5 mb-3">
+      {/* 아이콘 + 제목 — 영문 배지 대신 한글 제목을 강조색 볼드 + 손그림 밑줄로(다국어 대비) */}
+      <div className="flex items-center gap-2.5 mb-4">
         <span className={`flex items-center justify-center w-9 h-9 rounded-lg flex-shrink-0 ${ac.bg}`}>
           <span className={ac.text}>{icon}</span>
         </span>
-        <div>
-          <div className={`text-[10px] font-bold uppercase tracking-widest ${ac.text}`}>{badge}</div>
-          <div className="text-body-short-01 font-semibold text-text-primary leading-tight">{title}</div>
+        <div className={`text-heading-02 font-bold leading-tight ${ac.text}`}>
+          <PencilDoubleUnderline color={ac.dot} animated={false}>{title}</PencilDoubleUnderline>
         </div>
       </div>
-      {/* 설명 — flex-1로 늘려 items를 항상 하단 같은 위치에 고정 */}
-      <p className="text-caption-01 text-text-secondary leading-relaxed flex-1">{desc}</p>
+      {/* 설명 — flex-1로 늘려 items를 항상 하단 같은 위치에 고정.
+          (고령 사용자 가독성 위해 본문 글자 키움) */}
+      <p className="text-body-short-01 text-text-secondary leading-relaxed flex-1">{desc}</p>
       {/* 구분선 */}
       <div className="border-t border-border-subtle-01 my-3" />
       {/* 예시 항목 */}
-      <ul className="flex flex-col gap-1">
+      <ul className="flex flex-col gap-1.5">
         {items.map((item) => (
-          <li key={item} className="flex items-center gap-1.5 text-caption-01 text-text-helper">
-            <span className="w-1 h-1 rounded-full flex-shrink-0" style={{ backgroundColor: accentMap[accent].dot }} />
+          <li key={item} className="flex items-center gap-2 text-[12.5px] text-text-helper">
+            <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: accentMap[accent].dot }} />
             {item}
           </li>
         ))}
@@ -481,7 +509,6 @@ const ecosystemStep: OnboardingStep = {
       <div className="flex gap-3">
         <EcoCard
           accent="blue"
-          badge="Skill"
           icon={
             <LineIcon size={18}>
               <path d="M12 3l8 3v6c0 5-3.4 7.7-8 9-4.6-1.3-8-4-8-9V6l8-3z"/>
@@ -494,7 +521,6 @@ const ecosystemStep: OnboardingStep = {
         />
         <EcoCard
           accent="purple"
-          badge="Plugin"
           icon={
             <LineIcon size={18}>
               <rect x="3" y="3" width="7" height="7" rx="1"/>
@@ -509,7 +535,6 @@ const ecosystemStep: OnboardingStep = {
         />
         <EcoCard
           accent="teal"
-          badge="Connector"
           icon={
             <LineIcon size={18}>
               <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
@@ -561,6 +586,9 @@ const readyStep: OnboardingStep = {
   navLabel: '준비 완료',
   navDescription: '시작하기',
   primaryLabel: '시작하기',
+  // 모델이 연결됐을 때만 "시작하기" 가능 — 스텝 점프로 들어와도 모델 미연결이면 막는다.
+  canAdvance: (ctx) => ctx.draft.canSave,
+  blockedHint: () => '모델을 먼저 연결해 주세요',
   render: (ctx) => (
     <div className="flex flex-col w-full gap-6">
       {/* 헤더: 체크 아이콘을 제목 오른쪽에 나란히 배치 */}

@@ -63,9 +63,13 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
   const canAdvance = step.canAdvance ? step.canAdvance(ctx) : true;
   const blockedHint = !canAdvance ? step.blockedHint?.(ctx) : undefined;
   const primaryLabel = step.primaryLabel ?? (isLast ? '시작하기' : '다음');
-  // 소개 스텝(모델 연결 앞)에서만 "건너뛰기" 노출 — 필수 스텝은 건너뛸 수 없다.
+  // 스텝 점프 규칙: 뒤로(방문한 스텝)는 항상 가능. 앞으로는 소개~모델 단계까지만
+  // 자유롭게 가능하고, 모델 연결 이후 단계(준비 완료)는 모델이 연결됐을 때만 갈 수 있다.
+  // (필수 단계인 모델 연결을 건너뛰고 "시작하기"에 도달하는 구멍을 막는다.)
   const modelIdx = steps.findIndex((s) => s.id === 'model');
-  const showSkip = modelIdx >= 0 && index < modelIdx;
+  const modelConnected = draft.canSave;
+  const canJump = (i: number) =>
+    i !== index && (i < index || (modelIdx >= 0 && i <= modelIdx) || modelConnected);
 
   return (
     <div
@@ -87,7 +91,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
             <span className="text-heading-02 font-semibold text-text-primary">RICE</span>
           </div>
 
-          <Stepper steps={steps} index={index} onJump={(i) => i < index && setIndex(i)} />
+          <Stepper steps={steps} index={index} canJump={canJump} onJump={setIndex} />
 
           <div className="mt-auto flex items-center gap-2 text-caption-01 text-text-helper py-4 border-t border-border-subtle-01">
             <LineIcon size={14}>{icons.shield}</LineIcon>
@@ -120,16 +124,10 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
               </span>
             )}
 
-            {showSkip && (
-              <button
-                onClick={() => setIndex(modelIdx)}
-                className="text-caption-01 text-text-helper hover:text-text-secondary transition-colors"
-              >
-                소개 건너뛰기
-              </button>
-            )}
-
-            <div className="ml-auto flex flex-col items-end gap-0.5">
+            <div className="ml-auto flex items-center gap-2">
+              {blockedHint && (
+                <span className="text-caption-01 text-text-helper">{blockedHint}</span>
+              )}
               <Button
                 kind="primary"
                 size="sm"
@@ -140,7 +138,6 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
                 {primaryLabel}
                 {!isLast && <LineIcon size={14} className="ml-0.5">{icons.arrow}</LineIcon>}
               </Button>
-              {blockedHint && <span className="text-caption-01 text-text-helper">{blockedHint}</span>}
             </div>
           </div>
         </div>
@@ -149,6 +146,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
       <style>{`
         @keyframes onbIn { from { opacity: 0; transform: translateY(10px) scale(0.99); } to { opacity: 1; transform: translateY(0) scale(1); } }
         @keyframes onbStep { from { opacity: 0; transform: translateX(8px); } to { opacity: 1; transform: translateX(0); } }
+        @keyframes onbSketch { to { stroke-dashoffset: 0; } }
       `}</style>
     </div>
   );
@@ -158,12 +156,14 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
 const Stepper: React.FC<{
   steps: OnboardingStep[];
   index: number;
+  /** i 스텝으로 점프 가능한지 (앞/뒤 모두 포함) */
+  canJump: (i: number) => boolean;
   onJump: (i: number) => void;
-}> = ({ steps, index, onJump }) => (
+}> = ({ steps, index, canJump, onJump }) => (
   <ol className="flex flex-col">
     {steps.map((s, i) => {
       const state = i < index ? 'done' : i === index ? 'active' : 'upcoming';
-      const clickable = i < index;
+      const clickable = canJump(i);
       const isLast = i === steps.length - 1;
       return (
         <li key={s.id} className="flex flex-col">

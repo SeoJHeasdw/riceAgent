@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Button, Card, Input, Tag, Toggle } from '../components/ui';
 import { useI18n } from '../lib/i18n/I18nContext';
+import { replayOnboarding, replayTour } from '../lib/tutorial';
 
 /**
  * SettingsScreen - Application preferences
@@ -353,6 +354,54 @@ function SettingsScreen() {
               label={t.settings.learningPrivacy.telemetry}
               description={t.settings.learningPrivacy.telemetryDesc}
             />
+          </SettingsSection>
+
+          {/* Tutorial — 온보딩/투어 다시 보기 */}
+          <SettingsSection
+            title={language === 'ko' ? '튜토리얼' : 'Tutorial'}
+            description={
+              language === 'ko'
+                ? '처음 안내를 놓쳤거나 다시 보고 싶을 때 언제든 재실행할 수 있어요.'
+                : 'Replay the first-run guidance anytime you want to revisit it.'
+            }
+            iconClass="bg-[#ff832b]/15 text-[#ffb784]"
+            icon={
+              <SectionIcon>
+                <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+                <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+              </SectionIcon>
+            }
+          >
+            <div className="flex items-center gap-3">
+              <div className="flex-1 min-w-0">
+                <div className="text-body-short-02 text-text-primary">
+                  {language === 'ko' ? '소개 다시 보기' : 'Replay onboarding'}
+                </div>
+                <div className="text-caption-01 text-text-helper">
+                  {language === 'ko'
+                    ? 'RICE 개념과 모델 연결을 단계별로 다시 안내해요.'
+                    : 'Walk through the RICE concepts and model setup again.'}
+                </div>
+              </div>
+              <Button kind="secondary" size="sm" onClick={replayOnboarding}>
+                {language === 'ko' ? '다시 보기' : 'Replay'}
+              </Button>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="flex-1 min-w-0">
+                <div className="text-body-short-02 text-text-primary">
+                  {language === 'ko' ? '둘러보기 다시 시작' : 'Restart tour'}
+                </div>
+                <div className="text-caption-01 text-text-helper">
+                  {language === 'ko'
+                    ? '화면 곳곳의 기능을 말풍선으로 다시 짚어줘요.'
+                    : 'Highlight the key features around the app once more.'}
+                </div>
+              </div>
+              <Button kind="secondary" size="sm" onClick={replayTour}>
+                {language === 'ko' ? '다시 시작' : 'Start'}
+              </Button>
+            </div>
           </SettingsSection>
 
           {/* Danger zone */}

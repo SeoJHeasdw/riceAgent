@@ -18,6 +18,7 @@ import { MarketplaceProvider } from './lib/marketplace/MarketplaceContext';
 import { ToastProvider } from './lib/toast/ToastProvider';
 import { ModelOnboarding } from './components/carbon/ModelOnboarding';
 import { TourOverlay, TOUR_STEPS, TOUR_DONE_KEY } from './components/carbon/tour';
+import { REPLAY_ONBOARDING_EVENT, REPLAY_TOUR_EVENT } from './lib/tutorial';
 import { defaultModelSettings } from './lib/mockData';
 import type { ModelSettings } from './components/carbon/ModelSettingsPanel';
 import type { RegisteredModel } from './components/carbon/ModelSettingsPanel';
@@ -198,6 +199,18 @@ function App() {
     localStorage.setItem(TOUR_DONE_KEY, '1');
     setTourActive(false);
   };
+
+  // 설정 화면에서 "다시 보기"를 누르면 온보딩/투어를 재실행한다(tutorial.ts 브리지).
+  useEffect(() => {
+    const onReplayOnboarding = () => setOnboardingOpen(true);
+    const onReplayTour = () => setTourActive(true);
+    window.addEventListener(REPLAY_ONBOARDING_EVENT, onReplayOnboarding);
+    window.addEventListener(REPLAY_TOUR_EVENT, onReplayTour);
+    return () => {
+      window.removeEventListener(REPLAY_ONBOARDING_EVENT, onReplayOnboarding);
+      window.removeEventListener(REPLAY_TOUR_EVENT, onReplayTour);
+    };
+  }, []);
 
   return (
     <I18nProvider>

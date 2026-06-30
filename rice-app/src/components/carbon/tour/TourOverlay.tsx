@@ -23,6 +23,19 @@ interface BubblePos {
   arrowSide: 'left' | 'right' | 'top' | 'bottom';
   /** 화살표 중심의 bubble-내 오프셋 (px) */
   arrowCenter: number;
+  /** 타겟을 못 찾아 화면 중앙에 띄운 폴백(화살표 숨김) */
+  centered?: boolean;
+}
+
+/** 타겟 요소를 못 찾았을 때 화면 중앙에 띄우는 폴백 위치 */
+function centeredBubblePos(vpW: number, vpH: number): BubblePos {
+  return {
+    top: Math.max(VP_PAD, vpH / 2 - 110),
+    left: vpW / 2 - BUBBLE_W / 2,
+    arrowSide: 'top',
+    arrowCenter: 0,
+    centered: true,
+  };
 }
 
 const BUBBLE_W = 300;
@@ -227,7 +240,9 @@ export const TourOverlay: React.FC<TourOverlayProps> = ({ steps, currentPath, on
   const measureTarget = useCallback(() => {
     if (!step) return;
     const el = document.querySelector(`[data-tour="${step.target}"]`);
-    if (!el) { setTargetRect(null); setBubblePos(null); return; }
+    // 타겟을 못 찾으면(예: 접힌 패널) dim만 깔린 채 갇히지 않도록
+    // 말풍선을 화면 중앙에 띄워 사용자가 계속/건너뛰기 할 수 있게 한다.
+    if (!el) { setTargetRect(null); setBubblePos(centeredBubblePos(window.innerWidth, window.innerHeight)); return; }
     const r = el.getBoundingClientRect();
     const rect: Rect = { top: r.top, left: r.left, width: r.width, height: r.height };
     setTargetRect(rect);
@@ -329,8 +344,8 @@ export const TourOverlay: React.FC<TourOverlayProps> = ({ steps, currentPath, on
           }}
           onClick={(e) => e.stopPropagation()}
         >
-          {/* ── 화살표 ── */}
-          <BubbleArrow side={bubblePos.arrowSide} center={bubblePos.arrowCenter} />
+          {/* ── 화살표 (중앙 폴백일 땐 가리킬 타겟이 없어 숨김) ── */}
+          {!bubblePos.centered && <BubbleArrow side={bubblePos.arrowSide} center={bubblePos.arrowCenter} />}
 
           {/* ── 카드 본체 ── */}
           <div
