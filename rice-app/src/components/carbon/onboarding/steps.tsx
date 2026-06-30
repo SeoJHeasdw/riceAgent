@@ -580,6 +580,101 @@ const modelStep: OnboardingStep = {
   ),
 };
 
+/* ── 5. 준비 완료 전용 비주얼 요소 ──────────────────────────────────────────
+ *
+ * 1~4 스텝과 동일한 "보여주는" 톤을 유지하기 위해, 텍스트 팁마다 개념을
+ * 손에 잡히게 하는 미니 데모를 곁들인다.
+ *   · 슬래시 명령  → 깜빡이는 캐럿이 있는 명령 입력바
+ *   · 학습 패널    → 작업 패턴이 한 줄씩 차오르는 패널(무한 반복)
+ *   · 로컬 저장    → 노트북 + 잠금 배지로 "이 기기에만" 시각화
+ */
+
+/** 슬래시 명령 미니 입력바 — 깜빡이는 캐럿으로 "즉시 실행" 손맛 */
+const SlashDemo: React.FC = () => (
+  <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-layer-01 border border-border-subtle-01 shadow-elevation-1">
+    <span className="font-mono text-[12px] font-bold text-blue-50">/read_excel</span>
+  </div>
+);
+
+/** 학습 패턴이 한 줄씩 쌓이는 미니 패널 (무한 반복) */
+const LEARN_PATTERNS = ['보고서는 표로 정리', '영어 → 한국어 번역', '아침 일일 리포트'];
+const LearningStack: React.FC = () => {
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    // 0→1→2→3(전부)→0 으로 순환하며 한 줄씩 차오르다 리셋
+    const id = setInterval(() => setCount((c) => (c >= LEARN_PATTERNS.length ? 0 : c + 1)), 1000);
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <div className="flex flex-col gap-1 w-[150px]">
+      {LEARN_PATTERNS.map((p, i) => {
+        const on = i < count;
+        return (
+          <div
+            key={p}
+            className="flex items-center gap-1.5 px-2 py-1 rounded-md border transition-all duration-500"
+            style={{
+              background: on ? 'rgba(0,157,154,0.10)' : 'transparent',
+              borderColor: on ? 'rgba(0,157,154,0.28)' : 'var(--cds-border-subtle-01)',
+              opacity: on ? 1 : 0.4,
+              transform: on ? 'translateY(0)' : 'translateY(2px)',
+            }}
+          >
+            <span className="w-1 h-1 rounded-full flex-shrink-0" style={{ background: on ? '#009d9a' : 'var(--cds-text-helper)' }} />
+            <span className="text-[10.5px] font-medium truncate" style={{ color: on ? '#009d9a' : 'var(--cds-text-helper)' }}>{p}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+/** 로컬 저장(프라이버시) 시각화 — 노트북 + 잠금 배지 */
+const LocalDeviceDemo: React.FC = () => (
+  <div className="flex items-center gap-2.5">
+    <span className="relative flex items-center justify-center w-10 h-10 rounded-xl bg-purple-60/10">
+      <LineIcon size={20} className="text-purple-60">
+        <rect x="4" y="4.5" width="16" height="10.5" rx="1.5" />
+        <path d="M2.5 19h19l-1.6-2.6a1 1 0 0 0-.86-.49H4.96a1 1 0 0 0-.86.49L2.5 19z" />
+      </LineIcon>
+      {/* 잠금 배지 */}
+      <span className="absolute -bottom-1 -right-1 flex items-center justify-center w-[18px] h-[18px] rounded-full bg-purple-60 text-white ring-2 ring-layer-02">
+        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <rect x="5" y="11" width="14" height="9" rx="2" />
+          <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+        </svg>
+      </span>
+    </span>
+    <div className="flex flex-col leading-tight">
+      <span className="text-[11px] font-semibold text-purple-60">이 기기에 보관</span>
+      <span className="text-[10px] text-text-helper">클라우드 전송 없음</span>
+    </div>
+  </div>
+);
+
+/** 준비 완료 팁 카드 — [아이콘] [제목·설명] [미니 데모] 한 줄 */
+const ReadyTip: React.FC<{
+  accent: 'blue' | 'teal' | 'purple';
+  icon: React.ReactNode;
+  title: React.ReactNode;
+  desc: string;
+  visual: React.ReactNode;
+}> = ({ accent, icon, title, desc, visual }) => {
+  const ac = ACCENT_CLASSES[accent];
+  return (
+    <div className="flex items-center gap-3.5 rounded-xl border border-border-subtle-01 bg-layer-02 px-4 py-3">
+      <span className={`flex items-center justify-center w-9 h-9 rounded-lg flex-shrink-0 ${ac.bg} ${ac.text}`}>
+        <LineIcon size={18}>{icon}</LineIcon>
+      </span>
+      <div className="flex-1 min-w-0">
+        <p className="text-body-short-01 font-semibold text-text-primary leading-snug">{title}</p>
+        <p className="text-caption-01 text-text-helper mt-0.5 leading-snug">{desc}</p>
+      </div>
+      <div className="flex-shrink-0">{visual}</div>
+    </div>
+  );
+};
+
 /* ── 5. 준비 완료 ── */
 const readyStep: OnboardingStep = {
   id: 'ready',
@@ -591,46 +686,48 @@ const readyStep: OnboardingStep = {
   blockedHint: () => '모델을 먼저 연결해 주세요',
   render: (ctx) => (
     <div className="flex flex-col w-full gap-6">
-      {/* 헤더: 체크 아이콘을 제목 오른쪽에 나란히 배치 */}
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex flex-col gap-2">
-          <h2 className="text-heading-03 font-semibold text-text-primary">모두 준비됐어요</h2>
+      {/* 헤더: 초록 체크 아이콘 → 제목 왼쪽, 제목도 success 색 + 물결 색연필 밑줄 */}
+      <div className="flex items-center gap-3.5">
+        <span
+          className="flex items-center justify-center w-12 h-12 rounded-2xl bg-support-success/15 text-support-success flex-shrink-0"
+          style={{ boxShadow: '0 6px 18px -6px rgba(66,190,101,0.55)' }}
+        >
+          <LineIcon size={26}>{icons.check}</LineIcon>
+        </span>
+        <div className="flex flex-col gap-1.5">
+          <h2 className="text-heading-03 font-semibold text-support-success">
+            <PencilUnderline color="#42be65" animated={false}>모두 준비됐어요</PencilUnderline>
+          </h2>
           <p className="text-body-short-01 text-text-secondary">
             <span className="font-mono text-text-primary">{ctx.draft.modelId || ctx.initial.currentModel}</span>
             {' '}모델이 연결됐어요. 바로 대화를 시작할 수 있어요.
           </p>
         </div>
-        <span className="flex items-center justify-center w-12 h-12 rounded-2xl bg-support-success/15 text-support-success flex-shrink-0">
-          <LineIcon size={26}>{icons.check}</LineIcon>
-        </span>
       </div>
 
-      {/* 팁 목록 */}
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-layer-02 text-body-short-01 text-text-secondary">
-          <span className="flex items-center justify-center w-7 h-7 rounded-lg bg-layer-03 text-blue-50 flex-shrink-0">
-            <LineIcon size={15}>{icons.slash}</LineIcon>
-          </span>
-          <span>
-            <span className="text-text-primary font-medium">슬래시(/) 명령</span>으로 저장된 스킬을 즉시 실행해요
-          </span>
-        </div>
-        <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-layer-02 text-body-short-01 text-text-secondary">
-          <span className="flex items-center justify-center w-7 h-7 rounded-lg bg-layer-03 text-teal-60 flex-shrink-0">
-            <LineIcon size={15}>{icons.brain}</LineIcon>
-          </span>
-          <span>
-            대화를 이어갈수록 <span className="text-text-primary font-medium">학습 패널</span>에 내 작업 패턴이 쌓여요
-          </span>
-        </div>
-        <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-layer-02 text-body-short-01 text-text-secondary">
-          <span className="flex items-center justify-center w-7 h-7 rounded-lg bg-layer-03 text-purple-60 flex-shrink-0">
-            <LineIcon size={15}>{icons.shield}</LineIcon>
-          </span>
-          <span>
-            모든 데이터는 <span className="text-text-primary font-medium">이 기기에만</span> 저장돼요
-          </span>
-        </div>
+      {/* 팁 카드 — 텍스트 + 미니 데모로 개념을 손에 잡히게 */}
+      <div className="flex flex-col gap-2.5">
+        <ReadyTip
+          accent="blue"
+          icon={icons.slash}
+          title="슬래시(/) 명령으로 즉시 실행"
+          desc="저장한 스킬을 / 한 번으로 바로 불러와요"
+          visual={<SlashDemo />}
+        />
+        <ReadyTip
+          accent="teal"
+          icon={icons.brain}
+          title="학습 패널에 내 작업 패턴이 쌓여요"
+          desc="대화를 이어갈수록 RICE가 내 방식을 기억해요"
+          visual={<LearningStack />}
+        />
+        <ReadyTip
+          accent="purple"
+          icon={icons.shield}
+          title="모든 데이터는 이 기기에만 저장돼요"
+          desc="클라우드 업로드 없이 내 노트북 안에서 처리돼요"
+          visual={<LocalDeviceDemo />}
+        />
       </div>
     </div>
   ),

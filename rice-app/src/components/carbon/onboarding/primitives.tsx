@@ -65,10 +65,17 @@ export const PencilCircle: React.FC<{ children: React.ReactNode; color?: string;
 };
 
 /** 텍스트 아래 손으로 그은 물결 밑줄 효과 */
-export const PencilUnderline: React.FC<{ children: React.ReactNode; color?: string; delay?: number }> = ({
+export const PencilUnderline: React.FC<{
+  children: React.ReactNode;
+  color?: string;
+  delay?: number;
+  /** false이면 애니메이션 없이 처음부터 물결이 그어진 상태로 표시 */
+  animated?: boolean;
+}> = ({
   children,
   color = '#8a3ffc',
   delay = 260,
+  animated = true,
 }) => {
   const fid = `pu-${useId().replace(/:/g, '')}`;
   return (
@@ -94,11 +101,11 @@ export const PencilUnderline: React.FC<{ children: React.ReactNode; color?: stri
           strokeWidth="2.6"
           strokeLinecap="round"
           filter={`url(#${fid})`}
-          style={{
-            strokeDasharray: 240,
-            strokeDashoffset: 240,
-            animation: `onbSketch 680ms ease ${delay}ms forwards`,
-          }}
+          style={
+            animated
+              ? { strokeDasharray: 240, strokeDashoffset: 240, animation: `onbSketch 680ms ease ${delay}ms forwards` }
+              : { strokeDasharray: 240, strokeDashoffset: 0 }
+          }
         />
       </svg>
     </span>
