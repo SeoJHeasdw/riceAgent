@@ -514,7 +514,7 @@ function ConnectorsScreen() {
         </div>
 
         <div className="p-4">
-          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#0f62fe] via-[#3023ae] to-[#8a3ffc] p-4 text-white shadow-elevation-2">
+          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#005d5d] via-[#007d79] to-[#009d9a] p-4 text-white shadow-elevation-2">
             <div className="absolute -top-8 -right-8 w-28 h-28 rounded-full bg-white/10 blur-2xl" aria-hidden="true" />
             <div className="relative">
               <div className="text-caption-01 text-white/85 mb-1">
