@@ -35,6 +35,12 @@ const ARROW_H = 10;    // SVG 화살표 높이
 const ARROW_W = 18;    // SVG 화살표 너비
 const VP_PAD = 12;     // 뷰포트 최소 여백
 
+// ── 말풍선 꼬리(세모) 색상 · 여기서 바꾸면 됨 ─────────────────────────────
+// 카드 본체는 #262626(layer-01)라 어두운 dim 위에서 잘 안 보인다 → 더 밝게 띄운다.
+// 더 밝게/어둡게: ARROW_FILL 숫자를 올리거나(예 #555) 내리면(예 #303030) 된다.
+const ARROW_FILL = '#4a4a4a';   // 세모 채움색
+const ARROW_STROKE = '#8d8d8d'; // 세모 테두리색(밝을수록 윤곽이 또렷)
+
 // 부드러운 감속(오버슈트 없음) — 미끄러짐·모핑용
 const EASE_GLIDE = 'cubic-bezier(0.22, 1, 0.36, 1)';
 // 등장(페이드/스케일)용
@@ -175,29 +181,48 @@ const BubbleArrow: React.FC<{ side: BubblePos['arrowSide']; center: number }> = 
   // NOTE: var()는 SVG presentation attribute(fill="...")에서는 무효 → 검게 폴백된다.
   // 반드시 CSS(style)로 줘야 토큰이 해석되어 카드(layer-01)와 같은 색이 된다.
   const pathStyle: React.CSSProperties = {
-    fill: 'var(--cds-layer-01)',
-    stroke: 'var(--cds-border-subtle-01)',
+    fill: ARROW_FILL,
+    stroke: ARROW_STROKE,
     strokeWidth: 1,
     strokeLinejoin: 'round',
   };
-  const tri = (d: string, anchor: React.CSSProperties) => (
-    <svg className="absolute pointer-events-none overflow-visible" style={{ top: 0, left: 0, width: 1, height: 1, ...anchor }} aria-hidden>
+
+  // 핵심: 1×1 svg + overflow로 박스 밖에 그리면(예전 방식) 삼각형이 잘려 안 보였다.
+  // → svg를 삼각형 크기에 딱 맞추고 양수 좌표로 그린다(overflow 의존 X).
+  // base(밑변)는 OVERLAP만큼 카드 안쪽에 묻어 이음새(테두리 겹선)를 숨긴다.
+  const OVERLAP = 1;
+  let box: React.CSSProperties;
+  let w: number, h: number, d: string;
+
+  if (side === 'left') {
+    w = ARROW_H + OVERLAP; h = ARROW_W;
+    box = { left: -ARROW_H, top: center - ARROW_W / 2 };
+    d = `M 0 ${ARROW_W / 2} L ${w} 0 L ${w} ${ARROW_W} Z`;
+  } else if (side === 'right') {
+    w = ARROW_H + OVERLAP; h = ARROW_W;
+    box = { left: BUBBLE_W - OVERLAP, top: center - ARROW_W / 2 };
+    d = `M ${w} ${ARROW_W / 2} L 0 0 L 0 ${ARROW_W} Z`;
+  } else if (side === 'top') {
+    w = ARROW_W; h = ARROW_H + OVERLAP;
+    box = { left: center - ARROW_W / 2, top: -ARROW_H };
+    d = `M ${ARROW_W / 2} 0 L 0 ${h} L ${ARROW_W} ${h} Z`;
+  } else { // bottom
+    w = ARROW_W; h = ARROW_H + OVERLAP;
+    box = { left: center - ARROW_W / 2, top: `calc(100% - ${OVERLAP}px)` };
+    d = `M ${ARROW_W / 2} ${h} L 0 0 L ${ARROW_W} 0 Z`;
+  }
+
+  return (
+    <svg
+      className="absolute pointer-events-none overflow-visible"
+      width={w}
+      height={h}
+      style={box}
+      aria-hidden
+    >
       <path d={d} style={pathStyle} />
     </svg>
   );
-
-  if (side === 'left') {
-    return tri(`M ${-ARROW_H} ${center} L 0 ${center - ARROW_W / 2} L 0 ${center + ARROW_W / 2} Z`, {});
-  }
-  if (side === 'right') {
-    const bx = BUBBLE_W;
-    return tri(`M ${bx + ARROW_H} ${center} L ${bx} ${center - ARROW_W / 2} L ${bx} ${center + ARROW_W / 2} Z`, {});
-  }
-  if (side === 'top') {
-    return tri(`M ${center} ${-ARROW_H} L ${center - ARROW_W / 2} 0 L ${center + ARROW_W / 2} 0 Z`, {});
-  }
-  // bottom
-  return tri(`M ${center} ${ARROW_H} L ${center - ARROW_W / 2} 0 L ${center + ARROW_W / 2} 0 Z`, { top: 'auto', bottom: 0 });
 };
 
 /* ── 메인 컴포넌트 ──────────────────────────────────────────────────────── */
