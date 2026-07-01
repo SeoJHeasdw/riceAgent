@@ -74,7 +74,11 @@ class TestBeginConnect:
         """
         with patch(
             "rice_runtime.connector.oauth.flow.OAuthFlow.build_auth_url",
-            return_value=("https://accounts.google.com/o/oauth2/v2/auth?state=fake_state", "fake_state"),
+            return_value=(
+                "https://accounts.google.com/o/oauth2/v2/auth?state=fake_state",
+                "fake_state",
+                "fake_verifier",
+            ),
         ), patch.dict("os.environ", {
             "RICE_GMAIL_CLIENT_ID": "test-client-id",
             "RICE_GMAIL_CLIENT_SECRET": "test-client-secret",
@@ -103,7 +107,7 @@ class TestBeginConnect:
         """ConnectorService.begin_connect 도 정상 동작한다."""
         with patch(
             "rice_runtime.connector.oauth.flow.OAuthFlow.build_auth_url",
-            return_value=("https://accounts.google.com/o/oauth2?state=s1", "s1"),
+            return_value=("https://accounts.google.com/o/oauth2?state=s1", "s1", "verifier1"),
         ), patch.dict("os.environ", {
             "RICE_GMAIL_CLIENT_ID": "cid",
             "RICE_GMAIL_CLIENT_SECRET": "csecret",
@@ -181,7 +185,11 @@ class TestCompleteOAuth:
             # begin_connect 로 pending 레코드 + state 등록
             with patch(
                 "rice_runtime.connector.oauth.flow.OAuthFlow.build_auth_url",
-                return_value=("https://accounts.google.com/o/oauth2?state=valid_state", "valid_state"),
+                return_value=(
+                    "https://accounts.google.com/o/oauth2?state=valid_state",
+                    "valid_state",
+                    "valid_verifier",
+                ),
             ):
                 oauth_start = await svc.begin_connect("gmail")
 
@@ -198,7 +206,7 @@ class TestCompleteOAuth:
             mock_client.__aexit__ = AsyncMock(return_value=None)
 
             with patch("rice_runtime.connector.credential.keychain.KeychainStore._keyring", return_value=self._mock_keyring), \
-                 patch("rice_runtime.connector.oauth.flow.OAuthFlow._require_credentials"), \
+                 patch("rice_runtime.connector.oauth.flow.OAuthFlow._require_client_id"), \
                  patch("httpx.AsyncClient", return_value=mock_client):
                 info = await svc.complete_oauth(code="valid_code", state="valid_state")
 

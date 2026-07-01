@@ -92,8 +92,77 @@ class TestGmailConnector:
         from rice_runtime.connector.oauth.flow import GmailOAuthFlow
 
         flow = GmailOAuthFlow(client_id="abc", client_secret="xyz", redirect_uri="http://localhost:9/cb")
-        url, state = flow.build_auth_url()
+        url, state, verifier = flow.build_auth_url()
         assert "client_id=abc" in url and "redirect_uri=http" in url and state
+        # PKCE(RFC 7636) — client_secret 이 있어도 항상 code_challenge 를 붙인다.
+        assert "code_challenge=" in url and "code_challenge_method=S256" in url and verifier
+
+    def test_build_auth_url_works_without_client_secret(self, monkeypatch):
+        """public client(동적 등록이 secret 을 안 주는 MCP 서버)도 PKCE 만으로 연결을 시작할
+        수 있어야 한다 — client_secret 없다고 OAuthConfigError 를 던지면 안 된다."""
+        from rice_runtime.connector.oauth.flow import GmailOAuthFlow
+
+        # client_secret=None 이면 __init__ 이 env/file 폴백을 타므로, 이 머신에 실제
+        # RICE_GMAIL_* 이 설정돼 있어도(개발자 본인 Gmail 연동) 테스트가 그 값에 휘둘리지
+        # 않도록 명시적으로 비운다.
+        monkeypatch.delenv("RICE_GMAIL_CLIENT_ID", raising=False)
+        monkeypatch.delenv("RICE_GMAIL_CLIENT_SECRET", raising=False)
+        monkeypatch.delenv("RICE_GMAIL_CLIENT_SECRET_FILE", raising=False)
+
+        flow = GmailOAuthFlow(client_id="public-cid", client_secret=None, redirect_uri="http://localhost:9/cb")
+        url, state, verifier = flow.build_auth_url()
+        assert "client_id=public-cid" in url and state and verifier
+        assert "code_challenge=" in url
+
+    def test_build_auth_url_without_client_id_fails_closed(self, monkeypatch):
+        """client_id 조차 없으면 여전히 OAuthConfigError(fail-closed) — PKCE 는 secret 만 대체한다."""
+        from rice_runtime.connector.oauth.flow import GmailOAuthFlow, OAuthConfigError
+
+        monkeypatch.delenv("RICE_GMAIL_CLIENT_ID", raising=False)
+        monkeypatch.delenv("RICE_GMAIL_CLIENT_SECRET", raising=False)
+        monkeypatch.delenv("RICE_GMAIL_CLIENT_SECRET_FILE", raising=False)
+
+        flow = GmailOAuthFlow(client_id=None, client_secret=None, redirect_uri="http://localhost:9/cb")
+        with pytest.raises(OAuthConfigError):
+            flow.build_auth_url()
+
+    @pytest.mark.asyncio
+    async def test_exchange_code_omits_client_secret_when_absent_and_sends_verifier(self, monkeypatch):
+        """public client 는 토큰 교환 payload 에 client_secret 이 아예 없어야 하고(빈 문자열도
+        아님), code_verifier 는 함께 보내야 한다(PKCE, RFC 7636)."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from rice_runtime.connector.oauth.flow import GmailOAuthFlow
+
+        monkeypatch.delenv("RICE_GMAIL_CLIENT_ID", raising=False)
+        monkeypatch.delenv("RICE_GMAIL_CLIENT_SECRET", raising=False)
+        monkeypatch.delenv("RICE_GMAIL_CLIENT_SECRET_FILE", raising=False)
+
+        flow = GmailOAuthFlow(client_id="public-cid", client_secret=None, redirect_uri="http://localhost:9/cb")
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "access_token": "tok",
+            "refresh_token": "rtok",
+            "expires_in": 3600,
+            "scope": "s",
+            "token_type": "Bearer",
+        }
+        mock_response.raise_for_status.return_value = None
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            await flow.exchange_code(
+                code="c", state="s", expected_state="s", code_verifier="verifier-xyz"
+            )
+
+        sent_payload = mock_client.post.call_args.kwargs["data"]
+        assert "client_secret" not in sent_payload
+        assert sent_payload["code_verifier"] == "verifier-xyz"
+        assert sent_payload["client_id"] == "public-cid"
 
     @pytest.mark.asyncio
     async def test_remote_mcp_tools_persisted_at_connect_and_read_locally(self):

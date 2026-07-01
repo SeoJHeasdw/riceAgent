@@ -10,7 +10,13 @@
     2) env {PREFIX}_CLIENT_SECRET_FILE 가 가리키는 Google OAuth client JSON
     3) `~/.rice/connectors/{client_secret_filename}` (앱이 설치 시 떨궈 두는 위치)
   Google "installed"(desktop)/"web" 형식 JSON 을 그대로 읽는다.
-  세 경로 모두 비어 있으면 build/exchange 시점에 OAuthConfigError 로 fail-closed.
+  client_id 가 끝내 없으면 build/exchange 시점에 OAuthConfigError 로 fail-closed.
+  client_secret 은 **선택**이다 — 없으면 public client(동적 등록이 secret 을 안 주는 MCP
+  서버 등)로 취급하고 PKCE 만으로 진행한다.
+- PKCE(RFC 7636): client_secret 유무와 무관하게 항상 code_verifier/code_challenge 를
+  적용한다(public client 는 필수, confidential client 에도 추가 방어 — OAuth 2.0 Security
+  BCP 권고). code_verifier 는 state 와 함께 호출자(ConnectorManager)가 보관했다가
+  exchange_code 에 되돌려준다.
 - state(CSRF 토큰)은 secrets.token_urlsafe 로 생성한다.
 - httpx 는 지연 import 로 감싼다.
 
@@ -20,6 +26,8 @@ redirect_uri (CONTRACTS §4.2):
 """
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import logging
 import os
@@ -28,6 +36,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlencode
 
+from ...core.errors import ValidationError
 from ..registry import GMAIL_DESCRIPTOR, ConnectorDescriptor
 
 log = logging.getLogger("rice.connector.oauth")
@@ -47,6 +56,17 @@ def default_redirect_uri(port: int | None = None) -> str:
     """런타임 포트 기준 기본 redirect_uri 를 구성한다 (CONTRACTS §4.2)."""
     p = port or _DEFAULT_PORT
     return f"http://localhost:{p}{OAUTH_CALLBACK_PATH}"
+
+
+def _new_pkce_verifier() -> str:
+    """RFC 7636 code_verifier — 43~128자 unreserved 문자, token_urlsafe 는 둘 다 만족."""
+    return secrets.token_urlsafe(64)
+
+
+def _pkce_challenge(code_verifier: str) -> str:
+    """RFC 7636 S256: BASE64URL(SHA256(code_verifier)), 패딩 없이."""
+    digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
+    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
 
 
 @dataclass(frozen=True)
@@ -129,8 +149,11 @@ class TokenResponse:
     token_type: str
 
 
-class OAuthConfigError(RuntimeError):
-    """필수 OAuth 자격증명이 없을 때 — fail-closed (CONVENTIONS §7)."""
+class OAuthConfigError(ValidationError):
+    """필수 OAuth 자격증명(client_id)이 없을 때 — fail-closed (CONVENTIONS §7).
+
+    RiceError 계열이라 서버 경계에서 {success:false, error, code} 로 정상 직렬화된다
+    (예전엔 RuntimeError 라 전역 핸들러를 못 타고 구조화 안 된 500 이 나갔다)."""
 
 
 class OAuthFlow:
@@ -138,9 +161,11 @@ class OAuthFlow:
 
     사용법:
         flow = OAuthFlow(descriptor, connectors_dir=paths.connectors, port=8080)
-        url, state = flow.build_auth_url()
+        url, state, code_verifier = flow.build_auth_url()
         ...browser redirect...
-        token = await flow.exchange_code(code=..., state=..., expected_state=state)
+        token = await flow.exchange_code(
+            code=..., state=..., expected_state=state, code_verifier=code_verifier,
+        )
     """
 
     def __init__(
@@ -176,19 +201,25 @@ class OAuthFlow:
     def redirect_uri(self) -> str:
         return self._redirect_uri
 
-    def _require_credentials(self) -> None:
-        if not self._client_id or not self._client_secret:
+    def _require_client_id(self) -> None:
+        """client_secret 은 이제 선택(public client 는 PKCE 로 대체) — client_id 만 필수."""
+        if not self._client_id:
             raise OAuthConfigError(
-                f"{self._d.display_name} OAuth requires credentials. Set "
-                f"{self._d.env_client_id}/{self._d.env_client_secret}, or "
-                f"{self._d.env_client_secret_file}=<client_secret.json>, or drop the client JSON at "
-                f"~/.rice/connectors/{self._d.client_secret_filename} (RUNTIME_DESIGN §9.2, §10)."
+                f"{self._d.display_name} OAuth requires a client_id. Set "
+                f"{self._d.env_client_id}, or {self._d.env_client_secret_file}=<client_secret.json>, "
+                f"or drop the client JSON at ~/.rice/connectors/{self._d.client_secret_filename} "
+                f"(RUNTIME_DESIGN §9.2, §10)."
             )
 
-    def build_auth_url(self) -> tuple[str, str]:
-        """Authorization URL 과 CSRF state 토큰 쌍을 반환한다."""
-        self._require_credentials()
+    def build_auth_url(self) -> tuple[str, str, str]:
+        """Authorization URL, CSRF state 토큰, PKCE code_verifier 세 쌍을 반환한다.
+
+        code_verifier 는 호출자(ConnectorManager)가 state 와 함께 보관했다가
+        exchange_code 에 되돌려줘야 한다(RFC 7636 — client_secret 유무와 무관하게 항상 적용).
+        """
+        self._require_client_id()
         state = secrets.token_urlsafe(32)
+        code_verifier = _new_pkce_verifier()
         params = {
             "client_id": self._client_id,
             "redirect_uri": self._redirect_uri,
@@ -197,15 +228,23 @@ class OAuthFlow:
             "state": state,
             "access_type": "offline",  # refresh_token 요청
             "prompt": "consent",       # 매번 refresh_token 보장
+            "code_challenge": _pkce_challenge(code_verifier),
+            "code_challenge_method": "S256",
         }
         url = f"{self._d.auth_url}?{urlencode(params)}"
-        return url, state
+        return url, state, code_verifier
 
-    async def exchange_code(self, *, code: str, state: str, expected_state: str) -> TokenResponse:
-        """Authorization code 를 토큰으로 교환한다. state 불일치 시 ValueError."""
+    async def exchange_code(
+        self, *, code: str, state: str, expected_state: str, code_verifier: str | None = None
+    ) -> TokenResponse:
+        """Authorization code 를 토큰으로 교환한다. state 불일치 시 ValueError.
+
+        code_verifier 가 있으면 함께 보낸다(PKCE). client_secret 이 없는 public client 는
+        payload 에서 아예 빠진다 — code_verifier 만으로 인증(token_endpoint_auth_method=none).
+        """
         if state != expected_state:
             raise ValueError("OAuth state mismatch — possible CSRF attack")
-        self._require_credentials()
+        self._require_client_id()
 
         try:
             import httpx  # lazy import (connectors extra)
@@ -218,10 +257,13 @@ class OAuthFlow:
         payload = {
             "code": code,
             "client_id": self._client_id,
-            "client_secret": self._client_secret,
             "redirect_uri": self._redirect_uri,
             "grant_type": "authorization_code",
         }
+        if self._client_secret:
+            payload["client_secret"] = self._client_secret
+        if code_verifier:
+            payload["code_verifier"] = code_verifier
         async with httpx.AsyncClient() as client:
             resp = await client.post(self._d.token_url, data=payload, timeout=30.0)
             resp.raise_for_status()
@@ -237,7 +279,7 @@ class OAuthFlow:
 
     async def refresh_access_token(self, refresh_token: str) -> TokenResponse:
         """refresh_token 으로 새 access_token 을 발급한다 (RUNTIME_DESIGN §9.3)."""
-        self._require_credentials()
+        self._require_client_id()
 
         try:
             import httpx
@@ -247,9 +289,10 @@ class OAuthFlow:
         payload = {
             "refresh_token": refresh_token,
             "client_id": self._client_id,
-            "client_secret": self._client_secret,
             "grant_type": "refresh_token",
         }
+        if self._client_secret:
+            payload["client_secret"] = self._client_secret
         async with httpx.AsyncClient() as client:
             resp = await client.post(self._d.token_url, data=payload, timeout=30.0)
             resp.raise_for_status()

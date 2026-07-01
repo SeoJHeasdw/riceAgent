@@ -883,6 +883,12 @@ export interface CatalogConnector {
   /** '인기' · '새로 생성' · '추천' 등 카드에 표시할 뱃지 */
   badges?: string[];
   examples?: string[];
+  /**
+   * true = 아직 백엔드 registry(connector/registry.py)에 실제로 연결되지 않은 항목 —
+   * "둘러보기"에서는 보여주되 바로 추가/연결은 막고 커스텀 추가로 안내한다. 실제 지원이
+   * 붙으면(디스크립터 추가) 이 플래그를 지운다. 지금은 카탈로그 전부가 이 상태다.
+   */
+  comingSoon?: boolean;
 }
 
 export const CONNECTOR_CATALOG: CatalogConnector[] = [
@@ -895,6 +901,7 @@ export const CONNECTOR_CATALOG: CatalogConnector[] = [
     summary: '이슈·PR·코드를 읽어 변경을 요약하거나 리뷰를 돕습니다.',
     badges: ['인기'],
     examples: ['이 저장소의 열린 PR을 요약해줘'],
+    comingSoon: true,
   },
   {
     id: 'notion',
@@ -905,6 +912,7 @@ export const CONNECTOR_CATALOG: CatalogConnector[] = [
     summary: '워크스페이스 문서를 검색·요약하고 페이지를 작성합니다.',
     badges: ['인기'],
     examples: ['이번 주 회의 노트를 한 페이지로 정리해줘'],
+    comingSoon: true,
   },
   {
     id: 'linear',
@@ -915,6 +923,7 @@ export const CONNECTOR_CATALOG: CatalogConnector[] = [
     summary: '이슈·사이클을 읽어 진행 상황을 정리하고 티켓을 생성합니다.',
     badges: ['새로 생성'],
     examples: ['이번 사이클 남은 이슈를 정리해줘'],
+    comingSoon: true,
   },
   {
     id: 'confluence',
@@ -924,6 +933,7 @@ export const CONNECTOR_CATALOG: CatalogConnector[] = [
     provider: 'Atlassian',
     summary: '스페이스 문서를 검색해 답을 찾거나 보고서를 작성합니다.',
     examples: ['온보딩 문서를 요약해줘'],
+    comingSoon: true,
   },
   {
     id: 'salesforce',
@@ -934,6 +944,7 @@ export const CONNECTOR_CATALOG: CatalogConnector[] = [
     summary: '거래·고객 데이터를 조회해 파이프라인을 분석합니다.',
     badges: ['추천'],
     examples: ['이번 분기 파이프라인 상위 거래를 보여줘'],
+    comingSoon: true,
   },
   {
     id: 'hubspot',
@@ -943,6 +954,7 @@ export const CONNECTOR_CATALOG: CatalogConnector[] = [
     provider: 'HubSpot',
     summary: '컨택·딜·캠페인 데이터를 읽어 리포트를 만듭니다.',
     examples: ['이번 달 신규 리드 추이를 요약해줘'],
+    comingSoon: true,
   },
   {
     id: 'asana',
@@ -953,6 +965,7 @@ export const CONNECTOR_CATALOG: CatalogConnector[] = [
     summary: '태스크·프로젝트를 읽어 상태를 정리하고 업무를 만듭니다.',
     badges: ['새로 생성'],
     examples: ['마감 임박한 태스크를 알려줘'],
+    comingSoon: true,
   },
   {
     id: 'dropbox',
@@ -962,6 +975,7 @@ export const CONNECTOR_CATALOG: CatalogConnector[] = [
     provider: 'Dropbox',
     summary: '폴더의 문서를 읽어 요약하거나 결과 파일을 저장합니다.',
     examples: ['이 폴더의 PDF들을 한 줄씩 요약해줘'],
+    comingSoon: true,
   },
   {
     id: 'postgres',
@@ -972,6 +986,7 @@ export const CONNECTOR_CATALOG: CatalogConnector[] = [
     summary: '스키마를 점검하고 읽기 전용 쿼리로 데이터를 분석합니다.',
     badges: ['추천'],
     examples: ['orders 테이블의 최근 추세를 분석해줘'],
+    comingSoon: true,
   },
   {
     id: 'zendesk',
@@ -981,6 +996,7 @@ export const CONNECTOR_CATALOG: CatalogConnector[] = [
     provider: 'Zendesk',
     summary: '티켓을 읽어 이슈를 분류하고 응답 초안을 작성합니다.',
     examples: ['오늘 들어온 긴급 티켓을 정리해줘'],
+    comingSoon: true,
   },
 ];
 

@@ -63,8 +63,16 @@ export const ConnectorDirectoryModal: React.FC<ConnectorDirectoryModalProps> = (
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-layer-selected-01 border border-border-subtle-01 text-caption-01 font-semibold text-text-primary">
             <Icon name="bookmark" size={12} /> IBM 및 파트너
           </span>
-          <span className="text-caption-01 text-text-helper">함께 사용 가능한 · {results.length}</span>
+          <span className="text-caption-01 text-text-helper">카탈로그 · {results.length}</span>
         </div>
+
+        {/* 준비 중 안내 — "준비 중" 항목은 미리보기용이라 바로 연결은 안 되고, 커스텀 추가로 안내한다. */}
+        {results.some((c) => c.comingSoon) && (
+          <p className="text-caption-01 text-text-helper leading-relaxed -mt-1.5">
+            "준비 중" 항목은 아직 바로 연결할 수 없어요. MCP 서버 URL을 알고 있다면{' '}
+            <span className="text-text-secondary font-medium">"커스텀 추가"</span>로 바로 연결해보세요.
+          </p>
+        )}
 
         {/* 카드 그리드 */}
         {results.length === 0 ? (
@@ -75,35 +83,56 @@ export const ConnectorDirectoryModal: React.FC<ConnectorDirectoryModalProps> = (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             {results.map((c) => {
               const added = existingIds.includes(c.id);
+              const comingSoon = !!c.comingSoon;
+              const disabled = added || comingSoon;
+              const title = added
+                ? '이미 추가됨'
+                : comingSoon
+                ? 'MVP에서는 아직 바로 연결할 수 없어요 — MCP 서버 URL이 있다면 "커스텀 추가"를 이용하세요'
+                : `${c.name} 추가`;
               return (
                 <div
                   key={c.id}
-                  className="group relative flex items-start gap-3 rounded-xl border border-border-subtle-01 bg-background p-3.5 transition-colors hover:border-border-strong-01 hover:bg-layer-hover-01"
+                  className={`group relative flex items-start gap-3 rounded-xl border border-border-subtle-01 bg-background p-3.5 transition-colors ${
+                    comingSoon ? '' : 'hover:border-border-strong-01 hover:bg-layer-hover-01'
+                  }`}
                 >
-                  <div className="w-9 h-9 flex-shrink-0 flex items-center justify-center rounded-lg bg-layer-03">
+                  <div
+                    className={`w-9 h-9 flex-shrink-0 flex items-center justify-center rounded-lg bg-layer-03 ${
+                      comingSoon ? 'opacity-50' : ''
+                    }`}
+                  >
                     <Icon name={c.icon} size={18} className="text-icon-primary" />
                   </div>
-                  <div className="flex-1 min-w-0 pr-7">
+                  <div className={`flex-1 min-w-0 pr-7 ${comingSoon ? 'opacity-50' : ''}`}>
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <span className="text-body-short-01 font-semibold text-text-primary truncate">{c.name}</span>
-                      {c.badges?.map((b) => (
-                        <Tag key={b} type={badgeType(b)} size="sm">
-                          {b}
+                      {comingSoon ? (
+                        <Tag type="gray" size="sm">
+                          준비 중
                         </Tag>
-                      ))}
+                      ) : (
+                        c.badges?.map((b) => (
+                          <Tag key={b} type={badgeType(b)} size="sm">
+                            {b}
+                          </Tag>
+                        ))
+                      )}
                     </div>
                     <p className="mt-1 text-caption-01 text-text-helper leading-4 line-clamp-2">{c.summary}</p>
                   </div>
 
                   {/* 추가 버튼 (우상단) */}
                   <button
-                    onClick={() => !added && onAdd(c)}
-                    disabled={added}
-                    title={added ? '이미 추가됨' : `${c.name} 추가`}
-                    aria-label={added ? '이미 추가됨' : `${c.name} 추가`}
+                    onClick={() => !disabled && onAdd(c)}
+                    disabled={disabled}
+                    title={title}
+                    aria-label={title}
                     className={`absolute top-2.5 right-2.5 w-7 h-7 flex items-center justify-center rounded-lg transition-colors ${
                       added
                         ? 'text-support-success cursor-default'
+                        : comingSoon
+                        ? 'text-icon-secondary opacity-40 cursor-not-allowed'
                         : 'text-icon-secondary hover:text-text-primary hover:bg-layer-selected-01'
                     }`}
                   >

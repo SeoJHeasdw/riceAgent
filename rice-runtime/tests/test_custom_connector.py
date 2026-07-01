@@ -317,6 +317,26 @@ class TestAddCustomConnectorService:
         assert "client_id=dyn-cid" in start.oauth_url
 
     @pytest.mark.asyncio
+    async def test_dynamic_registration_without_secret_still_connects(self):
+        """RFC 7591 동적 등록이 client_secret 없이 client_id 만 돌려주는 public client
+        (PKCE-only) 서버도 begin_connect 까지 성공해야 한다 — OAuthConfigError 로 막히면 안 됨."""
+        with patch(
+            "rice_runtime.connector.service.register_dynamic_client",
+            AsyncMock(return_value=("dyn-cid-public", None)),
+        ):
+            start = await self._svc.add_custom_connector(
+                display_name="Public MCP",
+                mcp_endpoint="https://public.example/mcp",
+                auth_url="https://public.example/authorize",
+                token_url="https://public.example/token",
+                registration_endpoint="https://public.example/register",
+            )
+        assert start.connector_id
+        assert "client_id=dyn-cid-public" in start.oauth_url
+        # PKCE(RFC 7636) 로 client_secret 부재를 대체 — code_challenge 가 실려 있어야 한다.
+        assert "code_challenge=" in start.oauth_url and "code_challenge_method=S256" in start.oauth_url
+
+    @pytest.mark.asyncio
     async def test_discover_custom_connector_delegates_to_discovery_module(self):
         with patch(
             "rice_runtime.connector.service.discover_oauth_config", AsyncMock()

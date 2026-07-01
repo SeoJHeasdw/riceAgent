@@ -54,6 +54,9 @@ class ConnectorManager:
         # state → connector_id 매핑 — OAuth callback 에서 state 로 connector 를 찾을 수 있게
         # 인메모리로 관리 (단일 활성 세션 전제 — RUNTIME_DESIGN §2).
         self._pending_states: dict[str, str] = {}  # state -> connector_id
+        # state → PKCE code_verifier(RFC 7636) — exchange_code 에 되돌려줘야 하므로 state 와
+        # 같은 생명주기(단일 활성 세션 전제)로 함께 보관한다.
+        self._pending_verifiers: dict[str, str] = {}  # state -> code_verifier
 
     def _flow_for(self, connector_type: str) -> OAuthFlow:
         flow = self._flows.get(connector_type)
@@ -92,14 +95,16 @@ class ConnectorManager:
                 (connector_id, connector_type, display_name),
             )
 
-        oauth_url, state = self._flow_for(connector_type).build_auth_url()
+        oauth_url, state, code_verifier = self._flow_for(connector_type).build_auth_url()
         self._pending_states[state] = connector_id
+        self._pending_verifiers[state] = code_verifier
 
         return OAuthStart(connector_id=connector_id, oauth_url=oauth_url, state=state)
 
     async def complete_oauth(self, *, code: str, state: str) -> ConnectorInfo:
         """OAuth callback: state 검증 → code 교환 → 키체인 저장 → status 갱신."""
         connector_id = self._pending_states.pop(state, None)
+        code_verifier = self._pending_verifiers.pop(state, None)
         if connector_id is None:
             raise ValidationError(
                 f"unknown or expired OAuth state={state!r} — possible CSRF attempt"
@@ -109,9 +114,9 @@ class ConnectorManager:
         if row is None:
             raise NotFoundError(f"connector {connector_id} not found (state race?)")
 
-        # 이 connector 의 타입에 맞는 flow 로 code 를 교환한다.
+        # 이 connector 의 타입에 맞는 flow 로 code 를 교환한다(PKCE code_verifier 동봉).
         token = await self._flow_for(row["connector_type"]).exchange_code(
-            code=code, state=state, expected_state=state
+            code=code, state=state, expected_state=state, code_verifier=code_verifier
         )
 
         # 토큰을 OS 키체인에 저장 (DB/로그 금지 — RUNTIME_DESIGN §10.4)

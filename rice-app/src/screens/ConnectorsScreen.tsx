@@ -13,6 +13,7 @@ import { useResizable } from '../hooks/useResizable';
 import api from '../lib/api';
 import type { LocalMcpTransportPayload } from '../lib/api';
 import { openExternal } from '../lib/openExternal';
+import { useToast } from '../lib/toast/ToastContext';
 import {
   CONNECTORS,
   connectorKind,
@@ -837,6 +838,14 @@ function ConnectorsScreen() {
   const [directoryOpen, setDirectoryOpen] = useState(false);
   const [customModalOpen, setCustomModalOpen] = useState(false);
   const [sel, setSel] = useState<string | null>((initial?.id ?? CONNECTORS[0]?.id) ?? null);
+  const toast = useToast();
+
+  // 화면을 떠나면(다른 스크린으로 이동 등) 진행 중이던 폴링을 계속하지 않는다 — 안 그러면
+  // 백그라운드에서 최대 2분간 낭비되는 요청이 나가고, 이미 의미 없어진 결과로 토스트를 띄우게 된다.
+  const mountedRef = useRef(true);
+  useEffect(() => () => {
+    mountedRef.current = false;
+  }, []);
 
   // Resizable left rail
   const railPanel = useResizable({
@@ -928,15 +937,16 @@ function ConnectorsScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 브라우저 OAuth 완료까지 connected 폴링(최대 ~2분).
-  const pollConnected = async (connectorType: string): Promise<boolean> => {
+  // 브라우저 OAuth 완료까지 폴링(최대 ~2분) — predicate 를 만족하는 커넥터가 나타나면 true.
+  // 신규 연결(connector_type 기준)과 커스텀 커넥터 등록 직후(connector_id 기준) 양쪽에 쓴다
+  // (구 pollConnected/pollConnectedById 를 통합 — 로직이 거의 동일해 중복이었다).
+  const pollUntilConnected = async (predicate: (info: ConnectorInfoWire) => boolean): Promise<boolean> => {
     for (let i = 0; i < 48; i++) {
       await new Promise((r) => setTimeout(r, 2500));
+      if (!mountedRef.current) return false;
       const res = await api.getConnectors();
-      if (res.success && Array.isArray(res.data)) {
-        const list = res.data as ConnectorInfoWire[];
-        if (list.some((x) => x.connector_type === connectorType && x.status === 'connected')) return true;
-      }
+      if (!mountedRef.current) return false;
+      if (res.success && Array.isArray(res.data) && (res.data as ConnectorInfoWire[]).some(predicate)) return true;
     }
     return false;
   };
@@ -946,39 +956,38 @@ function ConnectorsScreen() {
     // (error 상태) 실제 커넥터는 infoToConnector 가 채운 connectorType 을 그대로 쓴다.
     const connectorType = c.connectorType ?? c.id;
     setBusyId(c.id);
+    const job = toast.progress({ label: '연결 시작 중', sublabel: c.name });
     try {
       const res = await api.connectConnector(connectorType);
       const url = (res.data as { oauth_url?: string } | undefined)?.oauth_url;
-      if (!res.success || !url) return;
-      await openExternal(url); // 시스템 브라우저에서 구글 로그인
-      if (await pollConnected(connectorType)) {
-        await refresh();
-        const res2 = await api.getConnectors();
-        const found =
-          res2.success && Array.isArray(res2.data)
-            ? (res2.data as ConnectorInfoWire[]).find(
-                (x) => x.connector_type === connectorType && x.status === 'connected',
-              )
-            : undefined;
-        if (found) setSel(found.id);
+      if (!res.success || !url) {
+        job.done('error', res.error || `${c.name} 연결을 시작하지 못했어요.`);
+        return;
       }
+      await openExternal(url); // 시스템 브라우저에서 구글 로그인
+      job.update({ label: '브라우저에서 로그인 대기 중', sublabel: c.name });
+      const ok = await pollUntilConnected((x) => x.connector_type === connectorType && x.status === 'connected');
+      if (!mountedRef.current) {
+        job.dismiss(); // 화면을 이미 떠났다 — 결과를 알릴 대상이 없다.
+        return;
+      }
+      if (!ok) {
+        job.done('error', '로그인 대기 시간이 초과됐어요. 다시 시도해주세요.');
+        return;
+      }
+      await refresh();
+      const res2 = await api.getConnectors();
+      const found =
+        res2.success && Array.isArray(res2.data)
+          ? (res2.data as ConnectorInfoWire[]).find(
+              (x) => x.connector_type === connectorType && x.status === 'connected',
+            )
+          : undefined;
+      if (found) setSel(found.id);
+      job.done('success', `${c.name} 연결됨`);
     } finally {
       setBusyId(null);
     }
-  };
-
-  // 커스텀 커넥터는 등록 직후엔 connector_type 을 화면이 몰라도 되게 connector_id 로 폴링한다
-  // (add 응답이 이미 확정된 id 를 돌려주므로).
-  const pollConnectedById = async (connectorId: string): Promise<boolean> => {
-    for (let i = 0; i < 48; i++) {
-      await new Promise((r) => setTimeout(r, 2500));
-      const res = await api.getConnectors();
-      if (res.success && Array.isArray(res.data)) {
-        const list = res.data as ConnectorInfoWire[];
-        if (list.some((x) => x.id === connectorId && x.status === 'connected')) return true;
-      }
-    }
-    return false;
   };
 
   // 부작용 없음(RFC 9728+8414 조회만) — 모달의 "검사" 버튼.
@@ -994,9 +1003,19 @@ function ConnectorsScreen() {
     if (!res.success || !data?.oauth_url || !data.connector_id) return false;
     setCustomModalOpen(false);
     await openExternal(data.oauth_url); // 시스템 브라우저에서 로그인
-    if (await pollConnectedById(data.connector_id)) {
+    const connectorId = data.connector_id;
+    const job = toast.progress({ label: '브라우저에서 로그인 대기 중', sublabel: payload.display_name });
+    const ok = await pollUntilConnected((x) => x.id === connectorId && x.status === 'connected');
+    if (!mountedRef.current) {
+      job.dismiss();
+      return true;
+    }
+    if (ok) {
       await refresh();
-      setSel(data.connector_id);
+      setSel(connectorId);
+      job.done('success', `${payload.display_name} 연결됨`);
+    } else {
+      job.done('error', '로그인 대기 시간이 초과됐어요. 다시 시도해주세요.');
     }
     return true;
   };
@@ -1004,7 +1023,11 @@ function ConnectorsScreen() {
   const handleRealDisconnect = async (c: Connector) => {
     setBusyId(c.id);
     try {
-      await api.deleteConnector(c.id);
+      const res = await api.deleteConnector(c.id);
+      if (!res.success) {
+        toast.notify({ message: res.error || `${c.name} 연결 해제에 실패했어요.`, variant: 'error' });
+        return;
+      }
       await refresh();
     } finally {
       setBusyId(null);
@@ -1015,7 +1038,11 @@ function ConnectorsScreen() {
   const handleResyncTools = async (c: Connector) => {
     setBusyId(c.id);
     try {
-      await api.resyncConnectorTools(c.id);
+      const res = await api.resyncConnectorTools(c.id);
+      if (!res.success) {
+        toast.notify({ message: res.error || '도구 목록을 새로고침하지 못했어요.', variant: 'error' });
+        return;
+      }
       await refresh();
     } finally {
       setBusyId(null);
@@ -1027,7 +1054,11 @@ function ConnectorsScreen() {
   const handleRefreshLocal = async (c: Connector) => {
     setBusyId(c.id);
     try {
-      await api.refreshLocalConnectors();
+      const res = await api.refreshLocalConnectors();
+      if (!res.success) {
+        toast.notify({ message: res.error || '로컬 MCP 서버를 새로고침하지 못했어요.', variant: 'error' });
+        return;
+      }
       await loadLocal();
     } finally {
       setBusyId(null);
@@ -1038,7 +1069,11 @@ function ConnectorsScreen() {
   const handleRemoveLocal = async (c: Connector) => {
     setBusyId(c.id);
     try {
-      await api.deleteLocalConnector(c.id.replace(/^local:/, ''));
+      const res = await api.deleteLocalConnector(c.id.replace(/^local:/, ''));
+      if (!res.success) {
+        toast.notify({ message: res.error || `${c.name} 제거에 실패했어요.`, variant: 'error' });
+        return;
+      }
       await loadLocal();
       setSel((prev) => (prev === c.id ? null : prev));
     } finally {
@@ -1050,7 +1085,11 @@ function ConnectorsScreen() {
   const handleApplyUpdate = async (c: Connector) => {
     setBusyId(c.id);
     try {
-      await api.applyConnectorToolsUpdate(c.id);
+      const res = await api.applyConnectorToolsUpdate(c.id);
+      if (!res.success) {
+        toast.notify({ message: res.error || '업데이트를 적용하지 못했어요.', variant: 'error' });
+        return;
+      }
       await refresh();
     } finally {
       setBusyId(null);
@@ -1058,8 +1097,17 @@ function ConnectorsScreen() {
   };
 
   // 도구별 정책 저장(낙관적 — 로컬은 이미 갱신됨) → 백엔드가 dispatcher 강제에 사용.
+  // 성공 시엔 토글 자체가 이미 결과를 보여주므로 토스트를 띄우지 않고, 실패(저장 안 됨 = UI와
+  // 백엔드 상태가 어긋남)했을 때만 알린다.
   const handleSetToolPermission = (connectorId: string, toolName: string, perm: ScopePermission) => {
-    void api.setConnectorToolPermission(connectorId, toolName, UI_TO_WIRE_PERM[perm]).catch(() => undefined);
+    void api
+      .setConnectorToolPermission(connectorId, toolName, UI_TO_WIRE_PERM[perm])
+      .then((res) => {
+        if (!res.success) {
+          toast.notify({ message: res.error || '권한 변경을 저장하지 못했어요.', variant: 'error' });
+        }
+      })
+      .catch(() => toast.notify({ message: '권한 변경을 저장하지 못했어요.', variant: 'error' }));
   };
 
   const isLocal = kind === 'local-mcp';
