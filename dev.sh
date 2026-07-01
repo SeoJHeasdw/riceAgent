@@ -17,9 +17,11 @@ PORT="${RICE_PORT:-8080}"
 PLATFORM_PORT="${RICE_PLATFORM_PORT:-7070}"
 PLATFORM_DIR="$ROOT/rice-platform"
 
-# 자식 프로세스(백엔드/프론트)를 종료 시 함께 정리.
-pids=()
-cleanup() { trap - INT TERM EXIT; kill "${pids[@]}" 2>/dev/null || true; }
+# 이 스크립트의 프로세스 그룹 전체를 SIGKILL — 손자 프로세스(uvicorn worker 등)까지 포함.
+cleanup() {
+  trap - INT TERM EXIT
+  kill -9 -$$ 2>/dev/null || true
+}
 trap cleanup INT TERM EXIT
 
 # ── 0) Ollama 떠 있나 (모델 호출 대상) ──────────────────────────────────────
@@ -39,7 +41,7 @@ echo "▶ 백엔드: rice-runtime --port $PORT (token 없음, dev)"
     exec python3 -m rice_runtime --port "$PORT" --token ""
   fi
 ) &
-pids+=($!)
+
 
 # 백엔드 health 대기 (최대 ~15s).
 echo -n "  health 대기"
@@ -59,7 +61,7 @@ if [ -d "$PLATFORM_DIR" ]; then
       exec python3 -m rice_platform --port "$PLATFORM_PORT" --artifacts-dir ./artifacts
     fi
   ) &
-  pids+=($!)
+  
 fi
 
 # ── 3) React 프론트 (electron 빼고 브라우저 전용 dev) ───────────────────────
@@ -68,7 +70,7 @@ echo "▶ 프론트: vite --config vite.renderer.config.ts → http://localhost:
   cd "$APP_DIR"
   exec npx vite --config vite.renderer.config.ts
 ) &
-pids+=($!)
+
 
 echo ""
 echo "✅ 떴습니다."
