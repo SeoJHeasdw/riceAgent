@@ -44,6 +44,14 @@ def create_app(container: Container):
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         scheduler.start()
+        # 로컬 MCP(.mcp.json, stdio) 서버를 spawn 해 도구 카탈로그를 미리 채운다.
+        # 로컬 프로세스 실행이라 원격과 달리 부팅 시 수행해도 무방(원격은 여전히 부팅 시 X).
+        warm = getattr(container.connectors, "warm_local", None)
+        if warm is not None:
+            try:
+                await warm()
+            except Exception:  # noqa: BLE001 — 로컬 MCP warm 실패는 기동을 막지 않는다
+                log.warning("local mcp warm failed", exc_info=True)
         try:
             yield
         finally:

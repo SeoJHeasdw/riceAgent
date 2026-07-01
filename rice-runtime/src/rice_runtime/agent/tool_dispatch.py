@@ -62,8 +62,23 @@ class ToolDispatcher:
     async def dispatch(self, session_id: str, call: ToolCall, spec: ToolSpec) -> AsyncIterator[SSEEvent]:
         yield ev_tool_call(call)
 
-        # ── HITL gate (RUNTIME_DESIGN §5.1) ──────────────────────────────────
-        if spec.requires_approval:
+        # ── policy gate (RUNTIME_DESIGN §5.1 + 도구별 권한) ───────────────────
+        # 기본 정책: requires_approval 이면 승인, 아니면 허용. connector 도구는 사용자가
+        # 저장한 도구별 정책(allow/approval/block)이 이를 오버라이드한다.
+        policy = "approval" if spec.requires_approval else "allow"
+        if spec.source == "connector" and spec.owner_id:
+            perm_fn = getattr(self._connectors, "permission_for", None)
+            if perm_fn is not None:
+                policy = perm_fn(spec.owner_id, call.tool_name)
+
+        if policy == "block":
+            # 차단된 도구는 승인도 묻지 않고 즉시 거부(호출 자체를 막음).
+            res = ToolResult(call.id, ok=False, error="tool blocked by policy (사용자가 차단한 도구)")
+            self._results[call.id] = res
+            yield ev_tool_result(res)
+            return
+
+        if policy == "approval":
             req = ApprovalRequest(
                 kind="tool_approval",
                 payload={"tool_name": call.tool_name, "arguments": call.arguments},

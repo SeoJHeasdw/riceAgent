@@ -59,6 +59,12 @@ class RicePaths:
         return self.root / "config.yaml"
 
     @property
+    def mcp_config(self) -> Path:
+        """`~/.rice/.mcp.json` — 로컬 MCP 서버 정의(Claude 표준 포맷 `mcpServers`).
+        사용자가 stdio/HTTP 로컬 MCP 서버를 선언하는 단일 소스(connector/local 참고)."""
+        return self.root / ".mcp.json"
+
+    @property
     def logs(self) -> Path:
         return self.root / "logs"
 

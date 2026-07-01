@@ -24,19 +24,34 @@ from __future__ import annotations
 import json
 import logging
 
-from ..core.errors import NotFoundError
+from ..core.errors import NotFoundError, ValidationError
 from ..core.paths import RicePaths
 from ..core.storage.sqlite import Database
 from ..core.types import ToolCall, ToolResult, ToolSpec, now_iso
 from .credential.keychain import KeychainStore
 from .interfaces import ConnectorInfo, ConnectorStatus, IConnectorService, OAuthStart
+from .local.config import LocalMcpServer, connector_id_to_name, load_local_mcp_servers
 from .manager import ConnectorManager, _row_to_info
 from .mcp.client import RemoteMcpClient
+from .mcp.stdio_client import StdioMcpClient
 from .oauth.flow import OAuthFlow
 from .permission.checker import PermissionChecker
 from .registry import descriptors, get_descriptor
 
 log = logging.getLogger("rice.connector.service")
+
+# 도구 호출 정책 (dispatcher 가 강제). connector_tool_permissions.permission 값.
+_PERMISSIONS = frozenset({"allow", "approval", "block"})
+
+# 도구명 접두사로 읽기 성격을 추정 → 저장값이 없을 때 기본 정책 계산에 쓴다
+# (프론트 toolToScope 의 READ_PREFIXES 와 의도를 맞춘다: 읽기=allow, 그 외=approval).
+_READ_PREFIXES = ("get", "list", "search", "read", "fetch", "find", "view")
+
+
+def _default_permission(tool_name: str) -> str:
+    """저장값이 없는 도구의 기본 정책. 읽기 성격이면 allow, 그 외엔 approval(외부 접근)."""
+    lowered = tool_name.lower()
+    return "allow" if lowered.startswith(_READ_PREFIXES) else "approval"
 
 
 class ConnectorService(IConnectorService):
@@ -56,14 +71,76 @@ class ConnectorService(IConnectorService):
         self._permission = PermissionChecker(paths.plugins if paths else None)
         # 원격 MCP 클라이언트 — connector_id 당 하나(엔드포인트는 타입 디스크립터에서).
         self._clients: dict[str, RemoteMcpClient] = {}
+        # 로컬 MCP(.mcp.json, stdio) — connector_id("local:<name>") → 캐시된 ToolSpec 목록.
+        # list_tools() 는 sync 라 여기 캐시를 읽고, warm_local() 이 async 로 채운다.
+        self._mcp_config_path = paths.mcp_config if paths else None
+        self._local_specs: dict[str, list[ToolSpec]] = {}
 
     # ── tool surface ──────────────────────────────────────────────────────────
     def list_tools(self) -> list[ToolSpec]:
-        """연결된 **모든** connector 의 저장된 도구 카탈로그 합집합 (로컬 DB, 네트워크 없음)."""
+        """연결된 원격 connector(DB 카탈로그) + 로컬 MCP(캐시) 도구의 합집합.
+
+        원격은 로컬 DB, 로컬 MCP 는 warm_local() 이 채운 인메모리 캐시에서 읽는다
+        (둘 다 이 호출 시점엔 네트워크/spawn 없음).
+        """
         tools: list[ToolSpec] = []
         for row in self._connected_connectors():
             tools.extend(self.tools_for(row["id"]))
+        for specs in self._local_specs.values():
+            tools.extend(specs)
         return tools
+
+    # ── local MCP (.mcp.json, stdio) ────────────────────────────────────────────
+    def _local_servers(self) -> list[LocalMcpServer]:
+        """`.mcp.json` 에 선언된 로컬 MCP 서버 목록 (없으면 [])."""
+        if self._mcp_config_path is None:
+            return []
+        return load_local_mcp_servers(self._mcp_config_path)
+
+    async def warm_local(self) -> int:
+        """stdio 로컬 MCP 서버를 spawn 해 tools/list 를 캐시한다 (앱 startup 용).
+
+        로컬 프로세스 실행이라 원격과 달리 부팅 시 수행해도 무방하다. 서버별 실패는
+        건너뛴다(fail-safe). 반환: 캐시된 총 도구 수.
+        """
+        specs_by_conn: dict[str, list[ToolSpec]] = {}
+        total = 0
+        for server in self._local_servers():
+            if server.transport != "stdio":
+                continue  # http 로컬 서버는 향후 원격 경로에서 다룬다
+            client = StdioMcpClient(server.command, server.args, server.env, owner_id=server.connector_id)
+            try:
+                specs = await client.list_tools()
+            except Exception as exc:  # noqa: BLE001
+                log.warning("local mcp %s tools/list failed: %s", server.name, exc)
+                continue
+            specs_by_conn[server.connector_id] = specs
+            total += len(specs)
+        self._local_specs = specs_by_conn
+        log.info("local mcp warmed: %d server(s), %d tool(s)", len(specs_by_conn), total)
+        return total
+
+    def local_servers_info(self) -> list[dict]:
+        """로컬 MCP 서버 + 캐시된 도구를 UI 용 dict 목록으로 반환한다."""
+        out: list[dict] = []
+        for server in self._local_servers():
+            cid = server.connector_id
+            specs = self._local_specs.get(cid, [])
+            perm_fn = self.permission_for
+            out.append({
+                "connector_id": cid,
+                "name": server.name,
+                "transport": server.transport,
+                "command": server.command,
+                "args": list(server.args),
+                "url": server.url,
+                "running": cid in self._local_specs,
+                "tools": [
+                    {"name": s.name, "requires_approval": s.requires_approval, "permission": perm_fn(cid, s.name)}
+                    for s in specs
+                ],
+            })
+        return out
 
     def tools_for(self, connector_id: str) -> list[ToolSpec]:
         """특정 connector 의 활성 도구 카탈로그 (로컬 DB 읽기). 없으면 []."""
@@ -86,6 +163,8 @@ class ConnectorService(IConnectorService):
             if owner is None:
                 return ToolResult(call.id, ok=False, error=f"no connected connector owns tool {call.tool_name!r}")
             connector_id, connector_type = owner
+            if connector_type == "local":
+                return await self._invoke_local(connector_id, call)
             access_token = await self._access_token(connector_id, connector_type)
             if access_token is None:
                 return ToolResult(
@@ -185,6 +264,43 @@ class ConnectorService(IConnectorService):
             ],
         }
 
+    # ── per-tool permissions (dispatcher 가 강제 — #도구별 권한 영속화) ──────────
+    def permission_for(self, connector_id: str, tool_name: str) -> str:
+        """(connector, tool) 의 호출 정책: 'allow' | 'approval' | 'block'.
+
+        저장값이 없으면 도구명 휴리스틱으로 기본값(읽기=allow, 그 외=approval)을 준다.
+        """
+        row = self._db.query_one(
+            "SELECT permission FROM connector_tool_permissions WHERE connector_id=? AND tool_name=?",
+            (connector_id, tool_name),
+        )
+        if row is not None and row["permission"] in _PERMISSIONS:
+            return row["permission"]
+        return _default_permission(tool_name)
+
+    def set_tool_permission(self, connector_id: str, tool_name: str, permission: str) -> None:
+        """(connector, tool) 정책을 저장한다. 잘못된 값은 ValidationError."""
+        if permission not in _PERMISSIONS:
+            raise ValidationError(f"invalid permission {permission!r}; expected one of {sorted(_PERMISSIONS)}")
+        self._db.execute(
+            "INSERT INTO connector_tool_permissions(connector_id, tool_name, permission) "
+            "VALUES (?, ?, ?) "
+            "ON CONFLICT(connector_id, tool_name) DO UPDATE SET permission=excluded.permission",
+            (connector_id, tool_name, permission),
+        )
+
+    def tool_permissions(self, connector_id: str) -> dict[str, str]:
+        """저장된 (tool_name → permission) 맵 (미저장 도구는 없음). GET payload·UI 용."""
+        rows = self._db.query_all(
+            "SELECT tool_name, permission FROM connector_tool_permissions WHERE connector_id=?",
+            (connector_id,),
+        )
+        return {r["tool_name"]: r["permission"] for r in rows if r["permission"] in _PERMISSIONS}
+
+    def effective_tool_permission(self, connector_id: str, tool_name: str) -> str:
+        """저장값 또는 휴리스틱 기본값(항상 값이 있는 permission_for 의 별칭)."""
+        return self.permission_for(connector_id, tool_name)
+
     # ── management ────────────────────────────────────────────────────────────
     def list_connectors(self) -> list[ConnectorInfo]:
         rows = self._db.query_all(
@@ -238,11 +354,28 @@ class ConnectorService(IConnectorService):
         )
 
     def _owner_of_tool(self, tool_name: str) -> tuple[str, str] | None:
-        """도구명을 노출하는 connected connector 의 (id, type). 없으면 None."""
+        """도구명을 노출하는 소유자의 (connector_id, type). 로컬 우선, 없으면 None.
+
+        로컬 MCP 는 type="local" 로 표시해 invoke 가 stdio 경로로 라우팅하게 한다.
+        """
+        for cid, specs in self._local_specs.items():
+            if any(s.name == tool_name for s in specs):
+                return cid, "local"
         for row in self._connected_connectors():
             if any(s.name == tool_name for s in self.tools_for(row["id"])):
                 return row["id"], row["connector_type"]
         return None
+
+    async def _invoke_local(self, connector_id: str, call: ToolCall) -> ToolResult:
+        """로컬 MCP(stdio) 도구를 spawn 해 실행한다."""
+        name = connector_id_to_name(connector_id)
+        server = next(
+            (s for s in self._local_servers() if s.name == name and s.transport == "stdio"), None
+        )
+        if server is None:
+            return ToolResult(call.id, ok=False, error=f"local mcp server {name!r} not found in .mcp.json")
+        client = StdioMcpClient(server.command, server.args, server.env, owner_id=connector_id)
+        return await client.call_tool(call.tool_name, call.arguments, call.id)
 
     def _client_for(self, connector_id: str, connector_type: str) -> RemoteMcpClient:
         """connector 전용 RemoteMcpClient (엔드포인트는 타입 디스크립터에서). 캐시한다."""

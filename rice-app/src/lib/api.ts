@@ -233,6 +233,14 @@ class ApiClient {
   ): Promise<ApiResponse<{ count: number; tools: { name: string; requires_approval?: boolean }[] }>> {
     return this.send('POST', `/connectors/${id}/tools/apply-update`);
   }
+  /** persist a tool's call policy — dispatcher enforces it (allow/approval/block) */
+  setConnectorToolPermission(
+    id: string,
+    toolName: string,
+    permission: 'allow' | 'approval' | 'block',
+  ): Promise<ApiResponse<{ tool_name: string; permission: string }>> {
+    return this.send('PUT', `/connectors/${id}/tools/permission`, { tool_name: toolName, permission });
+  }
   getConnectorStatus(id: string): Promise<ApiResponse> {
     return this.get(`/connectors/${id}/status`);
   }

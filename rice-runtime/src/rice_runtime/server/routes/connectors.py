@@ -6,6 +6,7 @@
   POST   /connectors/{id}/tools/resync      force re-fetch + apply the remote MCP tool catalog
   POST   /connectors/{id}/tools/check       detect remote catalog changes (sets a pending update)
   POST   /connectors/{id}/tools/apply-update  adopt the pending catalog update
+  PUT    /connectors/{id}/tools/permission  set a tool's call policy (allow/approval/block)
   DELETE /connectors/{id}                   disconnect
   GET    /connectors/{id}/status            connection status
   GET    /connectors/oauth/callback         OAuth redirect handler
@@ -28,6 +29,11 @@ class ConnectIn(BaseModel):
     connector_type: str  # "gmail" (prototype)
 
 
+class ToolPermissionIn(BaseModel):
+    tool_name: str
+    permission: str  # 'allow' | 'approval' | 'block'
+
+
 def _callback_page(title: str, message: str, ok: bool) -> HTMLResponse:
     """OAuth 콜백은 시스템 브라우저가 직접 연다 — 사람이 읽을 HTML 을 돌려준다.
     성공/실패에 따라 색만 다른 미니멀 페이지(자동 닫기 시도)."""
@@ -48,13 +54,20 @@ h1{{font-size:18px;margin:0 0 8px}}p{{color:#57606a;font-size:14px;line-height:1
 
 
 def _tools_payload(c: Container, connector_id: str) -> list[dict]:
-    """connector 의 도구 카탈로그(연결 시점에 원격 MCP tools/list 로 받아 저장한 것)를
-    UI 용 [{name, requires_approval}] 로 직렬화한다. 구현체가 tools_for 를 지원하지
-    않으면(테스트/골격) 빈 목록."""
+    """connector 의 도구 카탈로그(원격 MCP tools/list)를 UI 용으로 직렬화한다:
+    [{name, requires_approval, permission}]. permission 은 저장값 또는 휴리스틱 기본값.
+    구현체가 tools_for 를 지원하지 않으면(테스트/골격) 빈 목록."""
     tools_for = getattr(c.connectors, "tools_for", None)
     if tools_for is None:
         return []
-    return [{"name": t.name, "requires_approval": t.requires_approval} for t in tools_for(connector_id)]
+    perm_fn = getattr(c.connectors, "permission_for", None)
+    out: list[dict] = []
+    for t in tools_for(connector_id):
+        item = {"name": t.name, "requires_approval": t.requires_approval}
+        if perm_fn is not None:
+            item["permission"] = perm_fn(connector_id, t.name)
+        out.append(item)
+    return out
 
 
 def _connector_payload(c: Container, info) -> dict:
@@ -67,6 +80,24 @@ def _connector_payload(c: Container, info) -> dict:
 @router.get("")
 async def list_connectors(c: Container = Depends(get_container)):
     return {"success": True, "data": [_connector_payload(c, i) for i in c.connectors.list_connectors()]}
+
+
+@router.get("/local")
+async def list_local_mcp(c: Container = Depends(get_container)):
+    """`.mcp.json` 에 선언된 로컬 MCP 서버 + (캐시된) 도구 목록. local-MCP 탭 실데이터."""
+    info_fn = getattr(c.connectors, "local_servers_info", None)
+    data = info_fn() if info_fn is not None else []
+    return {"success": True, "data": data}
+
+
+@router.post("/local/refresh")
+async def refresh_local_mcp(c: Container = Depends(get_container)):
+    """로컬 MCP 서버를 다시 spawn 해 도구 카탈로그를 갱신한다."""
+    warm = getattr(c.connectors, "warm_local", None)
+    count = await warm() if warm is not None else 0
+    info_fn = getattr(c.connectors, "local_servers_info", None)
+    data = info_fn() if info_fn is not None else []
+    return {"success": True, "data": {"count": count, "servers": data}}
 
 
 @router.get("/oauth/callback")
@@ -138,6 +169,16 @@ async def apply_tool_update(connector_id: str, c: Container = Depends(get_contai
     apply = getattr(c.connectors, "apply_update", None)
     count = await apply(connector_id) if apply is not None else 0
     return {"success": True, "data": {"count": count, "tools": _tools_payload(c, connector_id)}}
+
+
+@router.put("/{connector_id}/tools/permission")
+async def set_tool_permission(connector_id: str, body: ToolPermissionIn, c: Container = Depends(get_container)):
+    """도구별 호출 정책(allow/approval/block)을 저장한다 — dispatcher 가 강제한다."""
+    _require_connector(c, connector_id)
+    setter = getattr(c.connectors, "set_tool_permission", None)
+    if setter is not None:
+        setter(connector_id, body.tool_name, body.permission)
+    return {"success": True, "data": {"tool_name": body.tool_name, "permission": body.permission}}
 
 
 @router.get("/{connector_id}/status")

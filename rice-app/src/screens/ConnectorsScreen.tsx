@@ -21,10 +21,25 @@ type Kind = 'remote' | 'local-mcp';
 
 // ── 백엔드(runtime) 연동 — 런타임이 온라인일 때 'remote' 커넥터를 실데이터로 대체 ──
 
+type WirePermission = 'allow' | 'approval' | 'block';
+
+/** 백엔드 도구 정책 ↔ UI 3단 토글 매핑. */
+const WIRE_TO_UI_PERM: Record<WirePermission, ScopePermission> = {
+  allow: '항상 허용',
+  approval: '승인 필요',
+  block: '차단',
+};
+const UI_TO_WIRE_PERM: Record<ScopePermission, WirePermission> = {
+  '항상 허용': 'allow',
+  '승인 필요': 'approval',
+  '차단': 'block',
+};
+
 /** 백엔드가 돌려주는 도구 카탈로그 항목(원격 MCP tools/list 로 받아 저장한 것). */
 interface ConnectorToolWire {
   name: string;
   requires_approval?: boolean;
+  permission?: WirePermission; // 저장된(또는 휴리스틱 기본) 호출 정책
 }
 
 /** 백엔드가 계산한 대기 중 도구 카탈로그 업데이트 diff. */
@@ -50,10 +65,14 @@ interface ConnectorInfoWire {
 // 도구 이름 접두사로 읽기/쓰기를 추정(그룹 헤더용 표시 힌트 — 실제 승인은 런타임이 강제).
 const READ_PREFIXES = ['get', 'list', 'search', 'read', 'fetch', 'find', 'view'];
 
-/** 백엔드 도구 → UI ConnectorScope. 이름으로 읽기/쓰기를 가른다(표시용). */
+/** 백엔드 도구 → UI ConnectorScope. 이름으로 읽기/쓰기를 가르고(표시용), 저장된 정책을 반영. */
 const toolToScope = (t: ConnectorToolWire): ConnectorScope => {
   const readOnly = READ_PREFIXES.some((p) => t.name.toLowerCase().startsWith(p));
-  return { name: t.name, mode: readOnly ? '읽기' : '쓰기' };
+  return {
+    name: t.name,
+    mode: readOnly ? '읽기' : '쓰기',
+    permission: t.permission ? WIRE_TO_UI_PERM[t.permission] : undefined,
+  };
 };
 
 /** 백엔드 update diff → UI ConnectorUpdate(적용 시 addsTools 를 도구 목록에 반영). */
@@ -252,7 +271,8 @@ const ConnectorDetailView: React.FC<{
   onRealDisconnect: (c: Connector) => void;
   onResyncTools: (c: Connector) => void;
   onApplyUpdate: (c: Connector) => void;
-}> = ({ connectorId, connectors, setConnectors, online, busyId, onRealConnect, onRealDisconnect, onResyncTools, onApplyUpdate }) => {
+  onSetToolPermission: (connectorId: string, toolName: string, perm: ScopePermission) => void;
+}> = ({ connectorId, connectors, setConnectors, online, busyId, onRealConnect, onRealDisconnect, onResyncTools, onApplyUpdate, onSetToolPermission }) => {
   const c = connectors.find((x) => x.id === connectorId);
 
   if (!c || !connectorId) {
@@ -284,11 +304,21 @@ const ConnectorDetailView: React.FC<{
     );
   };
   // 도구는 제공자가 정의하므로 추가/삭제하지 않고 "언제 호출할 수 있는가"만 바꾼다.
-  const setScopePermission = (idx: number, perm: ScopePermission) =>
+  // 실제(온라인) 커넥터면 백엔드에 정책을 저장한다 — dispatcher 가 이를 강제한다.
+  const persistPerm = (toolName: string, perm: ScopePermission) => {
+    if (online && !isMcp) onSetToolPermission(c.id, toolName, perm);
+  };
+  const setScopePermission = (idx: number, perm: ScopePermission) => {
+    const tool = c.scopes[idx];
     patch((x) => ({ ...x, scopes: x.scopes.map((s, i) => (i === idx ? { ...s, permission: perm } : s)) }));
+    if (tool) persistPerm(tool.name, perm);
+  };
   // 그룹(읽기/쓰기) 전체를 한 번에 설정 — 도구가 많은 커넥터(Gmail 등)에서 필수
-  const setGroupPermission = (predicate: (s: ConnectorScope) => boolean, perm: ScopePermission) =>
+  const setGroupPermission = (predicate: (s: ConnectorScope) => boolean, perm: ScopePermission) => {
+    const targets = c.scopes.filter(predicate);
     patch((x) => ({ ...x, scopes: x.scopes.map((s) => (predicate(s) ? { ...s, permission: perm } : s)) }));
+    targets.forEach((t) => persistPerm(t.name, perm));
+  };
   // 업데이트 적용 — 원격 커넥터는 백엔드 apply-update(pending→active) 호출, 그 외(목업)는
   // 클라이언트에서 addsTools 를 병합.
   const applyUpdate = () => {
@@ -681,6 +711,11 @@ function ConnectorsScreen() {
     }
   };
 
+  // 도구별 정책 저장(낙관적 — 로컬은 이미 갱신됨) → 백엔드가 dispatcher 강제에 사용.
+  const handleSetToolPermission = (connectorId: string, toolName: string, perm: ScopePermission) => {
+    void api.setConnectorToolPermission(connectorId, toolName, UI_TO_WIRE_PERM[perm]).catch(() => undefined);
+  };
+
   const isLocal = kind === 'local-mcp';
   const match = (c: Connector) =>
     filter === '전체' ||
@@ -939,6 +974,7 @@ function ConnectorsScreen() {
         onRealDisconnect={handleRealDisconnect}
         onResyncTools={handleResyncTools}
         onApplyUpdate={handleApplyUpdate}
+        onSetToolPermission={handleSetToolPermission}
       />
 
       {/* 원격 커넥터 둘러보기 */}

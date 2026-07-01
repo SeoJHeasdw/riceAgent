@@ -520,3 +520,96 @@ class TestKeychainStore:
             expires_at=time.time() + 7200,  # 2시간 후
         )
         assert cred.is_expired() is False
+
+
+# ── 도구별 권한(퍼미션) 영속화 + dispatcher 강제 ─────────────────────────────
+
+class TestToolPermissions:
+    """connector 도구별 정책 저장/조회 + 기본값 휴리스틱."""
+
+    def setup_method(self):
+        self._db = _fresh_db()
+        self._svc = ConnectorService(self._db, _fresh_paths())
+        self._db.execute(
+            "INSERT INTO connectors(id, connector_type, display_name, status) "
+            "VALUES ('c1','gmail','Gmail','connected')"
+        )
+
+    def test_default_permission_read_vs_write(self):
+        """저장값이 없으면 읽기류=allow, 그 외=approval."""
+        assert self._svc.permission_for("c1", "search_threads") == "allow"
+        assert self._svc.permission_for("c1", "list_labels") == "allow"
+        assert self._svc.permission_for("c1", "create_draft") == "approval"
+        assert self._svc.permission_for("c1", "label_message") == "approval"
+
+    def test_set_and_get_permission(self):
+        self._svc.set_tool_permission("c1", "create_draft", "block")
+        assert self._svc.permission_for("c1", "create_draft") == "block"
+        self._svc.set_tool_permission("c1", "create_draft", "allow")
+        assert self._svc.permission_for("c1", "create_draft") == "allow"
+        assert self._svc.tool_permissions("c1") == {"create_draft": "allow"}
+
+    def test_invalid_permission_raises(self):
+        with pytest.raises(ValidationError):
+            self._svc.set_tool_permission("c1", "create_draft", "maybe")
+
+
+class TestDispatcherPolicyEnforcement:
+    """dispatcher 가 도구별 정책(allow/approval/block)을 강제하는지 검증."""
+
+    def _spec(self):
+        from rice_runtime.core.types import ToolSpec
+        return ToolSpec(
+            name="create_draft", description="", parameters={},
+            source="connector", owner_id="c1", requires_approval=True,
+        )
+
+    def _dispatcher(self, permission: str, *, approve: bool = True):
+        from unittest.mock import AsyncMock, MagicMock
+        from rice_runtime.agent.tool_dispatch import ToolDispatcher
+        from rice_runtime.core.types import ApprovalResponse, ToolResult
+
+        connectors = MagicMock()
+        connectors.permission_for = MagicMock(return_value=permission)
+        connectors.invoke = AsyncMock(return_value=ToolResult("call_x", ok=True, result={"ok": 1}))
+        approvals = MagicMock()
+        approvals.request = AsyncMock(
+            return_value=ApprovalResponse(approval_id="a1", decision="approve" if approve else "reject")
+        )
+        disp = ToolDispatcher(
+            connectors=connectors, plugins=MagicMock(), approvals=approvals, approval_timeout_s=1,
+        )
+        return disp, connectors, approvals
+
+    @pytest.mark.asyncio
+    async def test_block_refuses_without_invoke_or_approval(self):
+        from rice_runtime.core.types import ToolCall
+        disp, connectors, approvals = self._dispatcher("block")
+        call = ToolCall(tool_name="create_draft", arguments={}, id="call_x")
+        events = [ev async for ev in disp.dispatch("s1", call, self._spec())]
+        res = await disp.result_for(call)
+        assert res.ok is False and "block" in (res.error or "").lower()
+        connectors.invoke.assert_not_called()
+        approvals.request.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_allow_runs_without_approval(self):
+        from rice_runtime.core.types import ToolCall
+        disp, connectors, approvals = self._dispatcher("allow")
+        call = ToolCall(tool_name="create_draft", arguments={}, id="call_x")
+        _ = [ev async for ev in disp.dispatch("s1", call, self._spec())]
+        res = await disp.result_for(call)
+        assert res.ok is True
+        approvals.request.assert_not_called()
+        connectors.invoke.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_approval_requests_hitl(self):
+        from rice_runtime.core.types import ToolCall
+        disp, connectors, approvals = self._dispatcher("approval", approve=True)
+        call = ToolCall(tool_name="create_draft", arguments={}, id="call_x")
+        _ = [ev async for ev in disp.dispatch("s1", call, self._spec())]
+        res = await disp.result_for(call)
+        approvals.request.assert_awaited_once()
+        assert res.ok is True
+        connectors.invoke.assert_awaited_once()
