@@ -585,6 +585,11 @@ export interface Connector {
    * 로컬 MCP 서버(개발자). 생략 시 'remote'로 취급. {@link connectorKind} 참고.
    */
   kind?: 'remote' | 'local-mcp';
+  /**
+   * 백엔드 registry 의 connector_type(예: 'gmail'/'calendar'/'drive') — 실제(온라인) 원격
+   * 커넥터에만 있다. connect/재연결·polling 시 어떤 타입으로 OAuth 를 시작할지 식별하는 데 쓴다.
+   */
+  connectorType?: string;
   status: 'connected' | 'disconnected';
   account?: string;
   lastSync?: string;

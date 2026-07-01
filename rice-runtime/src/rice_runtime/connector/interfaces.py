@@ -16,7 +16,8 @@ Two surfaces:
        delete, status.
 
 **FROZEN.** OAuth/keychain/permission impls (`oauth/`, `credential/`,
-`permission/`) sit behind this. The prototype connector_type is "gmail".
+`permission/`) sit behind this. connector_type is registry-driven (registry.py) —
+"gmail" / "calendar" / "drive" today, more via a new ConnectorDescriptor.
 """
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ ConnectorStatus = Literal["connected", "disconnected", "error"]
 @dataclass(frozen=True)
 class ConnectorInfo:
     id: str
-    connector_type: str  # "gmail" (prototype)
+    connector_type: str  # e.g. "gmail" / "calendar" / "drive" — registry.py
     display_name: str
     status: ConnectorStatus
     scopes: tuple[str, ...] = ()

@@ -89,6 +89,8 @@ def load_client_config(
     1) env {PREFIX}_CLIENT_ID + {PREFIX}_CLIENT_SECRET
     2) env {PREFIX}_CLIENT_SECRET_FILE (JSON 경로)
     3) {connectors_dir}/{client_secret_filename}
+    4) {connectors_dir}/{client_secret_fallback_filenames[i]} (같은 GCP 프로젝트의 다른
+       connector 용으로 이미 설치된 client — 예: calendar/drive 가 gmail 설치를 재사용)
     하나도 없으면 None.
     """
     env_id = os.environ.get(descriptor.env_client_id, "")
@@ -103,9 +105,10 @@ def load_client_config(
             return cfg
 
     if connectors_dir is not None:
-        cfg = _load_client_config_from_json(connectors_dir / descriptor.client_secret_filename)
-        if cfg is not None:
-            return cfg
+        for filename in (descriptor.client_secret_filename, *descriptor.client_secret_fallback_filenames):
+            cfg = _load_client_config_from_json(connectors_dir / filename)
+            if cfg is not None:
+                return cfg
 
     return None
 

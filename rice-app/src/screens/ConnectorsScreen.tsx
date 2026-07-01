@@ -88,49 +88,111 @@ const wireToUpdate = (u: ConnectorUpdateWire | null | undefined): ConnectorUpdat
   };
 };
 
+/**
+ * 원격 커넥터 타입별 표시 메타(아이콘·분류·제공사·문구) — 백엔드 registry.py 의
+ * connector_type 과 1:1 대응. 새 Google-family 커넥터(예: docs)를 백엔드에 추가하면
+ * 여기 항목 하나만 더하면 된다. 미등록 타입은 DEFAULT_TYPE_META 로 대충이라도 표시.
+ */
+const CONNECTOR_TYPE_META: Record<
+  string,
+  {
+    displayName: string;
+    icon: IconName;
+    category: string;
+    provider: string;
+    connectedSummary: string;
+    connectableSummary: string;
+    examples: string[];
+  }
+> = {
+  gmail: {
+    displayName: 'Gmail',
+    icon: 'send',
+    category: '메일',
+    provider: 'Google',
+    connectedSummary: '연결하면 원격 MCP 서버가 제공하는 메일 도구를 에이전트가 사용할 수 있어요.',
+    connectableSummary: '연결하면 브라우저에서 구글 로그인이 열리고, 이후 메일 검색·읽기·발송 도구를 쓸 수 있어요.',
+    examples: ['받은 편지함에서 최근 중요한 메일 요약해줘', '이 내용으로 초안 작성해줘'],
+  },
+  calendar: {
+    displayName: 'Google Calendar',
+    icon: 'calendar',
+    category: '일정',
+    provider: 'Google',
+    connectedSummary: '연결하면 원격 MCP 서버가 제공하는 캘린더 도구를 에이전트가 사용할 수 있어요.',
+    connectableSummary: '연결하면 브라우저에서 구글 로그인이 열리고, 이후 일정 조회·생성·응답 도구를 쓸 수 있어요.',
+    examples: ['오늘 일정 알려줘', '내일 오후 3시에 팀 미팅 잡아줘'],
+  },
+  drive: {
+    displayName: 'Google Drive',
+    icon: 'cloud',
+    category: '스토리지',
+    provider: 'Google',
+    connectedSummary: '연결하면 원격 MCP 서버가 제공하는 드라이브 도구를 에이전트가 사용할 수 있어요.',
+    connectableSummary: '연결하면 브라우저에서 구글 로그인이 열리고, 이후 파일 검색·읽기·생성 도구를 쓸 수 있어요.',
+    examples: ['최근 수정한 문서 찾아줘', '이 내용으로 새 문서 만들어줘'],
+  },
+};
+const DEFAULT_TYPE_META = {
+  displayName: '',
+  icon: 'plug' as IconName,
+  category: '',
+  provider: '',
+  connectedSummary: '',
+  connectableSummary: '',
+  examples: [] as string[],
+};
+const typeMeta = (connectorType: string) => CONNECTOR_TYPE_META[connectorType] ?? DEFAULT_TYPE_META;
+
 /** 백엔드 ConnectorInfo → UI Connector 매핑 (remote 전용). */
 const infoToConnector = (info: ConnectorInfoWire): Connector => {
   const connected = info.status === 'connected';
   const errored = info.status === 'error';
-  const isGmail = info.connector_type === 'gmail';
+  const meta = typeMeta(info.connector_type);
   // 도구는 하드코딩이 아니라 백엔드가 연결 시점에 원격 MCP tools/list 로 받아 저장한 실제 카탈로그.
   const scopes: ConnectorScope[] = connected ? (info.tools ?? []).map(toolToScope) : [];
   return {
     id: info.id,
     name: info.display_name || info.connector_type,
-    icon: isGmail ? 'send' : 'plug',
-    category: isGmail ? '메일' : info.connector_type,
-    provider: isGmail ? 'Google' : info.connector_type,
+    icon: meta.icon,
+    category: meta.category || info.connector_type,
+    provider: meta.provider || info.connector_type,
+    connectorType: info.connector_type,
     kind: 'remote',
     // 백엔드 'error'(토큰 무효)는 UI 상 미연결로 취급하되 errored 플래그로 "재연결 필요"를 노출.
     status: connected ? 'connected' : 'disconnected',
     errored,
     account: connected ? info.display_name || '연결됨' : undefined,
     lastSync: info.last_verified_at ?? undefined,
-    summary: isGmail
-      ? '연결하면 원격 MCP 서버가 제공하는 메일 도구를 에이전트가 사용할 수 있어요.'
-      : `${info.connector_type} 커넥터`,
+    summary: meta.connectedSummary || `${info.connector_type} 커넥터`,
     scopes,
     usedBy: [],
-    examples: isGmail ? ['받은 편지함에서 최근 중요한 메일 요약해줘', '이 내용으로 초안 작성해줘'] : [],
+    examples: meta.examples,
     update: wireToUpdate(info.update),
   };
 };
 
-/** 백엔드에 연결 레코드가 아직 없을 때 노출하는 "연결 가능한" Gmail 카드(프로토타입). */
-const GMAIL_CONNECTABLE: Connector = {
-  id: 'gmail',
-  name: 'Gmail',
-  icon: 'send',
-  category: '메일',
-  provider: 'Google',
-  kind: 'remote',
-  status: 'disconnected',
-  summary: '연결하면 브라우저에서 구글 로그인이 열리고, 이후 메일 검색·읽기·발송 도구를 쓸 수 있어요.',
-  scopes: [],
-  usedBy: [],
-  examples: ['받은 편지함에서 최근 중요한 메일 요약해줘'],
-};
+/**
+ * 백엔드가 지원하지만(registry.py) 아직 연결 레코드가 없는 타입에 노출하는 "연결 가능" 카드.
+ * connectorType 으로 실제(온라인) 목록과 매칭 — 이미 연결/생성된 타입이면 mergeRemote 가 뺀다.
+ */
+const CONNECTABLE_PRESETS: Connector[] = (['gmail', 'calendar', 'drive'] as const).map((connectorType) => {
+  const meta = typeMeta(connectorType);
+  return {
+    id: connectorType,
+    name: meta.displayName,
+    icon: meta.icon,
+    category: meta.category,
+    provider: meta.provider,
+    connectorType,
+    kind: 'remote',
+    status: 'disconnected',
+    summary: meta.connectableSummary,
+    scopes: [],
+    usedBy: [],
+    examples: meta.examples,
+  };
+});
 
 /** stdio transport를 보기 좋은 한 줄 명령으로 렌더 */
 const transportLine = (t: McpTransport): string =>
@@ -598,9 +660,9 @@ function ConnectorsScreen() {
   const mergeRemote = (real: Connector[]) => {
     setConnectors((prev) => {
       const localMcp = prev.filter((x) => connectorKind(x) === 'local-mcp');
-      const hasGmail = real.some((x) => x.name.toLowerCase() === 'gmail');
-      const remote = hasGmail ? real : [...real, GMAIL_CONNECTABLE];
-      return [...remote, ...localMcp];
+      const presentTypes = new Set(real.map((x) => x.connectorType).filter(Boolean));
+      const missingPresets = CONNECTABLE_PRESETS.filter((p) => !presentTypes.has(p.connectorType));
+      return [...real, ...missingPresets, ...localMcp];
     });
   };
 
@@ -646,31 +708,36 @@ function ConnectorsScreen() {
   }, []);
 
   // 브라우저 OAuth 완료까지 connected 폴링(최대 ~2분).
-  const pollConnected = async (): Promise<boolean> => {
+  const pollConnected = async (connectorType: string): Promise<boolean> => {
     for (let i = 0; i < 48; i++) {
       await new Promise((r) => setTimeout(r, 2500));
       const res = await api.getConnectors();
       if (res.success && Array.isArray(res.data)) {
         const list = res.data as ConnectorInfoWire[];
-        if (list.some((x) => x.connector_type === 'gmail' && x.status === 'connected')) return true;
+        if (list.some((x) => x.connector_type === connectorType && x.status === 'connected')) return true;
       }
     }
     return false;
   };
 
   const handleRealConnect = async (c: Connector) => {
+    // placeholder 카드(아직 연결 안 됨)는 connectorType 이 곧 백엔드 타입. 이미 연결된 적 있는
+    // (error 상태) 실제 커넥터는 infoToConnector 가 채운 connectorType 을 그대로 쓴다.
+    const connectorType = c.connectorType ?? c.id;
     setBusyId(c.id);
     try {
-      const res = await api.connectConnector('gmail');
+      const res = await api.connectConnector(connectorType);
       const url = (res.data as { oauth_url?: string } | undefined)?.oauth_url;
       if (!res.success || !url) return;
       await openExternal(url); // 시스템 브라우저에서 구글 로그인
-      if (await pollConnected()) {
+      if (await pollConnected(connectorType)) {
         await refresh();
         const res2 = await api.getConnectors();
         const found =
           res2.success && Array.isArray(res2.data)
-            ? (res2.data as ConnectorInfoWire[]).find((x) => x.connector_type === 'gmail' && x.status === 'connected')
+            ? (res2.data as ConnectorInfoWire[]).find(
+                (x) => x.connector_type === connectorType && x.status === 'connected',
+              )
             : undefined;
         if (found) setSel(found.id);
       }

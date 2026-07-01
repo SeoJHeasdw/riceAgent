@@ -139,6 +139,95 @@ class TestGmailConnector:
         assert svc.connected_types() == {"gmail"}
 
 
+# ── Calendar/Drive: 같은 Google Cloud OAuth client 를 공유하는 신규 커넥터 타입 ──
+
+class TestGoogleFamilyConnectors:
+    def test_registry_includes_calendar_and_drive(self):
+        from rice_runtime.connector.registry import (
+            CALENDAR_DESCRIPTOR,
+            DRIVE_DESCRIPTOR,
+            GMAIL_DESCRIPTOR,
+            get_descriptor,
+            supported_types,
+        )
+
+        assert {"gmail", "calendar", "drive"} <= supported_types()
+        assert get_descriptor("calendar") is CALENDAR_DESCRIPTOR
+        assert get_descriptor("drive") is DRIVE_DESCRIPTOR
+        # 셋 다 같은 Google Identity 엔드포인트를 쓴다 (OAuth client 하나 공유).
+        assert CALENDAR_DESCRIPTOR.auth_url == GMAIL_DESCRIPTOR.auth_url == DRIVE_DESCRIPTOR.auth_url
+
+    def test_calendar_and_drive_mcp_endpoints_distinct(self):
+        from rice_runtime.connector.registry import CALENDAR_DESCRIPTOR, DRIVE_DESCRIPTOR, GMAIL_DESCRIPTOR
+
+        endpoints = {GMAIL_DESCRIPTOR.mcp_endpoint, CALENDAR_DESCRIPTOR.mcp_endpoint, DRIVE_DESCRIPTOR.mcp_endpoint}
+        assert len(endpoints) == 3  # 세 타입이 서로 다른 원격 MCP 서버를 가리킨다
+
+    def test_client_config_falls_back_to_gmail_json_when_no_dedicated_file(self, monkeypatch):
+        """calendar/drive 전용 client json 이 없으면 이미 설치된 gmail_client_secret.json 을 쓴다."""
+        from rice_runtime.connector.oauth.flow import load_client_config
+        from rice_runtime.connector.registry import CALENDAR_DESCRIPTOR, DRIVE_DESCRIPTOR
+
+        monkeypatch.delenv("RICE_CALENDAR_CLIENT_ID", raising=False)
+        monkeypatch.delenv("RICE_CALENDAR_CLIENT_SECRET", raising=False)
+        monkeypatch.delenv("RICE_DRIVE_CLIENT_ID", raising=False)
+        monkeypatch.delenv("RICE_DRIVE_CLIENT_SECRET", raising=False)
+        paths = _fresh_paths()
+        (paths.connectors / "gmail_client_secret.json").write_text(
+            json.dumps({"installed": {"client_id": "shared-cid", "client_secret": "shared-sec"}}),
+            encoding="utf-8",
+        )
+
+        cal_cfg = load_client_config(CALENDAR_DESCRIPTOR, paths.connectors)
+        drv_cfg = load_client_config(DRIVE_DESCRIPTOR, paths.connectors)
+
+        assert cal_cfg is not None and cal_cfg.client_id == "shared-cid"
+        assert drv_cfg is not None and drv_cfg.client_id == "shared-cid"
+
+    def test_dedicated_client_json_takes_precedence_over_fallback(self, monkeypatch):
+        """calendar_client_secret.json 이 있으면 gmail 공유 파일보다 그것을 우선한다."""
+        from rice_runtime.connector.oauth.flow import load_client_config
+        from rice_runtime.connector.registry import CALENDAR_DESCRIPTOR
+
+        monkeypatch.delenv("RICE_CALENDAR_CLIENT_ID", raising=False)
+        monkeypatch.delenv("RICE_CALENDAR_CLIENT_SECRET", raising=False)
+        paths = _fresh_paths()
+        (paths.connectors / "gmail_client_secret.json").write_text(
+            json.dumps({"installed": {"client_id": "shared-cid", "client_secret": "shared-sec"}}),
+            encoding="utf-8",
+        )
+        (paths.connectors / "calendar_client_secret.json").write_text(
+            json.dumps({"installed": {"client_id": "dedicated-cid", "client_secret": "dedicated-sec"}}),
+            encoding="utf-8",
+        )
+
+        cfg = load_client_config(CALENDAR_DESCRIPTOR, paths.connectors)
+        assert cfg is not None and cfg.client_id == "dedicated-cid"
+
+    def test_begin_connect_calendar_and_drive_create_pending_records(self):
+        """manager 가 gmail 과 똑같은 제네릭 경로로 calendar/drive 도 처리한다."""
+        from rice_runtime.connector.service import ConnectorService
+
+        db = _fresh_db()
+        paths = _fresh_paths()
+        (paths.connectors / "gmail_client_secret.json").write_text(
+            json.dumps({"installed": {"client_id": "shared-cid", "client_secret": "shared-sec"}}),
+            encoding="utf-8",
+        )
+        svc = ConnectorService(db, paths)
+
+        for connector_type, display_name in (("calendar", "Google Calendar"), ("drive", "Google Drive")):
+            result = svc._manager.begin_connect(connector_type)
+            assert result.state and result.connector_id
+            assert "accounts.google.com" in result.oauth_url
+            assert f"state={result.state}" in result.oauth_url
+            row = db.query_one("SELECT * FROM connectors WHERE id=?", (result.connector_id,))
+            assert row is not None
+            assert row["connector_type"] == connector_type
+            assert row["display_name"] == display_name
+            assert row["status"] == "disconnected"
+
+
 # ── 버그#5: lifecycle 이 last_used_at 을 우선한다 ─────────────────────────────
 
 class TestLifecycleLastUsed:

@@ -6,7 +6,7 @@
   - delete: connector 레코드 삭제 + 키체인 항목 정리
 
 타입별 차이(지원 타입·표시명·OAuth 엔드포인트)는 registry.ConnectorDescriptor 에서 오고,
-매니저는 그 위에서 제네릭하게 동작한다(gmail 하드코딩 없음). OAuth flow 는 타입별로
+매니저는 그 위에서 제네릭하게 동작한다(하드코딩 없음). OAuth flow 는 타입별로
 주입된 flows 딕셔너리에 위임한다.
 """
 from __future__ import annotations

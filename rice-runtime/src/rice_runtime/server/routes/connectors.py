@@ -26,7 +26,7 @@ router = APIRouter(prefix="/connectors", tags=["connectors"])
 
 
 class ConnectIn(BaseModel):
-    connector_type: str  # "gmail" (prototype)
+    connector_type: str  # registry.py supported_types() — "gmail" / "calendar" / "drive"
 
 
 class ToolPermissionIn(BaseModel):

@@ -26,7 +26,11 @@ class ConnectorDescriptor:
     scopes: tuple[str, ...]        # 요청 scope
     mcp_endpoint: str              # 원격 MCP 서버 (기본값 — env 로 오버라이드 가능)
     env_prefix: str                # 자격증명 env prefix, 예: "RICE_GMAIL"
-    client_secret_filename: str    # ~/.rice/connectors/ 내 client JSON 파일명
+    client_secret_filename: str    # ~/.rice/connectors/ 내 client JSON 파일명 (1순위)
+    # 같은 Google Cloud 프로젝트의 OAuth client 는 Gmail/Calendar/Drive 등 여러 제품에
+    # 재사용된다(Google API 활성화는 프로젝트 단위, OAuth client 는 그 위에 하나). 그래서
+    # 타입 전용 파일이 없으면 이 목록을 순서대로 시도한다 — 파일 복제 없이 기존 설치를 공유.
+    client_secret_fallback_filenames: tuple[str, ...] = ()
 
     # ── env 오버라이드 헬퍼 ────────────────────────────────────────────────────
     def resolved_mcp_endpoint(self) -> str:
@@ -71,9 +75,42 @@ GMAIL_DESCRIPTOR = ConnectorDescriptor(
     client_secret_filename="gmail_client_secret.json",
 )
 
+CALENDAR_DESCRIPTOR = ConnectorDescriptor(
+    connector_type="calendar",
+    display_name="Google Calendar",
+    auth_url=_GOOGLE_AUTH_URL,
+    token_url=_GOOGLE_TOKEN_URL,
+    # readonly: list_events/get_event/list_calendars/suggest_time. events: create/update/delete/respond_to_event.
+    scopes=(
+        "https://www.googleapis.com/auth/calendar.readonly",
+        "https://www.googleapis.com/auth/calendar.events",
+    ),
+    # NOTE(agent): 실재 확인된 Google 원격 Calendar MCP 엔드포인트(2026-07-01, tools/list 로 8개 도구 확인).
+    mcp_endpoint="https://calendarmcp.googleapis.com/mcp/v1",
+    env_prefix="RICE_CALENDAR",
+    client_secret_filename="calendar_client_secret.json",
+    # 전용 파일이 없으면 이미 설치된 Gmail 용 client(같은 GCP 프로젝트)를 그대로 재사용.
+    client_secret_fallback_filenames=("gmail_client_secret.json",),
+)
+
+DRIVE_DESCRIPTOR = ConnectorDescriptor(
+    connector_type="drive",
+    display_name="Google Drive",
+    auth_url=_GOOGLE_AUTH_URL,
+    token_url=_GOOGLE_TOKEN_URL,
+    # copy_file/create_file 은 검색으로 찾은 임의 기존 파일을 대상으로 하므로 drive.file(앱이
+    # 만든/연 파일 한정)로는 부족 — 전체 파일 read/write 가 필요한 full drive scope 사용.
+    scopes=("https://www.googleapis.com/auth/drive",),
+    # NOTE(agent): 실재 확인된 Google 원격 Drive MCP 엔드포인트(2026-07-01, tools/list 로 8개 도구 확인).
+    mcp_endpoint="https://drivemcp.googleapis.com/mcp/v1",
+    env_prefix="RICE_DRIVE",
+    client_secret_filename="drive_client_secret.json",
+    client_secret_fallback_filenames=("gmail_client_secret.json",),
+)
+
 
 _REGISTRY: dict[str, ConnectorDescriptor] = {
-    GMAIL_DESCRIPTOR.connector_type: GMAIL_DESCRIPTOR,
+    d.connector_type: d for d in (GMAIL_DESCRIPTOR, CALENDAR_DESCRIPTOR, DRIVE_DESCRIPTOR)
 }
 
 
