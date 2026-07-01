@@ -552,6 +552,8 @@ export interface ConnectorScope {
   mode: string;
   /** 생략 시 mode로 추정: 읽기→'항상 허용', 그 외→'승인 필요' */
   permission?: ScopePermission;
+  /** 원격 MCP 서버가 tools/list 로 제공한 도구 설명 — 사용자가 무슨 도구인지 판단하는 근거 */
+  description?: string;
 }
 
 export interface ConnectorUser {

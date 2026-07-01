@@ -10,8 +10,8 @@ import React from 'react';
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   /** Button variant */
   kind?: 'primary' | 'secondary' | 'tertiary' | 'ghost' | 'danger';
-  /** Button size */
-  size?: 'sm' | 'md' | 'lg';
+  /** Button size. 'xs' = compact modal footer actions (below the standard 'sm') */
+  size?: 'xs' | 'sm' | 'md' | 'lg';
   /** Icon element to display before text */
   icon?: React.ReactNode;
   /** Full width button */
@@ -46,6 +46,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     };
 
     const sizeStyles = {
+      xs: 'h-7 px-2.5 text-caption-01',
       sm: 'h-8 px-3 text-body-short-01',
       md: 'h-10 px-4 text-body-short-02',
       lg: 'h-12 px-5 text-body-short-02',

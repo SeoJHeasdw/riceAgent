@@ -13,7 +13,8 @@ import type { LocalMcpTransportPayload } from '../../lib/api';
  * 파싱해서 목록으로 보여주고, 체크박스로 고른 것만 테스트·등록한다.
  *
  * 흐름(둘 다 실제 백엔드 호출 — 부작용 경계가 다르다):
- *   1. JSON 붙여넣기(또는 파일 선택) → "확인" → 파싱 → 서버 목록(이름 편집 가능) 표시
+ *   1. JSON 붙여넣기(또는 파일 선택/드래그) → 텍스트 영역 밖을 클릭(blur)하면 자동 파싱
+ *      → 서버 목록(이름 편집 가능) 표시
  *   2. "연결 테스트" → 선택된 항목을 실제로 spawn(stdio)/probe(http) 해서 tools/list 를
  *      받는다. **부작용 없음** — `.mcp.json` 은 안 건드린다. 등록의 필수 게이트.
  *   3. 테스트 통과한 항목만 "등록" 대상이 된다 — 발견한 도구 개수를 보여준다.
@@ -109,6 +110,21 @@ function parseLocalMcpJson(text: string): { entries: ParsedEntry[] } | { error: 
 const textareaCls =
   'w-full h-40 px-3.5 py-2.5 bg-field-01 text-text-primary font-mono text-caption-01 leading-relaxed border border-border-strong-01 rounded-lg outline-none transition-colors focus:border-focus focus:ring-1 focus:ring-focus placeholder:text-text-placeholder resize-none disabled:opacity-60';
 
+/** SectionStep — "1", "2" 같은 원형 배지로 입력 → 서버 목록 → 등록의 흐름을 시각적으로 안내한다.
+ * noMargin: 부모(예: 버튼과 나란한 flex row)가 이미 간격을 잡아줄 때 자체 mb를 뺀다. */
+const SectionStep: React.FC<{ n: number; children: React.ReactNode; noMargin?: boolean }> = ({
+  n,
+  children,
+  noMargin,
+}) => (
+  <div className={`flex items-center gap-2 ${noMargin ? '' : 'mb-1.5'}`}>
+    <span className="flex-shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full bg-interactive text-text-on-color text-[11px] font-semibold">
+      {n}
+    </span>
+    <label className="text-label-01 text-text-secondary">{children}</label>
+  </div>
+);
+
 export const McpRegisterModal: React.FC<McpRegisterModalProps> = ({ open, onClose, onTest, onRegister }) => {
   const [jsonText, setJsonText] = useState('');
   const [parseError, setParseError] = useState<string | null>(null);
@@ -116,6 +132,8 @@ export const McpRegisterModal: React.FC<McpRegisterModalProps> = ({ open, onClos
   const [testingAll, setTestingAll] = useState(false);
   const [registering, setRegistering] = useState(false);
   const [registerSummaryError, setRegisterSummaryError] = useState<string | null>(null);
+  const [dragActive, setDragActive] = useState(false);
+  const [lastParsedText, setLastParsedText] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const busy = testingAll || registering;
 
@@ -127,10 +145,13 @@ export const McpRegisterModal: React.FC<McpRegisterModalProps> = ({ open, onClos
       setTestingAll(false);
       setRegistering(false);
       setRegisterSummaryError(null);
+      setDragActive(false);
+      setLastParsedText('');
     }
   }, [open]);
 
   const applyParse = (text: string) => {
+    setLastParsedText(text);
     const result = parseLocalMcpJson(text);
     if ('error' in result) {
       setParseError(result.error);
@@ -152,10 +173,7 @@ export const McpRegisterModal: React.FC<McpRegisterModalProps> = ({ open, onClos
     );
   };
 
-  const handleFileChosen = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = ''; // 같은 파일을 다시 골라도 onChange 가 발생하도록
-    if (!file) return;
+  const loadJsonFile = (file: File) => {
     const reader = new FileReader();
     reader.onload = () => {
       const text = String(reader.result ?? '');
@@ -163,6 +181,31 @@ export const McpRegisterModal: React.FC<McpRegisterModalProps> = ({ open, onClos
       applyParse(text);
     };
     reader.readAsText(file);
+  };
+
+  const handleFileChosen = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // 같은 파일을 다시 골라도 onChange 가 발생하도록
+    if (file) loadJsonFile(file);
+  };
+
+  // 텍스트 영역에 .mcp.json/README 스니펫 파일을 바로 끌어다 놓을 수 있게 — "파일 선택"을
+  // 못 보고 지나쳐도 흔한 동작(파일 드래그)으로 등록을 시작할 수 있게 하는 보조 경로.
+  const handleDragOver = (e: React.DragEvent) => {
+    if (busy) return;
+    e.preventDefault();
+    setDragActive(true);
+  };
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragActive(false);
+  };
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragActive(false);
+    if (busy) return;
+    const file = e.dataTransfer.files?.[0];
+    if (file) loadJsonFile(file);
   };
 
   const setRowName = (idx: number, name: string) => {
@@ -229,29 +272,28 @@ export const McpRegisterModal: React.FC<McpRegisterModalProps> = ({ open, onClos
 
   const footer = (
     <div className="flex items-center justify-between w-full">
-      <Button kind="ghost" size="sm" onClick={() => { if (!busy) onClose(); }} disabled={busy} className="!h-7">
+      <Button kind="ghost" size="xs" onClick={() => { if (!busy) onClose(); }} disabled={busy}>
         취소
       </Button>
       <div className="flex items-center gap-2">
         <Button
           kind="tertiary"
-          size="sm"
+          size="xs"
           onClick={runTestAll}
           loading={testingAll}
           disabled={!canTest}
-          icon={!testingAll ? <Icon name="connect" size={14} /> : undefined}
-          className="!h-7"
+          icon={!testingAll ? <Icon name="connect" size={12} /> : undefined}
         >
           {testingAll ? '테스트 중…' : '연결 테스트'}
         </Button>
         <div className="relative group">
-          <Button kind="primary" size="sm" onClick={runRegisterSelected} loading={registering} disabled={!canRegister} className="!h-7">
-            <Icon name="check" size={14} className="mr-1.5" />
+          <Button kind="primary" size="xs" onClick={runRegisterSelected} loading={registering} disabled={!canRegister}>
+            <Icon name="check" size={12} className="mr-1" />
             등록
           </Button>
           {!canRegister && !registering && (
             <div className="pointer-events-none absolute bottom-full right-0 mb-2 w-max max-w-[240px] px-2.5 py-1.5 rounded-md bg-text-primary text-text-inverse text-caption-01 shadow-overlay opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-150">
-              {rows.length === 0 ? 'JSON을 붙여넣고 확인하세요' : "먼저 '연결 테스트'를 통과하세요"}
+              {rows.length === 0 ? 'MCP 서버 설정을 붙여넣거나 파일을 가져오세요' : "먼저 '연결 테스트'를 통과하세요"}
               <span className="absolute top-full right-4 -mt-px border-4 border-transparent border-t-text-primary" />
             </div>
           )}
@@ -261,7 +303,7 @@ export const McpRegisterModal: React.FC<McpRegisterModalProps> = ({ open, onClos
   );
 
   return (
-    <Modal open={open} onClose={() => { if (!busy) onClose(); }} title="로컬 MCP 서버 등록" size="md" footer={footer}>
+    <Modal open={open} onClose={() => { if (!busy) onClose(); }} title="로컬 MCP 서버 등록" size="md" footer={footer} compactFooter>
       <div className="space-y-5">
         {/* 실행 경고 — 로컬 MCP의 핵심 신뢰 모델 */}
         <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg bg-[#da1e28]/10 border border-[#da1e28]/30">
@@ -275,15 +317,16 @@ export const McpRegisterModal: React.FC<McpRegisterModalProps> = ({ open, onClos
         {/* JSON 입력 */}
         <div>
           <div className="flex items-center justify-between mb-1.5">
-            <label className="text-label-01 text-text-secondary">MCP 서버 설정 (JSON)</label>
-            <button
-              type="button"
+            <SectionStep n={1} noMargin>MCP 서버 설정 (JSON)</SectionStep>
+            <Button
+              kind="secondary"
+              size="sm"
               disabled={busy}
               onClick={() => fileInputRef.current?.click()}
-              className="inline-flex items-center gap-1 text-caption-01 text-link-primary hover:underline disabled:opacity-50"
+              icon={<Icon name="attachment" size={14} />}
             >
-              <Icon name="attachment" size={12} /> 파일 선택
-            </button>
+              파일에서 가져오기
+            </Button>
             <input
               ref={fileInputRef}
               type="file"
@@ -292,24 +335,43 @@ export const McpRegisterModal: React.FC<McpRegisterModalProps> = ({ open, onClos
               className="hidden"
             />
           </div>
-          <textarea
-            value={jsonText}
-            disabled={busy}
-            onChange={(e) => {
-              setJsonText(e.target.value);
-              setParseError(null);
-            }}
-            placeholder={EXAMPLE_JSON}
-            spellCheck={false}
-            className={textareaCls}
-          />
+          <div
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            className="relative"
+          >
+            <textarea
+              value={jsonText}
+              disabled={busy}
+              onChange={(e) => {
+                setJsonText(e.target.value);
+                setParseError(null);
+              }}
+              onBlur={() => {
+                // 붙여넣고 다른 곳을 클릭하면 자동으로 파싱 — 파일 업로드 경로와 동작을 맞춰서
+                // "확인" 버튼을 눌러야 하는 애매한 중간 단계를 없앤다. 이미 파싱한 텍스트와
+                // 같으면 건너뛰어 테스트/등록 진행 상태를 지우지 않는다.
+                if (busy || !jsonText.trim() || jsonText === lastParsedText) return;
+                applyParse(jsonText);
+              }}
+              placeholder={EXAMPLE_JSON}
+              spellCheck={false}
+              className={`${textareaCls} ${dragActive ? 'border-focus ring-1 ring-focus' : ''}`}
+            />
+            {dragActive && (
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-lg bg-layer-01/90 border-2 border-dashed border-focus">
+                <span className="inline-flex items-center gap-1.5 text-body-short-01 font-medium text-link-primary">
+                  <Icon name="document" size={16} /> 여기에 놓아서 불러오기
+                </span>
+              </div>
+            )}
+          </div>
           <p className="mt-1.5 text-caption-01 text-text-helper leading-relaxed">
-            MCP 서버 문서의 설치 스니펫을 그대로 붙여넣으세요. 서버가 여러 개면(예: 기존 .mcp.json 파일)
-            전부 인식해서 목록으로 보여줘요.
+            MCP 서버 문서의 설치 스니펫을 그대로 붙여넣거나, JSON 파일을 위 입력창에 끌어다 놓으세요.
+            붙여넣고 다른 곳을 클릭하면 자동으로 서버 목록을 만들어요. 서버가 여러 개면(예: 기존
+            .mcp.json 파일) 전부 인식해서 목록으로 보여줘요.
           </p>
-          <Button kind="tertiary" size="sm" onClick={() => applyParse(jsonText)} disabled={busy || !jsonText.trim()} className="!h-7 mt-2.5">
-            확인
-          </Button>
           {parseError && (
             <div className="mt-2 flex items-center gap-1.5 text-caption-01 text-support-error">
               <Icon name="warning" size={14} filled />
@@ -321,9 +383,7 @@ export const McpRegisterModal: React.FC<McpRegisterModalProps> = ({ open, onClos
         {/* 파싱된 서버 목록 */}
         {rows.length > 0 && (
           <div>
-            <label className="text-label-01 text-text-secondary mb-1.5 block">
-              찾은 서버 · {rows.length}개
-            </label>
+            <SectionStep n={2}>찾은 서버 · {rows.length}개</SectionStep>
             <div className="flex flex-col gap-px bg-border-subtle-01 rounded-lg overflow-hidden">
               {rows.map((row, idx) => (
                 <div key={idx} className="bg-background px-3 py-2.5">

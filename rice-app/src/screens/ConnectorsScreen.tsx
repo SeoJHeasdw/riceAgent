@@ -45,6 +45,8 @@ const UI_TO_WIRE_PERM: Record<ScopePermission, WirePermission> = {
 /** 백엔드가 돌려주는 도구 카탈로그 항목(원격 MCP tools/list 로 받아 저장한 것). */
 interface ConnectorToolWire {
   name: string;
+  /** 원격 MCP 서버가 tools/list 로 제공한 설명 — 무슨 도구인지 사용자가 판단하는 근거. */
+  description?: string;
   requires_approval?: boolean;
   permission?: WirePermission; // 저장된(또는 휴리스틱 기본) 호출 정책
 }
@@ -91,6 +93,7 @@ const toolToScope = (t: ConnectorToolWire): ConnectorScope => {
     name: t.name,
     mode: readOnly ? '읽기' : '쓰기',
     permission: t.permission ? WIRE_TO_UI_PERM[t.permission] : undefined,
+    description: t.description || undefined,
   };
 };
 
@@ -259,6 +262,51 @@ const SectionLabel: React.FC<{ children: React.ReactNode; right?: React.ReactNod
 const StatusDot: React.FC<{ connected: boolean }> = ({ connected }) => (
   <span className={`w-2 h-2 rounded-full flex-shrink-0 ${connected ? 'bg-support-success' : 'bg-layer-03'}`} />
 );
+
+/**
+ * ToolDescription — 원격 MCP 서버가 제공한 도구 설명. 기본 2줄로 잘라 보여주고,
+ * 실제로 잘렸을 때만(scrollHeight > clientHeight) "더보기/접기"를 노출한다.
+ */
+const ToolDescription: React.FC<{ text: string; blocked?: boolean }> = ({ text, blocked }) => {
+  const ref = useRef<HTMLParagraphElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [clamped, setClamped] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => setClamped(el.scrollHeight > el.clientHeight + 1);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [text, expanded]);
+
+  return (
+    <>
+      <p
+        ref={ref}
+        title={expanded ? undefined : text}
+        className={`mt-0.5 text-caption-01 leading-snug ${expanded ? '' : 'line-clamp-2'} ${
+          blocked ? 'text-text-helper opacity-60' : 'text-text-helper'
+        }`}
+      >
+        {text}
+      </p>
+      {(clamped || expanded) && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="mt-0.5 text-caption-01 font-medium text-link-primary hover:underline"
+        >
+          {expanded ? '접기' : '더보기'}
+        </button>
+      )}
+    </>
+  );
+};
 
 /** 도구를 읽기 전용 / 쓰기·실행 둘로 가른다 (그룹 헤더·기본 권한 결정용) */
 const isReadOnly = (s: ConnectorScope) => s.mode === '읽기';
@@ -721,15 +769,18 @@ const ConnectorDetailView: React.FC<{
                       {g.items.map(({ s, idx }) => {
                         const blocked = permOf(s) === '차단';
                         return (
-                          <div key={idx} className="flex items-center gap-2.5 bg-background px-3.5 py-2.5">
-                            <span
-                              title={s.name}
-                              className={`flex-1 min-w-0 text-body-short-01 truncate ${isMcp ? 'font-mono' : ''} ${
-                                blocked ? 'text-text-helper line-through opacity-60' : 'text-text-primary'
-                              }`}
-                            >
-                              {s.name}
-                            </span>
+                          <div key={idx} className="flex items-start gap-2.5 bg-background px-3.5 py-2.5">
+                            <div className="flex-1 min-w-0">
+                              <span
+                                title={s.name}
+                                className={`block text-body-short-01 truncate ${isMcp ? 'font-mono' : ''} ${
+                                  blocked ? 'text-text-helper line-through opacity-60' : 'text-text-primary'
+                                }`}
+                              >
+                                {s.name}
+                              </span>
+                              {s.description && <ToolDescription text={s.description} blocked={blocked} />}
+                            </div>
                             <PermissionControl
                               value={permOf(s)}
                               disabled={!connected}
@@ -1058,10 +1109,11 @@ function ConnectorsScreen() {
       usedBy: [],
       examples: entry.examples ?? [],
     };
-    // 추가 후 바로 연결하도록 원격 탭에서 새 커넥터를 선택 (모달은 다중 추가 위해 유지)
+    // 추가 후 바로 연결하도록 원격 탭에서 새 커넥터를 선택하고 모달을 닫는다.
     setConnectors((a) => [...a, newConnector]);
     setKind('remote');
     setSel(entry.id);
+    setDirectoryOpen(false);
   };
 
   return (

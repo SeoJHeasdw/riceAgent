@@ -251,7 +251,12 @@ class ConnectorService(IConnectorService):
                 "url": server.url,
                 "running": cid in self._local_specs,
                 "tools": [
-                    {"name": s.name, "requires_approval": s.requires_approval, "permission": perm_fn(cid, s.name)}
+                    {
+                        "name": s.name,
+                        "description": s.description,
+                        "requires_approval": s.requires_approval,
+                        "permission": perm_fn(cid, s.name),
+                    }
                     for s in specs
                 ],
             })

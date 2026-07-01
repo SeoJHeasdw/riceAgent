@@ -91,15 +91,17 @@ h1{{font-size:18px;margin:0 0 8px}}p{{color:#57606a;font-size:14px;line-height:1
 
 def _tools_payload(c: Container, connector_id: str) -> list[dict]:
     """connector 의 도구 카탈로그(원격 MCP tools/list)를 UI 용으로 직렬화한다:
-    [{name, requires_approval, permission}]. permission 은 저장값 또는 휴리스틱 기본값.
-    구현체가 tools_for 를 지원하지 않으면(테스트/골격) 빈 목록."""
+    [{name, description, requires_approval, permission}]. description 은 원격 MCP 서버가
+    tools/list 로 제공한 설명 그대로(UI가 각 도구의 용도를 사용자에게 보여줄 수 있게).
+    permission 은 저장값 또는 휴리스틱 기본값. 구현체가 tools_for 를 지원하지 않으면
+    (테스트/골격) 빈 목록."""
     tools_for = getattr(c.connectors, "tools_for", None)
     if tools_for is None:
         return []
     perm_fn = getattr(c.connectors, "permission_for", None)
     out: list[dict] = []
     for t in tools_for(connector_id):
-        item = {"name": t.name, "requires_approval": t.requires_approval}
+        item = {"name": t.name, "description": t.description, "requires_approval": t.requires_approval}
         if perm_fn is not None:
             item["permission"] = perm_fn(connector_id, t.name)
         out.append(item)

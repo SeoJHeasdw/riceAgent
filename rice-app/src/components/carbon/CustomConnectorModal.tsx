@@ -121,24 +121,23 @@ export const CustomConnectorModal: React.FC<CustomConnectorModalProps> = ({ open
 
   const footer = (
     <div className="flex items-center justify-between w-full">
-      <Button kind="ghost" size="sm" onClick={onClose} disabled={adding} className="!h-7">
+      <Button kind="ghost" size="xs" onClick={onClose} disabled={adding}>
         취소
       </Button>
       <div className="flex items-center gap-2">
         <Button
           kind="tertiary"
-          size="sm"
+          size="xs"
           onClick={runDiscover}
           loading={discoverState === 'checking'}
           disabled={!canDiscover}
-          icon={discoverState !== 'checking' ? <Icon name="search" size={14} /> : undefined}
-          className="!h-7"
+          icon={discoverState !== 'checking' ? <Icon name="search" size={12} /> : undefined}
         >
           {discoverState === 'checking' ? '검사 중…' : discoverState === 'done' ? '다시 검사' : 'OAuth 설정 검사'}
         </Button>
         <div className="relative group">
-          <Button kind="primary" size="sm" onClick={handleAdd} loading={adding} disabled={!canAdd} className="!h-7">
-            <Icon name="connect" size={14} className="mr-1.5" />
+          <Button kind="primary" size="xs" onClick={handleAdd} loading={adding} disabled={!canAdd}>
+            <Icon name="connect" size={12} className="mr-1" />
             추가하고 연결
           </Button>
           {!canAdd && !adding && (
@@ -162,6 +161,7 @@ export const CustomConnectorModal: React.FC<CustomConnectorModalProps> = ({ open
       title="커스텀 커넥터 추가"
       size="md"
       footer={footer}
+      compactFooter
     >
       <div className="space-y-5">
         <p className="text-caption-01 text-text-helper leading-relaxed">

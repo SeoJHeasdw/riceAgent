@@ -23,6 +23,8 @@ export interface ModalProps {
   size?: 'sm' | 'md' | 'lg';
   /** Footer content (typically buttons) */
   footer?: React.ReactNode;
+  /** Tighter footer padding for modals whose footer is just compact action buttons */
+  compactFooter?: boolean;
   /** Additional CSS classes */
   className?: string;
 }
@@ -34,6 +36,7 @@ export const Modal: React.FC<ModalProps> = ({
   children,
   size = 'md',
   footer,
+  compactFooter = false,
   className = '',
 }) => {
   // Close on Escape key
@@ -107,7 +110,11 @@ export const Modal: React.FC<ModalProps> = ({
 
         {/* Footer */}
         {footer && (
-          <div className="flex items-center justify-end gap-2 px-4 py-4 border-t border-border-subtle-01">
+          <div
+            className={`flex items-center justify-end gap-2 px-4 border-t border-border-subtle-01 ${
+              compactFooter ? 'py-2.5' : 'py-4'
+            }`}
+          >
             {footer}
           </div>
         )}

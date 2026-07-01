@@ -7,8 +7,8 @@ import { CONNECTOR_CATALOG, type CatalogConnector } from '../../lib/learningData
  *
  * 원격 커넥터 탭의 "추가"에서 열리는 카탈로그. Claude의 둘러보기처럼 검색 + 2열
  * 카드 그리드로 추가 가능한 커넥터를 보여주고, 각 카드의 + 로 목록에 추가한다.
- * 다중 추가를 위해 추가 후에도 모달은 열린 채로 두고, 이미 추가된 항목은
- * existingIds로 판별해 "추가됨" 상태로 비활성화한다.
+ * 추가하면 곧바로 그 커넥터로 이동해 연결을 이어가도록 모달이 닫힌다(onAdd 콜백이
+ * 닫기까지 책임진다). 이미 추가된 항목은 existingIds로 판별해 "추가됨" 상태로 비활성화한다.
  */
 
 export interface ConnectorDirectoryModalProps {
