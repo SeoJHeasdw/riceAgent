@@ -3,6 +3,8 @@
   GET    /connectors                        list (+ each connector's tool catalog + pending update)
   GET    /connectors/{id}                   detail (granted scopes)
   POST   /connectors                        begin OAuth (returns oauth_url)
+  POST   /connectors/custom/discover        auto-discover OAuth metadata for an arbitrary MCP URL
+  POST   /connectors/custom                 register a custom connector + begin OAuth
   POST   /connectors/{id}/tools/resync      force re-fetch + apply the remote MCP tool catalog
   POST   /connectors/{id}/tools/check       detect remote catalog changes (sets a pending update)
   POST   /connectors/{id}/tools/apply-update  adopt the pending catalog update
@@ -32,6 +34,22 @@ class ConnectIn(BaseModel):
 class ToolPermissionIn(BaseModel):
     tool_name: str
     permission: str  # 'allow' | 'approval' | 'block'
+
+
+class CustomDiscoverIn(BaseModel):
+    mcp_endpoint: str
+
+
+class CustomConnectIn(BaseModel):
+    display_name: str
+    mcp_endpoint: str
+    auth_url: str
+    token_url: str
+    registration_endpoint: str | None = None
+    scopes: list[str] = []
+    # 모달의 "직접 입력" 경로 — 있으면 동적 등록(RFC 7591)을 건너뛰고 그대로 쓴다.
+    client_id: str | None = None
+    client_secret: str | None = None
 
 
 def _callback_page(title: str, message: str, ok: bool) -> HTMLResponse:
@@ -100,6 +118,49 @@ async def refresh_local_mcp(c: Container = Depends(get_container)):
     return {"success": True, "data": {"count": count, "servers": data}}
 
 
+@router.post("/custom/discover")
+async def discover_custom(body: CustomDiscoverIn, c: Container = Depends(get_container)):
+    """임의의 원격 MCP 서버 URL 하나로 OAuth 메타데이터를 발견한다(부작용 없음 — 미리보기).
+
+    발견 못 한 필드는 null 로 온다 — 모달이 그 항목만 수동 입력을 받는다.
+    """
+    discover = getattr(c.connectors, "discover_custom_connector", None)
+    if discover is None:
+        return {"success": True, "data": {"ok": False}}
+    cfg = await discover(body.mcp_endpoint)
+    return {
+        "success": True,
+        "data": {
+            "ok": cfg.ok,
+            "auth_url": cfg.auth_url,
+            "token_url": cfg.token_url,
+            "registration_endpoint": cfg.registration_endpoint,
+            "scopes": list(cfg.scopes),
+            "issuer": cfg.issuer,
+        },
+    }
+
+
+@router.post("/custom")
+async def connect_custom(body: CustomConnectIn, c: Container = Depends(get_container)):
+    """커스텀 커넥터 등록을 확정한다 — 필요하면 RFC 7591 동적 등록을 수행하고, 바로 OAuth 를
+    시작한다(discover 미리보기와 달리 여기서부터 실제 부작용이 생긴다)."""
+    add = getattr(c.connectors, "add_custom_connector", None)
+    if add is None:
+        raise NotFoundError("custom connectors are not supported by this connector service")
+    start = await add(
+        display_name=body.display_name,
+        mcp_endpoint=body.mcp_endpoint,
+        auth_url=body.auth_url,
+        token_url=body.token_url,
+        registration_endpoint=body.registration_endpoint,
+        scopes=tuple(body.scopes),
+        client_id=body.client_id,
+        client_secret=body.client_secret,
+    )
+    return {"success": True, "data": {"oauth_url": start.oauth_url, "connector_id": start.connector_id}}
+
+
 @router.get("/oauth/callback")
 async def oauth_callback(
     code: str | None = None,
@@ -138,6 +199,20 @@ def _require_connector(c: Container, connector_id: str):
     return info
 
 
+def _require_connector_or_local(c: Container, connector_id: str) -> None:
+    """원격(connectors 테이블) 또는 로컬(.mcp.json) 커넥터 어느 쪽으로든 존재를 확인한다.
+
+    tool 권한처럼 두 종류 다 다루는 엔드포인트용 — 로컬 서버는 DB 행이 없어
+    _require_connector 만으로는 항상 404 난다.
+    """
+    if c.connectors.get_connector(connector_id) is not None:
+        return
+    exists = getattr(c.connectors, "local_server_exists", None)
+    if exists is not None and exists(connector_id):
+        return
+    raise NotFoundError(f"connector {connector_id} not found")
+
+
 @router.post("/{connector_id}/tools/resync")
 async def resync_tools(connector_id: str, c: Container = Depends(get_container)):
     """원격 MCP `tools/list` 를 다시 받아 카탈로그를 **강제 갱신**한다(즉시 적용).
@@ -174,7 +249,7 @@ async def apply_tool_update(connector_id: str, c: Container = Depends(get_contai
 @router.put("/{connector_id}/tools/permission")
 async def set_tool_permission(connector_id: str, body: ToolPermissionIn, c: Container = Depends(get_container)):
     """도구별 호출 정책(allow/approval/block)을 저장한다 — dispatcher 가 강제한다."""
-    _require_connector(c, connector_id)
+    _require_connector_or_local(c, connector_id)
     setter = getattr(c.connectors, "set_tool_permission", None)
     if setter is not None:
         setter(connector_id, body.tool_name, body.permission)

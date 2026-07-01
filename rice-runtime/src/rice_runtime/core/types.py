@@ -79,7 +79,9 @@ class ToolSpec:
     description: str
     parameters: dict[str, Any]  # JSON Schema for the arguments object
     # Where the tool came from — drives dispatch routing + permission checks.
-    source: Literal["builtin", "connector", "plugin"] = "builtin"
+    # "bridge" = tool_search/tool_describe/tool_call (RUNTIME_DESIGN §11 progressive
+    # disclosure) — folded-tool catalog lookup + a recursive dispatch, not a plain callable.
+    source: Literal["builtin", "connector", "plugin", "bridge"] = "builtin"
     # For connector/plugin tools: the owning instance id (connector_id / plugin_id).
     owner_id: str | None = None
     # Whether a successful call needs HITL approval (RUNTIME_DESIGN §5).

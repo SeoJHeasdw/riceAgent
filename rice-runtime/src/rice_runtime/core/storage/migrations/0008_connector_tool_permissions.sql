@@ -6,8 +6,14 @@
 --   approval → HITL 승인 후 실행 (기존 requires_approval 기본)
 --   block    → 실행 거부(호출 자체를 막음)
 -- 미저장 도구는 이름 휴리스틱(읽기=allow, 그 외=approval)으로 기본값을 계산한다.
+--
+-- connector_id 에 FK 를 걸지 않는다: 로컬 MCP(connector_id="local:<name>")는 .mcp.json
+-- 에서 매번 파생될 뿐 `connectors` 테이블에 행이 없어서, FK 를 걸면 로컬 도구의 권한
+-- 저장이 foreign_keys=ON 에서 즉시 실패한다. connector_id 는 원격이든 로컬이든 "이 권한이
+-- 누구 것인지"를 가리키는 문자열일 뿐이다. cascade 삭제 대신 ConnectorManager.delete() 가
+-- 명시적으로 정리한다.
 CREATE TABLE IF NOT EXISTS connector_tool_permissions (
-  connector_id  TEXT NOT NULL REFERENCES connectors(id) ON DELETE CASCADE,
+  connector_id  TEXT NOT NULL,
   tool_name     TEXT NOT NULL,
   permission    TEXT NOT NULL,   -- 'allow' | 'approval' | 'block'
   PRIMARY KEY (connector_id, tool_name)

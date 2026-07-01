@@ -152,3 +152,7 @@ async def test_connector_service_warms_and_invokes_local(tmp_path: Path, mock_se
 
     # 기본 권한: echo 는 읽기류 접두사가 아니므로 approval(외부 실행 안전기본).
     assert svc.permission_for("local:mock", "echo") == "approval"
+
+    # local_server_exists — permission 라우트의 "존재 확인" 가드가 쓴다(연결 라우트).
+    assert svc.local_server_exists("local:mock") is True
+    assert svc.local_server_exists("local:unknown") is False

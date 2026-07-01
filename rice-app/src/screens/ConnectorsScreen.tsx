@@ -2,7 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Button, Icon, Tag, ResizeHandle } from '../components/ui';
 import type { IconName } from '../components/ui/Icon';
-import { McpRegisterModal, ConnectorDirectoryModal, type McpRegisterPayload } from '../components/carbon';
+import {
+  McpRegisterModal,
+  ConnectorDirectoryModal,
+  CustomConnectorModal,
+  type McpRegisterPayload,
+  type CustomConnectorAddPayload,
+  type DiscoveredOAuthConfig,
+} from '../components/carbon';
 import { useResizable } from '../hooks/useResizable';
 import api from '../lib/api';
 import { openExternal } from '../lib/openExternal';
@@ -60,6 +67,18 @@ interface ConnectorInfoWire {
   update?: ConnectorUpdateWire | null;
   connected_at?: string | null;
   last_verified_at?: string | null;
+}
+
+/** GET /connectors/local 이 돌려주는 로컬 MCP 서버 wire 형태 (.mcp.json 파생). */
+interface LocalMcpServerWire {
+  connector_id: string;
+  name: string;
+  transport: 'stdio' | 'http';
+  command: string;
+  args: string[];
+  url: string;
+  running: boolean;
+  tools: ConnectorToolWire[];
 }
 
 // 도구 이름 접두사로 읽기/쓰기를 추정(그룹 헤더용 표시 힌트 — 실제 승인은 런타임이 강제).
@@ -194,6 +213,28 @@ const CONNECTABLE_PRESETS: Connector[] = (['gmail', 'calendar', 'drive'] as cons
   };
 });
 
+/** 백엔드 LocalMcpServerWire(.mcp.json 파생) → UI Connector 매핑 (local-mcp 전용). */
+const wireToLocalConnector = (s: LocalMcpServerWire): Connector => ({
+  id: s.connector_id,
+  name: s.name,
+  icon: s.transport === 'http' ? 'cloud' : 'server',
+  category: s.transport === 'http' ? 'HTTP MCP' : '로컬 MCP',
+  provider: s.transport === 'http' ? '로컬 MCP · http' : '로컬 MCP · stdio',
+  kind: 'local-mcp',
+  // running = 마지막 새로고침(spawn+tools/list)이 도구를 캐시했는지 — 호출마다 spawn 이라
+  // 지속 프로세스는 없다. 그래서 "실행 중"은 곧 "캐시된 도구가 있어 바로 쓸 수 있음"이다.
+  status: s.running ? 'connected' : 'disconnected',
+  account: s.transport === 'http' ? s.url : [s.command, ...s.args].join(' '),
+  lastSync: s.running ? '방금' : undefined,
+  summary: s.running
+    ? `.mcp.json 에 등록된 로컬 MCP 서버예요. 도구 ${s.tools.length}개를 확인했어요.`
+    : '.mcp.json 에 등록된 로컬 MCP 서버예요. 새로고침하면 노출 도구를 확인할 수 있어요.',
+  transport: s.transport === 'http' ? { type: 'http', endpoint: s.url } : { type: 'stdio', command: s.command, args: s.args },
+  scopes: s.tools.map(toolToScope),
+  usedBy: [],
+  examples: [],
+});
+
 /** stdio transport를 보기 좋은 한 줄 명령으로 렌더 */
 const transportLine = (t: McpTransport): string =>
   t.type === 'stdio' ? [t.command, ...t.args].join(' ') : t.endpoint;
@@ -323,6 +364,60 @@ const GroupPermissionMenu: React.FC<{ disabled?: boolean; onPick: (p: ScopePermi
   );
 };
 
+/**
+ * AddConnectorMenu — 원격 탭의 "추가" 드롭다운: 큐레이팅된 카탈로그를 둘러보거나,
+ * 임의의 MCP 서버 URL 로 커스텀 커넥터를 추가한다(OAuth 자동 디스커버리).
+ */
+const AddConnectorMenu: React.FC<{ onBrowse: () => void; onCustom: () => void }> = ({ onBrowse, onCustom }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex items-center gap-1 text-caption-01 text-link-primary hover:underline"
+      >
+        <Icon name="add" size={13} /> 추가
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-10 min-w-[170px] py-1 rounded-lg bg-layer-02 border border-border-subtle-01 shadow-overlay">
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              onBrowse();
+            }}
+            className="flex items-center gap-2 w-full px-3 py-1.5 text-caption-01 text-text-primary hover:bg-layer-hover-01 transition-colors"
+          >
+            <Icon name="search" size={12} className="flex-shrink-0" /> 둘러보기
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              onCustom();
+            }}
+            className="flex items-center gap-2 w-full px-3 py-1.5 text-caption-01 text-text-primary hover:bg-layer-hover-01 transition-colors"
+          >
+            <Icon name="tools" size={12} className="flex-shrink-0" /> 커스텀 추가
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const ConnectorDetailView: React.FC<{
   connectorId: string | null;
   connectors: Connector[];
@@ -332,9 +427,22 @@ const ConnectorDetailView: React.FC<{
   onRealConnect: (c: Connector) => void;
   onRealDisconnect: (c: Connector) => void;
   onResyncTools: (c: Connector) => void;
+  onRefreshLocal: (c: Connector) => void;
   onApplyUpdate: (c: Connector) => void;
   onSetToolPermission: (connectorId: string, toolName: string, perm: ScopePermission) => void;
-}> = ({ connectorId, connectors, setConnectors, online, busyId, onRealConnect, onRealDisconnect, onResyncTools, onApplyUpdate, onSetToolPermission }) => {
+}> = ({
+  connectorId,
+  connectors,
+  setConnectors,
+  online,
+  busyId,
+  onRealConnect,
+  onRealDisconnect,
+  onResyncTools,
+  onRefreshLocal,
+  onApplyUpdate,
+  onSetToolPermission,
+}) => {
   const c = connectors.find((x) => x.id === connectorId);
 
   if (!c || !connectorId) {
@@ -353,7 +461,13 @@ const ConnectorDetailView: React.FC<{
       else onRealConnect(c);
       return;
     }
-    // 오프라인(디자인 데모) 또는 로컬 MCP: 기존 목업 토글 유지.
+    // 런타임 온라인 + 로컬 MCP: 호출마다 spawn 이라 "중지"할 프로세스가 없다 — 다시 spawn 해
+    // 도구 카탈로그를 새로고침하는 것만 실제 동작이다.
+    if (online && isMcp) {
+      onRefreshLocal(c);
+      return;
+    }
+    // 오프라인(디자인 데모): 기존 목업 토글 유지.
     patch((x) =>
       x.status === 'connected'
         ? { ...x, status: 'disconnected', account: undefined, lastSync: undefined }
@@ -366,9 +480,9 @@ const ConnectorDetailView: React.FC<{
     );
   };
   // 도구는 제공자가 정의하므로 추가/삭제하지 않고 "언제 호출할 수 있는가"만 바꾼다.
-  // 실제(온라인) 커넥터면 백엔드에 정책을 저장한다 — dispatcher 가 이를 강제한다.
+  // 실제(온라인) 커넥터(원격이든 로컬 MCP 든)면 백엔드에 정책을 저장한다 — dispatcher 가 강제.
   const persistPerm = (toolName: string, perm: ScopePermission) => {
-    if (online && !isMcp) onSetToolPermission(c.id, toolName, perm);
+    if (online) onSetToolPermission(c.id, toolName, perm);
   };
   const setScopePermission = (idx: number, perm: ScopePermission) => {
     const tool = c.scopes[idx];
@@ -433,15 +547,19 @@ const ConnectorDetailView: React.FC<{
               kind={connected ? 'secondary' : 'primary'}
               size="sm"
               disabled={busy}
-              icon={<Icon name={busy ? 'renew' : connected ? 'close' : 'connect'} size={15} />}
+              icon={<Icon name={busy ? 'renew' : isMcp && online ? 'renew' : connected ? 'close' : 'connect'} size={15} />}
               onClick={toggleConnect}
             >
               {busy
-                ? online && !connected
+                ? isMcp && online
+                  ? '새로고침 중…'
+                  : online && !connected
                   ? '브라우저에서 로그인 대기…'
                   : '처리 중…'
                 : isMcp
-                ? connected
+                ? online
+                  ? '새로고침'
+                  : connected
                   ? '중지'
                   : '실행'
                 : connected
@@ -493,11 +611,12 @@ const ConnectorDetailView: React.FC<{
               connected ? (
                 <button
                   type="button"
-                  disabled={busy || (!isMcp && !online)}
-                  title={isMcp ? '서버 재시작' : '원격 MCP 서버에서 도구 목록을 다시 불러옵니다'}
+                  disabled={busy || !online}
+                  title={isMcp ? '서버를 다시 spawn 해 도구 목록을 새로 확인합니다' : '원격 MCP 서버에서 도구 목록을 다시 불러옵니다'}
                   onClick={() => {
-                    if (isMcp) return; // 로컬 MCP 재시작은 아직 목업(Phase 2)
-                    if (online) onResyncTools(c);
+                    if (!online) return;
+                    if (isMcp) onRefreshLocal(c);
+                    else onResyncTools(c);
                   }}
                   className="inline-flex items-center gap-1 text-caption-01 text-link-primary hover:underline disabled:opacity-50 disabled:no-underline"
                 >
@@ -627,6 +746,7 @@ function ConnectorsScreen() {
   const [kind, setKind] = useState<Kind>(initial ? connectorKind(initial) : 'remote');
   const [mcpModalOpen, setMcpModalOpen] = useState(false);
   const [directoryOpen, setDirectoryOpen] = useState(false);
+  const [customModalOpen, setCustomModalOpen] = useState(false);
   const [sel, setSel] = useState<string | null>((initial?.id ?? CONNECTORS[0]?.id) ?? null);
 
   // Resizable left rail
@@ -655,8 +775,7 @@ function ConnectorsScreen() {
     }
   }, [id, connectors]);
 
-  // ── 런타임 실연동: 온라인이면 'remote' 커넥터를 백엔드 실데이터로 대체(목업 제거) ──
-  // local-mcp 항목은 백엔드 관리 대상이 아니므로 목업 그대로 둔다(Phase 2).
+  // ── 런타임 실연동: 온라인이면 'remote'/'local-mcp' 커넥터 둘 다 백엔드 실데이터로 대체(목업 제거) ──
   const mergeRemote = (real: Connector[]) => {
     setConnectors((prev) => {
       const localMcp = prev.filter((x) => connectorKind(x) === 'local-mcp');
@@ -670,6 +789,18 @@ function ConnectorsScreen() {
     const res = await api.getConnectors();
     if (res.success && Array.isArray(res.data)) {
       mergeRemote((res.data as ConnectorInfoWire[]).map(infoToConnector));
+    }
+  };
+
+  const mergeLocal = (real: Connector[]) => {
+    setConnectors((prev) => [...prev.filter((x) => connectorKind(x) !== 'local-mcp'), ...real]);
+  };
+
+  /** `.mcp.json` 서버 + 캐시된 도구를 읽어온다(spawn 없음 — 그냥 GET). */
+  const loadLocal = async () => {
+    const res = await api.getLocalConnectors();
+    if (res.success && Array.isArray(res.data)) {
+      mergeLocal((res.data as LocalMcpServerWire[]).map(wireToLocalConnector));
     }
   };
 
@@ -694,6 +825,7 @@ function ConnectorsScreen() {
         mergeRemote(infos.map(infoToConnector));
         void runUpdateChecks(infos);
       }
+      void loadLocal();
     };
     void load();
     const unsub = api.onEnabledChange((en) => {
@@ -746,6 +878,40 @@ function ConnectorsScreen() {
     }
   };
 
+  // 커스텀 커넥터는 등록 직후엔 connector_type 을 화면이 몰라도 되게 connector_id 로 폴링한다
+  // (add 응답이 이미 확정된 id 를 돌려주므로).
+  const pollConnectedById = async (connectorId: string): Promise<boolean> => {
+    for (let i = 0; i < 48; i++) {
+      await new Promise((r) => setTimeout(r, 2500));
+      const res = await api.getConnectors();
+      if (res.success && Array.isArray(res.data)) {
+        const list = res.data as ConnectorInfoWire[];
+        if (list.some((x) => x.id === connectorId && x.status === 'connected')) return true;
+      }
+    }
+    return false;
+  };
+
+  // 부작용 없음(RFC 9728+8414 조회만) — 모달의 "검사" 버튼.
+  const handleDiscoverCustom = async (mcpEndpoint: string): Promise<DiscoveredOAuthConfig | null> => {
+    const res = await api.discoverCustomConnector(mcpEndpoint);
+    return res.success ? (res.data as DiscoveredOAuthConfig) ?? null : null;
+  };
+
+  // "추가하고 연결" — 여기서부터 부작용(동적 client 등록 + OAuth 시작).
+  const handleAddCustom = async (payload: CustomConnectorAddPayload): Promise<boolean> => {
+    const res = await api.addCustomConnector(payload);
+    const data = res.data as { oauth_url?: string; connector_id?: string } | undefined;
+    if (!res.success || !data?.oauth_url || !data.connector_id) return false;
+    setCustomModalOpen(false);
+    await openExternal(data.oauth_url); // 시스템 브라우저에서 로그인
+    if (await pollConnectedById(data.connector_id)) {
+      await refresh();
+      setSel(data.connector_id);
+    }
+    return true;
+  };
+
   const handleRealDisconnect = async (c: Connector) => {
     setBusyId(c.id);
     try {
@@ -762,6 +928,18 @@ function ConnectorsScreen() {
     try {
       await api.resyncConnectorTools(c.id);
       await refresh();
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  // 로컬 MCP 는 호출마다 spawn 이라 "중지"할 프로세스가 없다 — 다시 spawn 해 도구 카탈로그를
+  // 새로고침하는 것만 실제 동작. 백엔드가 .mcp.json 의 서버 전체를 한 번에 다시 warm 한다.
+  const handleRefreshLocal = async (c: Connector) => {
+    setBusyId(c.id);
+    try {
+      await api.refreshLocalConnectors();
+      await loadLocal();
     } finally {
       setBusyId(null);
     }
@@ -961,12 +1139,16 @@ function ConnectorsScreen() {
             </Tag>
           )}
           <div className="flex-1" />
-          <button
-            onClick={() => (isLocal ? setMcpModalOpen(true) : setDirectoryOpen(true))}
-            className="inline-flex items-center gap-1 text-caption-01 text-link-primary hover:underline"
-          >
-            <Icon name="add" size={13} /> {isLocal ? '서버 등록' : '추가'}
-          </button>
+          {isLocal ? (
+            <button
+              onClick={() => setMcpModalOpen(true)}
+              className="inline-flex items-center gap-1 text-caption-01 text-link-primary hover:underline"
+            >
+              <Icon name="add" size={13} /> 서버 등록
+            </button>
+          ) : (
+            <AddConnectorMenu onBrowse={() => setDirectoryOpen(true)} onCustom={() => setCustomModalOpen(true)} />
+          )}
         </div>
         {list.map((c) => {
           const on = c.id === effectiveSel;
@@ -1040,6 +1222,7 @@ function ConnectorsScreen() {
         onRealConnect={handleRealConnect}
         onRealDisconnect={handleRealDisconnect}
         onResyncTools={handleResyncTools}
+        onRefreshLocal={handleRefreshLocal}
         onApplyUpdate={handleApplyUpdate}
         onSetToolPermission={handleSetToolPermission}
       />
@@ -1050,6 +1233,14 @@ function ConnectorsScreen() {
         onClose={() => setDirectoryOpen(false)}
         existingIds={connectors.map((c) => c.id)}
         onAdd={handleAddFromDirectory}
+      />
+
+      {/* 커스텀 원격 커넥터 추가 (OAuth 자동 디스커버리) */}
+      <CustomConnectorModal
+        open={customModalOpen}
+        onClose={() => setCustomModalOpen(false)}
+        onDiscover={handleDiscoverCustom}
+        onAdd={handleAddCustom}
       />
 
       {/* 로컬 MCP 등록 모달 */}

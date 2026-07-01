@@ -244,6 +244,40 @@ class ApiClient {
   getConnectorStatus(id: string): Promise<ApiResponse> {
     return this.get(`/connectors/${id}/status`);
   }
+  /** `.mcp.json` 에 선언된 로컬 MCP 서버 + 캐시된 도구 목록 (local-MCP 탭 실데이터) */
+  getLocalConnectors(): Promise<ApiResponse> {
+    return this.get('/connectors/local');
+  }
+  /** 로컬 MCP 서버를 다시 spawn 해 도구 카탈로그를 갱신한다 (서버 전체 새로고침) */
+  refreshLocalConnectors(): Promise<ApiResponse> {
+    return this.send('POST', '/connectors/local/refresh');
+  }
+  /** 임의 MCP 서버 URL 로 OAuth 설정을 자동 발견한다(RFC 9728+8414, 부작용 없음 — 미리보기) */
+  discoverCustomConnector(mcpEndpoint: string): Promise<
+    ApiResponse<{
+      ok: boolean;
+      auth_url: string | null;
+      token_url: string | null;
+      registration_endpoint: string | null;
+      scopes: string[];
+      issuer: string | null;
+    }>
+  > {
+    return this.send('POST', '/connectors/custom/discover', { mcp_endpoint: mcpEndpoint });
+  }
+  /** 커스텀 커넥터 등록을 확정한다 — 필요하면 동적 client 등록(RFC 7591) 후 바로 OAuth 시작 */
+  addCustomConnector(payload: {
+    display_name: string;
+    mcp_endpoint: string;
+    auth_url: string;
+    token_url: string;
+    registration_endpoint?: string;
+    scopes?: string[];
+    client_id?: string;
+    client_secret?: string;
+  }): Promise<ApiResponse<{ oauth_url: string; connector_id: string }>> {
+    return this.send('POST', '/connectors/custom', payload);
+  }
 
   // ── personalization / config (CONTRACTS 1.3) ───────────────────
   getMemories(): Promise<ApiResponse> {

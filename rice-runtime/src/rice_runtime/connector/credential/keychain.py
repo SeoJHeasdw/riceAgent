@@ -110,3 +110,18 @@ class KeychainStore:
         kr.set_password(_SERVICE, _keychain_key(connector_id, "access_token"), access_token)
         expires_at = str(time.time() + expires_in)
         kr.set_password(_SERVICE, _keychain_key(connector_id, "expires_at"), expires_at)
+
+    # ── generic secrets (connector 자격증명 3종 스키마 밖) ──────────────────────
+    # 커스텀 원격 커넥터의 동적 등록(RFC 7591) client_secret 처럼, connector_id 인스턴스가
+    # 아니라 임의 키로 비밀을 저장해야 하는 경우용. DB 에는 절대 두지 않는다(§10.4).
+    def set_secret(self, key: str, value: str) -> None:
+        self._keyring().set_password(_SERVICE, f"rice.secret.{key}", value)
+
+    def get_secret(self, key: str) -> str | None:
+        return self._keyring().get_password(_SERVICE, f"rice.secret.{key}")
+
+    def delete_secret(self, key: str) -> None:
+        try:
+            self._keyring().delete_password(_SERVICE, f"rice.secret.{key}")
+        except Exception:  # noqa: BLE001 — 없어도 삭제는 성공 취급(idempotent)
+            pass

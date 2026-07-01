@@ -12,6 +12,8 @@ THE TURN, AS A CONTRACT (RUNTIME_DESIGN §2, LEARNING_LOOP §1)
       1. PERSIST    transcript.append(user message)
       2. PREFETCH   learning.prefetch(...)            → skills + memories + guidance
       3. ASSEMBLE   tools = builtin + connector.list_tools() + plugins.list_tools()
+                    (connector+plugin 합이 예산을 넘으면 tool_search/describe/call 3개
+                    브릿지로 접힌다 — §2.1/§11 progressive disclosure, tool_dispatch.py)
                     system_prompt = base ⊕ prefetch additions
                     → TurnContext
       4. RUN        AgentLoop.run(ctx)                 → thinking/message/tool_* events
@@ -70,7 +72,7 @@ from ..prompts.system import compose_system_prompt, render_skills_block
 from .interfaces import IApprovalGate, ITranscript
 from .loop import AgentLoop, LoopResult
 from .providers.interfaces import ILLMProvider
-from .tool_dispatch import BuiltinTool, ToolDispatcher
+from .tool_dispatch import BuiltinTool, ToolDispatcher, fold_tools_for_budget
 
 log = logging.getLogger("rice.agent.orchestrator")
 
@@ -147,12 +149,14 @@ class Orchestrator:
                 s for s in self._plugins.injected_skills() if s.name not in learned_names
             )
 
-            # 3. ASSEMBLE context (tools from every tool-bearing module)
-            tools = (
-                self._builtin_specs()
-                + tuple(self._connectors.list_tools())
-                + tuple(self._plugins.list_tools())
-            )
+            # 3. ASSEMBLE context (tools from every tool-bearing module).
+            # builtin = "core", always exposed as-is. connector+plugin = "non-core"; if
+            # their combined schema exceeds the tool budget, fold_tools_for_budget folds
+            # them behind 3 bridge tools (tool_search/describe/call — §2.1/§11) instead of
+            # sending every schema every turn. The dispatcher gets the full foldable
+            # catalog regardless, so tool_call can resolve a folded tool by name.
+            foldable_tools = tuple(self._connectors.list_tools()) + tuple(self._plugins.list_tools())
+            tools = fold_tools_for_budget(self._builtin_specs(), foldable_tools)
             # The model reads ctx.system_prompt only (the loop ignores injected_skills,
             # which is telemetry) → plugin skills must be rendered INTO the prompt.
             plugin_skill_block = render_skills_block(
@@ -177,6 +181,7 @@ class Orchestrator:
                 approvals=self._approvals,
                 approval_timeout_s=cfg.learning.approval_timeout_seconds,
                 builtins=self._builtins,
+                folded_catalog={t.name: t for t in foldable_tools},
             )
             loop = AgentLoop(
                 provider=self._resolve_provider(),

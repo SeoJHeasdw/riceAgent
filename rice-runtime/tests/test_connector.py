@@ -553,6 +553,20 @@ class TestToolPermissions:
         with pytest.raises(ValidationError):
             self._svc.set_tool_permission("c1", "create_draft", "maybe")
 
+    def test_set_permission_for_local_mcp_connector_id_does_not_raise(self):
+        """connector_tool_permissions 는 connectors(id) FK 가 없다(0008) — local:<name>
+        (.mcp.json 파생, connectors 테이블에 행이 없음)도 저장 가능해야 한다."""
+        self._svc.set_tool_permission("local:filesystem", "write_file", "approval")
+        assert self._svc.permission_for("local:filesystem", "write_file") == "approval"
+        assert self._svc.tool_permissions("local:filesystem") == {"write_file": "approval"}
+
+    @pytest.mark.asyncio
+    async def test_delete_cascades_tool_permissions(self):
+        """FK CASCADE 대신 manager.delete() 가 저장된 권한 행을 명시적으로 정리한다."""
+        self._svc.set_tool_permission("c1", "create_draft", "block")
+        await self._svc.delete("c1")
+        assert self._svc.tool_permissions("c1") == {}
+
 
 class TestDispatcherPolicyEnforcement:
     """dispatcher 가 도구별 정책(allow/approval/block)을 강제하는지 검증."""

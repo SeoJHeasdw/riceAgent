@@ -29,14 +29,16 @@ from ..core.paths import RicePaths
 from ..core.storage.sqlite import Database
 from ..core.types import ToolCall, ToolResult, ToolSpec, now_iso
 from .credential.keychain import KeychainStore
+from .custom_registry import CustomConnectorStore, resolve_descriptor
+from .discovery import DiscoveredOAuthConfig, discover_oauth_config, register_dynamic_client
 from .interfaces import ConnectorInfo, ConnectorStatus, IConnectorService, OAuthStart
 from .local.config import LocalMcpServer, connector_id_to_name, load_local_mcp_servers
 from .manager import ConnectorManager, _row_to_info
 from .mcp.client import RemoteMcpClient
 from .mcp.stdio_client import StdioMcpClient
-from .oauth.flow import OAuthFlow
+from .oauth.flow import OAuthFlow, default_redirect_uri
 from .permission.checker import PermissionChecker
-from .registry import descriptors, get_descriptor
+from .registry import descriptors
 
 log = logging.getLogger("rice.connector.service")
 
@@ -60,14 +62,26 @@ class ConnectorService(IConnectorService):
     def __init__(self, db: Database, paths: RicePaths | None = None, *, port: int | None = None) -> None:
         self._db = db
         self._paths = paths
+        self._port = port
         self._keychain = KeychainStore()
-        connectors_dir = paths.connectors if paths else None
-        # 타입별 OAuth flow 를 레지스트리에서 구성해 manager 와 공유(자격증명·redirect 일관).
+        self._connectors_dir = paths.connectors if paths else None
+        self._custom = CustomConnectorStore(db, self._keychain)
+        # 타입별 OAuth flow 를 레지스트리(정적 + 커스텀)에서 구성해 manager 와 공유
+        # (자격증명·redirect 일관). 커스텀은 client_id/secret 을 명시 주입한다(env/file
+        # 해석 경로가 아니라 동적 등록·DB·키체인에서 온 값이므로) — OAuthFlow 가 이미 지원.
         self._flows: dict[str, OAuthFlow] = {
-            d.connector_type: OAuthFlow(d, connectors_dir=connectors_dir, port=port)
+            d.connector_type: OAuthFlow(d, connectors_dir=self._connectors_dir, port=port)
             for d in descriptors()
         }
-        self._manager = ConnectorManager(db, self._keychain, self._flows)
+        for d in self._custom.list_descriptors():
+            self._flows[d.connector_type] = OAuthFlow(
+                d,
+                client_id=self._custom.client_id_for(d.connector_type),
+                client_secret=self._custom.client_secret_for(d.connector_type),
+                connectors_dir=self._connectors_dir,
+                port=port,
+            )
+        self._manager = ConnectorManager(db, self._keychain, self._flows, custom=self._custom)
         self._permission = PermissionChecker(paths.plugins if paths else None)
         # 원격 MCP 클라이언트 — connector_id 당 하나(엔드포인트는 타입 디스크립터에서).
         self._clients: dict[str, RemoteMcpClient] = {}
@@ -119,6 +133,10 @@ class ConnectorService(IConnectorService):
         self._local_specs = specs_by_conn
         log.info("local mcp warmed: %d server(s), %d tool(s)", len(specs_by_conn), total)
         return total
+
+    def local_server_exists(self, connector_id: str) -> bool:
+        """`.mcp.json` 에 선언된 로컬 서버 중 이 connector_id 가 있는지 (permission 라우트 가드용)."""
+        return any(s.connector_id == connector_id for s in self._local_servers())
 
     def local_servers_info(self) -> list[dict]:
         """로컬 MCP 서버 + 캐시된 도구를 UI 용 dict 목록으로 반환한다."""
@@ -329,6 +347,55 @@ class ConnectorService(IConnectorService):
         """OAuth 시작: state 토큰 생성 + pending 레코드 생성 + authorization URL 반환."""
         return self._manager.begin_connect(connector_type)
 
+    # ── 커스텀 원격 커넥터 ("추가" → "커스텀 추가") ──────────────────────────────
+    async def discover_custom_connector(self, mcp_endpoint: str) -> DiscoveredOAuthConfig:
+        """OAuth 메타데이터 자동 발견(RFC 9728+8414, 부작용 없음) — 모달 미리보기용."""
+        return await discover_oauth_config(mcp_endpoint)
+
+    async def add_custom_connector(
+        self,
+        *,
+        display_name: str,
+        mcp_endpoint: str,
+        auth_url: str,
+        token_url: str,
+        registration_endpoint: str | None = None,
+        scopes: tuple[str, ...] = (),
+        client_id: str | None = None,
+        client_secret: str | None = None,
+    ) -> OAuthStart:
+        """커스텀 커넥터 등록을 확정하고 즉시 OAuth 를 시작한다.
+
+        client_id 가 이미 주어지면(모달에서 수동 입력) 그대로 쓰고, 없고
+        registration_endpoint 가 있으면 여기서 RFC 7591 동적 등록을 실행한다(부작용이
+        있는 단계라 미리보기가 아니라 확정 시점에만 수행 — discovery.py 모듈 docstring 참고).
+        """
+        if not client_id and registration_endpoint:
+            redirect_uri = default_redirect_uri(self._port)
+            client_id, client_secret = await register_dynamic_client(registration_endpoint, redirect_uri)
+
+        connector_type = self._custom.unique_type(display_name)
+        descriptor = self._custom.add(
+            connector_type=connector_type,
+            display_name=display_name,
+            auth_url=auth_url,
+            token_url=token_url,
+            mcp_endpoint=mcp_endpoint,
+            scopes=scopes,
+            client_id=client_id or "",
+            client_secret=client_secret,
+            registration_endpoint=registration_endpoint,
+        )
+        # 방금 등록한 타입을 공유 flows 캐시에 즉시 반영 — 재시작 없이 바로 begin_connect 가능.
+        self._flows[connector_type] = OAuthFlow(
+            descriptor,
+            client_id=client_id,
+            client_secret=client_secret,
+            connectors_dir=self._connectors_dir,
+            port=self._port,
+        )
+        return self._manager.begin_connect(connector_type)
+
     async def complete_oauth(self, *, code: str, state: str) -> ConnectorInfo:
         """OAuth callback: state 검증 → 토큰 교환 → 키체인 저장 → status='connected'.
 
@@ -381,7 +448,7 @@ class ConnectorService(IConnectorService):
         """connector 전용 RemoteMcpClient (엔드포인트는 타입 디스크립터에서). 캐시한다."""
         client = self._clients.get(connector_id)
         if client is None:
-            descriptor = get_descriptor(connector_type)
+            descriptor = resolve_descriptor(self._custom, connector_type)
             endpoint = descriptor.resolved_mcp_endpoint() if descriptor else ""
             client = RemoteMcpClient(endpoint)
             client.set_owner(connector_id)

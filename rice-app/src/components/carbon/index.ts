@@ -36,6 +36,9 @@ export type { SkillAuthorModalProps } from './SkillAuthorModal';
 export { ConnectorDirectoryModal } from './ConnectorDirectoryModal';
 export type { ConnectorDirectoryModalProps } from './ConnectorDirectoryModal';
 
+export { CustomConnectorModal } from './CustomConnectorModal';
+export type { CustomConnectorModalProps, CustomConnectorAddPayload, DiscoveredOAuthConfig } from './CustomConnectorModal';
+
 // Marketplace components
 export { MarketplaceHeader } from './MarketplaceHeader';
 export type { MarketplaceHeaderProps } from './MarketplaceHeader';

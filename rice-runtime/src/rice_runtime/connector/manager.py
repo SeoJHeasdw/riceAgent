@@ -7,7 +7,8 @@
 
 타입별 차이(지원 타입·표시명·OAuth 엔드포인트)는 registry.ConnectorDescriptor 에서 오고,
 매니저는 그 위에서 제네릭하게 동작한다(하드코딩 없음). OAuth flow 는 타입별로
-주입된 flows 딕셔너리에 위임한다.
+주입된 flows 딕셔너리에 위임한다. 정적(registry.py) 타입 외에 사용자가 런타임에 추가한
+커스텀 타입(custom_registry.CustomConnectorStore, DB)도 같은 방식으로 지원한다.
 """
 from __future__ import annotations
 
@@ -19,9 +20,10 @@ from ..core.errors import NotFoundError, ValidationError
 from ..core.storage.sqlite import Database
 from ..core.types import new_id, now_iso
 from .credential.keychain import KeychainStore
+from .custom_registry import CustomConnectorStore, resolve_descriptor, resolve_supported_types
 from .interfaces import ConnectorInfo, OAuthStart
 from .oauth.flow import OAuthFlow
-from .registry import descriptors, get_descriptor, supported_types
+from .registry import descriptors
 
 log = logging.getLogger("rice.connector.manager")
 
@@ -31,7 +33,8 @@ class ConnectorManager:
 
     service.py 는 이 manager 에 begin_connect / complete_oauth / delete 를 위임한다.
     flows: connector_type → OAuthFlow. 미주입 시 레지스트리에서 기본 flow 를 만든다
-    (자격증명 미해석 — 골격/테스트용).
+    (자격증명 미해석 — 골격/테스트용). custom 미주입 시 커스텀 타입은 지원하지 않는다
+    (기존 테스트가 flows 만 넘기던 생성자 호환 유지).
     """
 
     def __init__(
@@ -39,12 +42,14 @@ class ConnectorManager:
         db: Database,
         keychain: KeychainStore,
         flows: dict[str, OAuthFlow] | None = None,
+        custom: CustomConnectorStore | None = None,
     ) -> None:
         self._db = db
         self._keychain = keychain
         # NOTE(agent): OAuthFlow 는 env > JSON(~/.rice/connectors) 순으로 자격증명을 읽는다.
         # ConnectorService 가 paths/port 를 아는 flow 들을 주입한다(공유). 없으면 자체 생성.
         self._flows: dict[str, OAuthFlow] = flows or {d.connector_type: OAuthFlow(d) for d in descriptors()}
+        self._custom = custom
 
         # state → connector_id 매핑 — OAuth callback 에서 state 로 connector 를 찾을 수 있게
         # 인메모리로 관리 (단일 활성 세션 전제 — RUNTIME_DESIGN §2).
@@ -59,16 +64,16 @@ class ConnectorManager:
     def begin_connect(self, connector_type: str) -> OAuthStart:
         """OAuth 시작: pending 레코드 생성 + authorization URL 반환.
 
-        connector_type 이 지원되지 않으면 ValidationError (RUNTIME_DESIGN §9.1).
-        같은 타입의 disconnected pending 레코드가 이미 존재하면 재사용한다.
+        connector_type 이 지원되지 않으면(정적+커스텀 어느 쪽에도 없음) ValidationError
+        (RUNTIME_DESIGN §9.1). 같은 타입의 disconnected pending 레코드가 있으면 재사용한다.
         """
-        if connector_type not in supported_types():
+        known = resolve_supported_types(self._custom)
+        if connector_type not in known:
             raise ValidationError(
-                f"unsupported connector_type={connector_type!r}. "
-                f"Supported: {sorted(supported_types())}"
+                f"unsupported connector_type={connector_type!r}. Supported: {sorted(known)}"
             )
 
-        descriptor = get_descriptor(connector_type)
+        descriptor = resolve_descriptor(self._custom, connector_type)
         display_name = descriptor.display_name if descriptor else connector_type
 
         # 같은 타입의 재사용 가능한 레코드(연결 전 pending 또는 자격증명 오류로 재연결 대상)
@@ -147,9 +152,14 @@ class ConnectorManager:
         return _row_to_info(updated)
 
     async def delete(self, connector_id: str) -> None:
-        """connector 레코드 삭제 + 키체인 항목 정리."""
+        """connector 레코드 삭제 + 키체인 항목 정리 + 저장된 도구 권한 정리.
+
+        connector_tool_permissions 는 FK 가 없어(로컬 MCP 도 같은 테이블을 쓰기 위해
+        의도적으로 뺐다 — 0008 참고) cascade 삭제가 안 되므로 여기서 명시적으로 정리한다.
+        """
         self._keychain.delete(connector_id)
         self._db.execute("DELETE FROM connectors WHERE id = ?", (connector_id,))
+        self._db.execute("DELETE FROM connector_tool_permissions WHERE connector_id = ?", (connector_id,))
 
 
 def _row_to_info(row) -> ConnectorInfo:
