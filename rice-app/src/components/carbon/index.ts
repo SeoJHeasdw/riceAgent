@@ -28,7 +28,7 @@ export { ModelRegisterModal } from './ModelRegisterModal';
 export type { ModelRegisterModalProps, RegisterPayload } from './ModelRegisterModal';
 
 export { McpRegisterModal } from './McpRegisterModal';
-export type { McpRegisterModalProps, McpRegisterPayload } from './McpRegisterModal';
+export type { McpRegisterModalProps } from './McpRegisterModal';
 
 export { SkillAuthorModal } from './SkillAuthorModal';
 export type { SkillAuthorModalProps } from './SkillAuthorModal';

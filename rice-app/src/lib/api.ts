@@ -10,6 +10,16 @@ import type {
   PlatformPublishPayload,
 } from './types';
 
+/** stdio 또는 http 로컬 MCP 서버 정의 — GET /connectors/local/{test,''} 요청 바디 공통 shape. */
+export interface LocalMcpTransportPayload {
+  transport: 'stdio' | 'http';
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
+}
+
 /**
  * API client for the RICE runtime — aligned to RICE_CONTRACTS 1.3 endpoints.
  *
@@ -251,6 +261,22 @@ class ApiClient {
   /** 로컬 MCP 서버를 다시 spawn 해 도구 카탈로그를 갱신한다 (서버 전체 새로고침) */
   refreshLocalConnectors(): Promise<ApiResponse> {
     return this.send('POST', '/connectors/local/refresh');
+  }
+  /** 등록 전 연결 확인 — 부작용 없음(.mcp.json 안 씀). "등록" 모달의 필수 게이트. */
+  testLocalConnector(
+    payload: LocalMcpTransportPayload,
+  ): Promise<ApiResponse<{ ok: boolean; error: string | null; tool_count: number; tools: string[] }>> {
+    return this.send('POST', '/connectors/local/test', payload);
+  }
+  /** `.mcp.json` 에 서버를 실제로 추가하고 바로 warm 한다(다른 서버는 안 건드림) */
+  registerLocalConnector(
+    payload: LocalMcpTransportPayload & { name: string },
+  ): Promise<ApiResponse> {
+    return this.send('POST', '/connectors/local', payload);
+  }
+  /** `.mcp.json` 에서 서버를 제거한다 */
+  deleteLocalConnector(name: string): Promise<ApiResponse> {
+    return this.send('DELETE', `/connectors/local/${encodeURIComponent(name)}`);
   }
   /** 임의 MCP 서버 URL 로 OAuth 설정을 자동 발견한다(RFC 9728+8414, 부작용 없음 — 미리보기) */
   discoverCustomConnector(mcpEndpoint: string): Promise<

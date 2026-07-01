@@ -6,12 +6,12 @@ import {
   McpRegisterModal,
   ConnectorDirectoryModal,
   CustomConnectorModal,
-  type McpRegisterPayload,
   type CustomConnectorAddPayload,
   type DiscoveredOAuthConfig,
 } from '../components/carbon';
 import { useResizable } from '../hooks/useResizable';
 import api from '../lib/api';
+import type { LocalMcpTransportPayload } from '../lib/api';
 import { openExternal } from '../lib/openExternal';
 import {
   CONNECTORS,
@@ -428,6 +428,7 @@ const ConnectorDetailView: React.FC<{
   onRealDisconnect: (c: Connector) => void;
   onResyncTools: (c: Connector) => void;
   onRefreshLocal: (c: Connector) => void;
+  onRemoveLocal: (c: Connector) => void;
   onApplyUpdate: (c: Connector) => void;
   onSetToolPermission: (connectorId: string, toolName: string, perm: ScopePermission) => void;
 }> = ({
@@ -440,10 +441,14 @@ const ConnectorDetailView: React.FC<{
   onRealDisconnect,
   onResyncTools,
   onRefreshLocal,
+  onRemoveLocal,
   onApplyUpdate,
   onSetToolPermission,
 }) => {
   const c = connectors.find((x) => x.id === connectorId);
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
+  // 다른 커넥터로 넘어가면 "정말 제거할까요?" 상태가 안 따라오게 초기화(잘못 클릭 방지).
+  useEffect(() => setConfirmingRemove(false), [connectorId]);
 
   if (!c || !connectorId) {
     return <div className="flex-1 flex items-center justify-center text-body-short-02 text-text-helper">커넥터를 선택하세요.</div>;
@@ -542,7 +547,40 @@ const ConnectorDetailView: React.FC<{
             </div>
             <p className="mt-1.5 text-body-short-01 leading-5 text-text-secondary">{c.summary}</p>
           </div>
-          <div className="flex-shrink-0">
+          <div className="flex-shrink-0 flex items-center gap-2">
+            {/* 로컬 MCP 제거 — .mcp.json 에서 실제로 지워지는 파괴적 동작이라 인라인 확인을 거친다. */}
+            {isMcp && online && (
+              confirmingRemove ? (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-caption-01 text-text-helper">정말 제거할까요?</span>
+                  <Button kind="ghost" size="sm" disabled={busy} onClick={() => setConfirmingRemove(false)}>
+                    취소
+                  </Button>
+                  <Button
+                    kind="danger"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => {
+                      setConfirmingRemove(false);
+                      onRemoveLocal(c);
+                    }}
+                  >
+                    제거
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  kind="ghost"
+                  size="sm"
+                  disabled={busy}
+                  icon={<Icon name="trash" size={14} />}
+                  onClick={() => setConfirmingRemove(true)}
+                  className="!text-[#da1e28] hover:!bg-[#da1e28]/10"
+                >
+                  제거
+                </Button>
+              )
+            )}
             <Button
               kind={connected ? 'secondary' : 'primary'}
               size="sm"
@@ -945,6 +983,18 @@ function ConnectorsScreen() {
     }
   };
 
+  // .mcp.json 에서 실제로 제거한다(파괴적 — 확인은 ConnectorDetailView 의 인라인 확인이 담당).
+  const handleRemoveLocal = async (c: Connector) => {
+    setBusyId(c.id);
+    try {
+      await api.deleteLocalConnector(c.id.replace(/^local:/, ''));
+      await loadLocal();
+      setSel((prev) => (prev === c.id ? null : prev));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   // 대기 중 업데이트 적용 — 백엔드가 pending 카탈로그를 활성으로 승격.
   const handleApplyUpdate = async (c: Connector) => {
     setBusyId(c.id);
@@ -977,28 +1027,20 @@ function ConnectorsScreen() {
   const selectedInKind = sel && kindList.some((c) => c.id === sel);
   const effectiveSel = selectedInKind ? sel : list[0]?.id ?? kindList[0]?.id ?? null;
 
-  const handleRegisterMcp = (p: McpRegisterPayload) => {
-    const id = `mcp-${Date.now()}`;
-    const newConnector: Connector = {
-      id,
-      name: p.name,
-      icon: p.transport.type === 'http' ? 'cloud' : 'server',
-      category: p.transport.type === 'http' ? 'HTTP MCP' : '로컬 MCP',
-      provider: p.transport.type === 'http' ? '로컬 MCP · http' : '로컬 MCP · stdio',
-      kind: 'local-mcp',
-      status: 'connected',
-      account: transportLine(p.transport),
-      lastSync: '방금',
-      summary: `방금 등록한 로컬 MCP 서버예요. 연결 테스트에서 도구 ${p.toolCount}개를 발견했습니다.`,
-      transport: p.transport,
-      scopes: Array.from({ length: p.toolCount }, (_, i) => ({ name: `tool_${i + 1}`, mode: '실행' })),
-      usedBy: [],
-      examples: ['이 서버의 도구로 무엇을 할 수 있는지 알려줘'],
-    };
-    setConnectors((a) => [...a, newConnector]);
+  // 연결 테스트 — 부작용 없음(.mcp.json 안 씀). 모달의 필수 게이트.
+  const handleTestLocalMcp = async (payload: LocalMcpTransportPayload) => {
+    const res = await api.testLocalConnector(payload);
+    return res.success ? (res.data as { ok: boolean; error: string | null; tool_count: number; tools: string[] }) : null;
+  };
+
+  // 등록 확정 — 여기서부터 부작용(.mcp.json 에 실제로 씀 + warm).
+  const handleRegisterLocalMcp = async (name: string, payload: LocalMcpTransportPayload): Promise<boolean> => {
+    const res = await api.registerLocalConnector({ ...payload, name });
+    if (!res.success) return false;
+    await loadLocal();
     setKind('local-mcp');
-    setSel(id);
-    setMcpModalOpen(false);
+    setSel(`local:${name}`);
+    return true;
   };
 
   const handleAddFromDirectory = (entry: CatalogConnector) => {
@@ -1223,6 +1265,7 @@ function ConnectorsScreen() {
         onRealDisconnect={handleRealDisconnect}
         onResyncTools={handleResyncTools}
         onRefreshLocal={handleRefreshLocal}
+        onRemoveLocal={handleRemoveLocal}
         onApplyUpdate={handleApplyUpdate}
         onSetToolPermission={handleSetToolPermission}
       />
@@ -1244,7 +1287,12 @@ function ConnectorsScreen() {
       />
 
       {/* 로컬 MCP 등록 모달 */}
-      <McpRegisterModal open={mcpModalOpen} onClose={() => setMcpModalOpen(false)} onRegister={handleRegisterMcp} />
+      <McpRegisterModal
+        open={mcpModalOpen}
+        onClose={() => setMcpModalOpen(false)}
+        onTest={handleTestLocalMcp}
+        onRegister={handleRegisterLocalMcp}
+      />
     </div>
   );
 }

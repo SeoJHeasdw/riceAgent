@@ -24,7 +24,7 @@ from __future__ import annotations
 import json
 import logging
 
-from ..core.errors import NotFoundError, ValidationError
+from ..core.errors import ConflictError, NotFoundError, ValidationError
 from ..core.paths import RicePaths
 from ..core.storage.sqlite import Database
 from ..core.types import ToolCall, ToolResult, ToolSpec, now_iso
@@ -32,7 +32,14 @@ from .credential.keychain import KeychainStore
 from .custom_registry import CustomConnectorStore, resolve_descriptor
 from .discovery import DiscoveredOAuthConfig, discover_oauth_config, register_dynamic_client
 from .interfaces import ConnectorInfo, ConnectorStatus, IConnectorService, OAuthStart
-from .local.config import LocalMcpServer, connector_id_to_name, load_local_mcp_servers
+from .local.config import (
+    LocalMcpServer,
+    LocalMcpServerExistsError,
+    add_local_mcp_server,
+    connector_id_to_name,
+    load_local_mcp_servers,
+    remove_local_mcp_server,
+)
 from .manager import ConnectorManager, _row_to_info
 from .mcp.client import RemoteMcpClient
 from .mcp.stdio_client import StdioMcpClient
@@ -104,27 +111,47 @@ class ConnectorService(IConnectorService):
             tools.extend(specs)
         return tools
 
-    # ── local MCP (.mcp.json, stdio) ────────────────────────────────────────────
+    # ── local MCP (.mcp.json, stdio+http) ───────────────────────────────────────
     def _local_servers(self) -> list[LocalMcpServer]:
         """`.mcp.json` 에 선언된 로컬 MCP 서버 목록 (없으면 [])."""
         if self._mcp_config_path is None:
             return []
         return load_local_mcp_servers(self._mcp_config_path)
 
-    async def warm_local(self) -> int:
-        """stdio 로컬 MCP 서버를 spawn 해 tools/list 를 캐시한다 (앱 startup 용).
+    def _find_local_server(self, name: str) -> LocalMcpServer | None:
+        return next((s for s in self._local_servers() if s.name == name), None)
 
-        로컬 프로세스 실행이라 원격과 달리 부팅 시 수행해도 무방하다. 서버별 실패는
-        건너뛴다(fail-safe). 반환: 캐시된 총 도구 수.
+    def _local_client(self, server: LocalMcpServer) -> StdioMcpClient | RemoteMcpClient:
+        """transport 에 맞는 클라이언트를 만든다. stdio 는 spawn-per-op, http 는 로컬
+        서버가 보통 인증이 없으므로 access_token="" 로 부른다(원격 OAuth 커넥터와 같은
+        RemoteMcpClient 를 재사용 — 프로토콜 로직은 동일하고 인증만 다르다)."""
+        if server.transport == "stdio":
+            return StdioMcpClient(server.command, server.args, server.env, owner_id=server.connector_id)
+        client = RemoteMcpClient(server.url, extra_headers=server.headers)
+        client.set_owner(server.connector_id)
+        return client
+
+    async def _local_list_tools(self, server: LocalMcpServer) -> list[ToolSpec]:
+        client = self._local_client(server)
+        if isinstance(client, StdioMcpClient):
+            return await client.list_tools()
+        return await client.list_tools("")
+
+    async def _local_call_tool(self, server: LocalMcpServer, call: ToolCall) -> ToolResult:
+        client = self._local_client(server)
+        if isinstance(client, StdioMcpClient):
+            return await client.call_tool(call.tool_name, call.arguments, call.id)
+        return await client.call_tool(call.tool_name, call.arguments, "", call.id)
+
+    async def warm_local(self) -> int:
+        """로컬 MCP 서버(stdio=spawn, http=probe) 를 전부 다시 불러 tools/list 를 캐시한다
+        (앱 startup 용). 서버별 실패는 건너뛴다(fail-safe). 반환: 캐시된 총 도구 수.
         """
         specs_by_conn: dict[str, list[ToolSpec]] = {}
         total = 0
         for server in self._local_servers():
-            if server.transport != "stdio":
-                continue  # http 로컬 서버는 향후 원격 경로에서 다룬다
-            client = StdioMcpClient(server.command, server.args, server.env, owner_id=server.connector_id)
             try:
-                specs = await client.list_tools()
+                specs = await self._local_list_tools(server)
             except Exception as exc:  # noqa: BLE001
                 log.warning("local mcp %s tools/list failed: %s", server.name, exc)
                 continue
@@ -137,6 +164,76 @@ class ConnectorService(IConnectorService):
     def local_server_exists(self, connector_id: str) -> bool:
         """`.mcp.json` 에 선언된 로컬 서버 중 이 connector_id 가 있는지 (permission 라우트 가드용)."""
         return any(s.connector_id == connector_id for s in self._local_servers())
+
+    async def test_local_mcp_server(
+        self,
+        *,
+        transport: str,
+        command: str = "",
+        args: tuple[str, ...] = (),
+        env: dict[str, str] | None = None,
+        url: str = "",
+        headers: dict[str, str] | None = None,
+    ) -> dict:
+        """등록 전 연결 확인 — **부작용 없음**(.mcp.json 안 건드림). "등록" 모달의 필수
+        게이트: 실제로 spawn(stdio)/probe(http) 해서 tools/list 가 성공하는지 확인한다."""
+        probe = LocalMcpServer(
+            name="__test__", transport=transport, command=command, args=tuple(args),
+            env=env or {}, url=url, headers=headers or {},
+        )
+        try:
+            specs = await self._local_list_tools(probe)
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc), "tool_count": 0, "tools": []}
+        return {"ok": True, "error": None, "tool_count": len(specs), "tools": [s.name for s in specs]}
+
+    async def register_local_mcp_server(
+        self,
+        name: str,
+        *,
+        transport: str,
+        command: str = "",
+        args: tuple[str, ...] = (),
+        env: dict[str, str] | None = None,
+        url: str = "",
+        headers: dict[str, str] | None = None,
+    ) -> dict:
+        """`.mcp.json` 에 실제로 쓰고, 이 서버만 바로 warm 한다(다른 서버는 안 건드림 —
+        여러 stdio 서버가 있을 때 등록 하나 때문에 전부 재-spawn 하지 않기 위해).
+        warm 실패는 등록 자체를 막지 않는다(새로고침으로 재시도 가능 — warm_local 과 동일 철학).
+        """
+        if self._mcp_config_path is None:
+            raise ValidationError("local MCP is not available (no workspace configured)")
+        try:
+            add_local_mcp_server(
+                self._mcp_config_path, name, transport=transport, command=command,
+                args=tuple(args), env=env, url=url, headers=headers,
+            )
+        except LocalMcpServerExistsError as exc:
+            raise ConflictError(str(exc)) from exc
+        except ValueError as exc:  # .mcp.json 이 깨져 있거나 transport 값이 잘못됨
+            raise ValidationError(str(exc)) from exc
+        server = self._find_local_server(name)
+        if server is not None:
+            try:
+                self._local_specs[server.connector_id] = await self._local_list_tools(server)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("warm after register failed for %s: %s", name, exc)
+        info = next((s for s in self.local_servers_info() if s["name"] == name), None)
+        if info is None:  # pragma: no cover - add_local_mcp_server 가 방금 썼으니 항상 있어야 함
+            raise RuntimeError(f"registered {name!r} but it did not appear in .mcp.json")
+        return info
+
+    def unregister_local_mcp_server(self, name: str) -> bool:
+        """`.mcp.json` 에서 제거 + 캐시·저장된 도구 권한 정리. 있었으면 True."""
+        if self._mcp_config_path is None:
+            return False
+        removed = remove_local_mcp_server(self._mcp_config_path, name)
+        if removed:
+            connector_id = f"local:{name}"
+            self._local_specs.pop(connector_id, None)
+            self._db.execute("DELETE FROM connector_tool_permissions WHERE connector_id=?", (connector_id,))
+        return removed
 
     def local_servers_info(self) -> list[dict]:
         """로컬 MCP 서버 + 캐시된 도구를 UI 용 dict 목록으로 반환한다."""
@@ -434,15 +531,12 @@ class ConnectorService(IConnectorService):
         return None
 
     async def _invoke_local(self, connector_id: str, call: ToolCall) -> ToolResult:
-        """로컬 MCP(stdio) 도구를 spawn 해 실행한다."""
+        """로컬 MCP(stdio=spawn, http=probe) 도구를 실행한다."""
         name = connector_id_to_name(connector_id)
-        server = next(
-            (s for s in self._local_servers() if s.name == name and s.transport == "stdio"), None
-        )
+        server = self._find_local_server(name) if name else None
         if server is None:
             return ToolResult(call.id, ok=False, error=f"local mcp server {name!r} not found in .mcp.json")
-        client = StdioMcpClient(server.command, server.args, server.env, owner_id=connector_id)
-        return await client.call_tool(call.tool_name, call.arguments, call.id)
+        return await self._local_call_tool(server, call)
 
     def _client_for(self, connector_id: str, connector_type: str) -> RemoteMcpClient:
         """connector 전용 RemoteMcpClient (엔드포인트는 타입 디스크립터에서). 캐시한다."""

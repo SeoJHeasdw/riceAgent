@@ -41,11 +41,17 @@ class RemoteMcpClient:
     (connector_id)를 지정하면 dispatcher 가 invoke 를 올바른 connector 로 라우팅한다.
     """
 
-    def __init__(self, endpoint: str) -> None:
+    def __init__(self, endpoint: str, *, extra_headers: dict[str, str] | None = None, transport=None) -> None:
         self._endpoint = endpoint
         self._owner_id: str = ""
         self._session_id: str | None = None
         self._initialized = False
+        # 로컬 HTTP MCP 서버(.mcp.json 의 headers) 처럼 Bearer 토큰 외에 고정 헤더가
+        # 필요한 경우용. 원격(OAuth) 커넥터는 None.
+        self._extra_headers = extra_headers or {}
+        # 테스트 전용 seam(discovery.py 와 같은 패턴) — httpx.MockTransport 주입.
+        # 운영 코드는 넘기지 않는다(기본 None → 실제 네트워크).
+        self._transport = transport
 
     @property
     def endpoint(self) -> str:
@@ -133,7 +139,7 @@ class RemoteMcpClient:
         import httpx  # lazy import (connectors extra)
 
         payload = {"jsonrpc": "2.0", "id": rpc_id, "method": method, "params": params}
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(transport=self._transport) as client:
             resp = await client.post(
                 self._endpoint,
                 json=payload,
@@ -152,7 +158,7 @@ class RemoteMcpClient:
         import httpx
 
         payload = {"jsonrpc": "2.0", "method": method, "params": {}}
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(transport=self._transport) as client:
             resp = await client.post(
                 self._endpoint,
                 json=payload,
@@ -165,11 +171,13 @@ class RemoteMcpClient:
 
     def _headers(self, access_token: str) -> dict[str, str]:
         headers = {
-            "Authorization": f"Bearer {access_token}",
+            **self._extra_headers,
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
             "MCP-Protocol-Version": _MCP_PROTOCOL_VERSION,
         }
+        if access_token:  # 로컬 무인증 HTTP MCP 서버는 access_token="" — 빈 Bearer 헤더를 안 보낸다.
+            headers["Authorization"] = f"Bearer {access_token}"
         if self._session_id:
             headers["Mcp-Session-Id"] = self._session_id
         return headers

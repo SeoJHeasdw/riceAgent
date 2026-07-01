@@ -5,6 +5,11 @@
   POST   /connectors                        begin OAuth (returns oauth_url)
   POST   /connectors/custom/discover        auto-discover OAuth metadata for an arbitrary MCP URL
   POST   /connectors/custom                 register a custom connector + begin OAuth
+  GET    /connectors/local                  list .mcp.json servers + cached tool catalog
+  POST   /connectors/local/refresh          re-spawn/probe every local server, refresh the cache
+  POST   /connectors/local/test             test-connect a not-yet-registered local server (no side effect)
+  POST   /connectors/local                  write a new server into .mcp.json + warm it
+  DELETE /connectors/local/{name}           remove a server from .mcp.json
   POST   /connectors/{id}/tools/resync      force re-fetch + apply the remote MCP tool catalog
   POST   /connectors/{id}/tools/check       detect remote catalog changes (sets a pending update)
   POST   /connectors/{id}/tools/apply-update  adopt the pending catalog update
@@ -38,6 +43,19 @@ class ToolPermissionIn(BaseModel):
 
 class CustomDiscoverIn(BaseModel):
     mcp_endpoint: str
+
+
+class LocalMcpTestIn(BaseModel):
+    transport: str  # "stdio" | "http"
+    command: str = ""
+    args: list[str] = []
+    env: dict[str, str] = {}
+    url: str = ""
+    headers: dict[str, str] = {}
+
+
+class LocalMcpRegisterIn(LocalMcpTestIn):
+    name: str
 
 
 class CustomConnectIn(BaseModel):
@@ -116,6 +134,42 @@ async def refresh_local_mcp(c: Container = Depends(get_container)):
     info_fn = getattr(c.connectors, "local_servers_info", None)
     data = info_fn() if info_fn is not None else []
     return {"success": True, "data": {"count": count, "servers": data}}
+
+
+@router.post("/local/test")
+async def test_local_mcp(body: LocalMcpTestIn, c: Container = Depends(get_container)):
+    """등록 전 연결 확인 — **부작용 없음**(.mcp.json 안 씀). "등록" 모달의 필수 게이트."""
+    test_fn = getattr(c.connectors, "test_local_mcp_server", None)
+    if test_fn is None:
+        return {"success": True, "data": {"ok": False, "error": "not supported", "tool_count": 0, "tools": []}}
+    result = await test_fn(
+        transport=body.transport, command=body.command, args=tuple(body.args),
+        env=body.env, url=body.url, headers=body.headers,
+    )
+    return {"success": True, "data": result}
+
+
+@router.post("/local")
+async def register_local_mcp(body: LocalMcpRegisterIn, c: Container = Depends(get_container)):
+    """`.mcp.json` 에 서버를 실제로 추가하고 바로 warm 한다(다른 서버는 안 건드림)."""
+    register = getattr(c.connectors, "register_local_mcp_server", None)
+    if register is None:
+        raise NotFoundError("local MCP registration is not supported by this connector service")
+    info = await register(
+        body.name, transport=body.transport, command=body.command, args=tuple(body.args),
+        env=body.env, url=body.url, headers=body.headers,
+    )
+    return {"success": True, "data": info}
+
+
+@router.delete("/local/{name}")
+async def unregister_local_mcp(name: str, c: Container = Depends(get_container)):
+    """`.mcp.json` 에서 서버를 제거한다."""
+    unregister = getattr(c.connectors, "unregister_local_mcp_server", None)
+    removed = unregister(name) if unregister is not None else False
+    if not removed:
+        raise NotFoundError(f"local mcp server {name!r} not found")
+    return {"success": True}
 
 
 @router.post("/custom/discover")

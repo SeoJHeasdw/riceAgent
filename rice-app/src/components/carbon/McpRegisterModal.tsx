@@ -1,170 +1,257 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Button, Icon, Modal } from '../ui';
-import type { McpTransport } from '../../lib/learningData';
-import { useToast } from '../../lib/toast/ToastContext';
+import type { LocalMcpTransportPayload } from '../../lib/api';
 
 /**
  * McpRegisterModal — 로컬 MCP 서버 등록 모달 (개발자).
  *
- * ModelRegisterModal과 동일한 게이트형 흐름을 따른다. 다만 대상은 API 키가 아니라
- * "내 기기에서 실행/연결되는 MCP 서버"이므로, 임의 로컬 코드 실행에 대한 경고를
- * 명시하고 전송 방식(stdio / http)을 분기한다.
+ * 실제 MCP 서버는 거의 항상 README 에 `{"mcpServers": {"name": {...}}}` 형태의 JSON
+ * 설치 스니펫을 제공한다 — 그래서 이 모달은 필드별 폼이 아니라 **JSON 붙여넣기/파일
+ * 업로드**를 1차 입력으로 삼는다(개별 command/args/env 필드 입력은 안 함).
  *
- * 등록 흐름(게이트형):
- *   1. 전송 방식 선택 → 이름 · 실행 명령(stdio) 또는 엔드포인트(http) 입력
- *   2. "연결 테스트"로 핸드셰이크 검증 (선택이 아니라 필수 게이트)
- *   3. 테스트 통과(= 노출 도구 확인) 시에만 "등록" 활성화
- *   4. 등록 시 즉시 목록에 추가 후 닫힘
+ * mcpServers 래퍼에 서버가 여러 개 있으면(예: 기존 .mcp.json 통째로 붙여넣기) 전부
+ * 파싱해서 목록으로 보여주고, 체크박스로 고른 것만 테스트·등록한다.
+ *
+ * 흐름(둘 다 실제 백엔드 호출 — 부작용 경계가 다르다):
+ *   1. JSON 붙여넣기(또는 파일 선택) → "확인" → 파싱 → 서버 목록(이름 편집 가능) 표시
+ *   2. "연결 테스트" → 선택된 항목을 실제로 spawn(stdio)/probe(http) 해서 tools/list 를
+ *      받는다. **부작용 없음** — `.mcp.json` 은 안 건드린다. 등록의 필수 게이트.
+ *   3. 테스트 통과한 항목만 "등록" 대상이 된다 — 발견한 도구 개수를 보여준다.
+ *   4. "등록" → 통과한 항목을 `.mcp.json` 에 실제로 쓰고 바로 warm 한다.
  */
-
-export interface McpRegisterPayload {
-  name: string;
-  transport: McpTransport;
-  /** 테스트에서 발견한 노출 도구 수 (프로토타입: 목 값) */
-  toolCount: number;
-}
-
-type TransportType = 'stdio' | 'http';
-type TestState = 'idle' | 'testing' | 'ok' | 'fail';
 
 export interface McpRegisterModalProps {
   open: boolean;
   onClose: () => void;
-  /** 테스트 통과 후 등록 확정 시 호출 */
-  onRegister: (payload: McpRegisterPayload) => void;
+  /** 부작용 없음(spawn/probe 만) — null 이면 요청 자체가 실패한 것 */
+  onTest: (
+    payload: LocalMcpTransportPayload,
+  ) => Promise<{ ok: boolean; error: string | null; tools: string[] } | null>;
+  /** 여기서부터 부작용(.mcp.json 에 실제로 씀 + warm). true=성공 */
+  onRegister: (name: string, payload: LocalMcpTransportPayload) => Promise<boolean>;
 }
 
-/** "KEY=VALUE" 줄들을 env 배열로 파싱 (빈 줄·형식 불량 줄은 무시) */
-function parseEnv(raw: string): { key: string; value: string }[] {
-  return raw
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line && line.includes('='))
-    .map((line) => {
-      const idx = line.indexOf('=');
-      return { key: line.slice(0, idx).trim(), value: line.slice(idx + 1).trim() };
-    })
-    .filter((e) => e.key.length > 0);
+interface ParsedEntry {
+  name: string;
+  payload: LocalMcpTransportPayload;
 }
 
-const inputCls =
-  'w-full h-10 px-3.5 bg-field-01 text-text-primary font-mono text-body-short-01 border border-border-strong-01 rounded-lg outline-none transition-colors focus:border-focus focus:ring-1 focus:ring-focus placeholder:text-text-placeholder placeholder:font-sans';
+type RowTestStatus = 'idle' | 'testing' | 'ok' | 'fail';
 
-export const McpRegisterModal: React.FC<McpRegisterModalProps> = ({ open, onClose, onRegister }) => {
-  const [transport, setTransport] = useState<TransportType>('stdio');
-  const [name, setName] = useState('');
-  const [command, setCommand] = useState('');
-  const [args, setArgs] = useState('');
-  const [env, setEnv] = useState('');
-  const [endpoint, setEndpoint] = useState('');
-  const [test, setTest] = useState<TestState>('idle');
-  const [toolCount, setToolCount] = useState(0);
-  const toast = useToast();
+interface RowState {
+  entry: ParsedEntry;
+  selected: boolean;
+  test: RowTestStatus;
+  testError: string | null;
+  tools: string[];
+  registered: boolean;
+  registerError: string | null;
+}
 
-  // 모달이 열릴 때마다 폼 초기화
+const EXAMPLE_JSON = `{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path"]
+    }
+  }
+}`;
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+function toPayload(cfg: Record<string, unknown>): LocalMcpTransportPayload | null {
+  if (typeof cfg.command === 'string' && cfg.command.trim()) {
+    return {
+      transport: 'stdio',
+      command: cfg.command,
+      args: Array.isArray(cfg.args) ? cfg.args.map((a) => String(a)) : [],
+      env: isPlainObject(cfg.env) ? (cfg.env as Record<string, string>) : {},
+    };
+  }
+  if (typeof cfg.url === 'string' && cfg.url.trim()) {
+    return {
+      transport: 'http',
+      url: cfg.url,
+      headers: isPlainObject(cfg.headers) ? (cfg.headers as Record<string, string>) : {},
+    };
+  }
+  return null;
+}
+
+/** README 스니펫 그대로(`{"mcpServers": {...}}`), 래퍼 없는 다중({"name": {...}, ...}),
+ * 래퍼도 이름도 없는 단일({"command": ...}) 셋 다 받는다. */
+function parseLocalMcpJson(text: string): { entries: ParsedEntry[] } | { error: string } {
+  let data: unknown;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return { error: '올바른 JSON이 아니에요.' };
+  }
+  if (!isPlainObject(data)) return { error: '올바른 JSON 객체가 아니에요.' };
+
+  const container = isPlainObject(data.mcpServers) ? (data.mcpServers as Record<string, unknown>) : data;
+  const entries: ParsedEntry[] = [];
+  for (const [name, cfg] of Object.entries(container)) {
+    if (!isPlainObject(cfg)) continue;
+    const payload = toPayload(cfg);
+    if (payload) entries.push({ name, payload });
+  }
+  if (entries.length > 0) return { entries };
+
+  const bare = toPayload(data);
+  if (bare) return { entries: [{ name: '', payload: bare }] };
+
+  return { error: 'command 또는 url이 있는 MCP 서버 설정을 찾지 못했어요.' };
+}
+
+const textareaCls =
+  'w-full h-40 px-3.5 py-2.5 bg-field-01 text-text-primary font-mono text-caption-01 leading-relaxed border border-border-strong-01 rounded-lg outline-none transition-colors focus:border-focus focus:ring-1 focus:ring-focus placeholder:text-text-placeholder resize-none disabled:opacity-60';
+
+export const McpRegisterModal: React.FC<McpRegisterModalProps> = ({ open, onClose, onTest, onRegister }) => {
+  const [jsonText, setJsonText] = useState('');
+  const [parseError, setParseError] = useState<string | null>(null);
+  const [rows, setRows] = useState<RowState[]>([]);
+  const [testingAll, setTestingAll] = useState(false);
+  const [registering, setRegistering] = useState(false);
+  const [registerSummaryError, setRegisterSummaryError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const busy = testingAll || registering;
+
   useEffect(() => {
     if (open) {
-      setTransport('stdio');
-      setName('');
-      setCommand('');
-      setArgs('');
-      setEnv('');
-      setEndpoint('');
-      setTest('idle');
-      setToolCount(0);
+      setJsonText('');
+      setParseError(null);
+      setRows([]);
+      setTestingAll(false);
+      setRegistering(false);
+      setRegisterSummaryError(null);
     }
   }, [open]);
 
-  const trimmedName = name.trim();
-  const fieldsReady = useMemo(() => {
-    if (trimmedName.length === 0) return false;
-    return transport === 'stdio' ? command.trim().length > 0 : endpoint.trim().length > 0;
-  }, [trimmedName, transport, command, endpoint]);
-
-  const canTest = fieldsReady && test !== 'testing';
-  const canRegister = test === 'ok';
-
-  // 입력이 바뀌면 이전 테스트 결과 무효
-  const invalidate = () => setTest((t) => (t === 'idle' ? t : 'idle'));
-
-  const handleTransport = (t: TransportType) => {
-    setTransport(t);
-    invalidate();
+  const applyParse = (text: string) => {
+    const result = parseLocalMcpJson(text);
+    if ('error' in result) {
+      setParseError(result.error);
+      setRows([]);
+      return;
+    }
+    setParseError(null);
+    setRegisterSummaryError(null);
+    setRows(
+      result.entries.map((entry) => ({
+        entry,
+        selected: entry.name.trim().length > 0,
+        test: 'idle',
+        testError: null,
+        tools: [],
+        registered: false,
+        registerError: null,
+      })),
+    );
   };
 
-  const runTest = () => {
+  const handleFileChosen = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // 같은 파일을 다시 골라도 onChange 가 발생하도록
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = String(reader.result ?? '');
+      setJsonText(text);
+      applyParse(text);
+    };
+    reader.readAsText(file);
+  };
+
+  const setRowName = (idx: number, name: string) => {
+    setRows((rs) =>
+      rs.map((r, i) => (i === idx ? { ...r, entry: { ...r.entry, name }, test: 'idle', testError: null } : r)),
+    );
+  };
+  const toggleRowSelected = (idx: number) => {
+    setRows((rs) => rs.map((r, i) => (i === idx ? { ...r, selected: !r.selected } : r)));
+  };
+
+  const testableRows = rows.filter((r) => r.selected && r.entry.name.trim().length > 0);
+  const canTest = testableRows.length > 0 && !busy;
+  const canRegister = rows.some((r) => r.selected && r.test === 'ok' && !r.registered) && !busy;
+
+  const runTestAll = async () => {
     if (!canTest) return;
-    setTest('testing');
-    // 진척률 없는 핸드셰이크 → indeterminate 진행률 토스트(progress 생략).
-    const sublabel = transport === 'stdio' ? command.trim() : endpoint.trim();
-    const job = toast.progress({ label: '연결 확인 중', sublabel: sublabel || trimmedName });
-    // 프로토타입: 실제 핸드셰이크 없이 형식만 검증
-    window.setTimeout(() => {
-      const ok =
-        transport === 'stdio'
-          ? command.trim().length > 0
-          : /^https?:\/\/.+/i.test(endpoint.trim());
-      if (ok) {
-        // 발견 도구 수는 데모용으로 입력에서 의사난수 생성
-        const found = 3 + ((command.length + endpoint.length) % 5);
-        setToolCount(found);
-        setTest('ok');
-        job.done('success', `연결 성공 · 도구 ${found}개`);
-      } else {
-        setTest('fail');
-        job.done('error', '연결 실패');
-      }
-    }, 1000);
+    setTestingAll(true);
+    for (let i = 0; i < rows.length; i++) {
+      if (!rows[i].selected || !rows[i].entry.name.trim()) continue;
+      setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, test: 'testing', testError: null } : r)));
+      const result = await onTest(rows[i].entry.payload);
+      setRows((rs) =>
+        rs.map((r, idx) => {
+          if (idx !== i) return r;
+          if (result?.ok) return { ...r, test: 'ok', tools: result.tools, testError: null };
+          return { ...r, test: 'fail', testError: result?.error || '연결을 확인하지 못했어요.' };
+        }),
+      );
+    }
+    setTestingAll(false);
   };
 
-  const buildTransport = (): McpTransport =>
-    transport === 'stdio'
-      ? {
-          type: 'stdio',
-          command: command.trim(),
-          args: args
-            .trim()
-            .split(/\s+/)
-            .filter((a) => a.length > 0),
-          env: parseEnv(env).length > 0 ? parseEnv(env) : undefined,
-        }
-      : { type: 'http', endpoint: endpoint.trim() };
-
-  const handleRegister = () => {
+  const runRegisterSelected = async () => {
     if (!canRegister) return;
-    onRegister({ name: trimmedName, transport: buildTransport(), toolCount });
+    setRegistering(true);
+    setRegisterSummaryError(null);
+    const targets = rows
+      .map((r, i) => ({ r, i }))
+      .filter(({ r }) => r.selected && r.test === 'ok' && !r.registered);
+    let successCount = 0;
+    for (const { r, i } of targets) {
+      const ok = await onRegister(r.entry.name.trim(), r.entry.payload);
+      if (ok) {
+        successCount += 1;
+        setRows((rs) => rs.map((row, idx) => (idx === i ? { ...row, registered: true, registerError: null } : row)));
+      } else {
+        setRows((rs) =>
+          rs.map((row, idx) =>
+            idx === i ? { ...row, registerError: '등록 실패 — 이 이름이 이미 등록되어 있는지 확인하세요' } : row,
+          ),
+        );
+      }
+    }
+    setRegistering(false);
+    if (successCount === targets.length) {
+      onClose();
+    } else if (successCount === 0) {
+      setRegisterSummaryError('등록하지 못했어요. 아래 항목별 오류를 확인하세요.');
+    } else {
+      setRegisterSummaryError(`${successCount}/${targets.length}개만 등록됐어요 — 나머지 항목을 확인하세요.`);
+    }
   };
 
   const footer = (
     <div className="flex items-center justify-between w-full">
-      <Button kind="ghost" size="sm" onClick={onClose} disabled={test === 'testing'} className="!h-7">
+      <Button kind="ghost" size="sm" onClick={() => { if (!busy) onClose(); }} disabled={busy} className="!h-7">
         취소
       </Button>
       <div className="flex items-center gap-2">
         <Button
           kind="tertiary"
           size="sm"
-          onClick={runTest}
-          loading={test === 'testing'}
+          onClick={runTestAll}
+          loading={testingAll}
           disabled={!canTest}
-          icon={test !== 'testing' ? <Icon name="connect" size={14} /> : undefined}
+          icon={!testingAll ? <Icon name="connect" size={14} /> : undefined}
           className="!h-7"
         >
-          {test === 'testing' ? '테스트 중…' : test === 'ok' ? '다시 테스트' : '연결 테스트'}
+          {testingAll ? '테스트 중…' : '연결 테스트'}
         </Button>
-        {/* 등록은 테스트 통과(게이트) 후에만 활성화 — 비활성 시 hover 안내 */}
         <div className="relative group">
-          <Button kind="primary" size="sm" onClick={handleRegister} disabled={!canRegister} className="!h-7">
+          <Button kind="primary" size="sm" onClick={runRegisterSelected} loading={registering} disabled={!canRegister} className="!h-7">
             <Icon name="check" size={14} className="mr-1.5" />
             등록
           </Button>
-          {!canRegister && (
+          {!canRegister && !registering && (
             <div className="pointer-events-none absolute bottom-full right-0 mb-2 w-max max-w-[240px] px-2.5 py-1.5 rounded-md bg-text-primary text-text-inverse text-caption-01 shadow-overlay opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-150">
-              {fieldsReady
-                ? "먼저 '연결 테스트'를 통과하세요"
-                : transport === 'stdio'
-                ? '이름과 실행 명령을 입력한 뒤 연결 테스트를 실행하세요'
-                : '이름과 엔드포인트를 입력한 뒤 연결 테스트를 실행하세요'}
+              {rows.length === 0 ? 'JSON을 붙여넣고 확인하세요' : "먼저 '연결 테스트'를 통과하세요"}
               <span className="absolute top-full right-4 -mt-px border-4 border-transparent border-t-text-primary" />
             </div>
           )}
@@ -174,159 +261,126 @@ export const McpRegisterModal: React.FC<McpRegisterModalProps> = ({ open, onClos
   );
 
   return (
-    <Modal
-      open={open}
-      onClose={() => {
-        if (test !== 'testing') onClose();
-      }}
-      title="로컬 MCP 서버 등록"
-      size="sm"
-      footer={footer}
-    >
+    <Modal open={open} onClose={() => { if (!busy) onClose(); }} title="로컬 MCP 서버 등록" size="md" footer={footer}>
       <div className="space-y-5">
         {/* 실행 경고 — 로컬 MCP의 핵심 신뢰 모델 */}
         <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg bg-[#da1e28]/10 border border-[#da1e28]/30">
           <Icon name="warning" size={15} filled className="text-[#ff8389] flex-shrink-0 mt-0.5" />
           <p className="text-caption-01 text-text-helper leading-relaxed">
             로컬 MCP 서버는 <span className="text-[#ff8389] font-medium">내 컴퓨터에서 직접 코드를 실행</span>합니다.
-            신뢰할 수 있는 명령·엔드포인트만 등록하세요.
+            신뢰할 수 있는 출처의 설정만 등록하세요.
           </p>
         </div>
 
-        {/* 전송 방식 */}
+        {/* JSON 입력 */}
         <div>
-          <label className="text-label-01 text-text-secondary mb-2 block">전송 방식</label>
-          <div className="grid grid-cols-2 gap-1.5">
-            {([
-              { id: 'stdio' as const, label: 'stdio', sub: '로컬 명령 실행' },
-              { id: 'http' as const, label: 'HTTP', sub: '로컬 엔드포인트' },
-            ]).map((opt) => {
-              const active = opt.id === transport;
-              return (
-                <button
-                  key={opt.id}
-                  type="button"
-                  onClick={() => handleTransport(opt.id)}
-                  aria-pressed={active}
-                  className={`px-3 py-2 rounded-lg border text-left transition-all duration-150 ${
-                    active
-                      ? 'border-interactive bg-[#0f62fe]/10 text-text-primary'
-                      : 'border-border-subtle-01 bg-background text-text-secondary hover:bg-layer-hover-01 hover:border-border-strong-01'
-                  }`}
-                >
-                  <div className="text-body-short-01 font-semibold">{opt.label}</div>
-                  <div className="text-caption-01 text-text-helper">{opt.sub}</div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* 이름 */}
-        <div>
-          <label className="text-label-01 text-text-secondary mb-1.5 block">이름</label>
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => {
-              setName(e.target.value);
-              invalidate();
-            }}
-            placeholder="예: Filesystem, Git"
-            className={inputCls.replace('font-mono ', '')}
-          />
-        </div>
-
-        {transport === 'stdio' ? (
-          <>
-            {/* 실행 명령 */}
-            <div>
-              <label className="text-label-01 text-text-secondary mb-1.5 block">실행 명령</label>
-              <input
-                type="text"
-                value={command}
-                onChange={(e) => {
-                  setCommand(e.target.value);
-                  invalidate();
-                }}
-                placeholder="npx · uvx · python …"
-                autoComplete="off"
-                spellCheck={false}
-                className={inputCls}
-              />
-            </div>
-            {/* 인자 */}
-            <div>
-              <label className="text-label-01 text-text-secondary mb-1.5 block">
-                인자 <span className="text-text-placeholder font-normal">· 공백으로 구분</span>
-              </label>
-              <input
-                type="text"
-                value={args}
-                onChange={(e) => {
-                  setArgs(e.target.value);
-                  invalidate();
-                }}
-                placeholder="-y @modelcontextprotocol/server-filesystem /path"
-                autoComplete="off"
-                spellCheck={false}
-                className={inputCls}
-              />
-            </div>
-            {/* 환경변수 */}
-            <div>
-              <label className="text-label-01 text-text-secondary mb-1.5 block">
-                환경변수 <span className="text-text-placeholder font-normal">· 선택 · KEY=VALUE 줄바꿈</span>
-              </label>
-              <textarea
-                value={env}
-                onChange={(e) => {
-                  setEnv(e.target.value);
-                  invalidate();
-                }}
-                placeholder={'API_TOKEN=...\nLOG_LEVEL=info'}
-                rows={2}
-                spellCheck={false}
-                className={`${inputCls} h-auto py-2.5 resize-none leading-relaxed`}
-              />
-            </div>
-          </>
-        ) : (
-          /* HTTP 엔드포인트 */
-          <div>
-            <label className="text-label-01 text-text-secondary mb-1.5 block">엔드포인트</label>
+          <div className="flex items-center justify-between mb-1.5">
+            <label className="text-label-01 text-text-secondary">MCP 서버 설정 (JSON)</label>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => fileInputRef.current?.click()}
+              className="inline-flex items-center gap-1 text-caption-01 text-link-primary hover:underline disabled:opacity-50"
+            >
+              <Icon name="attachment" size={12} /> 파일 선택
+            </button>
             <input
-              type="text"
-              value={endpoint}
-              onChange={(e) => {
-                setEndpoint(e.target.value);
-                invalidate();
-              }}
-              placeholder="http://localhost:3000/mcp"
-              autoComplete="off"
-              spellCheck={false}
-              className={inputCls}
+              ref={fileInputRef}
+              type="file"
+              accept=".json,application/json"
+              onChange={handleFileChosen}
+              className="hidden"
             />
           </div>
+          <textarea
+            value={jsonText}
+            disabled={busy}
+            onChange={(e) => {
+              setJsonText(e.target.value);
+              setParseError(null);
+            }}
+            placeholder={EXAMPLE_JSON}
+            spellCheck={false}
+            className={textareaCls}
+          />
+          <p className="mt-1.5 text-caption-01 text-text-helper leading-relaxed">
+            MCP 서버 문서의 설치 스니펫을 그대로 붙여넣으세요. 서버가 여러 개면(예: 기존 .mcp.json 파일)
+            전부 인식해서 목록으로 보여줘요.
+          </p>
+          <Button kind="tertiary" size="sm" onClick={() => applyParse(jsonText)} disabled={busy || !jsonText.trim()} className="!h-7 mt-2.5">
+            확인
+          </Button>
+          {parseError && (
+            <div className="mt-2 flex items-center gap-1.5 text-caption-01 text-support-error">
+              <Icon name="warning" size={14} filled />
+              {parseError}
+            </div>
+          )}
+        </div>
+
+        {/* 파싱된 서버 목록 */}
+        {rows.length > 0 && (
+          <div>
+            <label className="text-label-01 text-text-secondary mb-1.5 block">
+              찾은 서버 · {rows.length}개
+            </label>
+            <div className="flex flex-col gap-px bg-border-subtle-01 rounded-lg overflow-hidden">
+              {rows.map((row, idx) => (
+                <div key={idx} className="bg-background px-3 py-2.5">
+                  <div className="flex items-center gap-2.5">
+                    <input
+                      type="checkbox"
+                      checked={row.selected}
+                      disabled={busy}
+                      onChange={() => toggleRowSelected(idx)}
+                      className="w-4 h-4 flex-shrink-0 accent-interactive"
+                    />
+                    <input
+                      type="text"
+                      value={row.entry.name}
+                      disabled={busy}
+                      onChange={(e) => setRowName(idx, e.target.value)}
+                      placeholder="이름을 입력하세요"
+                      className="flex-1 min-w-0 h-8 px-2.5 bg-field-01 text-text-primary text-body-short-01 border border-border-strong-01 rounded-md outline-none focus:border-focus focus:ring-1 focus:ring-focus disabled:opacity-60"
+                    />
+                    <span className="flex-shrink-0 text-caption-01 font-mono text-text-helper px-1.5 py-0.5 rounded bg-layer-02">
+                      {row.entry.payload.transport}
+                    </span>
+                    <span className="flex-shrink-0 w-5 flex items-center justify-center">
+                      {row.test === 'testing' && <span className="ia-spinner w-3.5 h-3.5" />}
+                      {row.test === 'ok' && <Icon name="check-circle" size={16} className="text-support-success" />}
+                      {row.test === 'fail' && <Icon name="warning" size={16} filled className="text-support-error" />}
+                    </span>
+                  </div>
+                  <div className="mt-1 pl-[26px] text-caption-01 text-text-helper font-mono truncate">
+                    {row.entry.payload.transport === 'stdio'
+                      ? [row.entry.payload.command, ...(row.entry.payload.args ?? [])].join(' ')
+                      : row.entry.payload.url}
+                  </div>
+                  {row.test === 'ok' && (
+                    <div className="mt-1 pl-[26px] text-caption-01 text-support-success">
+                      연결됨 · 도구 {row.tools.length}개 발견
+                    </div>
+                  )}
+                  {row.test === 'fail' && row.testError && (
+                    <div className="mt-1 pl-[26px] text-caption-01 text-support-error truncate">{row.testError}</div>
+                  )}
+                  {row.registered && (
+                    <div className="mt-1 pl-[26px] text-caption-01 text-support-success">✓ 등록됨</div>
+                  )}
+                  {row.registerError && (
+                    <div className="mt-1 pl-[26px] text-caption-01 text-support-error">{row.registerError}</div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
         )}
 
-        {/* 테스트 결과 인라인 표시 */}
-        {test === 'testing' && (
-          <div className="flex items-center gap-2 text-caption-01 text-text-secondary">
-            <span className="ia-spinner w-3.5 h-3.5" /> 서버에 연결해 도구를 확인하는 중입니다…
-          </div>
-        )}
-        {test === 'ok' && (
-          <div className="flex items-center gap-1.5 text-caption-01 text-support-success">
-            <Icon name="check-circle" size={14} /> 연결됨 · 도구 {toolCount}개 발견 · 이제 등록할 수 있습니다
-          </div>
-        )}
-        {test === 'fail' && (
+        {registerSummaryError && (
           <div className="flex items-center gap-1.5 text-caption-01 text-support-error">
             <Icon name="warning" size={14} filled />
-            {transport === 'stdio'
-              ? '실행에 실패했습니다 · 명령을 확인하세요'
-              : '엔드포인트에 연결할 수 없습니다 · 주소를 확인하세요 (http/https)'}
+            {registerSummaryError}
           </div>
         )}
 
@@ -334,9 +388,8 @@ export const McpRegisterModal: React.FC<McpRegisterModalProps> = ({ open, onClos
         <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg bg-layer-02 border border-border-subtle-01">
           <Icon name="lock" size={15} className="text-icon-secondary flex-shrink-0 mt-0.5" />
           <p className="text-caption-01 text-text-helper leading-relaxed">
-            서버 설정은 <span className="text-text-secondary font-medium">이 기기에만 저장</span>됩니다.
-            <br />
-            <span className="text-text-placeholder">현재는 프로토타입 단계로 브라우저 로컬 저장소에 보관됩니다.</span>
+            서버 설정은 <span className="text-text-secondary font-medium">~/.rice/.mcp.json</span> 에 저장돼요.
+            등록하면 바로 실행되고, 다음에 앱을 열어도 그대로 남아 있어요.
           </p>
         </div>
       </div>
