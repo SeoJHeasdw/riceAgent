@@ -95,8 +95,16 @@ class TestGmailConnector:
         url, state = flow.build_auth_url()
         assert "client_id=abc" in url and "redirect_uri=http" in url and state
 
-    def test_gmail_send_tool_advertised_when_connected(self):
+    @pytest.mark.asyncio
+    async def test_remote_mcp_tools_persisted_at_connect_and_read_locally(self):
+        """도구는 하드코딩이 아니라 원격 MCP tools/list 로 연결 시점에 DB 에 저장된다.
+
+        sync_tools() 가 카탈로그를 저장하면 list_tools() 가 네트워크 없이 DB 에서 읽는다.
+        """
+        from unittest.mock import AsyncMock, patch
+
         from rice_runtime.connector.service import ConnectorService
+        from rice_runtime.core.types import ToolSpec
 
         db = _fresh_db()
         db.execute(
@@ -104,8 +112,19 @@ class TestGmailConnector:
             "VALUES ('c1','gmail','Gmail','connected')"
         )
         svc = ConnectorService(db, _fresh_paths())
+        # 카탈로그 저장 전에는 비어 있다.
+        assert svc.list_tools() == []
+
+        remote = [
+            ToolSpec(name="search_threads", description="", parameters={}, source="connector",
+                     owner_id="c1", requires_approval=True),
+            ToolSpec(name="create_draft", description="", parameters={}, source="connector",
+                     owner_id="c1", requires_approval=True),
+        ]
+        with patch.object(svc, "_fetch_remote_tools", AsyncMock(return_value=remote)):
+            await svc.sync_tools("c1")
         names = {t.name for t in svc.list_tools()}
-        assert {"gmail_search", "gmail_read", "gmail_send"} <= names
+        assert {"search_threads", "create_draft"} <= names
 
     def test_connected_types(self):
         from rice_runtime.connector.service import ConnectorService

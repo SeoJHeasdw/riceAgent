@@ -3,9 +3,9 @@ import { Icon, Modal, Tag } from '../ui';
 import { CONNECTOR_CATALOG, type CatalogConnector } from '../../lib/learningData';
 
 /**
- * ConnectorDirectoryModal — "커넥터 디렉터리".
+ * ConnectorDirectoryModal — "커넥터 둘러보기".
  *
- * 원격 커넥터 탭의 "추가"에서 열리는 카탈로그. Claude의 디렉터리처럼 검색 + 2열
+ * 원격 커넥터 탭의 "추가"에서 열리는 카탈로그. Claude의 둘러보기처럼 검색 + 2열
  * 카드 그리드로 추가 가능한 커넥터를 보여주고, 각 카드의 + 로 목록에 추가한다.
  * 다중 추가를 위해 추가 후에도 모달은 열린 채로 두고, 이미 추가된 항목은
  * existingIds로 판별해 "추가됨" 상태로 비활성화한다.
@@ -43,7 +43,7 @@ export const ConnectorDirectoryModal: React.FC<ConnectorDirectoryModalProps> = (
   }, [query]);
 
   return (
-    <Modal open={open} onClose={onClose} title="커넥터 디렉터리" size="lg">
+    <Modal open={open} onClose={onClose} title="커넥터 둘러보기" size="lg">
       <div className="space-y-4">
         {/* 검색 */}
         <div className="relative">

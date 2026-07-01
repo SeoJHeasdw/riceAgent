@@ -73,7 +73,7 @@ class TestBeginConnect:
         GmailOAuthFlow.build_auth_url 을 모킹해 실제 Google 호출을 피한다.
         """
         with patch(
-            "rice_runtime.connector.oauth.flow.GmailOAuthFlow.build_auth_url",
+            "rice_runtime.connector.oauth.flow.OAuthFlow.build_auth_url",
             return_value=("https://accounts.google.com/o/oauth2/v2/auth?state=fake_state", "fake_state"),
         ), patch.dict("os.environ", {
             "RICE_GMAIL_CLIENT_ID": "test-client-id",
@@ -102,7 +102,7 @@ class TestBeginConnect:
     async def test_begin_connect_via_service(self):
         """ConnectorService.begin_connect 도 정상 동작한다."""
         with patch(
-            "rice_runtime.connector.oauth.flow.GmailOAuthFlow.build_auth_url",
+            "rice_runtime.connector.oauth.flow.OAuthFlow.build_auth_url",
             return_value=("https://accounts.google.com/o/oauth2?state=s1", "s1"),
         ), patch.dict("os.environ", {
             "RICE_GMAIL_CLIENT_ID": "cid",
@@ -180,7 +180,7 @@ class TestCompleteOAuth:
 
             # begin_connect 로 pending 레코드 + state 등록
             with patch(
-                "rice_runtime.connector.oauth.flow.GmailOAuthFlow.build_auth_url",
+                "rice_runtime.connector.oauth.flow.OAuthFlow.build_auth_url",
                 return_value=("https://accounts.google.com/o/oauth2?state=valid_state", "valid_state"),
             ):
                 oauth_start = await svc.begin_connect("gmail")
@@ -198,7 +198,7 @@ class TestCompleteOAuth:
             mock_client.__aexit__ = AsyncMock(return_value=None)
 
             with patch("rice_runtime.connector.credential.keychain.KeychainStore._keyring", return_value=self._mock_keyring), \
-                 patch("rice_runtime.connector.oauth.flow.GmailOAuthFlow._require_credentials"), \
+                 patch("rice_runtime.connector.oauth.flow.OAuthFlow._require_credentials"), \
                  patch("httpx.AsyncClient", return_value=mock_client):
                 info = await svc.complete_oauth(code="valid_code", state="valid_state")
 
@@ -356,19 +356,72 @@ class TestToolSurface:
         """연결된 connector 가 없으면 빈 목록."""
         assert self._svc.list_tools() == []
 
-    def test_list_tools_returns_gmail_tools_when_connected(self):
-        """connected Gmail connector 가 있으면 Gmail 도구 목록 반환."""
+    def test_list_tools_empty_before_sync_even_when_connected(self):
+        """connected 여도 sync_tools() 전(카탈로그 미저장)에는 [] 를 반환한다.
+
+        도구는 하드코딩이 아니라 원격 MCP tools/list 로 연결 시점에 DB 에 저장된다.
+        """
         self._db.execute(
             "INSERT INTO connectors(id, connector_type, display_name, status) "
             "VALUES ('conn_1', 'gmail', 'Gmail', 'connected')"
         )
-        tools = self._svc.list_tools()
-        assert len(tools) > 0
+        assert self._svc.list_tools() == []
+
+    @pytest.mark.asyncio
+    async def test_sync_tools_persists_remote_catalog_and_list_reads_it(self):
+        """sync_tools() 가 원격 MCP tools/list 결과를 DB 에 저장하고, list_tools() 는
+        네트워크 없이 그 DB 값을 읽는다. 도구는 source=connector, requires_approval=True."""
+        from rice_runtime.core.types import ToolSpec
+
+        self._db.execute(
+            "INSERT INTO connectors(id, connector_type, display_name, status) "
+            "VALUES ('conn_1', 'gmail', 'Gmail', 'connected')"
+        )
+        remote_specs = [
+            ToolSpec(name="search_threads", description="search", parameters={"type": "object"},
+                     source="connector", owner_id="conn_1", requires_approval=True),
+            ToolSpec(name="create_draft", description="draft", parameters={"type": "object"},
+                     source="connector", owner_id="conn_1", requires_approval=True),
+        ]
+        # 원격 tools/list 결과를 seam 에서 바로 주입(토큰·MCP 클라이언트 우회).
+        with patch.object(self._svc, "_fetch_remote_tools", AsyncMock(return_value=remote_specs)):
+            n = await self._svc.sync_tools("conn_1")
+        assert n == 2
+
+        # list_tools() 는 이제 DB 만 읽는다 — 원격을 다시 호출하지 않아야 한다.
+        with patch.object(self._svc, "_fetch_remote_tools", AsyncMock(side_effect=AssertionError)):
+            tools = self._svc.list_tools()
+        names = {t.name for t in tools}
+        assert names == {"search_threads", "create_draft"}
         assert all(t.source == "connector" for t in tools)
         assert all(t.requires_approval is True for t in tools)
-        names = {t.name for t in tools}
-        assert "gmail_search" in names
-        assert "gmail_read" in names
+
+    @pytest.mark.asyncio
+    async def test_check_updates_flags_pending_and_apply_promotes(self):
+        """check_updates() 가 원격 변경을 pending 으로 표시하고, apply_update() 가 승격한다."""
+        from rice_runtime.core.types import ToolSpec
+
+        self._db.execute(
+            "INSERT INTO connectors(id, connector_type, display_name, status) "
+            "VALUES ('conn_1', 'gmail', 'Gmail', 'connected')"
+        )
+        v1 = [ToolSpec(name="search_threads", description="", parameters={}, source="connector",
+                       owner_id="conn_1", requires_approval=True)]
+        v2 = v1 + [ToolSpec(name="create_draft", description="", parameters={}, source="connector",
+                            owner_id="conn_1", requires_approval=True)]
+        with patch.object(self._svc, "_fetch_remote_tools", AsyncMock(return_value=v1)):
+            await self._svc.sync_tools("conn_1")
+        # 원격이 v2 로 늘어남 → check_updates 가 added 감지 + pending 표시(적용 X)
+        with patch.object(self._svc, "_fetch_remote_tools", AsyncMock(return_value=v2)):
+            result = await self._svc.check_updates("conn_1")
+        assert result["changed"] is True and result["added"] == ["create_draft"]
+        assert {t.name for t in self._svc.list_tools()} == {"search_threads"}  # 아직 미적용
+        pu = self._svc.pending_update("conn_1")
+        assert pu is not None and pu["added"] == ["create_draft"]
+        # 적용 → 활성이 v2 로 승격, pending 소거
+        await self._svc.apply_update("conn_1")
+        assert {t.name for t in self._svc.list_tools()} == {"search_threads", "create_draft"}
+        assert self._svc.pending_update("conn_1") is None
 
     @pytest.mark.asyncio
     async def test_invoke_returns_error_when_no_connector(self):

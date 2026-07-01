@@ -9,6 +9,6 @@ httpx는 optional extra `connectors` 에 선언, 지연 import 패턴으로 감�
 """
 from __future__ import annotations
 
-from .flow import GmailOAuthFlow
+from .flow import GmailOAuthFlow, OAuthFlow
 
-__all__ = ["GmailOAuthFlow"]
+__all__ = ["GmailOAuthFlow", "OAuthFlow"]

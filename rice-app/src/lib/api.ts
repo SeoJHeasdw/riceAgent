@@ -215,6 +215,24 @@ class ApiClient {
   deleteConnector(id: string): Promise<ApiResponse> {
     return this.send('DELETE', `/connectors/${id}`);
   }
+  /** force re-fetch + apply a connector's remote MCP tool catalog (강제 새로고침) */
+  resyncConnectorTools(
+    id: string,
+  ): Promise<ApiResponse<{ count: number; tools: { name: string; requires_approval?: boolean }[] }>> {
+    return this.send('POST', `/connectors/${id}/tools/resync`);
+  }
+  /** detect remote tool-catalog changes without applying (sets a pending update) */
+  checkConnectorUpdates(
+    id: string,
+  ): Promise<ApiResponse<{ changed: boolean; added: string[]; removed: string[] }>> {
+    return this.send('POST', `/connectors/${id}/tools/check`);
+  }
+  /** adopt the pending tool-catalog update (업데이트 적용) */
+  applyConnectorToolsUpdate(
+    id: string,
+  ): Promise<ApiResponse<{ count: number; tools: { name: string; requires_approval?: boolean }[] }>> {
+    return this.send('POST', `/connectors/${id}/tools/apply-update`);
+  }
   getConnectorStatus(id: string): Promise<ApiResponse> {
     return this.get(`/connectors/${id}/status`);
   }

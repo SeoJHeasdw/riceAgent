@@ -596,6 +596,8 @@ export interface Connector {
   examples: string[];
   /** 제공사가 도구·권한을 갱신했을 때 표시되는 사용 가능한 업데이트 */
   update?: ConnectorUpdate;
+  /** 토큰 만료·취소 등으로 자격증명이 무효해져 재연결이 필요한 상태(백엔드 status='error') */
+  errored?: boolean;
 }
 
 /**

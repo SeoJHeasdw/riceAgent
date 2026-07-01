@@ -12,6 +12,7 @@ import {
   type CatalogConnector,
   type Connector,
   type ConnectorScope,
+  type ConnectorUpdate,
   type McpTransport,
   type ScopePermission,
 } from '../lib/learningData';
@@ -20,6 +21,19 @@ type Kind = 'remote' | 'local-mcp';
 
 // ── 백엔드(runtime) 연동 — 런타임이 온라인일 때 'remote' 커넥터를 실데이터로 대체 ──
 
+/** 백엔드가 돌려주는 도구 카탈로그 항목(원격 MCP tools/list 로 받아 저장한 것). */
+interface ConnectorToolWire {
+  name: string;
+  requires_approval?: boolean;
+}
+
+/** 백엔드가 계산한 대기 중 도구 카탈로그 업데이트 diff. */
+interface ConnectorUpdateWire {
+  added: string[];
+  removed: string[];
+  added_tools?: ConnectorToolWire[];
+}
+
 /** GET /connectors 가 돌려주는 ConnectorInfo wire 형태 (CONTRACTS §4). */
 interface ConnectorInfoWire {
   id: string;
@@ -27,23 +41,41 @@ interface ConnectorInfoWire {
   display_name: string;
   status: 'connected' | 'disconnected' | 'error';
   scopes?: string[];
+  tools?: ConnectorToolWire[];
+  update?: ConnectorUpdateWire | null;
   connected_at?: string | null;
   last_verified_at?: string | null;
 }
 
+// 도구 이름 접두사로 읽기/쓰기를 추정(그룹 헤더용 표시 힌트 — 실제 승인은 런타임이 강제).
+const READ_PREFIXES = ['get', 'list', 'search', 'read', 'fetch', 'find', 'view'];
+
+/** 백엔드 도구 → UI ConnectorScope. 이름으로 읽기/쓰기를 가른다(표시용). */
+const toolToScope = (t: ConnectorToolWire): ConnectorScope => {
+  const readOnly = READ_PREFIXES.some((p) => t.name.toLowerCase().startsWith(p));
+  return { name: t.name, mode: readOnly ? '읽기' : '쓰기' };
+};
+
+/** 백엔드 update diff → UI ConnectorUpdate(적용 시 addsTools 를 도구 목록에 반영). */
+const wireToUpdate = (u: ConnectorUpdateWire | null | undefined): ConnectorUpdate | undefined => {
+  if (!u || (u.added.length === 0 && u.removed.length === 0)) return undefined;
+  const parts: string[] = [];
+  if (u.added.length) parts.push(`도구 ${u.added.length}개 추가`);
+  if (u.removed.length) parts.push(`${u.removed.length}개 제거`);
+  return {
+    version: `${u.added.length + u.removed.length}건 변경`,
+    note: `원격 서버가 도구를 갱신했어요 — ${parts.join(' · ')}.`,
+    addsTools: (u.added_tools ?? []).map(toolToScope),
+  };
+};
+
 /** 백엔드 ConnectorInfo → UI Connector 매핑 (remote 전용). */
 const infoToConnector = (info: ConnectorInfoWire): Connector => {
   const connected = info.status === 'connected';
+  const errored = info.status === 'error';
   const isGmail = info.connector_type === 'gmail';
-  // 연결된 Gmail 은 런타임이 노출하는 원자적 도구 3종을 보여준다(connector/service.py).
-  const scopes: ConnectorScope[] =
-    connected && isGmail
-      ? [
-          { name: 'gmail_search', mode: '읽기' },
-          { name: 'gmail_read', mode: '읽기' },
-          { name: 'gmail_send', mode: '쓰기' },
-        ]
-      : [];
+  // 도구는 하드코딩이 아니라 백엔드가 연결 시점에 원격 MCP tools/list 로 받아 저장한 실제 카탈로그.
+  const scopes: ConnectorScope[] = connected ? (info.tools ?? []).map(toolToScope) : [];
   return {
     id: info.id,
     name: info.display_name || info.connector_type,
@@ -51,15 +83,18 @@ const infoToConnector = (info: ConnectorInfoWire): Connector => {
     category: isGmail ? '메일' : info.connector_type,
     provider: isGmail ? 'Google' : info.connector_type,
     kind: 'remote',
+    // 백엔드 'error'(토큰 무효)는 UI 상 미연결로 취급하되 errored 플래그로 "재연결 필요"를 노출.
     status: connected ? 'connected' : 'disconnected',
+    errored,
     account: connected ? info.display_name || '연결됨' : undefined,
     lastSync: info.last_verified_at ?? undefined,
     summary: isGmail
-      ? '메일을 검색·읽기하고 메일을 발송합니다 (gmail_search · gmail_read · gmail_send).'
+      ? '연결하면 원격 MCP 서버가 제공하는 메일 도구를 에이전트가 사용할 수 있어요.'
       : `${info.connector_type} 커넥터`,
     scopes,
     usedBy: [],
-    examples: isGmail ? ['받은 편지함에서 최근 중요한 메일 요약해줘', '이 내용으로 메일 보내줘'] : [],
+    examples: isGmail ? ['받은 편지함에서 최근 중요한 메일 요약해줘', '이 내용으로 초안 작성해줘'] : [],
+    update: wireToUpdate(info.update),
   };
 };
 
@@ -215,7 +250,9 @@ const ConnectorDetailView: React.FC<{
   busyId: string | null;
   onRealConnect: (c: Connector) => void;
   onRealDisconnect: (c: Connector) => void;
-}> = ({ connectorId, connectors, setConnectors, online, busyId, onRealConnect, onRealDisconnect }) => {
+  onResyncTools: (c: Connector) => void;
+  onApplyUpdate: (c: Connector) => void;
+}> = ({ connectorId, connectors, setConnectors, online, busyId, onRealConnect, onRealDisconnect, onResyncTools, onApplyUpdate }) => {
   const c = connectors.find((x) => x.id === connectorId);
 
   if (!c || !connectorId) {
@@ -223,6 +260,7 @@ const ConnectorDetailView: React.FC<{
   }
 
   const connected = c.status === 'connected';
+  const errored = !!c.errored;
   const isMcp = connectorKind(c) === 'local-mcp';
   const busy = busyId === c.id;
   const patch = (fn: (c: Connector) => Connector) => setConnectors((a) => a.map((x) => (x.id === connectorId ? fn(x) : x)));
@@ -251,15 +289,21 @@ const ConnectorDetailView: React.FC<{
   // 그룹(읽기/쓰기) 전체를 한 번에 설정 — 도구가 많은 커넥터(Gmail 등)에서 필수
   const setGroupPermission = (predicate: (s: ConnectorScope) => boolean, perm: ScopePermission) =>
     patch((x) => ({ ...x, scopes: x.scopes.map((s) => (predicate(s) ? { ...s, permission: perm } : s)) }));
-  // 업데이트 적용 — 제공사/서버가 새로 노출한 도구를 목록에 합치고 배너를 정리
-  const applyUpdate = () =>
-    c.update &&
+  // 업데이트 적용 — 원격 커넥터는 백엔드 apply-update(pending→active) 호출, 그 외(목업)는
+  // 클라이언트에서 addsTools 를 병합.
+  const applyUpdate = () => {
+    if (!c.update) return;
+    if (online && !isMcp) {
+      onApplyUpdate(c);
+      return;
+    }
     patch((x) => ({
       ...x,
       scopes: [...x.scopes, ...(x.update?.addsTools ?? [])],
       lastSync: '방금',
       update: undefined,
     }));
+  };
 
   const meta: [string, string][] = isMcp
     ? [
@@ -286,8 +330,8 @@ const ConnectorDetailView: React.FC<{
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <h2 className="text-heading-03 font-semibold text-text-primary">{c.name}</h2>
-              <Tag type={connected ? 'green' : 'gray'} size="sm">
-                {connected ? '연결됨' : '연결 필요'}
+              <Tag type={connected ? 'green' : errored ? 'red' : 'gray'} size="sm">
+                {connected ? '연결됨' : errored ? '재연결 필요' : '연결 필요'}
               </Tag>
             </div>
             <p className="mt-1.5 text-body-short-01 leading-5 text-text-secondary">{c.summary}</p>
@@ -310,6 +354,8 @@ const ConnectorDetailView: React.FC<{
                   : '실행'
                 : connected
                 ? '연결 해제'
+                : errored
+                ? '재연결'
                 : '연결'}
             </Button>
           </div>
@@ -353,8 +399,18 @@ const ConnectorDetailView: React.FC<{
           <SectionLabel
             right={
               connected ? (
-                <button className="inline-flex items-center gap-1 text-caption-01 text-link-primary hover:underline">
-                  {isMcp ? '재시작' : '재인증'} <Icon name="renew" size={12} />
+                <button
+                  type="button"
+                  disabled={busy || (!isMcp && !online)}
+                  title={isMcp ? '서버 재시작' : '원격 MCP 서버에서 도구 목록을 다시 불러옵니다'}
+                  onClick={() => {
+                    if (isMcp) return; // 로컬 MCP 재시작은 아직 목업(Phase 2)
+                    if (online) onResyncTools(c);
+                  }}
+                  className="inline-flex items-center gap-1 text-caption-01 text-link-primary hover:underline disabled:opacity-50 disabled:no-underline"
+                >
+                  <Icon name="renew" size={12} className={busy ? 'animate-spin' : undefined} />
+                  {isMcp ? '재시작' : busy ? '새로고침 중…' : '도구 새로고침'}
                 </button>
               ) : undefined
             }
@@ -525,6 +581,15 @@ function ConnectorsScreen() {
     }
   };
 
+  // 화면 진입 시(온디맨드) 연결된 커넥터의 원격 카탈로그 변경을 확인 → pending 업데이트가
+  // 잡히면 배지가 뜬다. 부팅/백그라운드가 아니라 사용자가 커넥터 화면을 볼 때만 원격을 때린다.
+  const runUpdateChecks = async (infos: ConnectorInfoWire[]) => {
+    const connected = infos.filter((i) => i.status === 'connected');
+    if (connected.length === 0) return;
+    await Promise.all(connected.map((i) => api.checkConnectorUpdates(i.id).catch(() => undefined)));
+    await refresh(); // pending update 가 payload 에 실려 오도록 한 번 다시 불러온다
+  };
+
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
@@ -533,7 +598,9 @@ function ConnectorsScreen() {
       const res = await api.getConnectors();
       if (cancelled) return;
       if (res.success && Array.isArray(res.data)) {
-        mergeRemote((res.data as ConnectorInfoWire[]).map(infoToConnector));
+        const infos = res.data as ConnectorInfoWire[];
+        mergeRemote(infos.map(infoToConnector));
+        void runUpdateChecks(infos);
       }
     };
     void load();
@@ -586,6 +653,28 @@ function ConnectorsScreen() {
     setBusyId(c.id);
     try {
       await api.deleteConnector(c.id);
+      await refresh();
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  // 도구 목록만 다시 불러온다(재인증 아님) — 원격 MCP tools/list 강제 재동기화 후 목록 갱신.
+  const handleResyncTools = async (c: Connector) => {
+    setBusyId(c.id);
+    try {
+      await api.resyncConnectorTools(c.id);
+      await refresh();
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  // 대기 중 업데이트 적용 — 백엔드가 pending 카탈로그를 활성으로 승격.
+  const handleApplyUpdate = async (c: Connector) => {
+    setBusyId(c.id);
+    try {
+      await api.applyConnectorToolsUpdate(c.id);
       await refresh();
     } finally {
       setBusyId(null);
@@ -848,9 +937,11 @@ function ConnectorsScreen() {
         busyId={busyId}
         onRealConnect={handleRealConnect}
         onRealDisconnect={handleRealDisconnect}
+        onResyncTools={handleResyncTools}
+        onApplyUpdate={handleApplyUpdate}
       />
 
-      {/* 원격 커넥터 디렉터리 */}
+      {/* 원격 커넥터 둘러보기 */}
       <ConnectorDirectoryModal
         open={directoryOpen}
         onClose={() => setDirectoryOpen(false)}

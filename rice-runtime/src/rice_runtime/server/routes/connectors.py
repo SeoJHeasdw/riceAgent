@@ -1,11 +1,14 @@
 """Connectors (CONTRACTS §4) — ConnectorsScreen.
 
-  GET    /connectors                    list
-  GET    /connectors/{id}               detail (granted scopes)
-  POST   /connectors                    begin OAuth (returns oauth_url)
-  DELETE /connectors/{id}               disconnect
-  GET    /connectors/{id}/status        connection status
-  GET    /connectors/oauth/callback     OAuth redirect handler
+  GET    /connectors                        list (+ each connector's tool catalog + pending update)
+  GET    /connectors/{id}                   detail (granted scopes)
+  POST   /connectors                        begin OAuth (returns oauth_url)
+  POST   /connectors/{id}/tools/resync      force re-fetch + apply the remote MCP tool catalog
+  POST   /connectors/{id}/tools/check       detect remote catalog changes (sets a pending update)
+  POST   /connectors/{id}/tools/apply-update  adopt the pending catalog update
+  DELETE /connectors/{id}                   disconnect
+  GET    /connectors/{id}/status            connection status
+  GET    /connectors/oauth/callback         OAuth redirect handler
 """
 
 from __future__ import annotations
@@ -44,9 +47,26 @@ h1{{font-size:18px;margin:0 0 8px}}p{{color:#57606a;font-size:14px;line-height:1
     return HTMLResponse(content=html, status_code=200 if ok else 400)
 
 
+def _tools_payload(c: Container, connector_id: str) -> list[dict]:
+    """connector 의 도구 카탈로그(연결 시점에 원격 MCP tools/list 로 받아 저장한 것)를
+    UI 용 [{name, requires_approval}] 로 직렬화한다. 구현체가 tools_for 를 지원하지
+    않으면(테스트/골격) 빈 목록."""
+    tools_for = getattr(c.connectors, "tools_for", None)
+    if tools_for is None:
+        return []
+    return [{"name": t.name, "requires_approval": t.requires_approval} for t in tools_for(connector_id)]
+
+
+def _connector_payload(c: Container, info) -> dict:
+    """ConnectorInfo → wire dict + 도구 카탈로그(tools) + 대기 중 업데이트(update)."""
+    pending = getattr(c.connectors, "pending_update", None)
+    update = pending(info.id) if pending is not None else None
+    return {**info.__dict__, "tools": _tools_payload(c, info.id), "update": update}
+
+
 @router.get("")
 async def list_connectors(c: Container = Depends(get_container)):
-    return {"success": True, "data": [i.__dict__ for i in c.connectors.list_connectors()]}
+    return {"success": True, "data": [_connector_payload(c, i) for i in c.connectors.list_connectors()]}
 
 
 @router.get("/oauth/callback")
@@ -77,7 +97,47 @@ async def get_connector(connector_id: str, c: Container = Depends(get_container)
     info = c.connectors.get_connector(connector_id)
     if info is None:
         raise NotFoundError(f"connector {connector_id} not found")
-    return {"success": True, "data": info.__dict__}
+    return {"success": True, "data": _connector_payload(c, info)}
+
+
+def _require_connector(c: Container, connector_id: str):
+    info = c.connectors.get_connector(connector_id)
+    if info is None:
+        raise NotFoundError(f"connector {connector_id} not found")
+    return info
+
+
+@router.post("/{connector_id}/tools/resync")
+async def resync_tools(connector_id: str, c: Container = Depends(get_container)):
+    """원격 MCP `tools/list` 를 다시 받아 카탈로그를 **강제 갱신**한다(즉시 적용).
+
+    "재인증" 대신 도구 목록만 강제로 새로고침한다(재인증은 연결 해제→연결).
+    """
+    _require_connector(c, connector_id)
+    sync_tools = getattr(c.connectors, "sync_tools", None)
+    count = await sync_tools(connector_id) if sync_tools is not None else 0
+    return {"success": True, "data": {"count": count, "tools": _tools_payload(c, connector_id)}}
+
+
+@router.post("/{connector_id}/tools/check")
+async def check_tool_updates(connector_id: str, c: Container = Depends(get_container)):
+    """원격 카탈로그 변경을 감지한다(적용하지 않음). 변경 시 pending 업데이트로 표시.
+
+    커넥터 화면 진입 시 온디맨드로 호출해 "업데이트 있음" 배지를 실데이터로 띄운다.
+    """
+    _require_connector(c, connector_id)
+    check = getattr(c.connectors, "check_updates", None)
+    result = await check(connector_id) if check is not None else {"changed": False}
+    return {"success": True, "data": result}
+
+
+@router.post("/{connector_id}/tools/apply-update")
+async def apply_tool_update(connector_id: str, c: Container = Depends(get_container)):
+    """대기 중(pending) 카탈로그 업데이트를 활성으로 적용한다."""
+    _require_connector(c, connector_id)
+    apply = getattr(c.connectors, "apply_update", None)
+    count = await apply(connector_id) if apply is not None else 0
+    return {"success": True, "data": {"count": count, "tools": _tools_payload(c, connector_id)}}
 
 
 @router.get("/{connector_id}/status")
