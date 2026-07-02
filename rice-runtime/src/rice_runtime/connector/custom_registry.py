@@ -153,6 +153,7 @@ def _to_descriptor(
         mcp_endpoint=mcp_endpoint,
         env_prefix=f"RICE_CUSTOM_{connector_type.upper()}",
         client_secret_filename=f"{connector_type}_client_secret.json",
+        is_custom=True,
     )
 
 

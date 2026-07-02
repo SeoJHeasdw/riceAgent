@@ -39,8 +39,12 @@ export interface CustomConnectorModalProps {
   onClose: () => void;
   /** 부작용 없음(RFC 9728+8414 조회만) — null 이면 요청 자체가 실패한 것 */
   onDiscover: (mcpEndpoint: string) => Promise<DiscoveredOAuthConfig | null>;
-  /** 여기서부터 부작용 발생(동적 client 등록 + OAuth 시작). true=성공(모달 닫힘) */
-  onAdd: (payload: CustomConnectorAddPayload) => Promise<boolean>;
+  /**
+   * 여기서부터 부작용 발생(동적 client 등록 + OAuth 시작).
+   * null=성공(모달 닫힘), string=백엔드가 준 실패 사유(모달에 그대로 표시 — 예: 동적
+   * client 등록 미지원이라 client ID 수동 입력 필요).
+   */
+  onAdd: (payload: CustomConnectorAddPayload) => Promise<string | null>;
 }
 
 type DiscoverState = 'idle' | 'checking' | 'done';
@@ -103,7 +107,7 @@ export const CustomConnectorModal: React.FC<CustomConnectorModalProps> = ({ open
     setAdding(true);
     setAddError(null);
     try {
-      const ok = await onAdd({
+      const err = await onAdd({
         display_name: displayName.trim(),
         mcp_endpoint: mcpEndpoint.trim(),
         auth_url: authUrl.trim(),
@@ -113,7 +117,11 @@ export const CustomConnectorModal: React.FC<CustomConnectorModalProps> = ({ open
         client_id: clientId.trim() || undefined,
         client_secret: clientSecret.trim() || undefined,
       });
-      if (!ok) setAddError('연결을 시작하지 못했어요. 입력값을 확인하고 다시 시도하세요.');
+      if (err) {
+        setAddError(err);
+        // client ID 수동 입력이 필요한 실패가 대부분이라 입력란이 있는 고급 설정을 펼쳐 준다.
+        setAdvancedOpen(true);
+      }
     } finally {
       setAdding(false);
     }

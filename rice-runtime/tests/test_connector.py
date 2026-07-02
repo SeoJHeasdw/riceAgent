@@ -231,6 +231,176 @@ class TestCompleteOAuth:
         assert "ya29.test_access_token" not in str(dict(cred_row))
         assert "1//test_refresh_token" not in str(dict(cred_row))
 
+    @pytest.mark.asyncio
+    async def test_complete_oauth_survives_runtime_restart(self):
+        """begin_connect 와 브라우저 콜백 사이에 런타임이 재시작해도(새 서비스 인스턴스)
+        pending state 가 DB(oauth_pending_states, 0011)에 있어 로그인이 이어진다.
+        같은 state 는 one-shot 으로 소비돼 두 번째 교환(replay)은 거부된다."""
+        mock_token_resp = {
+            "access_token": "at", "refresh_token": "rt", "expires_in": 3600,
+            "scope": "s", "token_type": "Bearer",
+        }
+        with patch.dict("os.environ", {
+            "RICE_GMAIL_CLIENT_ID": "cid",
+            "RICE_GMAIL_CLIENT_SECRET": "csecret",
+        }):
+            svc1 = ConnectorService(self._db, self._paths)
+            with patch(
+                "rice_runtime.connector.oauth.flow.OAuthFlow.build_auth_url",
+                return_value=("https://auth?state=restart_state", "restart_state", "restart_verifier"),
+            ):
+                oauth_start = await svc1.begin_connect("gmail")
+
+            # ── 재시작 시뮬레이션: 같은 DB 로 새 인스턴스(인메모리 상태 전부 소실) ──
+            svc2 = ConnectorService(self._db, self._paths)
+
+            mock_response = MagicMock()
+            mock_response.json.return_value = mock_token_resp
+            mock_response.raise_for_status.return_value = None
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+
+            with patch("rice_runtime.connector.credential.keychain.KeychainStore._keyring", return_value=self._mock_keyring), \
+                 patch("httpx.AsyncClient", return_value=mock_client):
+                info = await svc2.complete_oauth(code="valid_code", state="restart_state")
+                assert info.status == "connected"
+                assert info.id == oauth_start.connector_id
+                # one-shot: 같은 state 재사용은 CSRF/replay 로 거부.
+                with pytest.raises(ValidationError, match="state"):
+                    await svc2.complete_oauth(code="valid_code", state="restart_state")
+
+    @pytest.mark.asyncio
+    async def test_complete_oauth_expired_state_rejected(self):
+        """15분 넘게 방치된 pending state 는 만료로 거부된다(0011 TTL)."""
+        with patch.dict("os.environ", {
+            "RICE_GMAIL_CLIENT_ID": "cid",
+            "RICE_GMAIL_CLIENT_SECRET": "csecret",
+        }):
+            svc = ConnectorService(self._db, self._paths)
+            self._db.execute(
+                "INSERT INTO oauth_pending_states(state, connector_id, code_verifier, created_at) "
+                "VALUES ('old_state', 'conn_x', 'v', datetime('now','-16 minutes'))"
+            )
+            with pytest.raises(ValidationError, match="state"):
+                await svc.complete_oauth(code="c", state="old_state")
+
+
+# ── refresh token rotation — 갱신 응답의 새 refresh_token 채택 ─────────────────
+
+class TestRefreshTokenRotation:
+    """rotation 을 강제하는 서버(OAuth 2.0 Security BCP)는 갱신 응답에 새 refresh_token 을
+    내려주고 이전 것을 무효화한다 — 키체인의 것도 함께 교체돼야 다음 갱신이 성공한다."""
+
+    @pytest.mark.asyncio
+    async def test_rotated_refresh_token_is_persisted(self):
+        from rice_runtime.connector.oauth.flow import TokenResponse
+
+        db = _fresh_db()
+        paths = _fresh_paths()
+        db.execute(
+            "INSERT INTO connectors(id, connector_type, display_name, status) "
+            "VALUES ('c1','gmail','Gmail','connected')"
+        )
+        backing: dict[tuple, str] = {}
+        mock_kr = MagicMock()
+        mock_kr.set_password.side_effect = lambda s, u, p: backing.__setitem__((s, u), p)
+        mock_kr.get_password.side_effect = lambda s, u: backing.get((s, u))
+        mock_kr.delete_password.side_effect = lambda s, u: backing.pop((s, u), None)
+
+        with patch("rice_runtime.connector.credential.keychain.KeychainStore._keyring", return_value=mock_kr):
+            # 만료된 access_token + 기존 refresh_token 을 심는다 → 갱신 경로 강제.
+            backing[("rice", "rice.connector.c1.access_token")] = "old_at"
+            backing[("rice", "rice.connector.c1.refresh_token")] = "old_rt"
+            backing[("rice", "rice.connector.c1.expires_at")] = "1.0"  # 과거 → 만료
+
+            svc = ConnectorService(db, paths)
+            rotated = TokenResponse(
+                access_token="new_at", refresh_token="new_rt",
+                expires_in=3600, scope="", token_type="Bearer",
+            )
+            with patch(
+                "rice_runtime.connector.oauth.flow.OAuthFlow.refresh_access_token",
+                AsyncMock(return_value=rotated),
+            ):
+                token = await svc._access_token("c1", "gmail")
+
+        assert token == "new_at"
+        assert backing[("rice", "rice.connector.c1.access_token")] == "new_at"
+        # 핵심: 이전 refresh_token 이 새것으로 교체됐다(이전 것은 서버가 무효화했을 수 있음).
+        assert backing[("rice", "rice.connector.c1.refresh_token")] == "new_rt"
+
+    @pytest.mark.asyncio
+    async def test_non_rotating_server_keeps_existing_refresh_token(self):
+        """Google 처럼 rotation 을 안 하는 서버(응답에 refresh_token 없음)는 flow 가 기존
+        것을 그대로 돌려주고, 키체인의 refresh_token 도 유지된다."""
+        from rice_runtime.connector.oauth.flow import TokenResponse
+
+        db = _fresh_db()
+        paths = _fresh_paths()
+        db.execute(
+            "INSERT INTO connectors(id, connector_type, display_name, status) "
+            "VALUES ('c1','gmail','Gmail','connected')"
+        )
+        backing: dict[tuple, str] = {}
+        mock_kr = MagicMock()
+        mock_kr.set_password.side_effect = lambda s, u, p: backing.__setitem__((s, u), p)
+        mock_kr.get_password.side_effect = lambda s, u: backing.get((s, u))
+        mock_kr.delete_password.side_effect = lambda s, u: backing.pop((s, u), None)
+
+        with patch("rice_runtime.connector.credential.keychain.KeychainStore._keyring", return_value=mock_kr):
+            backing[("rice", "rice.connector.c1.access_token")] = "old_at"
+            backing[("rice", "rice.connector.c1.refresh_token")] = "old_rt"
+            backing[("rice", "rice.connector.c1.expires_at")] = "1.0"
+
+            svc = ConnectorService(db, paths)
+            # flow.refresh_access_token 은 응답에 refresh_token 이 없으면 기존 것을 채워 돌려준다.
+            same = TokenResponse(
+                access_token="new_at", refresh_token="old_rt",
+                expires_in=3600, scope="", token_type="Bearer",
+            )
+            with patch(
+                "rice_runtime.connector.oauth.flow.OAuthFlow.refresh_access_token",
+                AsyncMock(return_value=same),
+            ):
+                token = await svc._access_token("c1", "gmail")
+
+        assert token == "new_at"
+        assert backing[("rice", "rice.connector.c1.refresh_token")] == "old_rt"
+
+    @pytest.mark.asyncio
+    async def test_flow_adopts_rotated_refresh_token_from_response(self):
+        """flow.refresh_access_token 이 응답에 새 refresh_token 이 있으면 그걸 채택하고,
+        없으면(비-rotation) 기존 것을 재사용한다."""
+        from rice_runtime.connector.oauth.flow import GmailOAuthFlow
+
+        flow = GmailOAuthFlow(client_id="cid", client_secret="cs", redirect_uri="http://localhost:9/cb")
+
+        def _resp(payload: dict) -> MagicMock:
+            r = MagicMock()
+            r.json.return_value = payload
+            r.raise_for_status.return_value = None
+            return r
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+
+        # rotation 서버: 응답에 새 refresh_token 동봉 → 채택.
+        mock_client.post = AsyncMock(
+            return_value=_resp({"access_token": "at2", "refresh_token": "rt2", "expires_in": 60})
+        )
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            tok = await flow.refresh_access_token("rt1")
+        assert tok.refresh_token == "rt2"
+
+        # 비-rotation 서버: 응답에 없음 → 기존 재사용.
+        mock_client.post = AsyncMock(return_value=_resp({"access_token": "at3", "expires_in": 60}))
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            tok = await flow.refresh_access_token("rt1")
+        assert tok.refresh_token == "rt1"
+
 
 # ── 수용 기준 3: check_plugin_permission ─────────────────────────────────────
 

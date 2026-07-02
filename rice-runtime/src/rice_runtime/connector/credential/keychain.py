@@ -103,13 +103,25 @@ class KeychainStore:
                 pass
 
     def update_access_token(
-        self, connector_id: str, *, access_token: str, expires_in: int
+        self,
+        connector_id: str,
+        *,
+        access_token: str,
+        expires_in: int,
+        refresh_token: str | None = None,
     ) -> None:
-        """refresh 후 새 access_token 만 교체한다 (refresh_token 은 유지)."""
+        """refresh 후 새 access_token 을 교체한다.
+
+        refresh_token 이 주어지면(rotation 서버가 새 것을 내려준 경우 — RFC 6749 §6)
+        그것도 교체한다. 이전 refresh_token 은 서버가 이미 무효화했을 수 있으므로
+        버리는 게 맞다. None 이면(비-rotation, Google 등) 기존 것을 유지한다.
+        """
         kr = self._keyring()
         kr.set_password(_SERVICE, _keychain_key(connector_id, "access_token"), access_token)
         expires_at = str(time.time() + expires_in)
         kr.set_password(_SERVICE, _keychain_key(connector_id, "expires_at"), expires_at)
+        if refresh_token is not None:
+            kr.set_password(_SERVICE, _keychain_key(connector_id, "refresh_token"), refresh_token)
 
     # ── generic secrets (connector 자격증명 3종 스키마 밖) ──────────────────────
     # 커스텀 원격 커넥터의 동적 등록(RFC 7591) client_secret 처럼, connector_id 인스턴스가

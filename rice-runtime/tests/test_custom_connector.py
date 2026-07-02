@@ -337,6 +337,94 @@ class TestAddCustomConnectorService:
         assert "code_challenge=" in start.oauth_url and "code_challenge_method=S256" in start.oauth_url
 
     @pytest.mark.asyncio
+    async def test_add_without_client_id_fails_closed_without_persisting(self):
+        """동적 등록이 실패(None,None)하고 수동 client_id 도 없으면 **저장 전에**
+        ValidationError — 예전처럼 client_id="" descriptor + disconnected 레코드를
+        만들면 UI 에 연결도 제거도 안 되는 좀비 카드가 남는다."""
+        from rice_runtime.core.errors import ValidationError
+
+        with patch(
+            "rice_runtime.connector.service.register_dynamic_client",
+            AsyncMock(return_value=(None, None)),
+        ):
+            with pytest.raises(ValidationError, match="client"):
+                await self._svc.add_custom_connector(
+                    display_name="Broken",
+                    mcp_endpoint="https://broken.example/mcp",
+                    auth_url="https://broken.example/authorize",
+                    token_url="https://broken.example/token",
+                    registration_endpoint="https://broken.example/register",
+                )
+        # 아무것도 영속화되지 않았다 — descriptor 도, connectors 행도.
+        assert self._svc._custom.types() == frozenset()
+        assert self._db.query_one("SELECT id FROM connectors LIMIT 1") is None
+
+    @pytest.mark.asyncio
+    async def test_add_without_registration_endpoint_and_client_id_fails_closed(self):
+        """registration_endpoint 조차 없으면 동적 등록 시도 없이 바로 fail-closed."""
+        from rice_runtime.core.errors import ValidationError
+
+        with pytest.raises(ValidationError, match="client"):
+            await self._svc.add_custom_connector(
+                display_name="NoAuth",
+                mcp_endpoint="https://noauth.example/mcp",
+                auth_url="https://noauth.example/authorize",
+                token_url="https://noauth.example/token",
+            )
+        assert self._svc._custom.types() == frozenset()
+
+    @pytest.mark.asyncio
+    async def test_delete_last_instance_cleans_descriptor_secret_and_flow(self):
+        """마지막 커스텀 인스턴스 삭제 시 descriptor(DB)·client secret(키체인)·flow(캐시)
+        까지 정리된다 — 같은 이름 재등록이 custom_notion_2 로 증식하지 않는다."""
+        start = await self._svc.add_custom_connector(
+            display_name="Notion",
+            mcp_endpoint="https://notion.example/mcp",
+            auth_url="https://notion.example/authorize",
+            token_url="https://notion.example/token",
+            client_id="cid",
+            client_secret="sec",
+        )
+        assert "custom_notion" in self._svc._custom.types()
+        assert self._svc._custom.client_secret_for("custom_notion") == "sec"
+
+        await self._svc.delete(start.connector_id)
+
+        assert self._svc._custom.types() == frozenset()
+        assert self._svc._custom.client_secret_for("custom_notion") is None
+        assert "custom_notion" not in self._svc._flows
+
+        # 재등록해도 _2 접미사가 붙지 않는다(고아 descriptor 가 없으므로).
+        start2 = await self._svc.add_custom_connector(
+            display_name="Notion",
+            mcp_endpoint="https://notion.example/mcp",
+            auth_url="https://notion.example/authorize",
+            token_url="https://notion.example/token",
+            client_id="cid2",
+        )
+        row = self._db.query_one(
+            "SELECT connector_type FROM connectors WHERE id=?", (start2.connector_id,)
+        )
+        assert row["connector_type"] == "custom_notion"
+
+    @pytest.mark.asyncio
+    async def test_delete_static_type_does_not_touch_custom_store(self):
+        """정적 타입(gmail 등) 삭제는 커스텀 스토어를 건드리지 않는다."""
+        self._db.execute(
+            "INSERT INTO connectors(id, connector_type, display_name, status) "
+            "VALUES ('g1','gmail','Gmail','connected')"
+        )
+        await self._svc.add_custom_connector(
+            display_name="Keep",
+            mcp_endpoint="https://keep.example/mcp",
+            auth_url="https://keep.example/authorize",
+            token_url="https://keep.example/token",
+            client_id="cid",
+        )
+        await self._svc.delete("g1")
+        assert "custom_keep" in self._svc._custom.types()
+
+    @pytest.mark.asyncio
     async def test_discover_custom_connector_delegates_to_discovery_module(self):
         with patch(
             "rice_runtime.connector.service.discover_oauth_config", AsyncMock()

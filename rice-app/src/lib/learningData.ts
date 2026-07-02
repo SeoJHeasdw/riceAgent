@@ -605,6 +605,12 @@ export interface Connector {
   update?: ConnectorUpdate;
   /** 토큰 만료·취소 등으로 자격증명이 무효해져 재연결이 필요한 상태(백엔드 status='error') */
   errored?: boolean;
+  /**
+   * 백엔드 connectors 테이블에 실제 레코드가 있는 커넥터(GET /connectors 유래) — true 면
+   * 미연결 상태에서도 "제거"(DELETE /connectors/{id})가 가능하다. 연결 가능 프리셋 카드·
+   * 목업에는 지울 레코드가 없으므로 이 플래그가 없다.
+   */
+  persisted?: boolean;
 }
 
 /**

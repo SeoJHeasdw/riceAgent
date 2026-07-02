@@ -16,6 +16,7 @@ package (and running the stdlib walking-skeleton demo) needs no web deps.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from .composition_root import Container, build_container
@@ -46,15 +47,25 @@ def create_app(container: Container):
         scheduler.start()
         # 로컬 MCP(.mcp.json, stdio) 서버를 spawn 해 도구 카탈로그를 미리 채운다.
         # 로컬 프로세스 실행이라 원격과 달리 부팅 시 수행해도 무방(원격은 여전히 부팅 시 X).
+        # **백그라운드 태스크로** 돌린다 — lifespan 에서 await 하면 서빙 자체가 warm 완료를
+        # 기다리는데, 죽은 stdio 서버가 있으면 타임아웃(~20초)까지 /health 도 응답하지 못해
+        # supervisor(Electron)가 런타임을 오프라인으로 오판한다. warm 이 끝나기 전의
+        # list_tools() 는 로컬 도구만 잠시 비어 있을 뿐이라(원격 카탈로그는 DB) 무해하다.
         warm = getattr(container.connectors, "warm_local", None)
+        warm_task: asyncio.Task | None = None
         if warm is not None:
-            try:
-                await warm()
-            except Exception:  # noqa: BLE001 — 로컬 MCP warm 실패는 기동을 막지 않는다
-                log.warning("local mcp warm failed", exc_info=True)
+            async def _warm_in_background() -> None:
+                try:
+                    await warm()
+                except Exception:  # noqa: BLE001 — 로컬 MCP warm 실패는 기동을 막지 않는다
+                    log.warning("local mcp warm failed", exc_info=True)
+
+            warm_task = asyncio.create_task(_warm_in_background())
         try:
             yield
         finally:
+            if warm_task is not None and not warm_task.done():
+                warm_task.cancel()
             await scheduler.stop()
 
     app = FastAPI(title="rice-runtime", version="0.1.0", lifespan=lifespan)

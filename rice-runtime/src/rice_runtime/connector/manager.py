@@ -50,13 +50,10 @@ class ConnectorManager:
         # ConnectorService 가 paths/port 를 아는 flow 들을 주입한다(공유). 없으면 자체 생성.
         self._flows: dict[str, OAuthFlow] = flows or {d.connector_type: OAuthFlow(d) for d in descriptors()}
         self._custom = custom
-
-        # state → connector_id 매핑 — OAuth callback 에서 state 로 connector 를 찾을 수 있게
-        # 인메모리로 관리 (단일 활성 세션 전제 — RUNTIME_DESIGN §2).
-        self._pending_states: dict[str, str] = {}  # state -> connector_id
-        # state → PKCE code_verifier(RFC 7636) — exchange_code 에 되돌려줘야 하므로 state 와
-        # 같은 생명주기(단일 활성 세션 전제)로 함께 보관한다.
-        self._pending_verifiers: dict[str, str] = {}  # state -> code_verifier
+        # 진행 중 OAuth 세션(state → connector_id + PKCE code_verifier)은
+        # oauth_pending_states 테이블(0011)에 영속화한다 — begin_connect 와 브라우저
+        # 콜백 사이에 런타임이 재시작해도 로그인이 이어진다. 만료(15분)·one-shot 소비는
+        # begin_connect/complete_oauth 가 SQL 로 강제한다.
 
     def _flow_for(self, connector_type: str) -> OAuthFlow:
         flow = self._flows.get(connector_type)
@@ -96,19 +93,38 @@ class ConnectorManager:
             )
 
         oauth_url, state, code_verifier = self._flow_for(connector_type).build_auth_url()
-        self._pending_states[state] = connector_id
-        self._pending_verifiers[state] = code_verifier
+        # 만료된 세션을 정리하고 새 세션을 영속화한다(재시작 내성). 15분은 authorization
+        # code 자체의 통상 수명(수 분)보다 넉넉한 상한.
+        self._db.execute(
+            "DELETE FROM oauth_pending_states WHERE created_at < datetime('now','-15 minutes')"
+        )
+        self._db.execute(
+            "INSERT OR REPLACE INTO oauth_pending_states(state, connector_id, code_verifier) "
+            "VALUES (?, ?, ?)",
+            (state, connector_id, code_verifier),
+        )
 
         return OAuthStart(connector_id=connector_id, oauth_url=oauth_url, state=state)
 
     async def complete_oauth(self, *, code: str, state: str) -> ConnectorInfo:
-        """OAuth callback: state 검증 → code 교환 → 키체인 저장 → status 갱신."""
-        connector_id = self._pending_states.pop(state, None)
-        code_verifier = self._pending_verifiers.pop(state, None)
-        if connector_id is None:
+        """OAuth callback: state 검증(CSRF) → code 교환 → 키체인 저장 → status 갱신.
+
+        state 검증의 실체는 이 pending 세션 조회다 — 우리가 발급한 state 만 행이 존재하고,
+        one-shot 으로 즉시 소비해 재사용(replay)을 막는다.
+        """
+        pending = self._db.query_one(
+            "SELECT connector_id, code_verifier FROM oauth_pending_states "
+            "WHERE state=? AND created_at >= datetime('now','-15 minutes')",
+            (state,),
+        )
+        # 성공/실패와 무관하게 즉시 소비 — 같은 state 로 두 번 교환할 수 없다.
+        self._db.execute("DELETE FROM oauth_pending_states WHERE state=?", (state,))
+        if pending is None:
             raise ValidationError(
                 f"unknown or expired OAuth state={state!r} — possible CSRF attempt"
             )
+        connector_id = pending["connector_id"]
+        code_verifier = pending["code_verifier"]
 
         row = self._db.query_one("SELECT * FROM connectors WHERE id = ?", (connector_id,))
         if row is None:
@@ -116,7 +132,7 @@ class ConnectorManager:
 
         # 이 connector 의 타입에 맞는 flow 로 code 를 교환한다(PKCE code_verifier 동봉).
         token = await self._flow_for(row["connector_type"]).exchange_code(
-            code=code, state=state, expected_state=state, code_verifier=code_verifier
+            code=code, code_verifier=code_verifier
         )
 
         # 토큰을 OS 키체인에 저장 (DB/로그 금지 — RUNTIME_DESIGN §10.4)
@@ -165,6 +181,7 @@ class ConnectorManager:
         self._keychain.delete(connector_id)
         self._db.execute("DELETE FROM connectors WHERE id = ?", (connector_id,))
         self._db.execute("DELETE FROM connector_tool_permissions WHERE connector_id = ?", (connector_id,))
+        self._db.execute("DELETE FROM oauth_pending_states WHERE connector_id = ?", (connector_id,))
 
 
 def _row_to_info(row) -> ConnectorInfo:

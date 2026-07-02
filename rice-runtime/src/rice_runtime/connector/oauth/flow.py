@@ -162,10 +162,8 @@ class OAuthFlow:
     사용법:
         flow = OAuthFlow(descriptor, connectors_dir=paths.connectors, port=8080)
         url, state, code_verifier = flow.build_auth_url()
-        ...browser redirect...
-        token = await flow.exchange_code(
-            code=..., state=..., expected_state=state, code_verifier=code_verifier,
-        )
+        ...browser redirect... (state 검증은 ConnectorManager 가 pending 세션 조회로 수행)
+        token = await flow.exchange_code(code=..., code_verifier=code_verifier)
     """
 
     def __init__(
@@ -203,13 +201,22 @@ class OAuthFlow:
 
     def _require_client_id(self) -> None:
         """client_secret 은 이제 선택(public client 는 PKCE 로 대체) — client_id 만 필수."""
-        if not self._client_id:
+        if self._client_id:
+            return
+        if self._d.is_custom:
+            # 커스텀 커넥터는 env/JSON 설치 경로를 안 쓴다 — 동적 등록(RFC 7591)이
+            # 실패했거나 미지원인 경우이므로 모달의 수동 입력을 안내한다.
             raise OAuthConfigError(
-                f"{self._d.display_name} OAuth requires a client_id. Set "
-                f"{self._d.env_client_id}, or {self._d.env_client_secret_file}=<client_secret.json>, "
-                f"or drop the client JSON at ~/.rice/connectors/{self._d.client_secret_filename} "
-                f"(RUNTIME_DESIGN §9.2, §10)."
+                f"{self._d.display_name}에 OAuth client ID가 없어요. 이 서버가 동적 client 등록을 "
+                "지원하지 않거나 등록이 실패한 상태예요 — 커넥터를 제거한 뒤 '커스텀 추가'의 "
+                "고급 설정에서 client ID(발급받았다면 secret 포함)를 직접 입력해 다시 추가해주세요."
             )
+        raise OAuthConfigError(
+            f"{self._d.display_name} OAuth requires a client_id. Set "
+            f"{self._d.env_client_id}, or {self._d.env_client_secret_file}=<client_secret.json>, "
+            f"or drop the client JSON at ~/.rice/connectors/{self._d.client_secret_filename} "
+            f"(RUNTIME_DESIGN §9.2, §10)."
+        )
 
     def build_auth_url(self) -> tuple[str, str, str]:
         """Authorization URL, CSRF state 토큰, PKCE code_verifier 세 쌍을 반환한다.
@@ -234,16 +241,17 @@ class OAuthFlow:
         url = f"{self._d.auth_url}?{urlencode(params)}"
         return url, state, code_verifier
 
-    async def exchange_code(
-        self, *, code: str, state: str, expected_state: str, code_verifier: str | None = None
-    ) -> TokenResponse:
-        """Authorization code 를 토큰으로 교환한다. state 불일치 시 ValueError.
+    async def exchange_code(self, *, code: str, code_verifier: str | None = None) -> TokenResponse:
+        """Authorization code 를 토큰으로 교환한다.
+
+        state(CSRF) 검증은 여기서 하지 않는다 — ConnectorManager 가 oauth_pending_states
+        의 one-shot 조회로 강제한다(우리가 발급한 state 만 행이 존재). 예전의
+        state/expected_state 파라미터는 호출자가 같은 값을 두 번 넘겨 항상 통과하는
+        죽은 체크였다.
 
         code_verifier 가 있으면 함께 보낸다(PKCE). client_secret 이 없는 public client 는
         payload 에서 아예 빠진다 — code_verifier 만으로 인증(token_endpoint_auth_method=none).
         """
-        if state != expected_state:
-            raise ValueError("OAuth state mismatch — possible CSRF attack")
         self._require_client_id()
 
         try:
@@ -278,7 +286,12 @@ class OAuthFlow:
         )
 
     async def refresh_access_token(self, refresh_token: str) -> TokenResponse:
-        """refresh_token 으로 새 access_token 을 발급한다 (RUNTIME_DESIGN §9.3)."""
+        """refresh_token 으로 새 access_token 을 발급한다 (RUNTIME_DESIGN §9.3).
+
+        rotation 을 강제하는 서버(OAuth 2.0 Security BCP — 특히 public client)는 응답에
+        새 refresh_token 을 내려주고 이전 것을 무효화한다. 그래서 응답에 있으면 그걸
+        채택하고, 없으면(Google 등 비-rotation) 기존 것을 재사용한다.
+        """
         self._require_client_id()
 
         try:
@@ -300,7 +313,7 @@ class OAuthFlow:
 
         return TokenResponse(
             access_token=data["access_token"],
-            refresh_token=refresh_token,  # refresh_token 은 재사용
+            refresh_token=data.get("refresh_token") or refresh_token,
             expires_in=int(data.get("expires_in", 3600)),
             scope=data.get("scope", ""),
             token_type=data.get("token_type", "Bearer"),

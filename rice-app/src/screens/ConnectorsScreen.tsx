@@ -185,6 +185,8 @@ const infoToConnector = (info: ConnectorInfoWire): Connector => {
     // 백엔드 'error'(토큰 무효)는 UI 상 미연결로 취급하되 errored 플래그로 "재연결 필요"를 노출.
     status: connected ? 'connected' : 'disconnected',
     errored,
+    // 백엔드 레코드가 실재 — 미연결이어도 "제거" 가능(연결 실패한 커스텀 커넥터 정리 경로).
+    persisted: true,
     account: connected ? info.display_name || '연결됨' : undefined,
     lastSync: info.last_verified_at ?? undefined,
     summary: meta.connectedSummary || `${info.connector_type} 커넥터`,
@@ -507,6 +509,10 @@ const ConnectorDetailView: React.FC<{
   const errored = !!c.errored;
   const isMcp = connectorKind(c) === 'local-mcp';
   const busy = busyId === c.id;
+  // 제거 가능: 로컬 MCP(.mcp.json 항목 삭제) 또는 미연결이지만 백엔드 레코드가 남아 있는
+  // 원격 커넥터(연결 실패·중도 취소된 커스텀 커넥터 정리 경로 — DELETE /connectors/{id}).
+  // 연결된 원격은 아래 "연결 해제" 버튼이 같은 삭제를 수행하므로 중복 노출하지 않는다.
+  const removable = online && (isMcp || (!!c.persisted && !connected));
   const patch = (fn: (c: Connector) => Connector) => setConnectors((a) => a.map((x) => (x.id === connectorId ? fn(x) : x)));
   const toggleConnect = () => {
     // 런타임 온라인 + 원격 커넥터: 실제 OAuth 연결/해제 경로(백엔드 /connectors).
@@ -597,8 +603,9 @@ const ConnectorDetailView: React.FC<{
             <p className="mt-1.5 text-body-short-01 leading-5 text-text-secondary">{c.summary}</p>
           </div>
           <div className="flex-shrink-0 flex items-center gap-2">
-            {/* 로컬 MCP 제거 — .mcp.json 에서 실제로 지워지는 파괴적 동작이라 인라인 확인을 거친다. */}
-            {isMcp && online && (
+            {/* 제거 — 로컬 MCP 는 .mcp.json 에서, 미연결 원격은 백엔드 레코드가 실제로
+                지워지는 파괴적 동작이라 인라인 확인을 거친다. */}
+            {removable && (
               confirmingRemove ? (
                 <div className="flex items-center gap-1.5">
                   <span className="text-caption-01 text-text-helper">정말 제거할까요?</span>
@@ -611,7 +618,8 @@ const ConnectorDetailView: React.FC<{
                     disabled={busy}
                     onClick={() => {
                       setConfirmingRemove(false);
-                      onRemoveLocal(c);
+                      if (isMcp) onRemoveLocal(c);
+                      else onRealDisconnect(c);
                     }}
                   >
                     제거
@@ -997,10 +1005,14 @@ function ConnectorsScreen() {
   };
 
   // "추가하고 연결" — 여기서부터 부작용(동적 client 등록 + OAuth 시작).
-  const handleAddCustom = async (payload: CustomConnectorAddPayload): Promise<boolean> => {
+  // 반환: null=성공, string=실패 사유(모달이 그대로 표시 — 백엔드의 fail-closed 메시지
+  // 예: "동적 client 등록 미지원 — client ID를 직접 입력해주세요"를 사용자가 봐야 한다).
+  const handleAddCustom = async (payload: CustomConnectorAddPayload): Promise<string | null> => {
     const res = await api.addCustomConnector(payload);
     const data = res.data as { oauth_url?: string; connector_id?: string } | undefined;
-    if (!res.success || !data?.oauth_url || !data.connector_id) return false;
+    if (!res.success || !data?.oauth_url || !data.connector_id) {
+      return res.error || '연결을 시작하지 못했어요. 입력값을 확인하고 다시 시도하세요.';
+    }
     setCustomModalOpen(false);
     await openExternal(data.oauth_url); // 시스템 브라우저에서 로그인
     const connectorId = data.connector_id;
@@ -1008,7 +1020,7 @@ function ConnectorsScreen() {
     const ok = await pollUntilConnected((x) => x.id === connectorId && x.status === 'connected');
     if (!mountedRef.current) {
       job.dismiss();
-      return true;
+      return null;
     }
     if (ok) {
       await refresh();
@@ -1017,7 +1029,7 @@ function ConnectorsScreen() {
     } else {
       job.done('error', '로그인 대기 시간이 초과됐어요. 다시 시도해주세요.');
     }
-    return true;
+    return null;
   };
 
   const handleRealDisconnect = async (c: Connector) => {

@@ -21,6 +21,7 @@ composition_root.py 에서 RicePaths 가 추가로 주입된다 (DI 허용 — C
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 
@@ -146,17 +147,22 @@ class ConnectorService(IConnectorService):
     async def warm_local(self) -> int:
         """로컬 MCP 서버(stdio=spawn, http=probe) 를 전부 다시 불러 tools/list 를 캐시한다
         (앱 startup 용). 서버별 실패는 건너뛴다(fail-safe). 반환: 캐시된 총 도구 수.
+
+        서버들을 **병렬로** warm 한다 — 직렬이면 죽은 stdio 서버 하나당 타임아웃(~20초)씩
+        기다려서, 죽은 서버 N개면 N×20초가 걸린다. 병렬이면 최악이 타임아웃 1회분이다.
         """
+        servers = self._local_servers()
+        results = await asyncio.gather(
+            *(self._local_list_tools(s) for s in servers), return_exceptions=True
+        )
         specs_by_conn: dict[str, list[ToolSpec]] = {}
         total = 0
-        for server in self._local_servers():
-            try:
-                specs = await self._local_list_tools(server)
-            except Exception as exc:  # noqa: BLE001
-                log.warning("local mcp %s tools/list failed: %s", server.name, exc)
+        for server, result in zip(servers, results):
+            if isinstance(result, BaseException):
+                log.warning("local mcp %s tools/list failed: %s", server.name, result)
                 continue
-            specs_by_conn[server.connector_id] = specs
-            total += len(specs)
+            specs_by_conn[server.connector_id] = result
+            total += len(result)
         self._local_specs = specs_by_conn
         log.info("local mcp warmed: %d server(s), %d tool(s)", len(specs_by_conn), total)
         return total
@@ -471,10 +477,20 @@ class ConnectorService(IConnectorService):
         client_id 가 이미 주어지면(모달에서 수동 입력) 그대로 쓰고, 없고
         registration_endpoint 가 있으면 여기서 RFC 7591 동적 등록을 실행한다(부작용이
         있는 단계라 미리보기가 아니라 확정 시점에만 수행 — discovery.py 모듈 docstring 참고).
+
+        어느 경로로도 client_id 를 못 얻으면 **저장 전에** fail-closed 한다 — 예전엔
+        client_id="" 로 descriptor·connectors 행을 만들어 놓고 begin_connect 에서 죽어서,
+        UI 에 연결도 제거도 안 되는 좀비 카드가 남았다.
         """
         if not client_id and registration_endpoint:
             redirect_uri = default_redirect_uri(self._port)
             client_id, client_secret = await register_dynamic_client(registration_endpoint, redirect_uri)
+        if not client_id:
+            raise ValidationError(
+                "이 서버에서 OAuth client ID를 얻지 못했어요 — 동적 client 등록(RFC 7591)이 "
+                "실패했거나 지원되지 않아요. 고급 설정에서 client ID(발급받았다면 secret 포함)를 "
+                "직접 입력해주세요."
+            )
 
         connector_type = self._custom.unique_type(display_name)
         descriptor = self._custom.add(
@@ -484,7 +500,7 @@ class ConnectorService(IConnectorService):
             token_url=token_url,
             mcp_endpoint=mcp_endpoint,
             scopes=scopes,
-            client_id=client_id or "",
+            client_id=client_id,
             client_secret=client_secret,
             registration_endpoint=registration_endpoint,
         )
@@ -511,9 +527,32 @@ class ConnectorService(IConnectorService):
         return info
 
     async def delete(self, connector_id: str) -> None:
-        """connector 레코드 삭제 + 키체인 항목 정리 (카탈로그는 cascade 삭제)."""
+        """connector 레코드 삭제 + 키체인 항목 정리 (카탈로그는 cascade 삭제).
+
+        커스텀 타입의 마지막 인스턴스였다면 descriptor·client secret·flow 도 함께
+        정리한다 — 안 그러면 재등록 때마다 custom_foo_2, _3… 타입이 증식하고 키체인에
+        고아 secret 이 쌓인다.
+        """
+        row = self._db.query_one(
+            "SELECT connector_type FROM connectors WHERE id=?", (connector_id,)
+        )
         await self._manager.delete(connector_id)
         self._clients.pop(connector_id, None)
+        if row is not None:
+            self._cleanup_custom_type(row["connector_type"])
+
+    def _cleanup_custom_type(self, connector_type: str) -> None:
+        """이 커스텀 타입의 connectors 행이 더 없으면 descriptor(DB)·secret(키체인)·
+        flow(캐시)를 정리한다. 정적 타입(registry.py)은 건드리지 않는다."""
+        if connector_type not in self._custom.types():
+            return
+        remaining = self._db.query_one(
+            "SELECT id FROM connectors WHERE connector_type=? LIMIT 1", (connector_type,)
+        )
+        if remaining is not None:
+            return
+        self._custom.delete(connector_type)
+        self._flows.pop(connector_type, None)
 
     # ── helpers ───────────────────────────────────────────────────────────────
     def _connected_connectors(self) -> list:
@@ -603,10 +642,18 @@ class ConnectorService(IConnectorService):
             log.warning("token refresh failed for %s: %s", connector_id, exc)
             self._mark_error(connector_id)
             return None
+        # rotation 서버가 새 refresh_token 을 내려줬으면 함께 교체한다 — 이전 것은
+        # 서버가 무효화했을 수 있어 그대로 두면 다음 갱신부터 실패한다.
+        rotated = (
+            refreshed.refresh_token
+            if refreshed.refresh_token and refreshed.refresh_token != credential.refresh_token
+            else None
+        )
         self._keychain.update_access_token(
             connector_id,
             access_token=refreshed.access_token,
             expires_in=refreshed.expires_in,
+            refresh_token=rotated,
         )
         self._mark_healthy(connector_id)
         return refreshed.access_token

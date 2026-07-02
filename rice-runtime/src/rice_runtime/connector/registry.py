@@ -31,6 +31,10 @@ class ConnectorDescriptor:
     # 재사용된다(Google API 활성화는 프로젝트 단위, OAuth client 는 그 위에 하나). 그래서
     # 타입 전용 파일이 없으면 이 목록을 순서대로 시도한다 — 파일 복제 없이 기존 설치를 공유.
     client_secret_fallback_filenames: tuple[str, ...] = ()
+    # 사용자가 런타임에 "커스텀 추가"로 등록한 타입(custom_registry.py 산출) 여부.
+    # 자격증명 오류 안내가 갈린다: 정적 타입은 env/JSON 설치를, 커스텀은 모달의
+    # client ID 직접 입력을 안내해야 한다(OAuthFlow._require_client_id).
+    is_custom: bool = False
 
     # ── env 오버라이드 헬퍼 ────────────────────────────────────────────────────
     def resolved_mcp_endpoint(self) -> str:

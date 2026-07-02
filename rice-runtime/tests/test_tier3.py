@@ -155,9 +155,7 @@ class TestGmailConnector:
         mock_client.__aexit__ = AsyncMock(return_value=None)
 
         with patch("httpx.AsyncClient", return_value=mock_client):
-            await flow.exchange_code(
-                code="c", state="s", expected_state="s", code_verifier="verifier-xyz"
-            )
+            await flow.exchange_code(code="c", code_verifier="verifier-xyz")
 
         sent_payload = mock_client.post.call_args.kwargs["data"]
         assert "client_secret" not in sent_payload
