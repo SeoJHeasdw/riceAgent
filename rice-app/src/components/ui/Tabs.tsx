@@ -69,7 +69,7 @@ export const Tabs: React.FC<TabsProps> = ({
               disabled={isDisabled}
               onClick={() => handleTabClick(tab.id, isDisabled)}
               className={`
-                relative px-4 py-3 font-sans text-body-short-02 font-normal
+                relative px-4 py-2.5 font-sans text-body-short-01 font-medium
                 transition-colors rounded-t-md border-0 outline-none
                 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus
                 ${isActive

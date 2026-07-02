@@ -1,9 +1,8 @@
 import React from 'react';
 
 /**
- * Tag component following IBM Carbon design principles
+ * Tag component — Carbon g100 색상 + rounded-full pill 형태
  * - Status/category tags with color variants
- * - 0px border radius (flat design)
  * - Multiple color variants: blue, green, purple, gray, teal, red, yellow
  */
 

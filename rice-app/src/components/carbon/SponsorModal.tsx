@@ -43,18 +43,18 @@ export const SponsorModal: React.FC<SponsorModalProps> = ({
         {/* Header */}
         <div className="flex items-center px-5 py-4 border-b border-border-subtle-01">
           <div className="flex-1">
-            <div className="text-heading-03 font-semibold text-text-primary">
+            <div className="text-heading-02 font-semibold text-text-primary">
               스킬 후원
             </div>
             <div className="text-caption-01 text-text-helper">{skillName}</div>
           </div>
           <button
             onClick={onClose}
-            className="w-8 h-8 flex items-center justify-center hover:bg-layer-hover-01 transition-colors"
+            className="w-8 h-8 flex items-center justify-center rounded-lg text-icon-secondary hover:text-icon-primary hover:bg-layer-hover-01 transition-colors"
             aria-label="Close"
           >
-            <svg width="16" height="16" viewBox="0 0 32 32" fill="currentColor">
-              <path d="M24 9.4L22.6 8 16 14.6 9.4 8 8 9.4l6.6 6.6L8 22.6 9.4 24l6.6-6.6 6.6 6.6 1.4-1.4-6.6-6.6L24 9.4z"/>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <path d="M18 6 6 18M6 6l12 12" />
             </svg>
           </button>
         </div>
@@ -68,25 +68,25 @@ export const SponsorModal: React.FC<SponsorModalProps> = ({
 
           {/* Balance */}
           <div className="flex items-center gap-1.5 text-caption-01 text-text-helper mb-4">
-            <svg width="14" height="14" viewBox="0 0 32 32" fill="currentColor">
-              <path d="M26 6H6a2 2 0 00-2 2v16a2 2 0 002 2h20a2 2 0 002-2V8a2 2 0 00-2-2zm0 2v4H6V8zM6 24V14h20v10z"/>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="5" width="20" height="14" rx="2" />
+              <path d="M2 10h20" />
             </svg>
             내 잔액 {balance.toLocaleString()} BP
           </div>
 
-          {/* Amount selection */}
-          <div className="grid grid-cols-4 gap-px bg-border-subtle-01 mb-5">
+          {/* Amount selection — 세그먼트 그리드 (앱 공통 segmented control 문법) */}
+          <div className="grid grid-cols-4 gap-1 p-1 bg-field-01 border border-border-subtle-01 rounded-xl mb-5">
             {presetAmounts.map((preset) => (
               <button
                 key={preset}
                 onClick={() => setAmount(preset)}
-                className={`
-                  py-3.5 text-center text-body-short-01 font-semibold font-mono transition-colors
-                  ${amount === preset
-                    ? 'bg-interactive text-white'
-                    : 'bg-background text-text-primary hover:bg-layer-hover-01'
-                  }
-                `}
+                aria-pressed={amount === preset}
+                className={`py-2.5 text-center text-body-short-01 font-semibold font-mono rounded-lg transition-all duration-150 ${
+                  amount === preset
+                    ? 'bg-interactive text-white shadow-elevation-1'
+                    : 'bg-transparent text-text-secondary hover:bg-layer-hover-01 hover:text-text-primary'
+                }`}
               >
                 {preset.toLocaleString()}
               </button>
@@ -99,10 +99,12 @@ export const SponsorModal: React.FC<SponsorModalProps> = ({
             size="lg"
             onClick={handleSponsor}
             className="w-full"
+            icon={
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />
+              </svg>
+            }
           >
-            <svg width="16" height="16" viewBox="0 0 32 32" fill="currentColor" className="mr-2">
-              <path d="M22.45 6h-7.88l-1.94-4.68A1 1 0 0011.7 1H3.53a1 1 0 00-.93.63L.1 8.31a1 1 0 00.93 1.37h4.67l-2.5 6.54a1 1 0 00.55 1.3 1 1 0 001.3-.55l2.5-6.54h4.67l-2.5 6.54a1 1 0 00.55 1.3 1 1 0 001.3-.55l2.5-6.54h4.67l-2.5 6.54a1 1 0 00.55 1.3 1 1 0 001.3-.55l2.5-6.54h4.67a1 1 0 00.93-1.37l-2.5-6.68A1 1 0 0022.45 6z"/>
-            </svg>
             {amount.toLocaleString()} BP 후원
           </Button>
         </div>

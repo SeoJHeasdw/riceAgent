@@ -57,54 +57,6 @@
   }
 }
 
-/* Component styles */
-@layer components {
-  /* Button base styles */
-  .btn {
-    @apply px-4 py-2 font-medium rounded-lg transition-all;
-    @apply border border-border-strong-01;
-    @apply hover:bg-layer-02 active:bg-layer-03 active:scale-[0.98];
-  }
-
-  .btn-primary {
-    @apply bg-interactive text-text-on-color;
-    @apply border-interactive;
-    /* 투명도(/90) hover는 다크 배경이 비쳐 오히려 어두워진다 — 밝기 상승으로 */
-    @apply hover:brightness-110 hover:shadow-elevation-2;
-  }
-
-  .btn-secondary {
-    @apply bg-layer-01 text-text-primary;
-    @apply hover:bg-layer-02;
-  }
-
-  .btn-ghost {
-    @apply bg-transparent border-transparent;
-    @apply hover:bg-layer-02;
-  }
-
-  /* Input base styles */
-  .input {
-    @apply w-full px-4 py-2 rounded-lg;
-    @apply bg-field-01 text-text-primary;
-    @apply border border-border-strong-01;
-    @apply transition-colors;
-    @apply focus:outline-none focus:border-focus focus:ring-1 focus:ring-focus;
-    @apply placeholder:text-text-placeholder;
-  }
-
-  /* Card styles */
-  .card {
-    @apply bg-layer-01 border border-border-subtle-01 rounded-xl;
-    @apply p-4 shadow-elevation-1;
-  }
-
-  /* Focus styles */
-  .focus-ring {
-    @apply focus:outline-none focus:ring-2 focus:ring-focus focus:ring-offset-2 focus:ring-offset-background;
-  }
-}
-
 /* Utility styles */
 @layer utilities {
   /* Text utilities */

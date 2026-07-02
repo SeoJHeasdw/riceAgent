@@ -126,7 +126,8 @@ function SettingsScreen() {
   return (
     <div className="flex flex-col h-full bg-background">
       {/* Header */}
-      <header className="h-12 flex-shrink-0 bg-layer-01 border-b border-border-subtle-01 flex items-center gap-3 px-5">
+      {/* 채팅·사이드바와 같은 52px 헤더 라인 */}
+      <header className="h-[52px] flex-shrink-0 bg-layer-01 border-b border-border-subtle-01 flex items-center gap-3 px-5">
         <h1 className="text-body-short-02 font-semibold text-text-primary">{t.settings.title}</h1>
         {saved && (
           <Tag type="green" size="sm" className="animate-fade-in">

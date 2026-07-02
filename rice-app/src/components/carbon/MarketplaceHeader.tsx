@@ -33,7 +33,8 @@ export const MarketplaceHeader: React.FC<MarketplaceHeaderProps> = ({
     <div className="px-8 pt-7 pb-0">
       {/* Title and subtitle */}
       <div className="flex items-end gap-4 mb-1">
-        <h1 className="text-[28px] font-light text-text-primary leading-tight">
+        {/* 페이지 타이틀 공통 문법: heading-04(28px) + font-light — HomeScreen 히어로와 동일 */}
+        <h1 className="text-heading-04 font-light text-text-primary leading-tight">
           {title}
         </h1>
         {subtitle && (
@@ -64,8 +65,8 @@ export const MarketplaceHeader: React.FC<MarketplaceHeaderProps> = ({
               className="p-0.5 rounded hover:bg-layer-hover-01 transition-colors"
               aria-label="Clear search"
             >
-              <svg width="12" height="12" viewBox="0 0 32 32" fill="currentColor" className="text-icon-secondary">
-                <path d="M24 9.4L22.6 8 16 14.6 9.4 8 8 9.4l6.6 6.6L8 22.6 9.4 24l6.6-6.6 6.6 6.6 1.4-1.4-6.6-6.6L24 9.4z"/>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="text-icon-secondary">
+                <path d="M18 6 6 18M6 6l12 12" />
               </svg>
             </button>
           )}

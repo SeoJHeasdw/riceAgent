@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { SkillFile } from '../../lib/types';
 import { Markdown } from './Markdown';
 import { FileTypeIcon, FolderIcon } from './FileTypeIcon';
+import { Icon } from '../ui';
 
 /**
  * SkillFileBrowser — a compact two-pane file explorer for a skill's bundled
@@ -128,16 +129,7 @@ export const SkillFileBrowser: React.FC<{ files: SkillFile[] }> = ({ files }) =>
               title="Copy"
               className="w-7 h-7 flex items-center justify-center rounded-md text-icon-secondary hover:bg-layer-hover-01 hover:text-text-primary transition-colors"
             >
-              {copied ? (
-                <svg width="15" height="15" viewBox="0 0 32 32" fill="currentColor">
-                  <path d="M13 24l-9-9 1.4-1.4L13 21.2 26.6 7.6 28 9z" />
-                </svg>
-              ) : (
-                <svg width="15" height="15" viewBox="0 0 32 32" fill="currentColor">
-                  <path d="M28 10v18H10V10h18m0-2H10a2 2 0 00-2 2v18a2 2 0 002 2h18a2 2 0 002-2V10a2 2 0 00-2-2z" />
-                  <path d="M4 18H2V4a2 2 0 012-2h14v2H4z" />
-                </svg>
-              )}
+              {copied ? <Icon name="check" size={15} /> : <Icon name="copy" size={15} />}
             </button>
           </div>
         </div>

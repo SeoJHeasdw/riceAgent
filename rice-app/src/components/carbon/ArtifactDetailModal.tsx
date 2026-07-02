@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Button, Tag, Toggle } from '../ui';
+import { Button, Icon, Tag, Toggle } from '../ui';
 import { dialogBackdropCls } from '../ui/surfaces';
 import { Skill, Plugin, SkillFile, PlatformArtifact } from '../../lib/types';
 import { getSkillFiles } from '../../lib/skillFiles';
@@ -90,13 +90,14 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
                 isSkill ? 'from-[#4589ff] to-[#0043ce]' : 'from-[#8a3ffc] to-[#6929c4]'
               }`}
             >
-              <svg width="22" height="22" viewBox="0 0 32 32" fill="white">
-                {isSkill ? (
-                  <path d="M30 8h-4.1c-.5-2.3-2.5-4-4.9-4s-4.4 1.7-4.9 4H2v2h14.1c.5 2.3 2.5 4 4.9 4s4.4-1.7 4.9-4H30V8zM21 12c-1.7 0-3-1.3-3-3s1.3-3 3-3 3 1.3 3 3-1.3 3-3 3zM2 24h4.1c.5 2.3 2.5 4 4.9 4s4.4-1.7 4.9-4H30v-2H15.9c-.5-2.3-2.5-4-4.9-4s-4.4 1.7-4.9 4H2v2zm9-4c1.7 0 3 1.3 3 3s-1.3 3-3 3-3-1.3-3-3 1.3-3 3-3z"/>
-                ) : (
-                  <path d="M16 2a14 14 0 1014 14A14 14 0 0016 2zm0 26a12 12 0 1112-12 12 12 0 01-12 12z"/>
-                )}
-              </svg>
+              {isSkill ? (
+                <Icon name="skill" size={22} className="text-white" />
+              ) : (
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round">
+                  <circle cx="12" cy="12" r="9" />
+                  <circle cx="12" cy="12" r="3.5" />
+                </svg>
+              )}
             </div>
           </div>
           <div className="flex-1 min-w-0">
@@ -129,9 +130,7 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
             className="w-8 h-8 flex items-center justify-center hover:bg-layer-hover-01 transition-colors flex-shrink-0"
             aria-label="Close"
           >
-            <svg width="16" height="16" viewBox="0 0 32 32" fill="currentColor">
-              <path d="M24 9.4L22.6 8 16 14.6 9.4 8 8 9.4l6.6 6.6L8 22.6 9.4 24l6.6-6.6 6.6 6.6 1.4-1.4-6.6-6.6L24 9.4z"/>
-            </svg>
+            <Icon name="close" size={16} />
           </button>
         </div>
 
@@ -147,20 +146,18 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
               {/* Stats */}
               <div className="flex items-center gap-4 mb-4 text-body-short-01 text-text-secondary">
                 <span className="flex items-center gap-1.5">
-                  <svg width="16" height="16" viewBox="0 0 32 32" fill="currentColor">
-                    <path d="M26 24v4H6v-4H4v4a2 2 0 002 2h20a2 2 0 002-2v-4zM26 14l-1.41-1.41L17 20.17V2h-2v18.17l-7.59-7.58L6 14l10 10 10-10z"/>
-                  </svg>
+                  <Icon name="download" size={15} />
                   {skill.downloads.toLocaleString()} 다운로드
                 </span>
                 <span className="flex items-center gap-1.5">
-                  <svg width="16" height="16" viewBox="0 0 32 32" fill="currentColor">
-                    <path d="M16 6.52l2.76 5.58.46 1 1.1.16 6.16.89-4.46 4.35-.8.77.19 1.09 1.05 6.13-5.51-2.89L16 23l-.95.5-5.51 2.89 1.05-6.13.19-1.09-.8-.77-4.46-4.35 6.16-.89 1.1-.16.46-1L16 6.52M16 2l-4.55 9.22-10.17 1.47 7.36 7.18L6.9 30l9.1-4.78L25.1 30l-1.74-10.13 7.36-7.18-10.17-1.47L16 2z"/>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 2.5l2.9 5.9 6.5.95-4.7 4.6 1.1 6.5L12 17.4l-5.8 3.05 1.1-6.5-4.7-4.6 6.5-.95L12 2.5z" />
                   </svg>
                   {skill.rating} 평점
                 </span>
                 <span className="flex items-center gap-1.5 text-interactive font-mono">
-                  <svg width="16" height="16" viewBox="0 0 32 32" fill="currentColor">
-                    <path d="M22.45 6h-7.88l-1.94-4.68A1 1 0 0011.7 1H3.53a1 1 0 00-.93.63L.1 8.31a1 1 0 00.93 1.37h4.67l-2.5 6.54a1 1 0 00.55 1.3 1 1 0 001.3-.55l2.5-6.54h4.67l-2.5 6.54a1 1 0 00.55 1.3 1 1 0 001.3-.55l2.5-6.54h4.67l-2.5 6.54a1 1 0 00.55 1.3 1 1 0 001.3-.55l2.5-6.54h4.67a1 1 0 00.93-1.37l-2.5-6.68A1 1 0 0022.45 6z"/>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />
                   </svg>
                   {skill.points.toLocaleString()} BP
                 </span>
@@ -255,9 +252,7 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
                   <div className="flex flex-col gap-px bg-border-subtle-01 rounded-xl overflow-hidden">
                     {plugin.skills.map((s) => (
                       <div key={s.command} className="flex items-start gap-2.5 bg-background px-3.5 py-2.5">
-                        <svg width="16" height="16" viewBox="0 0 32 32" fill="currentColor" className="flex-shrink-0 mt-1 text-[#a56eff]">
-                          <path d="M30 8h-4.1c-.5-2.3-2.5-4-4.9-4s-4.4 1.7-4.9 4H2v2h14.1c.5 2.3 2.5 4 4.9 4s4.4-1.7 4.9-4H30V8zM21 12c-1.7 0-3-1.3-3-3s1.3-3 3-3 3 1.3 3 3-1.3 3-3 3zM2 24h4.1c.5 2.3 2.5 4 4.9 4s4.4-1.7 4.9-4H30v-2H15.9c-.5-2.3-2.5-4-4.9-4s-4.4 1.7-4.9 4H2v2zm9-4c1.7 0 3 1.3 3 3s-1.3 3-3 3-3-1.3-3-3 1.3-3 3-3z"/>
-                        </svg>
+                        <Icon name="skill" size={16} className="flex-shrink-0 mt-1 text-[#a56eff]" />
                         <div className="flex-1 min-w-0">
                           <code className="inline-block font-mono text-[13px] font-semibold text-[#c4a7ff] bg-[#8a3ffc]/12 rounded-md px-1.5 py-0.5">
                             /{s.command}
@@ -282,9 +277,7 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
                   <div className="flex flex-col gap-px bg-border-subtle-01 rounded-xl overflow-hidden">
                     {plugin.connectors.map((c) => (
                       <div key={c.name} className="flex items-start gap-2.5 bg-background px-3.5 py-2.5">
-                        <svg width="16" height="16" viewBox="0 0 32 32" fill="currentColor" className="flex-shrink-0 mt-0.5 text-interactive">
-                          <path d="M24 21.32a4.66 4.66 0 00-3.69 1.82l-7-3.45a4.6 4.6 0 000-3.38l7-3.45A4.67 4.67 0 1019.33 8a4.65 4.65 0 00.18 1.26l-7 3.45a4.67 4.67 0 100 6.58l7 3.45A4.6 4.6 0 0019.33 24 4.67 4.67 0 1024 21.32z"/>
-                        </svg>
+                        <Icon name="connect" size={16} className="flex-shrink-0 mt-0.5 text-interactive" />
                         <div className="flex-1 min-w-0">
                           <div className="text-body-short-01 font-semibold text-text-primary">{c.name}</div>
                           {c.desc && <div className="text-caption-01 text-text-helper mt-0.5">{c.desc}</div>}
@@ -307,9 +300,7 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
                   <div className="flex flex-col gap-px bg-border-subtle-01 rounded-xl overflow-hidden">
                     {plugin.knowledge.map((k) => (
                       <div key={k.name} className="flex items-start gap-2.5 bg-background px-3.5 py-2.5">
-                        <svg width="16" height="16" viewBox="0 0 32 32" fill="currentColor" className="flex-shrink-0 mt-0.5 text-support-success">
-                          <path d="M26 4H8a2 2 0 00-2 2v1H4v2h2v6H4v2h2v6H4v2h2v1a2 2 0 002 2h18a2 2 0 002-2V6a2 2 0 00-2-2zm0 22H8v-1h2v-2H8v-6h2v-2H8V9h2V7H8V6h18z"/>
-                        </svg>
+                        <Icon name="document" size={16} className="flex-shrink-0 mt-0.5 text-support-success" />
                         <div className="flex-1 min-w-0">
                           <div className="text-body-short-01 font-semibold text-text-primary">{k.name}</div>
                           <div className="text-caption-01 text-text-helper mt-0.5">{k.desc}</div>
@@ -363,11 +354,7 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
               )}
 
               {/* Uninstall button */}
-              <Button kind="danger" size="sm" onClick={onUninstall} className="ml-auto">
-                <svg width="15" height="15" viewBox="0 0 32 32" fill="currentColor">
-                  <path d="M12 12h2v12h-2zm6 0h2v12h-2z"/>
-                  <path d="M4 6v2h2v20a2 2 0 002 2h16a2 2 0 002-2V8h2V6zm4 22V8h16v20zm4-26h8v2h-8z"/>
-                </svg>
+              <Button kind="danger" size="sm" onClick={onUninstall} className="ml-auto" icon={<Icon name="trash" size={14} />}>
                 제거
               </Button>
             </div>
@@ -380,17 +367,20 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
               )}
               <div className="flex-1" />
               {isSkill && onSponsor && (
-                <Button kind="tertiary" size="sm" onClick={onSponsor}>
-                  <svg width="15" height="15" viewBox="0 0 32 32" fill="currentColor">
-                    <path d="M22.45 6h-7.88l-1.94-4.68A1 1 0 0011.7 1H3.53a1 1 0 00-.93.63L.1 8.31a1 1 0 00.93 1.37h4.67l-2.5 6.54a1 1 0 00.55 1.3 1 1 0 001.3-.55l2.5-6.54h4.67l-2.5 6.54a1 1 0 00.55 1.3 1 1 0 001.3-.55l2.5-6.54h4.67l-2.5 6.54a1 1 0 00.55 1.3 1 1 0 001.3-.55l2.5-6.54h4.67a1 1 0 00.93-1.37l-2.5-6.68A1 1 0 0022.45 6z"/>
-                  </svg>
+                <Button
+                  kind="tertiary"
+                  size="sm"
+                  onClick={onSponsor}
+                  icon={
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />
+                    </svg>
+                  }
+                >
                   후원
                 </Button>
               )}
-              <Button kind="primary" size="sm" onClick={onInstall}>
-                <svg width="15" height="15" viewBox="0 0 32 32" fill="currentColor">
-                  <path d="M26 24v4H6v-4H4v4a2 2 0 002 2h20a2 2 0 002-2v-4zM26 14l-1.41-1.41L17 20.17V2h-2v18.17l-7.59-7.58L6 14l10 10 10-10z"/>
-                </svg>
+              <Button kind="primary" size="sm" onClick={onInstall} icon={<Icon name="download" size={14} />}>
                 {isSkill ? '스킬 설치' : '전문가 설치'}
               </Button>
             </div>

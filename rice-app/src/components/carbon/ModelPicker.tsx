@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Button, Input, Tag } from '../ui';
+import { Button, Icon, Input, Tag } from '../ui';
 import { ModelRegisterModal, RegisterPayload } from './ModelRegisterModal';
 import { useToast } from '../../lib/toast/ToastContext';
 import { api } from '../../lib/api';
@@ -248,25 +248,23 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
                 onClick={() => setRegisterModalOpen(true)}
                 className="flex items-center gap-1 text-caption-01 text-interactive hover:underline"
               >
-                <svg width="12" height="12" viewBox="0 0 32 32" fill="currentColor">
-                  <path d="M17 15V8h-2v7H8v2h7v7h2v-7h7v-2z" />
-                </svg>
+                <Icon name="add" size={12} />
                 모델 추가
               </button>
             </div>
 
             {saasModels.length === 0 ? (
               <EmptyState
-                icon={
-                  <path d="M16 4a5 5 0 015 5v3h1a3 3 0 013 3v9a3 3 0 01-3 3H10a3 3 0 01-3-3v-9a3 3 0 013-3h1V9a5 5 0 015-5zm0 2a3 3 0 00-3 3v3h6V9a3 3 0 00-3-3z" />
-                }
+                icon={<Icon name="lock" size={22} className="text-icon-secondary" />}
                 title="등록된 모델 없음"
                 desc="모델 추가로 API 모델과 키를 등록하세요"
                 action={
-                  <Button kind="primary" size="sm" onClick={() => setRegisterModalOpen(true)}>
-                    <svg width="14" height="14" viewBox="0 0 32 32" fill="currentColor" className="mr-1">
-                      <path d="M17 15V8h-2v7H8v2h7v7h2v-7h7v-2z" />
-                    </svg>
+                  <Button
+                    kind="primary"
+                    size="sm"
+                    icon={<Icon name="add" size={14} />}
+                    onClick={() => setRegisterModalOpen(true)}
+                  >
                     모델 추가
                   </Button>
                 }
@@ -302,10 +300,7 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
                         className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-1 rounded-md text-icon-secondary hover:text-support-error hover:bg-support-error/10 transition-all cursor-pointer flex-shrink-0"
                         title="등록 해제"
                       >
-                        <svg width="14" height="14" viewBox="0 0 32 32" fill="currentColor">
-                          <path d="M12 12h2v12h-2zM18 12h2v12h-2z" />
-                          <path d="M4 6v2h2v20a2 2 0 002 2h16a2 2 0 002-2V8h2V6zm4 22V8h16v20zM12 2h8v2h-8z" />
-                        </svg>
+                        <Icon name="trash" size={14} />
                       </span>
                     </button>
                   );
@@ -350,15 +345,14 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
               <div className={`flex items-center gap-1.5 mt-1.5 text-caption-01 ${connTest === 'ok' ? 'text-support-success' : 'text-support-error'}`}>
                 {connTest === 'ok' ? (
                   <>
-                    <svg width="13" height="13" viewBox="0 0 32 32" fill="currentColor" className="flex-shrink-0">
-                      <path d="M13 24l-9-9 1.414-1.414L13 21.171 26.586 7.586 28 9 13 24z" />
-                    </svg>
+                    <Icon name="check" size={13} className="flex-shrink-0" />
                     연결됨 · Ollama 응답 정상
                   </>
                 ) : (
                   <>
-                    <svg width="13" height="13" viewBox="0 0 32 32" fill="currentColor" className="flex-shrink-0">
-                      <path d="M16 2a14 14 0 1014 14A14 14 0 0016 2zm-1.1 6h2.2v11h-2.2zm1.1 17.5a1.6 1.6 0 111.6-1.6 1.6 1.6 0 01-1.6 1.6z" />
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" className="flex-shrink-0">
+                      <circle cx="12" cy="12" r="9" />
+                      <path d="M12 8v5M12 16.5h.01" />
                     </svg>
                     연결 실패 · 엔드포인트를 확인하세요
                   </>
@@ -369,22 +363,24 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
 
           {ollamaModels === null ? (
             <EmptyState
-              icon={<path d="M16 2a14 14 0 1014 14A14 14 0 0016 2zm-1 6h2v8h-2zm1 12.5a1.5 1.5 0 111.5-1.5A1.5 1.5 0 0116 20.5z" />}
+              icon={<Icon name="server" size={22} className="text-icon-secondary" />}
               title="설치된 모델 확인 전"
               desc="로컬 Ollama에서 모델 목록을 불러옵니다"
               action={
-                <Button kind="primary" size="sm" onClick={fetchOllamaModels} loading={ollamaFetching}>
-                  <svg width="14" height="14" viewBox="0 0 32 32" fill="currentColor" className="mr-1">
-                    <path d="M22 16a6 6 0 11-6-6 6 6 0 016 6zM4 16A12 12 0 1016 4 12 12 0 004 16zm2 0a10 10 0 1010-10A10 10 0 006 16z" opacity=".3" />
-                    <path d="M14 10h2v12h-2zM10 14h12v2H10z" />
-                  </svg>
+                <Button
+                  kind="primary"
+                  size="sm"
+                  icon={<Icon name="search" size={14} />}
+                  onClick={fetchOllamaModels}
+                  loading={ollamaFetching}
+                >
                   로컬 모델 확인
                 </Button>
               }
             />
           ) : ollamaModels.length === 0 ? (
             <EmptyState
-              icon={<path d="M26 14h-2V8a2 2 0 00-2-2H10L8 4H4a2 2 0 00-2 2v18a2 2 0 002 2h20.142a2 2 0 001.992-1.819L28 14zM4 6h3.172l2 2H22v4H6a2 2 0 00-1.99 1.819L4 18.06z" />}
+              icon={<Icon name="download" size={22} className="text-icon-secondary" />}
               title="설치된 모델 없음"
               desc={
                 <>
@@ -408,10 +404,7 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
                     className="flex items-center gap-1 text-caption-01 text-interactive hover:underline disabled:opacity-40"
                     title="새로고침"
                   >
-                    <svg width="12" height="12" viewBox="0 0 32 32" fill="currentColor" className={ollamaFetching ? 'animate-spin' : ''}>
-                      <path d="M27.1 14.3A11 11 0 1016 27v-2a9 9 0 109-9.7z" />
-                      <path d="M27 4v8h-8l3.4-3.4A9 9 0 107 24.6l-1.4 1.4A11 11 0 1027.1 14.3z" opacity=".4" />
-                    </svg>
+                    <Icon name="renew" size={12} className={ollamaFetching ? 'animate-spin' : ''} />
                     새로고침
                   </button>
                 </div>
@@ -540,7 +533,7 @@ const RadioDot: React.FC<{ selected: boolean }> = ({ selected }) => (
   </span>
 );
 
-/* ── 컴팩트 빈 상태 (확인 전 / 없음) ── */
+/* ── 컴팩트 빈 상태 (확인 전 / 없음) — icon은 완성된 엘리먼트(<Icon> 등)를 받는다 ── */
 const EmptyState: React.FC<{
   icon: React.ReactNode;
   title: string;
@@ -548,9 +541,7 @@ const EmptyState: React.FC<{
   action: React.ReactNode;
 }> = ({ icon, title, desc, action }) => (
   <div className="flex flex-col items-center gap-2.5 px-4 py-5 rounded-lg border border-dashed border-border-subtle-01 bg-layer-02 text-center">
-    <svg width="22" height="22" viewBox="0 0 32 32" fill="currentColor" className="text-icon-secondary">
-      {icon}
-    </svg>
+    {icon}
     <div>
       <div className="text-body-short-01 font-medium text-text-primary">{title}</div>
       <div className="text-caption-01 text-text-helper mt-0.5">{desc}</div>
@@ -622,15 +613,11 @@ const Params: React.FC<{
               <option value="128K">128K 토큰</option>
               <option value="256K">256K 토큰</option>
             </select>
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 32 32"
-              fill="currentColor"
+            <Icon
+              name="chevron-down"
+              size={12}
               className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-icon-secondary"
-            >
-              <path d="M16 22L6 12l1.4-1.4 8.6 8.6 8.6-8.6L26 12z" />
-            </svg>
+            />
           </div>
         </div>
       )}

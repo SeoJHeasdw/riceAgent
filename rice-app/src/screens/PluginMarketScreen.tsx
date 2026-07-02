@@ -127,9 +127,9 @@ function PluginMarketScreen() {
             <div className="absolute -top-8 -right-8 w-28 h-28 rounded-full bg-white/10 blur-2xl" aria-hidden="true" />
             <div className="relative">
               <div className="flex items-center gap-1.5 text-caption-01 text-white/80 mb-2">
-                <svg width="12" height="12" viewBox="0 0 32 32" fill="currentColor">
-                  <path d="M16 2a14 14 0 1014 14A14 14 0 0016 2zm0 26a12 12 0 1112-12 12 12 0 01-12 12z"/>
-                  <path d="M16 10a6 6 0 106 6 6 6 0 00-6-6z"/>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                  <circle cx="12" cy="12" r="9" />
+                  <circle cx="12" cy="12" r="3.5" />
                 </svg>
                 내 전문가
               </div>

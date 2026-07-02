@@ -23,7 +23,7 @@ export interface ModalProps {
   size?: 'sm' | 'md' | 'lg';
   /** Footer content (typically buttons) */
   footer?: React.ReactNode;
-  /** Tighter footer padding for modals whose footer is just compact action buttons */
+  /** 컴팩트 푸터가 기본 — 두꺼운 py-4 푸터가 필요한 예외 표면만 false로 */
   compactFooter?: boolean;
   /** Additional CSS classes */
   className?: string;
@@ -36,7 +36,7 @@ export const Modal: React.FC<ModalProps> = ({
   children,
   size = 'md',
   footer,
-  compactFooter = false,
+  compactFooter = true,
   className = '',
 }) => {
   // Close on Escape key
@@ -87,31 +87,31 @@ export const Modal: React.FC<ModalProps> = ({
       >
         {/* Header */}
         {title && (
-          <div className="flex items-center justify-between px-4 py-4 border-b border-border-subtle-01">
-            <h2 id="modal-title" className="text-heading-03 text-text-primary font-sans font-semibold">
+          <div className="flex items-center justify-between px-5 py-3.5 border-b border-border-subtle-01">
+            <h2 id="modal-title" className="text-heading-02 text-text-primary font-sans font-semibold">
               {title}
             </h2>
             <button
               onClick={onClose}
-              className="flex items-center justify-center w-8 h-8 rounded-md text-icon-primary hover:bg-layer-hover-01 transition-colors"
+              className="flex items-center justify-center w-8 h-8 rounded-lg text-icon-secondary hover:text-icon-primary hover:bg-layer-hover-01 transition-colors"
               aria-label="Close modal"
             >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M12 4.7L11.3 4 8 7.3 4.7 4 4 4.7 7.3 8 4 11.3l.7.7L8 8.7l3.3 3.3.7-.7L8.7 8z" />
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <path d="M18 6 6 18M6 6l12 12" />
               </svg>
             </button>
           </div>
         )}
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto px-4 py-5">
+        <div className="flex-1 overflow-y-auto px-5 py-5">
           {children}
         </div>
 
         {/* Footer */}
         {footer && (
           <div
-            className={`flex items-center justify-end gap-2 px-4 border-t border-border-subtle-01 ${
+            className={`flex items-center justify-end gap-2 px-5 border-t border-border-subtle-01 ${
               compactFooter ? 'py-2.5' : 'py-4'
             }`}
           >

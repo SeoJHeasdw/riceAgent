@@ -166,15 +166,13 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
               title="검색 닫기"
               className="p-0.5 -mr-0.5 rounded hover:bg-layer-hover-02 transition-colors"
             >
-              <svg width="12" height="12" viewBox="0 0 32 32" fill="currentColor" className="text-icon-secondary">
-                <path d="M24 9.4L22.6 8 16 14.6 9.4 8 8 9.4l6.6 6.6L8 22.6 9.4 24l6.6-6.6 6.6 6.6 1.4-1.4-6.6-6.6L24 9.4z"/>
-              </svg>
+              <Icon name="close" size={12} className="text-icon-secondary" />
             </button>
           </div>
         ) : (
           <button
             onClick={() => setSearchOpen(true)}
-            className="flex items-center gap-0.5 w-full h-5 px-0.5 rounded-lg text-body-short-01 text-text-secondary hover:bg-layer-hover-01 hover:text-text-primary transition-colors"
+            className="flex items-center gap-0.5 w-full h-6 px-0.5 rounded-lg text-body-short-01 text-text-secondary hover:bg-layer-hover-01 hover:text-text-primary transition-colors"
           >
             <span className="flex items-center justify-center w-5 h-5 flex-shrink-0">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
@@ -238,10 +236,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                           className="absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded-md text-icon-secondary hover:bg-layer-hover-02 hover:text-support-error transition-colors"
                           title="대화 삭제"
                         >
-                          <svg width="13" height="13" viewBox="0 0 32 32" fill="currentColor">
-                            <path d="M12 12h2v12h-2zm6 0h2v12h-2z"/>
-                            <path d="M4 6v2h2v20a2 2 0 002 2h16a2 2 0 002-2V8h2V6zm4 22V8h16v20zm4-26h8v2h-8z"/>
-                          </svg>
+                          <Icon name="trash" size={13} />
                         </button>
                       )}
                     </div>
@@ -262,7 +257,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
           title="모델 설정"
         >
           <div
-            className={`w-7 h-7 flex-shrink-0 flex items-center justify-center rounded-lg ${
+            className={`w-7 h-6 flex-shrink-0 flex items-center justify-center rounded-lg ${
               modelMode === 'local' ? 'bg-teal-60' : 'bg-blue-60'
             }`}
           >

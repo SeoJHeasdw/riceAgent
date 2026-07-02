@@ -66,9 +66,9 @@ export const PluginCard: React.FC<PluginCardProps> = ({
             aria-hidden="true"
           />
           <div className="relative w-10 h-10 flex items-center justify-center rounded-xl bg-gradient-to-br from-[#8a3ffc] to-[#6929c4] ring-1 ring-white/10 shadow-elevation-1">
-            <svg width="20" height="20" viewBox="0 0 32 32" fill="white">
-              <path d="M16 2a14 14 0 1014 14A14 14 0 0016 2zm0 26a12 12 0 1112-12 12 12 0 01-12 12z"/>
-              <path d="M16 10a6 6 0 106 6 6 6 0 00-6-6zm0 10a4 4 0 114-4 4 4 0 01-4 4z"/>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="9" />
+              <circle cx="12" cy="12" r="3.5" />
             </svg>
           </div>
         </div>
@@ -123,9 +123,9 @@ export const PluginCard: React.FC<PluginCardProps> = ({
       {/* Gains */}
       {gains && (
         <div className="relative flex items-start gap-2 mb-2.5 text-caption-01 text-text-helper">
-          <svg width="14" height="14" viewBox="0 0 32 32" fill="currentColor" className="flex-shrink-0 mt-0.5">
-            <path d="M16 2L2 16l14 14 14-14L16 2zm0 26L4 16 16 4l12 12-12 12z"/>
-            <path d="M16 10a6 6 0 106 6 6 6 0 00-6-6zm0 10a4 4 0 114-4 4 4 0 01-4 4z"/>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0 mt-0.5">
+            <path d="M12 2.5 21.5 12 12 21.5 2.5 12 12 2.5z" />
+            <circle cx="12" cy="12" r="3" />
           </svg>
           <span className="flex-1">{gains}</span>
         </div>

@@ -123,7 +123,7 @@ const HomeScreen: React.FC = () => {
         {/* ── 히어로 ── */}
         <header className="mb-9">
           <p className="text-body-short-01 text-text-helper">{greeting()}</p>
-          <h1 className="text-heading-04 font-semibold text-text-primary mt-1">무엇을 해볼까요?</h1>
+          <h1 className="text-heading-04 font-light text-text-primary mt-1">무엇을 해볼까요?</h1>
           <p className="text-body-short-01 text-text-secondary mt-2 max-w-[560px]">
             RICE는 대화할수록 내 작업 방식을 학습하고 반복 작업을 스킬로 저장해요. 이어서 일을 시작해 보세요.
           </p>

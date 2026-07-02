@@ -184,11 +184,9 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
           <button
             onClick={requestClose}
             title="닫기 (Esc)"
-            className="ml-auto flex-shrink-0 p-1.5 hover:bg-layer-hover-01 transition-colors rounded-md"
+            className="ml-auto flex-shrink-0 p-1.5 text-icon-secondary hover:text-icon-primary hover:bg-layer-hover-01 transition-colors rounded-md"
           >
-            <svg width="20" height="20" viewBox="0 0 32 32" fill="currentColor" className="text-icon-primary">
-              <path d="M24 9.4L22.6 8 16 14.6 9.4 8 8 9.4l6.6 6.6L8 22.6 9.4 24l6.6-6.6 6.6 6.6 1.4-1.4-6.6-6.6L24 9.4z" />
-            </svg>
+            <Icon name="close" size={18} />
           </button>
         </div>
 
@@ -203,31 +201,27 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
           />
         </div>
 
-        {/* Footer */}
+        {/* Footer — 우측 정렬 자연폭. 취소는 조용한 텍스트 버튼, 저장만 primary로 위계를 만든다 */}
         <div
-          className={`px-5 py-2.5 border-t border-border-subtle-01 flex gap-2 flex-shrink-0 transition-shadow duration-200 ${
+          className={`px-4 py-3 border-t border-border-subtle-01 flex items-center justify-end gap-1.5 flex-shrink-0 transition-shadow duration-200 ${
             footerLifted ? 'shadow-[0_-10px_18px_-10px_rgba(0,0,0,0.55)]' : ''
           }`}
         >
-          <Button
-            kind="secondary"
-            size="sm"
+          <button
             onClick={requestClose}
-            className="flex-1 !bg-layer-02 hover:!bg-layer-hover-02"
+            className="h-8 px-3 rounded-lg text-body-short-01 font-medium text-text-secondary hover:text-text-primary hover:bg-layer-hover-01 transition-colors"
           >
             취소
-          </Button>
+          </button>
           <Button
             kind="primary"
             size="sm"
             onClick={handleSave}
             disabled={!draft.canSave}
-            className="flex-1"
+            className="px-5"
+            icon={<Icon name="check" size={14} />}
             title={draft.canSave ? undefined : draft.mode === 'local' ? '설치된 모델을 확인하고 선택하세요' : '먼저 모델을 추가하세요'}
           >
-            <svg width="14" height="14" viewBox="0 0 32 32" fill="currentColor" className="mr-1.5">
-              <path d="M13 24l-9-9 1.414-1.414L13 21.171 26.586 7.586 28 9 13 24z" />
-            </svg>
             저장
           </Button>
         </div>

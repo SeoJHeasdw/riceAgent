@@ -10,7 +10,7 @@ import React from 'react';
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   /** Button variant */
   kind?: 'primary' | 'secondary' | 'tertiary' | 'ghost' | 'danger';
-  /** Button size. 'xs' = compact modal footer actions (below the standard 'sm') */
+  /** Button size. 앱 표준은 'sm'(h-8) — md/lg는 히어로 CTA 등 예외적 표면에만. */
   size?: 'xs' | 'sm' | 'md' | 'lg';
   /** Icon element to display before text */
   icon?: React.ReactNode;
@@ -24,7 +24,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   (
     {
       kind = 'primary',
-      size = 'md',
+      size = 'sm',
       icon,
       fullWidth = false,
       loading = false,
@@ -62,7 +62,8 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         {...props}
       >
         {loading ? (
-          <span className="animate-spin">⟳</span>
+          // currentColor 스피너 — primary(흰 텍스트)/secondary 어디서든 대비 유지
+          <span className="w-3.5 h-3.5 rounded-full border-2 border-current border-t-transparent animate-spin flex-shrink-0" aria-hidden />
         ) : icon ? (
           <span className="flex-shrink-0">{icon}</span>
         ) : null}
