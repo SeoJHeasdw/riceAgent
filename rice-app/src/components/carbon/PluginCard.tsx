@@ -49,7 +49,7 @@ export const PluginCard: React.FC<PluginCardProps> = ({
   return (
     <Card
       padding="md"
-      className="group relative flex flex-col min-h-[224px] cursor-pointer overflow-hidden rounded-2xl border-border-subtle-01 transition-all duration-200 hover:border-[#8a3ffc]/40 hover:shadow-elevation-2 hover:-translate-y-0.5"
+      className="group relative flex flex-col min-h-[176px] cursor-pointer overflow-hidden rounded-2xl border-border-subtle-01 transition-all duration-200 hover:border-[#8a3ffc]/40 hover:shadow-elevation-2 hover:-translate-y-0.5"
       onClick={onOpenDetails}
     >
       {/* Brand wash — blooms on hover */}
@@ -78,7 +78,7 @@ export const PluginCard: React.FC<PluginCardProps> = ({
           </h3>
           <p className="text-caption-01 text-text-helper">{author}</p>
         </div>
-        {installed && (
+        {installed ? (
           enabled ? (
             <Tag type="green" size="sm" dot>
               활성
@@ -88,6 +88,17 @@ export const PluginCard: React.FC<PluginCardProps> = ({
               설치됨
             </Tag>
           )
+        ) : (
+          // 카드마다 반복되던 대형 CTA 대신 컴팩트 pill — 설치는 즉시 실행
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onInstall();
+            }}
+            className="flex-shrink-0 inline-flex items-center gap-1 h-7 px-3.5 rounded-full text-caption-01 font-semibold bg-purple-60/15 text-purple-50 group-hover:bg-purple-60 group-hover:text-white active:scale-95 transition-all cursor-pointer"
+          >
+            설치
+          </button>
         )}
       </div>
 
@@ -120,50 +131,25 @@ export const PluginCard: React.FC<PluginCardProps> = ({
         </div>
       )}
 
-      {/* Use Cases */}
-      <div className="relative flex flex-wrap gap-1.5 mb-3.5">
-        {useCases.slice(0, 3).map((useCase) => (
-          <Tag key={useCase} type="outline" size="sm">
-            {useCase}
-          </Tag>
-        ))}
-      </div>
+      {/* Use Cases — pill 나열 대신 조용한 한 줄 텍스트 */}
+      {useCases.length > 0 && (
+        <div className="relative text-caption-01 text-text-placeholder truncate mb-1">
+          {useCases.slice(0, 3).join(' · ')}
+        </div>
+      )}
 
-      {/* Actions */}
-      <div className="relative" onClick={(e) => e.stopPropagation()}>
-        {installed ? (
-          <div className="flex items-center gap-2.5 pt-3 border-t border-border-subtle-01">
-            {/* Toggle Switch */}
-            <Toggle checked={enabled} onChange={onToggle} tone="green" />
-            <span className="flex items-center gap-1.5 flex-1 min-w-0">
-              <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${enabled ? 'bg-support-success' : 'bg-text-helper'}`} />
-              <span className="text-caption-01 text-text-secondary truncate">
-                {enabled ? '에이전트가 사용 중' : '일시정지됨'}
-              </span>
+      {/* Installed footer — 사용 상태 토글 (카드 자체가 상세로 연결되므로 별도 링크 없음) */}
+      {installed && (
+        <div className="relative flex items-center gap-2.5 pt-3 mt-2 border-t border-border-subtle-01" onClick={(e) => e.stopPropagation()}>
+          <Toggle checked={enabled} onChange={onToggle} tone="green" />
+          <span className="flex items-center gap-1.5 flex-1 min-w-0">
+            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${enabled ? 'bg-support-success' : 'bg-text-helper'}`} />
+            <span className="text-caption-01 text-text-secondary truncate">
+              {enabled ? '에이전트가 사용 중' : '일시정지됨'}
             </span>
-            <button
-              onClick={onOpenDetails}
-              className="flex items-center gap-1 text-link-primary text-body-short-01 hover:underline flex-shrink-0"
-            >
-              상세보기
-              <svg width="14" height="14" viewBox="0 0 32 32" fill="currentColor">
-                <path d="M18 6l-1.43 1.393L24.15 15H4v2h20.15l-7.58 7.573L18 26l10-10L18 6z"/>
-              </svg>
-            </button>
-          </div>
-        ) : (
-          <button
-            onClick={onInstall}
-            className="w-full flex items-center justify-center gap-1.5 py-2.5 gradient-plugin text-white hover:brightness-110 border-0 rounded-xl text-body-short-01 font-semibold shadow-glow-plugin transition-all hover:shadow-elevation-2"
-          >
-            <svg width="15" height="15" viewBox="0 0 32 32" fill="currentColor">
-              <path d="M16 2v14h2V2h-2zM6 10v2h4v-2H6zM22 10v2h4v-2h-4z"/>
-              <path d="M26 24v4H6v-4H4v4a2 2 0 002 2h20a2 2 0 002-2v-4h-2z"/>
-            </svg>
-            전문가 설치
-          </button>
-        )}
-      </div>
+          </span>
+        </div>
+      )}
     </Card>
   );
 };

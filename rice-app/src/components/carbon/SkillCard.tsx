@@ -1,8 +1,12 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Card, Tag } from '../ui';
+import React from 'react';
+import { Card } from '../ui';
 
 /**
- * SkillCard - Skill marketplace card with download/sponsor actions
+ * SkillCard - Skill marketplace card.
+ *
+ * 조용한 카드 패턴: 카드 전체가 클릭 대상(상세 모달)이고, 액션은 우상단의
+ * 컴팩트한 "받기" pill 하나로 좁힌다 — 카드마다 대형 CTA를 반복하지 않는다.
+ * 실제 설치는 상세 모달에서 확정되므로 pill 도 모달을 여는 진입점이다.
  */
 
 export interface SkillCardProps {
@@ -49,6 +53,8 @@ const tileAccentFor = (tags: string[], name: string) => {
   return TILE_ACCENTS[Math.abs(hash) % TILE_ACCENTS.length];
 };
 
+const nf = (n: number) => n.toLocaleString();
+
 export const SkillCard: React.FC<SkillCardProps> = ({
   name,
   description,
@@ -63,22 +69,12 @@ export const SkillCard: React.FC<SkillCardProps> = ({
   onInstall,
   onSponsor,
 }) => {
-  const [expanded, setExpanded] = useState(false);
-  const descRef = useRef<HTMLParagraphElement>(null);
-  const [clamped, setClamped] = useState(false);
   const accent = tileAccentFor(tags, name);
-
-  // Detect whether the description overflows two lines (only while collapsed).
-  useEffect(() => {
-    if (expanded) return;
-    const el = descRef.current;
-    if (el) setClamped(el.scrollHeight - el.clientHeight > 1);
-  }, [description, expanded]);
 
   return (
     <Card
       padding="md"
-      className="group relative flex flex-col min-h-[232px] cursor-pointer overflow-hidden rounded-2xl border-border-subtle-01 transition-all duration-200 hover:border-interactive/40 hover:shadow-elevation-2 hover:-translate-y-0.5"
+      className="group relative flex flex-col min-h-[164px] cursor-pointer overflow-hidden rounded-2xl border-border-subtle-01 transition-all duration-200 hover:border-interactive/40 hover:shadow-elevation-2 hover:-translate-y-0.5"
     >
       {/* Brand wash — blooms on hover */}
       <div
@@ -86,8 +82,8 @@ export const SkillCard: React.FC<SkillCardProps> = ({
         aria-hidden="true"
       />
 
-      {/* Header */}
-      <div className="relative flex items-start gap-3 mb-3">
+      {/* Header — 아이콘 · 이름/출처 · 받기 pill */}
+      <div className="relative flex items-start gap-3">
         <div className="relative flex-shrink-0">
           <div
             className={`absolute inset-0 rounded-xl ${accent.wash} blur-md opacity-0 transition-opacity duration-300 group-hover:opacity-100`}
@@ -99,107 +95,79 @@ export const SkillCard: React.FC<SkillCardProps> = ({
             </svg>
           </div>
         </div>
-        <div className="flex-1 min-w-0">
-          <h3 className="text-heading-02 font-semibold text-text-primary leading-tight">
+        <div className="flex-1 min-w-0 pt-0.5">
+          <h3 className="text-heading-02 font-semibold text-text-primary leading-tight truncate">
             {name}
           </h3>
-          <p className="text-caption-01 text-text-helper">
+          <p className="text-caption-01 text-text-helper truncate">
             by {author}{team && ` · ${team}`}{version && ` · v${version}`}
           </p>
         </div>
-      </div>
-
-      {/* Description — reserves two lines; longer text collapses behind a toggle */}
-      <div className="relative mb-3">
-        <p
-          ref={descRef}
-          className={`text-body-short-01 text-text-secondary ${expanded ? '' : 'line-clamp-2 min-h-[2.25rem]'}`}
-        >
-          {description}
-        </p>
-        {(clamped || expanded) && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setExpanded((v) => !v);
-            }}
-            className="mt-1 inline-flex items-center gap-0.5 text-caption-01 font-semibold text-link-primary hover:underline"
-          >
-            {expanded ? '접기' : '… 더보기'}
-          </button>
-        )}
-      </div>
-
-      {/* Spacer keeps the action row pinned to the bottom regardless of text length */}
-      <div className="flex-1" />
-
-      {/* Tags */}
-      <div className="relative flex flex-wrap gap-1.5 mb-3">
-        {tags.map((tag) => (
-          <Tag key={tag} type="gray" size="sm">
-            {tag}
-          </Tag>
-        ))}
-      </div>
-
-      {/* Stats */}
-      <div className="relative flex items-center gap-3.5 mb-3.5 text-caption-01 text-text-secondary">
-        <span className="flex items-center gap-1">
-          <svg width="13" height="13" viewBox="0 0 32 32" fill="currentColor">
-            <path d="M26 24v4H6v-4H4v4a2 2 0 002 2h20a2 2 0 002-2v-4zM26 14l-1.41-1.41L17 20.17V2h-2v18.17l-7.59-7.58L6 14l10 10 10-10z"/>
-          </svg>
-          {downloads.toLocaleString()}
-        </span>
-        <span className="flex items-center gap-1">
-          <svg width="13" height="13" viewBox="0 0 32 32" fill="currentColor">
-            <path d="M16 6.52l2.76 5.58.46 1 1.1.16 6.16.89-4.46 4.35-.8.77.19 1.09 1.05 6.13-5.51-2.89L16 23l-.95.5-5.51 2.89 1.05-6.13.19-1.09-.8-.77-4.46-4.35 6.16-.89 1.1-.16.46-1L16 6.52M16 2l-4.55 9.22-10.17 1.47 7.36 7.18L6.9 30l9.1-4.78L25.1 30l-1.74-10.13 7.36-7.18-10.17-1.47L16 2z"/>
-          </svg>
-          {rating}
-        </span>
-        {points !== undefined && (
-          <span className="ml-auto flex items-center gap-1 text-interactive font-mono">
-            <svg width="13" height="13" viewBox="0 0 32 32" fill="currentColor">
-              <path d="M22.45 6h-7.88l-1.94-4.68A1 1 0 0011.7 1H3.53a1 1 0 00-.93.63L.1 8.31a1 1 0 00.93 1.37h4.67l-2.5 6.54a1 1 0 00.55 1.3 1 1 0 001.3-.55l2.5-6.54h4.67l-2.5 6.54a1 1 0 00.55 1.3 1 1 0 001.3-.55l2.5-6.54h4.67l-2.5 6.54a1 1 0 00.55 1.3 1 1 0 001.3-.55l2.5-6.54h4.67a1 1 0 00.93-1.37l-2.5-6.68A1 1 0 0022.45 6z"/>
-            </svg>
-            {points.toLocaleString()} BP
-          </span>
-        )}
-      </div>
-
-      {/* Actions */}
-      <div className="relative flex gap-2">
         <button
           onClick={(e) => {
             e.stopPropagation();
-            onInstall();
+            if (!installed) onInstall();
           }}
           disabled={installed}
-          className={`
-            flex-1 flex items-center justify-center gap-1.5 py-2.5 border-0 rounded-xl
-            text-body-short-01 font-semibold transition-all
-            ${installed
-              ? 'bg-layer-02 text-text-secondary cursor-default ring-1 ring-inset ring-border-subtle-01'
-              : 'gradient-skill text-white shadow-glow-blue hover:brightness-110 hover:shadow-elevation-2 cursor-pointer'
-            }
-          `}
+          className={`flex-shrink-0 inline-flex items-center gap-1 h-7 rounded-full text-caption-01 font-semibold transition-all ${
+            installed
+              ? 'px-3 bg-layer-02 text-text-helper ring-1 ring-inset ring-border-subtle-02 cursor-default'
+              : 'px-3.5 bg-interactive/15 text-link-primary group-hover:bg-interactive group-hover:text-white active:scale-95 cursor-pointer'
+          }`}
         >
-          <svg width="15" height="15" viewBox="0 0 32 32" fill="currentColor">
-            {installed ? (
-              <path d="M16 2C8.3 2 2 8.3 2 16s6.3 14 14 14 14-6.3 14-14S23.7 2 16 2zm-2 19.6l-5-5 1.4-1.4 3.6 3.6 7.6-7.6 1.4 1.4-9 9z"/>
-            ) : (
-              <path d="M26 24v4H6v-4H4v4a2 2 0 002 2h20a2 2 0 002-2v-4zM26 14l-1.41-1.41L17 20.17V2h-2v18.17l-7.59-7.58L6 14l10 10 10-10z"/>
-            )}
-          </svg>
-          {installed ? '설치됨' : '다운로드'}
+          {installed && (
+            <svg width="12" height="12" viewBox="0 0 32 32" fill="currentColor">
+              <path d="M13 24l-9-9 1.41-1.41L13 21.17 26.59 7.59 28 9l-15 15z"/>
+            </svg>
+          )}
+          {installed ? '설치됨' : '받기'}
         </button>
+      </div>
+
+      {/* Description — 2줄 고정 클램프(전문은 상세 모달에서) */}
+      <p className="relative text-body-short-01 text-text-secondary line-clamp-2 min-h-[2.25rem] mt-3">
+        {description}
+      </p>
+
+      <div className="flex-1" />
+
+      {/* Footer — 스탯 · 태그 · 후원 (0값 스탯은 숨겨 깨져 보이지 않게) */}
+      <div className="relative flex items-center gap-3 mt-3 text-caption-01 text-text-helper">
+        <span className="flex items-center gap-1 flex-shrink-0">
+          <svg width="12" height="12" viewBox="0 0 32 32" fill="currentColor">
+            <path d="M26 24v4H6v-4H4v4a2 2 0 002 2h20a2 2 0 002-2v-4zM26 14l-1.41-1.41L17 20.17V2h-2v18.17l-7.59-7.58L6 14l10 10 10-10z"/>
+          </svg>
+          {nf(downloads)}
+        </span>
+        {rating > 0 && (
+          <span className="flex items-center gap-1 flex-shrink-0">
+            <svg width="12" height="12" viewBox="0 0 32 32" fill="currentColor">
+              <path d="M16 2l4.55 9.22 10.17 1.47-7.36 7.18L25.1 30 16 25.22 6.9 30l1.74-10.13-7.36-7.18 10.17-1.47L16 2z"/>
+            </svg>
+            {rating}
+          </span>
+        )}
+        {points !== undefined && points > 0 && (
+          <span className="flex items-center gap-1 flex-shrink-0 text-link-primary font-mono">
+            <svg width="12" height="12" viewBox="0 0 32 32" fill="currentColor">
+              <path d="M22.45 6h-7.88l-1.94-4.68A1 1 0 0011.7 1H3.53a1 1 0 00-.93.63L.1 8.31a1 1 0 00.93 1.37h4.67l-2.5 6.54a1 1 0 00.55 1.3 1 1 0 001.3-.55l2.5-6.54h4.67l-2.5 6.54a1 1 0 00.55 1.3 1 1 0 001.3-.55l2.5-6.54h4.67l-2.5 6.54a1 1 0 00.55 1.3 1 1 0 001.3-.55l2.5-6.54h4.67a1 1 0 00.93-1.37l-2.5-6.68A1 1 0 0022.45 6z"/>
+            </svg>
+            {nf(points)} BP
+          </span>
+        )}
+        <span className="flex-1 min-w-0 truncate text-text-placeholder">
+          {tags.slice(0, 2).map((t) => `#${t}`).join(' ')}
+          {tags.length > 2 && `  +${tags.length - 2}`}
+        </span>
         <button
           onClick={(e) => {
             e.stopPropagation();
             onSponsor();
           }}
-          className="flex-shrink-0 w-[110px] flex items-center justify-center gap-1.5 py-2.5 bg-layer-02 text-text-primary ring-1 ring-inset ring-border-subtle-01 hover:bg-layer-hover-01 hover:ring-interactive/40 hover:text-interactive border-0 rounded-xl text-body-short-01 font-semibold transition-all cursor-pointer"
+          title="블루 포인트로 후원하기"
+          className="flex-shrink-0 inline-flex items-center gap-1 h-6 px-2 -mr-1 rounded-full text-caption-01 font-medium text-text-helper hover:text-link-primary hover:bg-interactive/10 transition-colors"
         >
-          <svg width="15" height="15" viewBox="0 0 32 32" fill="currentColor">
+          <svg width="12" height="12" viewBox="0 0 32 32" fill="currentColor">
             <path d="M22.45 6h-7.88l-1.94-4.68A1 1 0 0011.7 1H3.53a1 1 0 00-.93.63L.1 8.31a1 1 0 00.93 1.37h4.67l-2.5 6.54a1 1 0 00.55 1.3 1 1 0 001.3-.55l2.5-6.54h4.67l-2.5 6.54a1 1 0 00.55 1.3 1 1 0 001.3-.55l2.5-6.54h4.67l-2.5 6.54a1 1 0 00.55 1.3 1 1 0 001.3-.55l2.5-6.54h4.67a1 1 0 00.93-1.37l-2.5-6.68A1 1 0 0022.45 6z"/>
           </svg>
           후원

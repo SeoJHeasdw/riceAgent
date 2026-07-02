@@ -1290,6 +1290,32 @@ function ChatScreen() {
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-background">
           {/* Header */}
           <div className="h-[52px] flex-shrink-0 flex items-center gap-3 px-4 border-b border-border-subtle-01">
+            {/* 사이드바가 접히면 미니 레일 대신 여기서 다시 연다 (Claude 데스크톱 문법) */}
+            {!sessionSidebarOpen && (
+              <div className="-ml-1.5 mr-0.5 flex items-center gap-0.5 flex-shrink-0">
+                <button
+                  onClick={() => setSessionSidebarOpen(true)}
+                  title="대화 목록 열기"
+                  className="flex items-center justify-center w-8 h-8 rounded-lg text-icon-secondary hover:bg-layer-hover-01 hover:text-icon-primary transition-colors"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="3" width="18" height="18" rx="2" />
+                    <path d="M9 3v18" />
+                    <path d="m14 9 3 3-3 3" />
+                  </svg>
+                </button>
+                <button
+                  onClick={newChat}
+                  title="새 대화"
+                  className="flex items-center justify-center w-8 h-8 rounded-lg text-icon-secondary hover:bg-layer-hover-01 hover:text-icon-primary transition-colors"
+                >
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 20h9" />
+                    <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                  </svg>
+                </button>
+              </div>
+            )}
             <span className="text-body-short-01 font-semibold text-text-primary truncate">
               {isEmpty ? '새 대화' : activeSession?.title || '대화'}
             </span>
