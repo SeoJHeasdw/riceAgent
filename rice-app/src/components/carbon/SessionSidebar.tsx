@@ -106,8 +106,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       className="flex-shrink-0 bg-layer-01 border-r border-border-subtle-01 flex flex-col min-w-0 overflow-hidden"
       style={{ width }}
     >
-      {/* Header */}
-      <div className="flex items-center px-4 h-12 flex-shrink-0 min-w-0">
+      {/* Header — 채팅 헤더(h-[52px] + border-b)와 같은 높이로 맞춰 한 줄로 이어지게 */}
+      <div className="flex items-center px-4 h-[52px] border-b border-border-subtle-01 flex-shrink-0 min-w-0">
         <span className="text-label-02 font-semibold text-text-primary truncate">
           대화
         </span>
@@ -129,7 +129,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
       {/* Quick actions — 대형 버튼·입력박스 대신 목록과 같은 문법의 한 줄 진입점.
           검색 행은 클릭 시 같은 자리에서 입력으로 변신한다 (레이아웃 점프 없음). */}
-      <div className="px-2 pb-1 flex flex-col gap-0.5 flex-shrink-0">
+      <div className="px-2 pt-2 pb-1 flex flex-col gap-0.5 flex-shrink-0">
         <button
           onClick={onNewSession}
           className="flex items-center w-full gap-0.5 h-6 px-0.5 rounded-lg text-body-short-01 font-medium text-link-primary hover:bg-interactive/10 transition-colors"
