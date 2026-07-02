@@ -23,8 +23,8 @@ const GROUPS: { id: NavGroup; label: string }[] = [
 /** group별 아이콘 강조 색 (시각적 구분) */
 const GROUP_ACCENT: Record<NavGroup, string> = {
   workspace: 'text-blue-50 bg-blue-60/12',
-  market: 'text-purple-60 bg-purple-60/12',
-  system: 'text-teal-60 bg-teal-60/12',
+  market: 'text-purple-50 bg-purple-60/12',
+  system: 'text-teal-40 bg-teal-60/12',
 };
 
 const greeting = (): string => {
@@ -61,7 +61,7 @@ const StatTile: React.FC<{
   value: React.ReactNode;
   label: string;
 }> = ({ accent, icon, value, label }) => (
-  <div className="flex items-center gap-3 rounded-xl border border-border-subtle-01 bg-layer-01 px-4 py-3.5">
+  <div className="flex items-center gap-3 rounded-xl border border-border-subtle-01 bg-layer-01 px-4 py-3.5 shadow-elevation-1 transition-shadow duration-150 hover:shadow-elevation-2">
     <span className={`flex items-center justify-center w-9 h-9 rounded-lg flex-shrink-0 ${accent}`}>{icon}</span>
     <div className="min-w-0">
       <div className="text-heading-03 font-semibold text-text-primary tabular-nums leading-none">{value}</div>
@@ -71,10 +71,14 @@ const StatTile: React.FC<{
 );
 
 /* ── 네비게이션 카드 ── */
-const NavCard: React.FC<{ dest: NavDestination; onClick: () => void }> = ({ dest, onClick }) => (
+const NavCard: React.FC<{ dest: NavDestination; onClick: () => void; className?: string }> = ({
+  dest,
+  onClick,
+  className = '',
+}) => (
   <button
     onClick={onClick}
-    className="group flex items-start gap-4 text-left rounded-xl border border-border-subtle-01 bg-layer-01 shadow-elevation-1 p-4 transition-all duration-150 hover:border-border-strong-01 hover:shadow-elevation-2 hover:-translate-y-0.5 active:translate-y-0 outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+    className={`group flex items-start gap-4 text-left rounded-xl border border-border-subtle-01 bg-layer-01 shadow-elevation-1 p-4 transition-all duration-150 hover:border-border-strong-01 hover:shadow-elevation-2 hover:-translate-y-0.5 active:translate-y-0 outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus ${className}`}
   >
     <span
       className={`flex items-center justify-center w-11 h-11 rounded-xl flex-shrink-0 ${
@@ -115,7 +119,7 @@ const HomeScreen: React.FC = () => {
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="max-w-[920px] mx-auto px-8 py-10">
+      <div className="max-w-[1040px] mx-auto px-8 py-10">
         {/* ── 히어로 ── */}
         <header className="mb-9">
           <p className="text-body-short-01 text-text-helper">{greeting()}</p>
@@ -128,7 +132,7 @@ const HomeScreen: React.FC = () => {
           <div className="mt-5 flex flex-wrap items-center gap-2.5">
             <button
               onClick={() => navigate('/chat')}
-              className="group inline-flex items-center gap-2 rounded-xl bg-interactive px-4 py-2.5 text-white shadow-elevation-1 transition-all duration-150 hover:brightness-110 hover:shadow-elevation-2 active:scale-[0.98] outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+              className="group inline-flex items-center gap-2 rounded-xl bg-interactive px-4 py-2.5 text-white shadow-glow-blue transition-all duration-150 hover:brightness-110 hover:shadow-elevation-2 active:scale-[0.98] outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
             >
               <LineIcon size={18}>
                 <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
@@ -191,7 +195,7 @@ const HomeScreen: React.FC = () => {
                 label="저장된 스킬"
               />
               <StatTile
-                accent="text-teal-60 bg-teal-60/12"
+                accent="text-teal-40 bg-teal-60/12"
                 icon={
                   <LineIcon size={18}>
                     <path d="M3 17l5-5 4 4 8-8" />
@@ -202,7 +206,7 @@ const HomeScreen: React.FC = () => {
                 label="누적 사용"
               />
               <StatTile
-                accent="text-purple-60 bg-purple-60/12"
+                accent="text-purple-50 bg-purple-60/12"
                 icon={
                   <LineIcon size={18}>
                     <path d="M12 3v3M12 18v3M3 12h3M18 12h3" />
@@ -213,7 +217,7 @@ const HomeScreen: React.FC = () => {
                 label="자동 개선"
               />
               <StatTile
-                accent="text-[#ff832b] bg-[#ff832b]/12"
+                accent="text-support-warning bg-support-warning/12"
                 icon={
                   <LineIcon size={18}>
                     <path d="M12 5a3 3 0 0 0-3 3 3 3 0 0 0-1.5 5.6A2.5 2.5 0 0 0 9 18a3 3 0 0 0 3 1" />
@@ -293,6 +297,25 @@ const HomeScreen: React.FC = () => {
                   </NavIcon>
                 </button>
               ))}
+              {/* 홀수 개일 때 그리드 공백을 '새 스킬' 유도 카드로 채워 균형 유지 */}
+              {topSkills.length % 2 === 1 && (
+                <button
+                  onClick={() => navigate('/chat')}
+                  className="group flex items-center gap-3 text-left rounded-xl border border-dashed border-border-strong-01 bg-transparent px-3.5 py-3 transition-colors duration-150 hover:border-border-strong-02 hover:bg-layer-01 outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                >
+                  <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-blue-60/12 text-blue-50 flex-shrink-0">
+                    <LineIcon size={16}>
+                      <path d="M12 5v14M5 12h14" />
+                    </LineIcon>
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <span className="text-body-short-01 font-medium text-text-secondary group-hover:text-text-primary transition-colors">
+                      새 스킬 만들기
+                    </span>
+                    <div className="text-caption-01 text-text-helper mt-0.5">대화에서 반복 작업을 스킬로 저장해요</div>
+                  </div>
+                </button>
+              )}
             </div>
           </section>
         )}
@@ -308,8 +331,14 @@ const HomeScreen: React.FC = () => {
                   {group.label}
                 </h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {items.map((dest) => (
-                    <NavCard key={dest.id} dest={dest} onClick={() => navigate(dest.path)} />
+                  {items.map((dest, i) => (
+                    <NavCard
+                      key={dest.id}
+                      dest={dest}
+                      onClick={() => navigate(dest.path)}
+                      // 홀수 개 그룹의 마지막 카드는 2열 전체를 채워 빈 슬롯 제거
+                      className={items.length % 2 === 1 && i === items.length - 1 ? 'sm:col-span-2' : ''}
+                    />
                   ))}
                 </div>
               </section>

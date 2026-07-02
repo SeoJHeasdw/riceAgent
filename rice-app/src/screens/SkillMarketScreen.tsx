@@ -149,7 +149,7 @@ function SkillMarketScreen() {
       >
         {/* Blue Point Balance */}
         <div className="p-3">
-          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#0f62fe] via-[#0043ce] to-[#001d6c] p-4 text-white shadow-elevation-2">
+          <div className="relative overflow-hidden rounded-2xl gradient-skill p-4 text-white shadow-glow-blue">
             {/* Decorative glow */}
             <div className="absolute -top-8 -right-8 w-28 h-28 rounded-full bg-white/10 blur-2xl" aria-hidden="true" />
             <div className="relative">

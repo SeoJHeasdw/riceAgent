@@ -1463,7 +1463,7 @@ function MySkillsScreen() {
       >
         {/* 통계 카드 + "학습 효과" proof CTA — 숫자(현황)에서 정량 증명으로 자연히 이어지는 한 덩어리 */}
         <div className="p-4">
-          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#0f62fe] via-[#1a56db] to-[#4589ff] text-white shadow-elevation-2">
+          <div className="relative overflow-hidden rounded-2xl gradient-skill text-white shadow-glow-blue">
             <div className="absolute -top-8 -right-8 w-28 h-28 rounded-full bg-white/10 blur-2xl" aria-hidden="true" />
             <div className="relative p-4">
               <div className="text-caption-01 text-white/85 mb-1">학습한 스킬</div>

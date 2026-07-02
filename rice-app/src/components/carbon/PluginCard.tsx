@@ -154,7 +154,7 @@ export const PluginCard: React.FC<PluginCardProps> = ({
         ) : (
           <button
             onClick={onInstall}
-            className="w-full flex items-center justify-center gap-1.5 py-2.5 bg-gradient-to-r from-[#8a3ffc] to-[#6929c4] text-white hover:from-[#7c3aed] hover:to-[#5b21b6] border-0 rounded-xl text-body-short-01 font-semibold shadow-elevation-1 transition-all hover:shadow-elevation-2"
+            className="w-full flex items-center justify-center gap-1.5 py-2.5 gradient-plugin text-white hover:brightness-110 border-0 rounded-xl text-body-short-01 font-semibold shadow-glow-plugin transition-all hover:shadow-elevation-2"
           >
             <svg width="15" height="15" viewBox="0 0 32 32" fill="currentColor">
               <path d="M16 2v14h2V2h-2zM6 10v2h4v-2H6zM22 10v2h4v-2h-4z"/>

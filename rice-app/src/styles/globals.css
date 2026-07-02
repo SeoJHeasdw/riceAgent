@@ -48,7 +48,8 @@
   .btn-primary {
     @apply bg-interactive text-text-on-color;
     @apply border-interactive;
-    @apply hover:bg-interactive/90;
+    /* 투명도(/90) hover는 다크 배경이 비쳐 오히려 어두워진다 — 밝기 상승으로 */
+    @apply hover:brightness-110 hover:shadow-elevation-2;
   }
 
   .btn-secondary {
@@ -379,6 +380,48 @@
     }
   }
 
+  /* Status chip — 권한 3-상태(항상/승인/차단) 등 상태어를 인라인 컬러 텍스트
+     대신 작은 pill로. 본문 속 무지개 텍스트를 없애고 시선을 상태에만 모은다. */
+  .status-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 18px;
+    padding: 0 7px;
+    border-radius: 9999px;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: 0.2px;
+    vertical-align: 1px;
+  }
+  .status-chip--allow {
+    color: var(--cds-support-success);
+    background: color-mix(in srgb, var(--cds-support-success) 13%, transparent);
+  }
+  .status-chip--ask {
+    color: var(--cds-support-warning);
+    background: color-mix(in srgb, var(--cds-support-warning) 13%, transparent);
+  }
+  .status-chip--block {
+    color: var(--cds-text-error);
+    background: color-mix(in srgb, var(--cds-support-error) 15%, transparent);
+  }
+
+  /* 도메인 히어로 그라디언트 — 통계 카드·대형 CTA 공용 (항상 135deg) */
+  .gradient-skill {
+    background-image: var(--gradient-skill);
+  }
+  .gradient-plugin {
+    background-image: var(--gradient-plugin);
+  }
+  .gradient-connector {
+    background-image: var(--gradient-connector);
+  }
+  .gradient-brand {
+    background-image: var(--gradient-brand);
+  }
+
   /* Layout utilities */
   .container-fluid {
     @apply w-full px-4 mx-auto;
@@ -462,6 +505,18 @@
   --cds-support-warning: #f1c21b;
   --cds-support-info: #4589ff;
 
+  /* RGB 트리플릿 — Tailwind의 /opacity 수식(bg-support-success/15 등)이 동작하려면
+     rgb(var(--x-rgb) / <alpha-value>) 형태가 필요하다. 위 hex 토큰과 항상 동기 유지. */
+  --cds-support-error-rgb: 250 77 86;
+  --cds-support-success-rgb: 66 190 101;
+  --cds-support-warning-rgb: 241 194 27;
+  --cds-support-info-rgb: 69 137 255;
+  --cds-interactive-rgb: 15 98 254;
+  --cds-text-helper-rgb: 141 141 141;
+  --cds-layer-01-rgb: 38 38 38;
+  --cds-layer-02-rgb: 57 57 57;
+  --cds-border-strong-01-rgb: 82 82 82;
+
   /* Interaction */
   --cds-interactive: #0f62fe;
   --cds-focus: #0f62fe;
@@ -474,6 +529,23 @@
   --ai-border-gradient: linear-gradient(90deg, var(--ai-gradient-start), var(--ai-gradient-end));
   --ai-aura: radial-gradient(circle at 0% 0%, rgba(120, 169, 255, 0.22), rgba(165, 110, 255, 0.1) 40%, transparent 72%);
   --ai-popover-bg: #262626;
+
+  /* Domain accents — 도메인별 강조색을 Carbon 50 레벨로 통일해
+     화면마다 채도·명도가 튀지 않게 한다. (스킬=블루, 플러그인=퍼플, 커넥터=teal) */
+  --accent-skill: #4589ff; /* blue-50 */
+  --accent-skill-deep: #0f62fe; /* blue-60 */
+  --accent-plugin: #a56eff; /* purple-50 */
+  --accent-plugin-deep: #6929c4; /* purple-70 — 흰 텍스트가 얹히는 히어로의 어두운 앵커 */
+  --accent-connector: #08bdba; /* teal-40 */
+  --accent-connector-deep: #007d79; /* teal-60 */
+
+  /* 도메인 히어로 카드·대형 CTA가 공유하는 그라디언트 — 항상 135deg.
+     50레벨 앵커는 다크 UI에서 눈부셔서 한 단계 어두운 톤으로 고정
+     (색상별 명도가 비슷해지도록 hue마다 스텝을 맞춤). */
+  --gradient-skill: linear-gradient(135deg, #0043ce, #0f62fe); /* blue-70 → blue-60 */
+  --gradient-plugin: linear-gradient(135deg, #491d8b, #6929c4); /* purple-80 → purple-70 */
+  --gradient-connector: linear-gradient(135deg, #005d5d, #009d9a); /* teal-70 → teal-50 */
+  --gradient-brand: linear-gradient(135deg, #0043ce, #6929c4); /* blue-70 → purple-70 */
 }
 
 /* Prevent text selection on UI elements */

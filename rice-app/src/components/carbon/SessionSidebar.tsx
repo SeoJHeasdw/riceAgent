@@ -221,12 +221,16 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                     >
                       <button
                         onClick={() => onSelectSession(session.id)}
-                        className={`flex flex-col gap-0.5 w-full min-w-0 overflow-hidden border-none px-2.5 py-2 text-left cursor-pointer rounded-lg transition-colors ${
+                        className={`relative flex flex-col gap-0.5 w-full min-w-0 overflow-hidden border-none px-2.5 py-2 text-left cursor-pointer rounded-lg transition-colors ${
                           isActive
-                            ? 'bg-[#0f62fe]/15'
+                            ? 'bg-layer-selected-01'
                             : 'bg-transparent hover:bg-layer-hover-01'
                         }`}
                       >
+                        {/* 선택 인디케이터 — 배경 틴트만으로는 약해서 좌측 바로 명시 */}
+                        {isActive && (
+                          <span className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full bg-interactive" />
+                        )}
                         <span
                           className={`block max-w-full min-w-0 text-body-short-01 truncate pr-6 ${
                             isActive ? 'text-text-primary font-semibold' : 'text-text-primary'

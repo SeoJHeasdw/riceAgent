@@ -316,9 +316,10 @@ const isReadOnly = (s: ConnectorScope) => s.mode === '읽기';
 const permOf = (s: ConnectorScope): ScopePermission => s.permission ?? (isReadOnly(s) ? '항상 허용' : '승인 필요');
 
 const PERMS: { id: ScopePermission; label: string; icon: IconName; active: string }[] = [
-  { id: '항상 허용', label: '항상', icon: 'check', active: 'bg-support-success/15 text-support-success' },
-  { id: '승인 필요', label: '승인', icon: 'user', active: 'bg-[#f1c21b]/15 text-[#d2a106]' },
-  { id: '차단', label: '차단', icon: 'view-off', active: 'bg-[#da1e28]/12 text-[#da1e28]' },
+  // status-chip(allow/ask/block)과 동일한 색 언어 — support 토큰 기반
+  { id: '항상 허용', label: '항상', icon: 'check', active: 'bg-support-success/[0.13] text-support-success' },
+  { id: '승인 필요', label: '승인', icon: 'user', active: 'bg-support-warning/[0.13] text-support-warning' },
+  { id: '차단', label: '차단', icon: 'view-off', active: 'bg-support-error/15 text-text-error' },
 ];
 
 /**
@@ -595,9 +596,14 @@ const ConnectorDetailView: React.FC<{
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <h2 className="text-heading-03 font-semibold text-text-primary">{c.name}</h2>
-              <Tag type={connected ? 'green' : errored ? 'red' : 'gray'} size="sm">
-                {connected ? '연결됨' : errored ? '재연결 필요' : '연결 필요'}
-              </Tag>
+              {errored ? (
+                // Tag red는 어두운 적색 배경이 뭉개져서 명도 대비가 있는 chip으로
+                <span className="status-chip status-chip--block">재연결 필요</span>
+              ) : (
+                <Tag type={connected ? 'green' : 'gray'} size="sm">
+                  {connected ? '연결됨' : '연결 필요'}
+                </Tag>
+              )}
             </div>
             <p className="mt-1.5 text-body-short-01 leading-5 text-text-secondary">{c.summary}</p>
           </div>
@@ -737,12 +743,13 @@ const ConnectorDetailView: React.FC<{
           <SectionLabel>도구 권한 · {c.scopes.length}</SectionLabel>
           <p className="text-caption-01 text-text-helper -mt-1 mb-3 leading-relaxed">
             {isMcp ? '이 서버가 노출하는 도구예요.' : `${c.provider}가 제공하는 도구예요.`} 에이전트가 각 도구를 언제
-            호출할 수 있는지 정하세요 — <span className="text-support-success font-medium">항상</span> 허용 ·{' '}
-            <span className="text-[#d2a106] font-medium">승인</span> 후 호출 ·{' '}
-            <span className="text-[#da1e28] font-medium">차단</span>.
+            호출할 수 있는지 정하세요 — <span className="status-chip status-chip--allow">항상 허용</span>{' '}
+            <span className="status-chip status-chip--ask">승인 후 호출</span>{' '}
+            <span className="status-chip status-chip--block">차단</span>
           </p>
           {c.scopes.length === 0 ? (
-            <div className="text-caption-01 text-text-helper bg-layer-01 border border-border-subtle-01 rounded-lg px-3.5 py-3.5">
+            <div className="flex items-center gap-2.5 text-caption-01 text-text-helper border border-dashed border-border-strong-01 rounded-lg px-3.5 py-3">
+              <Icon name="tools" size={15} className="text-icon-secondary flex-shrink-0" />
               {connected
                 ? isMcp
                   ? '이 서버가 노출한 도구가 없어요.'
@@ -811,7 +818,8 @@ const ConnectorDetailView: React.FC<{
             이 커넥터의 도구를 호출하는 스킬 · 플러그인 · 자동화예요.
           </p>
           {c.usedBy.length === 0 ? (
-            <div className="text-caption-01 text-text-helper bg-layer-01 border border-border-subtle-01 rounded-lg px-3.5 py-3.5">
+            <div className="flex items-center gap-2.5 text-caption-01 text-text-helper border border-dashed border-border-strong-01 rounded-lg px-3.5 py-3">
+              <Icon name="skill" size={15} className="text-icon-secondary flex-shrink-0" />
               아직 이 커넥터의 도구를 쓰는 스킬·플러그인이 없어요.
             </div>
           ) : (
@@ -1209,7 +1217,7 @@ function ConnectorsScreen() {
         </div>
 
         <div className="p-4">
-          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#005d5d] via-[#007d79] to-[#009d9a] p-4 text-white shadow-elevation-2">
+          <div className="relative overflow-hidden rounded-2xl gradient-connector p-4 text-white shadow-glow-connector">
             <div className="absolute -top-8 -right-8 w-28 h-28 rounded-full bg-white/10 blur-2xl" aria-hidden="true" />
             <div className="relative">
               <div className="text-caption-01 text-white/85 mb-1">

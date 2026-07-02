@@ -11,8 +11,9 @@ export default {
         background: 'var(--cds-background)',
         layer: {
           DEFAULT: 'var(--cds-layer)',
-          '01': 'var(--cds-layer-01)',
-          '02': 'var(--cds-layer-02)',
+          // /opacity 수식이 실제 동작하도록 alpha 주입 가능한 형태로 (자주 쓰는 층만)
+          '01': 'rgb(var(--cds-layer-01-rgb) / <alpha-value>)',
+          '02': 'rgb(var(--cds-layer-02-rgb) / <alpha-value>)',
           '03': 'var(--cds-layer-03)',
           accent: {
             DEFAULT: 'var(--cds-layer-accent)',
@@ -44,10 +45,18 @@ export default {
           '70': '#ba1b23',
         },
         purple: {
+          '50': '#a56eff',
           '60': '#8a3ffc',
         },
         teal: {
+          '40': '#08bdba',
           '60': '#009d9a',
+        },
+        // Domain accents (globals.css :root 정의와 동기)
+        accent: {
+          skill: 'var(--accent-skill)',
+          plugin: 'var(--accent-plugin)',
+          connector: 'var(--accent-connector)',
         },
         overlay: 'var(--cds-overlay)',
         field: {
@@ -66,7 +75,7 @@ export default {
           },
           strong: {
             DEFAULT: 'var(--cds-border-strong)',
-            '01': 'var(--cds-border-strong-01)',
+            '01': 'rgb(var(--cds-border-strong-01-rgb) / <alpha-value>)',
             '02': 'var(--cds-border-strong-02)',
             '03': 'var(--cds-border-strong-03)',
           },
@@ -77,7 +86,7 @@ export default {
           primary: 'var(--cds-text-primary)',
           secondary: 'var(--cds-text-secondary)',
           placeholder: 'var(--cds-text-placeholder)',
-          helper: 'var(--cds-text-helper)',
+          helper: 'rgb(var(--cds-text-helper-rgb) / <alpha-value>)',
           error: 'var(--cds-text-error)',
           inverse: 'var(--cds-text-inverse)',
           'on-color': 'var(--cds-text-on-color)',
@@ -97,12 +106,12 @@ export default {
           'on-color-disabled': 'var(--cds-icon-on-color-disabled)',
         },
         support: {
-          error: 'var(--cds-support-error)',
-          success: 'var(--cds-support-success)',
-          warning: 'var(--cds-support-warning)',
-          info: 'var(--cds-support-info)',
+          error: 'rgb(var(--cds-support-error-rgb) / <alpha-value>)',
+          success: 'rgb(var(--cds-support-success-rgb) / <alpha-value>)',
+          warning: 'rgb(var(--cds-support-warning-rgb) / <alpha-value>)',
+          info: 'rgb(var(--cds-support-info-rgb) / <alpha-value>)',
         },
-        interactive: 'var(--cds-interactive)',
+        interactive: 'rgb(var(--cds-interactive-rgb) / <alpha-value>)',
         focus: 'var(--cds-focus)',
         'focus-inset': 'var(--cds-focus-inset)',
         'focus-inverse': 'var(--cds-focus-inverse)',
@@ -150,6 +159,10 @@ export default {
         'elevation-3': '0 4px 8px rgba(0, 0, 0, 0.36), 0 8px 24px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.06)',
         'overlay': '0 12px 32px rgba(0, 0, 0, 0.45), 0 24px 64px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.07)',
         'glow-interactive': '0 0 0 1px var(--cds-interactive), 0 4px 16px rgba(15, 98, 254, 0.35)',
+        // 대형 CTA용 은은한 글로우 — 링 없이 색광만 (도메인별)
+        'glow-blue': '0 4px 18px rgba(69, 137, 255, 0.2)',
+        'glow-plugin': '0 4px 18px rgba(165, 110, 255, 0.22)',
+        'glow-connector': '0 4px 18px rgba(8, 189, 186, 0.18)',
       },
       fontSize: {
         // IBM Carbon type scale

@@ -340,7 +340,7 @@ function MyPluginsScreen() {
         style={{ width: railPanel.width }}
       >
         <div className="p-4">
-          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#6929c4] via-[#491d8b] to-[#8a3ffc] p-4 text-white shadow-elevation-2">
+          <div className="relative overflow-hidden rounded-2xl gradient-plugin p-4 text-white shadow-glow-plugin">
             <div className="absolute -top-8 -right-8 w-28 h-28 rounded-full bg-white/10 blur-2xl" aria-hidden="true" />
             <div className="relative">
               <div className="text-caption-01 text-white/85 mb-1">설치된 플러그인</div>

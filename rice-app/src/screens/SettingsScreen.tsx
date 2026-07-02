@@ -148,7 +148,7 @@ function SettingsScreen() {
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-[720px] mx-auto px-8 py-8 space-y-8">
           {/* About — hero card */}
-          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#0f62fe] via-[#3023ae] to-[#8a3ffc] p-5 text-white shadow-elevation-2">
+          <div className="relative overflow-hidden rounded-2xl gradient-brand p-5 text-white shadow-elevation-2">
             <div className="absolute -top-10 -right-10 w-36 h-36 rounded-full bg-white/10 blur-2xl" aria-hidden="true" />
             <div className="relative flex items-center gap-4">
               <div

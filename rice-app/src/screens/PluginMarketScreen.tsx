@@ -122,7 +122,7 @@ function PluginMarketScreen() {
       >
         {/* Installed Summary */}
         <div className="p-3">
-          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#6929c4] via-[#491d8b] to-[#31135e] p-4 text-white shadow-elevation-2">
+          <div className="relative overflow-hidden rounded-2xl gradient-plugin p-4 text-white shadow-glow-plugin">
             {/* Decorative glow */}
             <div className="absolute -top-8 -right-8 w-28 h-28 rounded-full bg-white/10 blur-2xl" aria-hidden="true" />
             <div className="relative">

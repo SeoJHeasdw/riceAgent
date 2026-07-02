@@ -24,12 +24,24 @@ export interface LearningPanelProps {
   onOpenConversation?: (conversationId: string, messageIndex?: number) => void;
 }
 
-// confidence meter
-const Confidence: React.FC<{ v: number }> = ({ v }) => (
-  <div className="w-11 h-1 bg-border-strong-01 flex-shrink-0 rounded-full overflow-hidden">
-    <div className="h-full bg-blue-50" style={{ width: `${Math.round(v * 100)}%` }} />
-  </div>
-);
+// confidence meter — 신뢰도 구간별로 색을 달리해 바가 "다 똑같은 파란 줄"로
+// 읽히지 않게 한다 (낮음=회색, 보통=블루, 높음=AI 그라디언트)
+const Confidence: React.FC<{ v: number }> = ({ v }) => {
+  const fill =
+    v >= 0.75
+      ? 'bg-gradient-to-r from-[var(--ai-gradient-start)] to-[var(--ai-gradient-end)]'
+      : v >= 0.4
+        ? 'bg-blue-50'
+        : 'bg-border-strong-03';
+  return (
+    <div
+      title={`신뢰도 ${Math.round(v * 100)}%`}
+      className="w-11 h-1 bg-border-strong-01 flex-shrink-0 rounded-full overflow-hidden"
+    >
+      <div className={`h-full rounded-full ${fill}`} style={{ width: `${Math.round(v * 100)}%` }} />
+    </div>
+  );
+};
 
 // small overflow menu
 interface MenuItem {
@@ -154,9 +166,8 @@ const SignalRow: React.FC<{ s: UserSignal; onEdit: (v: string) => void; onRemove
   return (
     <div className="group flex items-center gap-2.5">
       <div className="min-w-0 flex-1">
-        <div className="text-caption-01 text-text-helper">
-          {s.label} · {s.source}
-        </div>
+        {/* label은 그룹 헤더로 승격됐으므로 행에는 출처만 */}
+        <div className="text-caption-01 text-text-helper">{s.source}</div>
         <div className="text-body-short-01 text-text-primary">{s.value}</div>
       </div>
       <Confidence v={s.conf} />
@@ -372,9 +383,20 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ isLearning = true,
           <Icon name="renew" size={18} className="text-icon-primary" />
           <span className="text-body-short-02 font-semibold text-text-primary">학습 루프</span>
           <span className="ml-auto flex-shrink-0">
-            <Tag type={isLearning ? 'green' : 'gray'} size="sm" dot={isLearning}>
-              {isLearning ? '학습 중' : '일시정지'}
-            </Tag>
+            {isLearning ? (
+              // 살아있는 루프임이 느껴지도록 도트에 은은한 pulse
+              <span className="inline-flex items-center gap-1.5 h-[18px] px-2 rounded-full text-[11px] font-semibold bg-support-success/12 text-support-success">
+                <span className="relative flex h-1.5 w-1.5">
+                  <span className="absolute inline-flex h-full w-full rounded-full bg-support-success opacity-60 animate-ping" />
+                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-support-success" />
+                </span>
+                학습 중
+              </span>
+            ) : (
+              <Tag type="gray" size="sm">
+                일시정지
+              </Tag>
+            )}
           </span>
         </div>
 
@@ -421,21 +443,47 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ isLearning = true,
               />
             ))}
             {installed.length === 0 && (
-              <span className="text-caption-01 text-text-helper">설치된 도구가 없어요. 마켓에서 설치해보세요.</span>
+              <div className="flex items-center gap-2.5 rounded-lg border border-dashed border-border-strong-01 px-3 py-2.5">
+                <Icon name="plug" size={16} className="text-icon-secondary flex-shrink-0" />
+                <span className="text-caption-01 text-text-helper">
+                  설치된 도구가 없어요. 마켓에서 설치해보세요.
+                </span>
+              </div>
             )}
           </div>
         </PanelSection>
 
-        {/* user model — editable signals */}
+        {/* user model — editable signals, 같은 label끼리 묶어 반복 라벨 제거 */}
         <PanelSection icon="user" title="나에 대한 모델" count={`신호 ${signals.length}`}>
-          <div className="flex flex-col gap-2.5">
-            {signals.map((u) => (
-              <SignalRow
-                key={u.id}
-                s={u}
-                onEdit={(v) => setSignals((arr) => arr.map((x) => (x.id === u.id ? { ...x, value: v, source: '명시적 교정' } : x)))}
-                onRemove={() => setSignals((arr) => arr.filter((x) => x.id !== u.id))}
-              />
+          <div className="flex flex-col gap-3">
+            {Array.from(
+              signals.reduce((m, u) => {
+                const arr = m.get(u.label) ?? [];
+                arr.push(u);
+                m.set(u.label, arr);
+                return m;
+              }, new Map<string, UserSignal[]>()),
+            ).map(([label, items]) => (
+              <div key={label}>
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <span className="text-caption-01 font-semibold text-text-secondary">{label}</span>
+                  {items.length > 1 && (
+                    <span className="text-caption-01 text-text-helper font-mono">{items.length}</span>
+                  )}
+                </div>
+                <div className="flex flex-col gap-2.5">
+                  {items.map((u) => (
+                    <SignalRow
+                      key={u.id}
+                      s={u}
+                      onEdit={(v) =>
+                        setSignals((arr) => arr.map((x) => (x.id === u.id ? { ...x, value: v, source: '명시적 교정' } : x)))
+                      }
+                      onRemove={() => setSignals((arr) => arr.filter((x) => x.id !== u.id))}
+                    />
+                  ))}
+                </div>
+              </div>
             ))}
             {signals.length === 0 && (
               <span className="text-caption-01 text-text-helper">아직 학습된 신호가 없어요. 대화에서 자동으로 쌓입니다.</span>

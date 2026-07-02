@@ -21,6 +21,34 @@ export interface SkillCardProps {
   onSponsor: () => void;
 }
 
+/**
+ * 카테고리별 아이콘 타일 액센트 — 모든 카드가 똑같은 파란 사각형으로 보이는
+ * 단조로움을 깬다. 첫 매칭 태그의 계열을 따르고, 못 찾으면 이름 해시로 고정 배정
+ * (같은 스킬은 항상 같은 색).
+ */
+const TILE_ACCENTS = [
+  { grad: 'from-[#0f62fe] to-[#4589ff]', wash: 'bg-blue-50/25' }, // blue — 데이터·개발
+  { grad: 'from-[#007d79] to-[#08bdba]', wash: 'bg-teal-40/25' }, // teal — 자동화·연동
+  { grad: 'from-[#8a3ffc] to-[#a56eff]', wash: 'bg-purple-50/25' }, // purple — 커뮤니케이션·창작
+  { grad: 'from-[#d02670] to-[#ee5396]', wash: 'bg-[#ee5396]/25' }, // magenta — 생산성·기타
+] as const;
+
+const TILE_KEYWORDS: [RegExp, number][] = [
+  [/data|analysis|csv|excel|statistic|dev|code|git|vcs/i, 0],
+  [/automation|workflow|integration|tool/i, 1],
+  [/communication|writing|brevity|art|creative|visualization/i, 2],
+  [/productivity|token/i, 3],
+];
+
+const tileAccentFor = (tags: string[], name: string) => {
+  for (const t of tags) {
+    const hit = TILE_KEYWORDS.find(([re]) => re.test(t));
+    if (hit) return TILE_ACCENTS[hit[1]];
+  }
+  const hash = [...name].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) | 0, 0);
+  return TILE_ACCENTS[Math.abs(hash) % TILE_ACCENTS.length];
+};
+
 export const SkillCard: React.FC<SkillCardProps> = ({
   name,
   description,
@@ -38,6 +66,7 @@ export const SkillCard: React.FC<SkillCardProps> = ({
   const [expanded, setExpanded] = useState(false);
   const descRef = useRef<HTMLParagraphElement>(null);
   const [clamped, setClamped] = useState(false);
+  const accent = tileAccentFor(tags, name);
 
   // Detect whether the description overflows two lines (only while collapsed).
   useEffect(() => {
@@ -61,10 +90,10 @@ export const SkillCard: React.FC<SkillCardProps> = ({
       <div className="relative flex items-start gap-3 mb-3">
         <div className="relative flex-shrink-0">
           <div
-            className="absolute inset-0 rounded-xl bg-interactive/25 blur-md opacity-0 transition-opacity duration-300 group-hover:opacity-100"
+            className={`absolute inset-0 rounded-xl ${accent.wash} blur-md opacity-0 transition-opacity duration-300 group-hover:opacity-100`}
             aria-hidden="true"
           />
-          <div className="relative w-10 h-10 flex items-center justify-center rounded-xl bg-gradient-to-br from-[#4589ff] to-[#0043ce] ring-1 ring-white/10 shadow-elevation-1">
+          <div className={`relative w-10 h-10 flex items-center justify-center rounded-xl bg-gradient-to-br ${accent.grad} ring-1 ring-white/10 shadow-elevation-1`}>
             <svg width="20" height="20" viewBox="0 0 32 32" fill="white">
               <path d="M30 8h-4.1c-.5-2.3-2.5-4-4.9-4s-4.4 1.7-4.9 4H2v2h14.1c.5 2.3 2.5 4 4.9 4s4.4-1.7 4.9-4H30V8zM21 12c-1.7 0-3-1.3-3-3s1.3-3 3-3 3 1.3 3 3-1.3 3-3 3zM2 24h4.1c.5 2.3 2.5 4 4.9 4s4.4-1.7 4.9-4H30v-2H15.9c-.5-2.3-2.5-4-4.9-4s-4.4 1.7-4.9 4H2v2zm9-4c1.7 0 3 1.3 3 3s-1.3 3-3 3-3-1.3-3-3 1.3-3 3-3z"/>
             </svg>
@@ -150,7 +179,7 @@ export const SkillCard: React.FC<SkillCardProps> = ({
             text-body-short-01 font-semibold transition-all
             ${installed
               ? 'bg-layer-02 text-text-secondary cursor-default ring-1 ring-inset ring-border-subtle-01'
-              : 'bg-gradient-to-r from-[#4589ff] to-[#0043ce] text-white shadow-elevation-1 hover:from-[#0f62fe] hover:to-[#002d9c] hover:shadow-elevation-2 cursor-pointer'
+              : 'gradient-skill text-white shadow-glow-blue hover:brightness-110 hover:shadow-elevation-2 cursor-pointer'
             }
           `}
         >

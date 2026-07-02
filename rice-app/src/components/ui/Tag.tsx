@@ -34,7 +34,7 @@ export const Tag: React.FC<TagProps> = ({
     blue: 'bg-[#002d9c] text-[#a6c8ff]',
     green: 'bg-[#044317] text-[#6fdc8c]',
     purple: 'bg-[#491d8b] text-[#d4bbff]',
-    gray: 'bg-layer-02 text-text-secondary border border-border-subtle-01',
+    gray: 'bg-layer-02 text-text-secondary border border-border-subtle-02',
     teal: 'bg-[#004144] text-[#3ddbd9]',
     red: 'bg-[#750e13] text-[#ffb3b8]',
     yellow: 'bg-[#684e00] text-[#fddc69]',
