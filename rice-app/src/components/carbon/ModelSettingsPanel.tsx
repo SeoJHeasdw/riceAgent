@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Button, Icon, Tooltip } from '../ui';
+import { Button, Icon } from '../ui';
 import { ModelPicker, ModelDraft, ModelSettings } from './ModelPicker';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
 
 /**
  * ModelSettingsPanel — 모델 설정 슬라이드 패널.
@@ -37,10 +38,51 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
     canSave: false,
   });
 
+  // 저장 의미 있는 변경 여부:
+  // mode 전환이나 "로컬 모델 확인" 같은 탐색 행위는 제외하고,
+  // 실제로 저장될 값(modelId · registeredModels · temperature · maxTokens · contextLength · endpoint)이
+  // 패널을 열 때의 초기값과 달라졌을 때만 dirty로 판단한다.
+  const savedModelId = useRef(currentModel);
+  const savedSettings = useRef(settings);
+  const savedMode = useRef(modelMode);
+
+  const computeDirty = useCallback((d: ModelDraft): boolean => {
+    // 탭 전환 자체는 탐색 행위 — 저장될 실제 값이 바뀌었는지만 본다.
+    // mode가 원래와 달라졌더라도 저장 시 그 mode에 맞는 값이 동일하면 무시.
+    const modeChanged = d.mode !== savedMode.current;
+    const modelChanged = d.modelId !== savedModelId.current;
+    const a = d.settings;
+    const b = savedSettings.current;
+    const paramsChanged =
+      a.temperature !== b.temperature ||
+      a.maxTokens !== b.maxTokens ||
+      a.contextLength !== b.contextLength ||
+      (a.endpoint ?? '') !== (b.endpoint ?? '');
+    const registeredChanged =
+      a.registeredModels.length !== b.registeredModels.length ||
+      a.registeredModels.some((ra) => !b.registeredModels.find((rb) => rb.modelId === ra.modelId));
+
+    // mode만 바뀌고 나머지가 동일한 경우도 저장하면 달라지므로 dirty로 본다.
+    // 단, modeChanged && !modelChanged && !paramsChanged && !registeredChanged 이면
+    // 탭만 왔다갔다 한 것 — 경고 불필요.
+    if (modeChanged && !modelChanged && !paramsChanged && !registeredChanged) return false;
+    return modeChanged || modelChanged || paramsChanged || registeredChanged;
+  }, []);
+
+  const [isDirty, setIsDirty] = useState(false);
+
+  const handleDraftChange = useCallback((d: ModelDraft) => {
+    setDraft(d);
+    setIsDirty(computeDirty(d));
+  }, [computeDirty]);
+
+  // 나가기 확인 다이얼로그
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
   // 닫힘 애니메이션: closing 동안 slide-out을 재생한 뒤 실제 onClose
   const [closing, setClosing] = useState(false);
   const closingRef = useRef(false);
-  const requestClose = useCallback(() => {
+  const doClose = useCallback(() => {
     if (closingRef.current) return;
     closingRef.current = true;
     setClosing(true);
@@ -50,6 +92,26 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
       onClose();
     }, CLOSE_MS);
   }, [onClose]);
+
+  // dirty 상태면 확인 다이얼로그를 먼저 띄운다
+  const requestClose = useCallback(() => {
+    if (isDirty) {
+      setConfirmOpen(true);
+    } else {
+      doClose();
+    }
+  }, [isDirty, doClose]);
+
+  // 패널이 다시 열릴 때 저장 기준값 · dirty 상태 초기화
+  useEffect(() => {
+    if (isOpen) {
+      savedModelId.current = currentModel;
+      savedSettings.current = settings;
+      savedMode.current = modelMode;
+      setIsDirty(false);
+      setConfirmOpen(false);
+    }
+  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ESC로 닫기
   useEffect(() => {
@@ -84,7 +146,8 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
 
   const handleSave = () => {
     onSave({ modelId: draft.modelId, settings: draft.settings, mode: draft.mode });
-    requestClose();
+    setIsDirty(false);
+    doClose();
   };
 
   return (
@@ -112,23 +175,21 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
       >
         {/* Header — 사이드바·채팅 헤더와 같은 52px 라인 */}
         <div className="flex items-center gap-2 px-4 h-[52px] border-b border-border-subtle-01 flex-shrink-0">
-          <Icon name="model" size={18} className="text-icon-primary flex-shrink-0" />
           <div className="flex items-baseline gap-2 min-w-0">
             <span className="text-body-short-02 font-semibold text-text-primary flex-shrink-0">모델 설정</span>
             <span className="text-caption-01 font-mono text-text-helper truncate">
               {currentModel || '미설정'}
             </span>
           </div>
-          <Tooltip label="닫기 (Esc)">
-            <button
-              onClick={requestClose}
-              className="ml-auto p-1.5 hover:bg-layer-hover-01 transition-colors rounded-md flex-shrink-0"
-            >
-              <svg width="20" height="20" viewBox="0 0 32 32" fill="currentColor" className="text-icon-primary">
-                <path d="M24 9.4L22.6 8 16 14.6 9.4 8 8 9.4l6.6 6.6L8 22.6 9.4 24l6.6-6.6 6.6 6.6 1.4-1.4-6.6-6.6L24 9.4z" />
-              </svg>
-            </button>
-          </Tooltip>
+          <button
+            onClick={requestClose}
+            title="닫기 (Esc)"
+            className="ml-auto flex-shrink-0 p-1.5 hover:bg-layer-hover-01 transition-colors rounded-md"
+          >
+            <svg width="20" height="20" viewBox="0 0 32 32" fill="currentColor" className="text-icon-primary">
+              <path d="M24 9.4L22.6 8 16 14.6 9.4 8 8 9.4l6.6 6.6L8 22.6 9.4 24l6.6-6.6 6.6 6.6 1.4-1.4-6.6-6.6L24 9.4z" />
+            </svg>
+          </button>
         </div>
 
         {/* Content — 열릴 때마다 최신 prop으로 새로 초기화하도록 key로 remount */}
@@ -138,7 +199,7 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
             currentModel={currentModel}
             modelMode={modelMode}
             settings={settings}
-            onChange={setDraft}
+            onChange={handleDraftChange}
           />
         </div>
 
@@ -171,6 +232,21 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
           </Button>
         </div>
       </div>
+
+      {/* 미저장 변경사항 확인 다이얼로그 */}
+      <ConfirmDialog
+        open={confirmOpen}
+        title="저장하지 않고 나가시겠어요?"
+        description="변경한 모델 설정이 저장되지 않습니다. 정말 나가시겠어요?"
+        confirmLabel="나가기"
+        cancelLabel="계속 편집"
+        tone="danger"
+        onConfirm={() => {
+          setConfirmOpen(false);
+          doClose();
+        }}
+        onClose={() => setConfirmOpen(false)}
+      />
 
       <style>{`
         @keyframes panelFadeIn { from { opacity: 0; } to { opacity: 1; } }
