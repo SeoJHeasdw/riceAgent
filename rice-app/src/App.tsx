@@ -18,6 +18,7 @@ import { MarketplaceProvider } from './lib/marketplace/MarketplaceContext';
 import { ToastProvider } from './lib/toast/ToastProvider';
 import { ModelOnboarding } from './components/carbon/ModelOnboarding';
 import { TourOverlay, TOUR_STEPS, TOUR_DONE_KEY } from './components/carbon/tour';
+import { CommandPalette } from './components/carbon/CommandPalette';
 import { REPLAY_ONBOARDING_EVENT, REPLAY_TOUR_EVENT } from './lib/tutorial';
 import { defaultModelSettings } from './lib/mockData';
 import type { ModelSettings } from './components/carbon/ModelSettingsPanel';
@@ -60,6 +61,8 @@ function AppShell({ tourActive, onTourDone }: AppShellProps) {
           <Route path="*" element={<Navigate to="/chat" replace />} />
         </Routes>
       </Layout>
+
+      <CommandPalette />
 
       {tourActive && (
         <TourOverlay

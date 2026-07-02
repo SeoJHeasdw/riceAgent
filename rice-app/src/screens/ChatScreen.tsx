@@ -5,12 +5,14 @@ import { LearningPanel } from '../components/carbon/LearningPanel';
 import { ChatTurn } from '../components/carbon/ChatMessage';
 import { useResizable } from '../hooks/useResizable';
 import { useLearning } from '../lib/learning/LearningContext';
-import type { ThreadMessage } from '../lib/learningData';
+import type { Skill, ThreadMessage } from '../lib/learningData';
 import { defaultModelSettings } from '../lib/mockData';
+import { RUN_SKILL_EVENT, NEW_CHAT_EVENT } from '../lib/commandBridge';
 import { api } from '../lib/api';
 import { sseClient } from '../lib/sse';
 import type { PatchTrigger, PendingApproval, ToolApprovalRequiredData, SkillPatchProposedData, SSEEvent } from '../lib/types';
-import { Icon, ResizeHandle, ConfirmDialog } from '../components/ui';
+import { Icon, Kbd, ResizeHandle, ConfirmDialog, Tooltip } from '../components/ui';
+import type { IconName } from '../components/ui/Icon';
 import { FileViewerProvider } from '../lib/fileViewer/FileViewerProvider';
 import { useToast } from '../lib/toast/ToastContext';
 import type { RegisteredModel } from '../components/carbon/ModelSettingsPanel';
@@ -492,15 +494,75 @@ const SkillsPopover: React.FC<{
   );
 };
 
-/* ── 키보드 힌트 뱃지 ── */
-const Kbd: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <kbd className="px-1 py-px rounded bg-layer-01 border border-border-subtle-01 font-mono text-[9px] text-text-secondary">
-    {children}
-  </kbd>
-);
+/* ── 빈 채팅 스타터 화면 — 백지 대신 바로 눌러 보낼 수 있는 예시 카드 ──
+ * 일반 프롬프트 3개 + (스킬을 등록해 뒀다면) 가장 많이 쓴 스킬 실행 카드 1개를
+ * 섞어 보여준다. 클릭 즉시 전송되어 데모/온보딩 첫 인상에서 제품 정체성
+ * (스킬로 반복 작업을 학습·자동화)을 바로 보여준다.
+ */
+const GENERIC_STARTERS: { icon: IconName; title: string; prompt: string }[] = [
+  { icon: 'flow', title: '오늘 할 일 정리', prompt: '오늘 처리할 작업을 우선순위대로 정리해줘' },
+  { icon: 'idea', title: '아이디어 브레인스토밍', prompt: '새로운 아이디어를 함께 브레인스토밍해줘' },
+  { icon: 'document', title: '글 다듬기', prompt: '내가 붙여넣을 글을 다듬고 피드백을 줘' },
+];
+
+const ChatStarter: React.FC<{ skills: Skill[]; onPick: (text: string) => void }> = ({ skills, onPick }) => {
+  const topSkill = [...skills]
+    .filter((s) => s.enabled && s.command)
+    .sort((a, b) => b.uses - a.uses)[0];
+
+  const cards = [
+    ...GENERIC_STARTERS,
+    ...(topSkill
+      ? [{ icon: 'skill' as IconName, title: `${topSkill.name} 실행`, prompt: `/${topSkill.command}` }]
+      : []),
+  ];
+
+  return (
+    <div className="pt-16 text-center">
+      <div
+        className="w-12 h-12 mx-auto mb-4 flex items-center justify-center rounded-xl shadow-glow-blue"
+        style={{ background: 'var(--gradient-skill)' }}
+      >
+        <Icon name="model" size={24} className="text-white" />
+      </div>
+      <div className="text-heading-04 font-light text-text-primary mb-2">무엇을 도와드릴까요?</div>
+      <div className="text-body-short-02 text-text-helper mb-7">
+        쓸수록 당신의 방식에 맞춰 학습하고, 반복 작업은 스킬로 저장합니다.
+      </div>
+
+      <div className="grid grid-cols-2 gap-2.5 max-w-[560px] mx-auto text-left">
+        {cards.map((c, i) => (
+          <button
+            key={c.title}
+            onClick={() => onPick(c.prompt)}
+            className="group flex items-start gap-3 p-3.5 rounded-xl border border-border-subtle-01 bg-layer-01 hover:border-border-strong-01 hover:bg-layer-hover-01 transition-all duration-150"
+            style={{ animation: `starterCardIn 220ms cubic-bezier(0.16, 1, 0.3, 1) both`, animationDelay: `${i * 30}ms` }}
+          >
+            <span
+              className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-interactive bg-interactive/12 group-hover:bg-interactive/20 transition-colors"
+            >
+              <Icon name={c.icon} size={16} />
+            </span>
+            <div className="min-w-0">
+              <div className="text-body-short-01 font-medium text-text-primary truncate">{c.title}</div>
+              <div className="text-caption-01 text-text-helper truncate">{c.prompt}</div>
+            </div>
+          </button>
+        ))}
+      </div>
+
+      <style>{`
+        @keyframes starterCardIn {
+          from { opacity: 0; transform: translateY(6px); }
+          to { opacity: 1; transform: none; }
+        }
+      `}</style>
+    </div>
+  );
+};
 
 function ChatScreen() {
-  const { jumpToSkill, setSkills, setDetails, panelScrollRef } = useLearning();
+  const { skills, jumpToSkill, setSkills, setDetails, panelScrollRef } = useLearning();
   const toast = useToast();
 
   const [thread, setThread] = useState<ThreadMessage[]>([]);
@@ -664,9 +726,38 @@ function ChatScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connected]);
 
+  // 스마트 오토스크롤: 바닥 근처에 있을 때만 새 메시지를 따라가고,
+  // 위로 스크롤해 읽는 중이면 위치를 지키고 "새 메시지" 플로팅 버튼을 띄운다.
+  const [atBottom, setAtBottom] = useState(true);
+  const [hasNewBelow, setHasNewBelow] = useState(false);
+  const NEAR_BOTTOM_PX = 120;
+
+  const handleThreadScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
+    setAtBottom(nearBottom);
+    if (nearBottom) setHasNewBelow(false);
+  };
+
   useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    const el = scrollRef.current;
+    if (!el) return;
+    if (atBottom) {
+      el.scrollTop = el.scrollHeight;
+    } else {
+      setHasNewBelow(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [thread]);
+
+  const jumpToBottom = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    setAtBottom(true);
+    setHasNewBelow(false);
+  };
 
   // after the target session's thread is mounted, scroll to + pulse the
   // message a proposal's evidence pointed at (gated on loadedSession so we
@@ -1172,9 +1263,11 @@ function ChatScreen() {
     void sendLive(q);
   };
 
-  const send = () => {
+  // overrideText: 스타터 프롬프트 카드처럼 draft state를 거치지 않고 즉시 보낼 때 사용
+  // (setDraft 직후 같은 틱에서 send()를 부르면 draft가 아직 반영 전이라 stale하게 읽힌다)
+  const send = (overrideText?: string) => {
     if (busy) return; // a live turn is still streaming — ignore re-entrant sends
-    const body = draft.trim();
+    const body = (overrideText ?? draft).trim();
     if (!command && !body) return;
     const q = command ? `/${command}${body ? ' ' + body : ''}` : body;
     setDraft('');
@@ -1318,6 +1411,22 @@ function ChatScreen() {
     requestAnimationFrame(() => composerRef.current?.focus());
   };
 
+  // 글로벌 커맨드 팔레트(Cmd+K)에서 오는 "스킬 실행"·"새 대화" 요청을 받는다.
+  useEffect(() => {
+    const onRunSkill = (e: Event) => {
+      const cmd = (e as CustomEvent<{ command: string }>).detail?.command;
+      if (cmd) insertSkill(cmd);
+    };
+    const onNewChat = () => newChat();
+    window.addEventListener(RUN_SKILL_EVENT, onRunSkill);
+    window.addEventListener(NEW_CHAT_EVENT, onNewChat);
+    return () => {
+      window.removeEventListener(RUN_SKILL_EVENT, onRunSkill);
+      window.removeEventListener(NEW_CHAT_EVENT, onNewChat);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Find a slash-command token at or just before the cursor.
   // Returns { token, slashIndex } when the text immediately before `cursor`
   // looks like "/word" (no space after the slash yet), otherwise null.
@@ -1432,27 +1541,29 @@ function ChatScreen() {
             {/* 사이드바가 접히면 미니 레일 대신 여기서 다시 연다 (Claude 데스크톱 문법) */}
             {!sessionSidebarOpen && (
               <div className="-ml-1.5 mr-0.5 flex items-center gap-0.5 flex-shrink-0">
-                <button
-                  onClick={() => setSessionSidebarOpen(true)}
-                  title="대화 목록 열기"
-                  className="flex items-center justify-center w-8 h-8 rounded-lg text-icon-secondary hover:bg-layer-hover-01 hover:text-icon-primary transition-colors"
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="3" width="18" height="18" rx="2" />
-                    <path d="M9 3v18" />
-                    <path d="m14 9 3 3-3 3" />
-                  </svg>
-                </button>
-                <button
-                  onClick={newChat}
-                  title="새 대화"
-                  className="flex items-center justify-center w-8 h-8 rounded-lg text-icon-secondary hover:bg-layer-hover-01 hover:text-icon-primary transition-colors"
-                >
-                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 20h9" />
-                    <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
-                  </svg>
-                </button>
+                <Tooltip label="대화 목록 열기">
+                  <button
+                    onClick={() => setSessionSidebarOpen(true)}
+                    className="flex items-center justify-center w-8 h-8 rounded-lg text-icon-secondary hover:bg-layer-hover-01 hover:text-icon-primary transition-colors"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="3" width="18" height="18" rx="2" />
+                      <path d="M9 3v18" />
+                      <path d="m14 9 3 3-3 3" />
+                    </svg>
+                  </button>
+                </Tooltip>
+                <Tooltip label="새 대화">
+                  <button
+                    onClick={newChat}
+                    className="flex items-center justify-center w-8 h-8 rounded-lg text-icon-secondary hover:bg-layer-hover-01 hover:text-icon-primary transition-colors"
+                  >
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 20h9" />
+                      <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                    </svg>
+                  </button>
+                </Tooltip>
               </div>
             )}
             <span className="text-body-short-01 font-semibold text-text-primary truncate">
@@ -1476,36 +1587,53 @@ function ChatScreen() {
           </div>
 
           {/* Thread */}
-          <div ref={scrollRef} className="flex-1 overflow-y-auto">
-            <div className="w-full max-w-[920px] mx-auto px-5 py-4">
-              {isEmpty ? (
-                <div className="pt-20 text-center">
-                  <div className="w-12 h-12 mx-auto mb-4 bg-blue-60 flex items-center justify-center rounded-xl">
-                    <Icon name="model" size={24} className="text-white" />
-                  </div>
-                  <div className="text-heading-04 font-light text-text-primary mb-2">무엇을 도와드릴까요?</div>
-                  <div className="text-body-short-02 text-text-helper">
-                    쓸수록 당신의 방식에 맞춰 학습하고, 반복 작업은 스킬로 저장합니다.
-                  </div>
-                </div>
-              ) : (
-                turns.map((t) => (
-                  <ChatTurn
-                    key={t.key}
-                    items={t.items}
-                    onCorrect={handleCorrect}
-                    onJumpSkill={jumpToSkill}
-                    onRegenerate={regenerate}
-                    onSaveSkill={saveSkillFromChat}
-                    onApprovePatch={handleApprovePatch}
-                    onRespondApproval={handleToolApproval}
-                    highlightIndex={highlightMsg}
-                    actionsCopyAt={actionsCopyAt}
-                  />
-                ))
-              )}
+          <div className="relative flex-1 min-h-0">
+            <div ref={scrollRef} onScroll={handleThreadScroll} className="h-full overflow-y-auto">
+              <div className="w-full max-w-[920px] mx-auto px-5 py-4">
+                {isEmpty ? (
+                  <ChatStarter skills={skills} onPick={(text) => send(text)} />
+                ) : (
+                  turns.map((t) => (
+                    <ChatTurn
+                      key={t.key}
+                      items={t.items}
+                      onCorrect={handleCorrect}
+                      onJumpSkill={jumpToSkill}
+                      onRegenerate={regenerate}
+                      onSaveSkill={saveSkillFromChat}
+                      onApprovePatch={handleApprovePatch}
+                      onRespondApproval={handleToolApproval}
+                      highlightIndex={highlightMsg}
+                      actionsCopyAt={actionsCopyAt}
+                    />
+                  ))
+                )}
+              </div>
             </div>
+
+            {/* 스크롤을 올려 읽는 중일 때만 노출되는 바닥 이동 버튼 */}
+            {!isEmpty && !atBottom && (
+              <button
+                onClick={jumpToBottom}
+                className={`absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1.5 pl-3 pr-3.5 h-8 rounded-full border text-caption-01 font-medium shadow-elevation-2 transition-colors ${
+                  hasNewBelow
+                    ? 'bg-interactive border-interactive text-white hover:brightness-110'
+                    : 'bg-layer-02 border-border-subtle-01 text-text-secondary hover:bg-layer-hover-02'
+                }`}
+                style={{ animation: 'jumpBtnIn 160ms cubic-bezier(0.16, 1, 0.3, 1)' }}
+              >
+                <Icon name="chevron-down" size={14} />
+                {hasNewBelow ? '새 메시지' : '맨 아래로'}
+              </button>
+            )}
           </div>
+
+          <style>{`
+            @keyframes jumpBtnIn {
+              from { opacity: 0; transform: translate(-50%, 6px); }
+              to { opacity: 1; transform: translate(-50%, 0); }
+            }
+          `}</style>
 
           {/* Composer */}
           <div className="flex-shrink-0 px-5 pt-2 pb-5">
@@ -1590,18 +1718,16 @@ function ChatScreen() {
                   className="w-full resize-none border-none outline-none bg-transparent text-text-primary text-body-short-02 leading-5 px-4 pt-3.5 pb-1 min-h-[56px] max-h-[200px]"
                 />
                 <div className="flex items-center gap-1.5 px-2.5 pb-2.5">
-                  <button
-                    className="p-1.5 rounded-lg text-icon-secondary hover:text-icon-primary hover:bg-layer-hover-01 transition-colors"
-                    title="첨부"
-                  >
-                    <Icon name="attachment" size={16} />
-                  </button>
-                  <button
-                    className="p-1.5 rounded-lg text-icon-secondary hover:text-icon-primary hover:bg-layer-hover-01 transition-colors"
-                    title="음성"
-                  >
-                    <Icon name="microphone" size={16} />
-                  </button>
+                  <Tooltip label="첨부">
+                    <button className="p-1.5 rounded-lg text-icon-secondary hover:text-icon-primary hover:bg-layer-hover-01 transition-colors">
+                      <Icon name="attachment" size={16} />
+                    </button>
+                  </Tooltip>
+                  <Tooltip label="음성">
+                    <button className="p-1.5 rounded-lg text-icon-secondary hover:text-icon-primary hover:bg-layer-hover-01 transition-colors">
+                      <Icon name="microphone" size={16} />
+                    </button>
+                  </Tooltip>
                   <div className="relative">
                     <button
                       onClick={() => setSkillsOpen((o) => !o)}
@@ -1620,30 +1746,32 @@ function ChatScreen() {
                     )}
                   </div>
                   {connected && liveSessionId.current && (
-                    <button
-                      onClick={learnFromConversation}
-                      className="p-1.5 rounded-lg text-icon-secondary hover:text-icon-primary hover:bg-layer-hover-01 transition-colors"
-                      title="이 대화를 스킬로 저장"
-                    >
-                      <Icon name="bookmark" size={16} />
-                    </button>
+                    <Tooltip label="이 대화를 스킬로 저장">
+                      <button
+                        onClick={learnFromConversation}
+                        className="p-1.5 rounded-lg text-icon-secondary hover:text-icon-primary hover:bg-layer-hover-01 transition-colors"
+                      >
+                        <Icon name="bookmark" size={16} />
+                      </button>
+                    </Tooltip>
                   )}
                   <div className="flex-1" />
-                  <button
-                    onClick={busy ? stopTurn : send}
-                    disabled={!busy && !command && !draft.trim()}
-                    className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-150 ${
-                      busy
-                        ? 'bg-layer-02 hover:bg-layer-hover-02 border border-border-subtle-01 cursor-pointer'
-                        : command || draft.trim()
-                        ? 'shadow-glow-blue hover:brightness-110 cursor-pointer'
-                        : 'bg-layer-02 cursor-not-allowed opacity-50'
-                    }`}
-                    style={!busy && (command || draft.trim()) ? { background: 'var(--gradient-skill)' } : undefined}
-                    title={busy ? '생성 중지' : '전송'}
-                  >
-                    <Icon name={busy ? 'close' : 'send'} size={16} className={busy ? 'text-text-primary' : 'text-white'} />
-                  </button>
+                  <Tooltip label={busy ? '생성 중지' : '전송'}>
+                    <button
+                      onClick={() => (busy ? stopTurn() : send())}
+                      disabled={!busy && !command && !draft.trim()}
+                      className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-150 ${
+                        busy
+                          ? 'bg-layer-02 hover:bg-layer-hover-02 border border-border-subtle-01 cursor-pointer'
+                          : command || draft.trim()
+                          ? 'shadow-glow-blue hover:brightness-110 cursor-pointer'
+                          : 'bg-layer-02 cursor-not-allowed opacity-50'
+                      }`}
+                      style={!busy && (command || draft.trim()) ? { background: 'var(--gradient-skill)' } : undefined}
+                    >
+                      <Icon name={busy ? 'close' : 'send'} size={16} className={busy ? 'text-text-primary' : 'text-white'} />
+                    </button>
+                  </Tooltip>
                 </div>
               </div>
               <div className="flex items-center justify-center gap-1.5 text-caption-01 text-text-helper mt-2.5">

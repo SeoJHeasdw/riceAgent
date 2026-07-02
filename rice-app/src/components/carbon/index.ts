@@ -6,6 +6,8 @@
 export { IconRail } from './IconRail';
 export type { IconRailProps, IconRailItem } from './IconRail';
 
+export { CommandPalette } from './CommandPalette';
+
 export { SkillCard } from './SkillCard';
 export type { SkillCardProps } from './SkillCard';
 

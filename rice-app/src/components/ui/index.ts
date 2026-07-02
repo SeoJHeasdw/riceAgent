@@ -42,4 +42,9 @@ export type { ToggleProps } from './Toggle';
 export { Icon } from './Icon';
 export type { IconProps, IconName } from './Icon';
 
+export { Kbd } from './Kbd';
+
+export { Tooltip } from './Tooltip';
+export type { TooltipProps } from './Tooltip';
+
 // Made with Bob

@@ -1,4 +1,5 @@
 import React from 'react';
+import { useLocation } from 'react-router-dom';
 import { IconRail, IconRailItem } from './carbon';
 
 /**
@@ -22,6 +23,11 @@ export const Layout: React.FC<LayoutProps> = ({
   activeRailId,
   onNavigate,
 }) => {
+  // 화면(최상위 경로 세그먼트) 전환 시에만 새로 mount해 크로스페이드를 재생한다.
+  // 같은 화면 안의 하위 경로 변화(예: /connectors/:id)는 key가 그대로라 remount되지 않는다.
+  const location = useLocation();
+  const screenKey = location.pathname.split('/')[1] || 'home';
+
   return (
     <div className="flex flex-col h-screen w-screen bg-background overflow-hidden">
       {/* Titlebar / window drag region */}
@@ -59,7 +65,9 @@ export const Layout: React.FC<LayoutProps> = ({
           onNavigate={onNavigate}
         />
         <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
-          {children}
+          <div key={screenKey} className="flex-1 flex flex-col min-h-0 animate-fade-in">
+            {children}
+          </div>
         </main>
       </div>
     </div>

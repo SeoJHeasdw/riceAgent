@@ -34,6 +34,27 @@
   ::-webkit-scrollbar-thumb:hover {
     @apply bg-border-strong-02;
   }
+
+  /* 전역 focus-visible 링 — 개별 컴포넌트가 자체 focus 스타일을 두지 않은 경우의 기본값.
+     키보드 탐색 시 어디에 포커스가 있는지 항상 보이도록 한다. */
+  :focus-visible {
+    outline: 2px solid var(--cds-focus);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  /* prefers-reduced-motion — 모든 애니메이션·트랜지션을 사실상 순간 전환으로 축소.
+     스크롤 동작(scroll-behavior)은 auto로 되돌려 smooth-scroll도 끈다. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 }
 
 /* Component styles */

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Button, Icon } from '../ui';
+import { Button, Icon, Tooltip } from '../ui';
 import { ModelPicker, ModelDraft, ModelSettings } from './ModelPicker';
 
 /**
@@ -119,15 +119,16 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
               {currentModel || '미설정'}
             </span>
           </div>
-          <button
-            onClick={requestClose}
-            className="ml-auto p-1.5 hover:bg-layer-hover-01 transition-colors rounded-md flex-shrink-0"
-            title="닫기 (Esc)"
-          >
-            <svg width="20" height="20" viewBox="0 0 32 32" fill="currentColor" className="text-icon-primary">
-              <path d="M24 9.4L22.6 8 16 14.6 9.4 8 8 9.4l6.6 6.6L8 22.6 9.4 24l6.6-6.6 6.6 6.6 1.4-1.4-6.6-6.6L24 9.4z" />
-            </svg>
-          </button>
+          <Tooltip label="닫기 (Esc)">
+            <button
+              onClick={requestClose}
+              className="ml-auto p-1.5 hover:bg-layer-hover-01 transition-colors rounded-md flex-shrink-0"
+            >
+              <svg width="20" height="20" viewBox="0 0 32 32" fill="currentColor" className="text-icon-primary">
+                <path d="M24 9.4L22.6 8 16 14.6 9.4 8 8 9.4l6.6 6.6L8 22.6 9.4 24l6.6-6.6 6.6 6.6 1.4-1.4-6.6-6.6L24 9.4z" />
+              </svg>
+            </button>
+          </Tooltip>
         </div>
 
         {/* Content — 열릴 때마다 최신 prop으로 새로 초기화하도록 key로 remount */}
