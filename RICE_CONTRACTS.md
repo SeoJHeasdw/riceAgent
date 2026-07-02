@@ -27,7 +27,7 @@ Electron main process
 
 **Tool 실행 승인(human-in-the-loop)**: 위험한 tool(Connector(MCP)·plugin이 제공하는 실행 도구) 실행 전 사용자 승인을 받는다(RUNTIME_DESIGN 5장). WS 승격 없이, SSE에 **`tool_approval_required` 이벤트**를 추가하고 앱이 **`POST /sessions/{id}/tool-approval`**로 응답한다(폴링형). 승인 UI는 개발 영역.
 
-**Skill 개선 승인(human-in-the-loop)**: 스킬 본문 개선(patch)도 동일 폴링 패턴을 쓴다 — SSE **`skill_patch_proposed` 이벤트**(diff 포함)를 발행하고 앱이 **`POST /skills/{id}/patch`**로 승인/거부/편집 응답한다(LEARNING_LOOP 5.2). 자동 무단 수정 없음.
+**Skill 개선 승인(human-in-the-loop)**: 스킬 본문 개선(patch)도 동일 폴링 패턴을 쓴다 — SSE **`skill_patch_proposed` 이벤트**(diff 포함)를 발행하고 앱이 **`POST /skills/{id}/patch`**로 승인/거부/편집 응답한다(LEARNING_LOOP 5.2). 자동 무단 수정 없음. **2026-07-02**: 스킬 **생성**도 이 동일 메커니즘으로 통일됐다 — `from_version=0`인 `skill_patch_proposed`가 "신규 스킬 제안"이다(더 이상 별도 `skill_created` 알림 이벤트로 즉시 저장하지 않는다 — LEARNING_LOOP §4).
 
 **승인 상관·정지/재개·복구 (두 승인 공통, 메커니즘 정본 RUNTIME_DESIGN 5.1)**: 두 제어 이벤트는 고유 **`approval_id`** 를 싣고, 대응 POST 본문은 그 `approval_id`를 포함한다(서버가 parking된 요청과 매칭). 에이전트 루프는 응답까지 정지한 뒤 재개한다. 함정 처리:
 - **timeout**: 기본 5분(설정) 무응답 시 **안전 기본값=거부/취소**(tool 미실행 / patch 미적용).
@@ -43,7 +43,10 @@ Electron main process
 | POST | `/sessions` | 세션 생성 |
 | GET | `/sessions` / `/sessions/{id}` | 목록/상세 (히스토리 UI) |
 | POST | `/sessions/{id}/attachments` | **첨부 선업로드 (multipart, xlsx·png만) → `{attachment_id, kind}` 반환** |
-| POST | `/sessions/{id}/messages` | 메시지 전송(본문 + `attachment_ids[]` 참조) → **SSE 스트림 응답** (9종 이벤트) |
+| POST | `/sessions/{id}/messages` | 메시지 전송(본문 + `attachment_ids[]` 참조) → **SSE 스트림 응답** (8종 이벤트, 2026-07-02 정정 — 아래) |
+| POST | `/sessions/{id}/title` | 세션 제목 생성(post-turn, 논블로킹) — 첫 턴 `done` 후 호출 |
+| **POST** | **`/sessions/{id}/learning-review`** | **게이트된 LLM 스킬/메모리 리뷰(post-turn, 논블로킹) → SSE 스트림(메인 턴과 동일 이벤트 어휘) — LEARNING_LOOP §4. body: `{tool_calls_made}`. 게이트 미통과 시 즉시 `done`만.** |
+| **POST** | **`/sessions/{id}/learn`** | **명시적 "이 대화를 스킬로 저장" — 게이트 없이 항상 시도 → SSE 스트림 — LEARNING_LOOP §5.3. body: `{instruction?}`.** |
 | POST | `/sessions/{id}/abort` | 생성 중단 |
 | POST | `/sessions/{id}/tool-approval` | tool 실행 승인 응답 (`tool_approval_required` 이벤트에 대응, `approval_id` 포함) |
 | GET | `/sessions/{id}/pending-approvals` | 대기 중 승인 목록 (SSE 재연결 복구 — RUNTIME_DESIGN 5.1) |
@@ -52,9 +55,11 @@ Electron main process
 | GET | `/sessions/{id}/export?format=md\|json` | 대화 내보내기 (ChatScreen) |
 | GET | `/skills` | 스킬 목록 + 상태/사용 통계 (learning loop 가시화용) |
 | GET | `/skills/{id}` | 스킬 상세 (내용 · version · tags · usage — MySkillsScreen) |
-| POST | `/skills/curate` | 수동 "스킬 정리" 트리거 (RUNTIME_DESIGN 문서 4장) |
+| POST | `/skills/curate` | 수동 "스킬 정리" 트리거. **`?mode=rules\|consolidate`**(기본 `rules`, 하위호환) — `consolidate`는 규칙 전이 + LLM 통합 제안(있으면) 반환, LEARNING_LOOP §5.1 |
 | PATCH | `/skills/{id}/state` | 스킬 상태 전환 (archive, activate) |
-| **POST** | **`/skills/{id}/patch`** | **스킬 개선(patch) 제안 응답 (approve/reject/edited_body) — LEARNING_LOOP 5.2** |
+| **POST** | **`/skills/{id}/patch`** | **스킬 개선(patch) *또는* 신규 생성(from_version=0) 제안 응답 (approve/reject/edited_body) — LEARNING_LOOP 5.2·§4** |
+| **POST** | **`/skills/{id}/archive-decision`** | **curator 통합의 정리(prune) 제안 응답 (approved, absorbed_into?) — approval_id 파킹 없음, LEARNING_LOOP §5.1** |
+| **POST** | **`/skills/{id}/consolidate-decision`** | **curator 통합의 병합(umbrella patch/create) 제안 응답 (approved, proposed_body?, description?, tags?) — approval_id 파킹 없음, LEARNING_LOOP §5.1** |
 | **GET** | **`/skills/{id}/history`** | **스킬 버전 히스토리 (diff·롤백 UI)** |
 | **POST** | **`/skills/{id}/rollback`** | **이전 버전 복구 (선택)** |
 | GET | `/plugins` | 설치된 플러그인 목록 |
@@ -73,18 +78,21 @@ Electron main process
 | POST | `/artifacts/install` | platform에서 받은 artifact 설치 (2장 manifest 전달) |
 | DELETE | `/artifacts/{id}` | 제거 |
 
-**SSE 이벤트 9종** (Learning Loop 가시화):
+**SSE 이벤트 8종** (Learning Loop 가시화, **2026-07-02: `skill_created` 제거** — 아래 참고):
 1. `thinking` - LLM 사고 과정 스트리밍
 2. `tool_call` - Tool 호출 시작 (tool_name, arguments)
 3. `tool_result` - Tool 실행 결과
 4. `message` - 최종 응답 메시지 (delta 또는 complete)
-5. `skill_created` - 새 스킬 생성됨 (skill_id, title, version)
-6. `memory_written` - 메모리 저장됨 (memory_type, content)
-7. `skill_patched` - 스킬 개선 적용됨 (skill_id, version) — LEARNING_LOOP 5.2
-8. `done` - 응답 완료
-9. `error` - 오류 발생 (error_code, message)
+5. `memory_written` - 메모리 저장됨 (memory_type, content)
+6. `skill_patched` - 스킬 개선 **또는 신규 생성** 적용됨 (skill_id, version) — LEARNING_LOOP 5.2·§4. `version === 1`이면 신규 생성이었다는 뜻 — 클라이언트는 로컬 목록에 해당 skill_id가 없으면 갱신이 아니라 **추가**해야 한다.
+7. `done` - 응답 완료
+8. `error` - 오류 발생 (error_code, message)
 
-> 제어 이벤트(별도, 각자 고유 `approval_id` 포함 — 정지/재개·timeout·재연결 처리는 1.2, 메커니즘은 RUNTIME_DESIGN 5.1): `tool_approval_required`(approval_id, tool_name, arguments) — 위험 tool 실행 전 발행 → 앱이 `POST /sessions/{id}/tool-approval`(approval_id 포함)로 응답. `skill_patch_proposed`(approval_id, skill_id, changelog, diff, trigger, from_version?, to_version?) — 스킬 개선 제안 발행 → 앱이 diff 카드 표시 후 `POST /skills/{id}/patch`(approval_id 포함)로 응답 (LEARNING_LOOP 5.2).
+> ~~`skill_created`(skill_id, title, version)~~ — **2026-07-02 제거.** 스킬 생성이 HITL 승인 없이 즉시 저장+사후 통지되던 경로였는데, LEARNING_LOOP §4가 요구하는 "스킬은 항상 사용자 확인 후 저장"과 어긋나는 채로 방치돼 있었다(설계 문서와 구현의 불일치). 생성을 `skill_patch_proposed`(`from_version=0`)로 통일해 패치와 동일한 승인 게이트를 거치게 하면서 이 이벤트가 도달 불가능한 죽은 코드가 됐다 — 삭제. `POST /sessions/{id}/learning-review`·`/learn`(아래)도 이 8종과 동일 이벤트 어휘만 방출한다.
+>
+> 제어 이벤트(별도, 각자 고유 `approval_id` 포함 — 정지/재개·timeout·재연결 처리는 1.2, 메커니즘은 RUNTIME_DESIGN 5.1): `tool_approval_required`(approval_id, tool_name, arguments) — 위험 tool 실행 전 발행 → 앱이 `POST /sessions/{id}/tool-approval`(approval_id 포함)로 응답. `skill_patch_proposed`(approval_id, skill_id, changelog, diff, trigger, from_version?, to_version?, **proposed_body?**, **warnings?**) — 스킬 개선/생성 제안 발행 → 앱이 diff 카드 표시 후 `POST /skills/{id}/patch`(approval_id 포함)로 응답 (LEARNING_LOOP 5.2). **`proposed_body`/`warnings`는 2026-07-02 추가**: 이전엔 제안의 실제 전체 본문이 SSE payload에 실리지 않아 프론트가 `diff.lines`를 필터링해 재구성했는데(edge case에서 미묘하게 어긋날 위험), 이제 서버가 준 원문을 그대로 쓸 수 있다. `warnings`는 §8 가드(시크릿 스크러빙)가 뭔가 마스킹했을 때의 경고 문자열 배열.
+>
+> **curator 통합(`/skills/curate?mode=consolidate`, LEARNING_LOOP §5.1)이 낳는 제안은 이 SSE 메커니즘을 쓰지 않는다** — 스트림이 아닌 일반 REST 응답에 그대로 실려온다(`{transitioned, proposals}`, 각 proposal은 `{"kind":"patch",...}` 또는 `{"kind":"archive",...}`). 승인은 `kind:"patch"`면 `/skills/{id}/consolidate-decision`, `kind:"archive"`면 `/skills/{id}/archive-decision`으로 — 둘 다 `approval_id` 불필요(제안이 애초에 파킹된 적이 없다).
 
 - ✅ 스펙 소유: `rice-runtime`이 `contracts/runtime.yaml`(runtime OpenAPI 스펙)을 소유, `rice-app`은 코드젠 (REPO_STRATEGY 4.3, RUNTIME_DIRECTORY 1장)
 
@@ -95,6 +103,8 @@ Electron main process
 **첨부/멀티모달 입력**: **MVP 포함, 대상은 xlsx·png 2종만**(벤치마크: Claude cowork의 파일 첨부). 방식은 **선업로드 후 참조**: 앱이 `POST /sessions/{id}/attachments`(multipart)로 먼저 올려 `attachment_id`를 받고, `POST /sessions/{id}/messages`는 `attachment_ids[]`로 참조한다. 이는 SSE 스트림 응답과 multipart 본문이 한 요청에서 충돌하는 것을 피하기 위함이다. 런타임은 xlsx·png 외 MIME은 **거부**(415)한다. 음성 입력(STT)은 **이번 개발 제외**(향후 Web Speech 또는 로컬 STT).
 
 **스킬 개선(patch) 계약** (LEARNING_LOOP 소유): `skill_patched`·`skill_patch_proposed` 이벤트 + `/skills/{id}/patch|history|rollback` 엔드포인트. 본 절에 반영 완료.
+
+**LLM 기반 스킬/메모리 저작 계약 (2026-07-02, LEARNING_LOOP §4·§5.2·§5.3 소유)**: `POST /sessions/{id}/learning-review`(게이트된 자동 리뷰)·`/learn`(명시적 요청) — 둘 다 메인 턴과 분리된 SSE 스트림(같은 이벤트 어휘)으로, LLM 호출이 메인 턴의 `done`을 지연시키지 않는다(`/title`과 동일 원칙). **curator 통합 계약 (LEARNING_LOOP §5.1 소유)**: `POST /skills/curate?mode=consolidate` + `/skills/{id}/archive-decision`·`/consolidate-decision` — SSE가 아닌 일반 REST(제안이 JSON 응답에 그대로 실림, approval_id 파킹 없음). 본 절에 반영 완료.
 
 ---
 
@@ -258,3 +268,14 @@ requires:
 - OAuth client 자격증명 해석 우선순위: env(`RICE_GMAIL_CLIENT_ID/SECRET`) → `RICE_GMAIL_CLIENT_SECRET_FILE` → `~/.rice/connectors/gmail_client_secret.json`(Google "installed" JSON).
 - `redirect_uri` 는 런타임 바인딩 포트로 구성: `http://localhost:{port}/connectors/oauth/callback`. 콜백은 **bearer 토큰 면제**(브라우저가 직접 호출) + 사람이 읽는 HTML 응답.
 - Gmail 도구 표면에 **`gmail_send`** 추가(send scope, requires_approval=True). 기존 `gmail_search`/`gmail_read` 유지.
+
+### 6.6 학습 루프 LLM 저작 이식 (2026-07-02, Hermes learning_loop 이식 — 계약 표면 변경분만)
+
+> 상세 설계는 [RICE_LEARNING_LOOP_DESIGN.md](RICE_LEARNING_LOOP_DESIGN.md) §4·§5·§8. 여기는 §1.3/§1.2에 반영된 wire 계약 변경만 고정.
+
+- **버그 교정 (계약 변경 없음, 동작 교정)**: `skill_patch_proposed` 승인 시 `edited_body` 없이(=사용자가 diff만 보고 그냥 "승인") 그냥 승인하면 이전 구현은 조용히 `current.body`로 되돌아가 — 버전만 올라가고 제안 본문이 실제로 반영되지 않았다. `apply_patch`가 이제 `edited_body > proposed_body(제안 원문) > 현재 본문` 순으로 우선한다. wire 스키마는 안 바뀜(서버가 이미 갖고 있던 `PatchProposal.proposed_body`를 내부적으로 전달하도록 고쳤을 뿐).
+- **SSE 이벤트 9종 → 8종**: `skill_created` 제거(§1.3 표 참고). 스킬 생성이 `skill_patch_proposed`(`from_version=0`)로 통일되며 도달 불가능해짐 — HITL 우회 문제(설계 문서는 항상 "확인 후 저장"이라 했는데 구현은 즉시 저장이었음)도 같이 닫힘.
+- **`skill_patch_proposed`/`PatchProposal` 필드 추가**(하위호환 optional): `proposed_body`(서버 원문 — 프론트의 diff 재구성 폴백 제거), `warnings`(시크릿 스크러빙 경고), `description`/`tags`(신규 생성 제안 전용).
+- **`PatchTrigger` 열거값 추가**: `T4`(신규 생성). 기존 T1a/T1b/T1c는 의미 불변이나 판단 주체가 정규식→LLM 자기분류로 바뀜(§5.2.2).
+- **신규 엔드포인트 5개**: `POST /sessions/{id}/title`(기존에 있었으나 이 문서에 누락돼 있던 것 — 이번에 §1.3에 추가), `POST /sessions/{id}/learning-review`, `POST /sessions/{id}/learn`, `POST /skills/{id}/archive-decision`, `POST /skills/{id}/consolidate-decision`.
+- **`POST /skills/curate`에 `mode` 쿼리 파라미터 추가**(하위호환, 기본 `rules`).

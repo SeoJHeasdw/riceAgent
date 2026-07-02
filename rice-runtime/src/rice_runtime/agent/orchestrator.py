@@ -19,12 +19,16 @@ THE TURN, AS A CONTRACT (RUNTIME_DESIGN §2, LEARNING_LOOP §1)
       4. RUN        AgentLoop.run(ctx)                 → thinking/message/tool_* events
                     (tool dispatch + HITL approval handled inside the loop/dispatcher)
       5. PERSIST    transcript.append(every message the loop produced this turn)
-      6. OBSERVE    learning.observe(outcome)          → effects (skill/memory/patch)
-      7. SURFACE    effects → SSE:
-                      SkillCreated   → skill_created
+      6. OBSERVE    learning.observe(outcome)          → cheap effects (memory only —
+                                                           skill judgement moved to the
+                                                           separate `/learning-review`
+                                                           endpoint, see agent/effect_surfacing.py)
+      7. SURFACE    effects → SSE via agent.effect_surfacing.surface_learning_effect:
                       MemoryWritten  → memory_written
                       PatchProposal  → skill_patch_proposed → await IApprovalGate
                                        → learning.apply_patch → skill_patched
+                                       (from_version=0 covers skill *creation* too —
+                                       Phase A.1 unified create+patch into one flow)
       8. DONE       done   (or error → done on any failure)
 
 WHY THE APPROVAL DANCE LIVES HERE (not in learning)
@@ -48,7 +52,6 @@ from typing import AsyncIterator, Callable
 from ..connector.interfaces import IConnectorService
 from ..core.config import ConfigStore
 from ..core.types import (
-    ApprovalRequest,
     Message,
     SSEEvent,
     ToolSpec,
@@ -56,19 +59,11 @@ from ..core.types import (
     TurnOutcome,
     ev_done,
     ev_error,
-    ev_memory_written,
-    ev_skill_created,
-    ev_skill_patch_proposed,
-    ev_skill_patched,
 )
 from ..execution.interfaces import IPluginLoader
-from ..learning.interfaces import (
-    ILearningService,
-    MemoryWritten,
-    PatchProposal,
-    SkillCreated,
-)
+from ..learning.interfaces import ILearningService
 from ..prompts.system import compose_system_prompt, render_skills_block
+from .effect_surfacing import surface_learning_effect
 from .interfaces import IApprovalGate, ITranscript
 from .loop import AgentLoop, LoopResult
 from .providers.interfaces import ILLMProvider
@@ -209,9 +204,19 @@ class Orchestrator:
             )
             effects = await self._learning.observe(outcome)
 
-            # 7. SURFACE effects (patches go through the HITL gate)
+            # 7. SURFACE effects (patches/creations go through the HITL gate) —
+            #    surface_learning_effect (agent/effect_surfacing.py) is a pure
+            #    extraction of what used to be this method's own body, shared
+            #    with the standalone /learning-review·/learn routes.
+            timeout_s = self._config_store.config.learning.approval_timeout_seconds
             for effect in effects:
-                async for event in self._surface_effect(session_id, effect):
+                async for event in surface_learning_effect(
+                    session_id=session_id,
+                    effect=effect,
+                    learning=self._learning,
+                    approvals=self._approvals,
+                    approval_timeout_s=timeout_s,
+                ):
                     yield event
 
         except Exception as exc:  # any failure → one terminal error event
@@ -222,44 +227,6 @@ class Orchestrator:
             #    `_aborts` can't grow unbounded (C-3).
             self._aborts.pop(session_id, None)
             yield ev_done()
-
-    # ── effect → SSE (with HITL for patches) ─────────────────────────────────
-    async def _surface_effect(self, session_id: str, effect) -> AsyncIterator[SSEEvent]:
-        if isinstance(effect, SkillCreated):
-            yield ev_skill_created(effect.skill_id, effect.title, effect.version)
-        elif isinstance(effect, MemoryWritten):
-            yield ev_memory_written(effect.memory_type, effect.content)
-        elif isinstance(effect, PatchProposal):
-            req = ApprovalRequest(
-                kind="skill_patch",
-                payload={
-                    "skill_id": effect.skill_id,
-                    "changelog": effect.changelog,
-                    "diff": effect.diff,
-                    "trigger": effect.trigger,
-                    "from_version": effect.from_version,
-                    "to_version": effect.to_version,
-                },
-            )
-            yield ev_skill_patch_proposed(
-                req.approval_id,
-                effect.skill_id,
-                effect.changelog,
-                effect.diff,
-                effect.trigger,
-                effect.from_version,
-                effect.to_version,
-            )
-            timeout_s = self._config_store.config.learning.approval_timeout_seconds
-            response = await self._approvals.request(session_id, req, timeout_s=timeout_s)
-            approved = response.decision == "approve"
-            new_version = self._learning.apply_patch(
-                effect.skill_id, approved=approved, edited_body=response.edited_body
-            )
-            if approved and new_version is not None:
-                yield ev_skill_patched(effect.skill_id, new_version)
-        else:  # pragma: no cover - effect union is closed
-            log.warning("unknown learning effect: %r", effect)
 
     # ── IAgent.abort ─────────────────────────────────────────────────────────
     async def abort(self, session_id: str) -> None:

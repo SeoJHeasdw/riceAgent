@@ -17,6 +17,14 @@ local user. Just named templates + a small `compose_system_prompt` synthesis fn.
 
 from __future__ import annotations
 
+from .curator import CURATOR_REVIEW_PROMPT, build_curator_messages, build_curator_tool_specs
+from .review import (
+    LEARN_SYSTEM_PROMPT,
+    REVIEW_SYSTEM_PROMPT,
+    build_learn_instruction,
+    build_review_messages,
+    build_review_tool_specs,
+)
 from .system import BASE_SYSTEM_PROMPT, SKILL_GUIDANCE, compose_system_prompt
 from .title import TITLE_MAX_CHARS, build_title_messages, clean_title
 
@@ -27,4 +35,12 @@ __all__ = [
     "TITLE_MAX_CHARS",
     "build_title_messages",
     "clean_title",
+    "REVIEW_SYSTEM_PROMPT",
+    "LEARN_SYSTEM_PROMPT",
+    "build_review_messages",
+    "build_review_tool_specs",
+    "build_learn_instruction",
+    "CURATOR_REVIEW_PROMPT",
+    "build_curator_messages",
+    "build_curator_tool_specs",
 ]

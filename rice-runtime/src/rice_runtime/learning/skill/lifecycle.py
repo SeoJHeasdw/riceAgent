@@ -102,6 +102,17 @@ class SkillLifecycle:
         skill.updated_at = now_iso()
         self._store.write(skill)
 
+    def archive_with_absorption(self, name: str, absorbed_into: str | None) -> None:
+        """Curator 통합(Phase B) 승인 시 호출 — archived로 전이하며 `absorbed_into`를
+        frontmatter에 기록한다(병합 흡수 대상이 있으면 그 umbrella skill 이름,
+        순수 정리면 None). `set_state`와 분리한 이유: absorbed_into는 통합 컨텍스트
+        에서만 의미 있는 필드라 범용 set_state에 억지로 끼워 넣지 않는다."""
+        skill = self._store.read(name)  # NotFoundError 위임
+        skill.state = "archived"
+        skill.absorbed_into = absorbed_into
+        skill.updated_at = now_iso()
+        self._store.write(skill)
+
     def rollback(self, name: str, version: int) -> int:
         """히스토리 버전 <version>을 현재 본문으로 복원한다.
 

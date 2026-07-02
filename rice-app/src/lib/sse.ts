@@ -20,7 +20,6 @@ const STREAM_EVENT_TYPES: ReadonlySet<string> = new Set<SSEEventType>([
   'tool_call',
   'tool_result',
   'message',
-  'skill_created',
   'memory_written',
   'skill_patched',
   'done',
@@ -116,6 +115,22 @@ export class SSEClient {
   /** re-answer the last user message — streams a fresh turn (POST /regenerate). */
   regenerate(sessionId: string, handlers: StreamHandlers): StreamHandle {
     return this._streamPost(`/sessions/${sessionId}/regenerate`, undefined, handlers);
+  }
+
+  /**
+   * Gated LLM skill/memory review — the client calls this fire-and-forget right
+   * after the main turn's `done`, same trigger point as the title call (Phase A).
+   * `toolCallsMade` is the one thing not derivable from stored history alone —
+   * count `tool_call` events seen during the just-finished turn's stream.
+   * Fast no-op (single `done` frame) when the server-side gate declines.
+   */
+  reviewLearning(sessionId: string, toolCallsMade: number, handlers: StreamHandlers): StreamHandle {
+    return this._streamPost(`/sessions/${sessionId}/learning-review`, { tool_calls_made: toolCallsMade }, handlers);
+  }
+
+  /** Explicit "이 대화를 스킬로 저장" action (Phase C) — always attempts, no gate. */
+  learnFromConversation(sessionId: string, instruction: string, handlers: StreamHandlers): StreamHandle {
+    return this._streamPost(`/sessions/${sessionId}/learn`, { instruction }, handlers);
   }
 
   /** Shared SSE-over-POST driver. `body===undefined` posts with no JSON body. */

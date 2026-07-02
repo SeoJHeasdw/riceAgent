@@ -83,7 +83,6 @@ def build_container(args: RuntimeArgs | None = None, *, paths: RicePaths | None 
 
     # ── module services (each behind its interface) ───────────────────────────
     sessions: ISessionStore = SessionManager(db)
-    learning: ILearningService = LearningService(db, config_store.config.learning, paths)
     # port 를 넘겨 OAuth redirect_uri(http://localhost:{port}/connectors/oauth/callback)를
     # 정확히 구성한다 (CONTRACTS §4.2). args.port 가 0 이면 flow 가 dev 기본(8080)으로 폴백.
     connectors: IConnectorService = ConnectorService(db, paths, port=args.port or None)
@@ -120,6 +119,17 @@ def build_container(args: RuntimeArgs | None = None, *, paths: RicePaths | None 
         except ProviderError as exc:
             log.warning("provider %r unavailable (%s) → falling back to echo", kind, exc)
             return providers.get("echo")
+
+    # `learning` now depends on `resolve_provider` (Phase A.3 — review()/learn()
+    # need real judgment, not just regex) so it's constructed AFTER provider
+    # selection, not before it as in the pre-learning-loop-evolution ordering.
+    # Reuses the SAME resolve_provider as the main turn loop (not a cheaper/
+    # think-disabled variant like the titler's) — review requires the same
+    # reasoning quality as the conversation itself, and it's already off the hot
+    # path (gated + its own endpoint), so there's no latency reason to downgrade it.
+    learning: ILearningService = LearningService(
+        db, config_store.config.learning, paths, resolve_provider=resolve_provider
+    )
 
     # ── builtin tools (in-process; advertised to the LLM + dispatched directly) ─
     builtin_specs, builtins = build_builtin_tools(paths)

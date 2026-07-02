@@ -12,31 +12,36 @@ Implementation status per task batch:
              + curator/curator.py — 스킬 CRUD, usage 카운터, 상태 전이.
              list_skills, get_skill, history, rollback, set_state, curate 구현.
              prefetch: active 스킬 전부 token budget 내에서 주입.
-  T3 (done): observe() — 메모리 기록 판단, 스킬 생성 판단, PatchProposal 산출.
-             skill/patch.py — diff 산출. user_model/profile.py — 선호 렌더링.
-             prefetch: preferences 반영.
+  T3 (superseded by review engine, see below): observe() 는 한때 스킬 생성/patch도
+             정규식으로 직접 산출했으나(truncation 본문/note-append 본문 — 품질이 나빴다),
+             그 판단력을 통째로 learning/review/engine.py(LLM 기반, 비동기 `/learning-review`
+             경로)로 옮겼다. observe()는 이제 memory fact/preference 추출 + use 카운터
+             증가만 담당한다(턴 안에서 즉시·저비용으로 끝나야 하므로 LLM 호출 없음).
   T5 (done): user_model/profile.py — preferences → system prompt.
 """
 
 from __future__ import annotations
 
-import re
+from typing import Callable
 
+from ..agent.providers.interfaces import ILLMProvider
 from ..core.config import LearningConfig
 from ..core.errors import NotFoundError, ValidationError
 from ..core.paths import RicePaths
 from ..core.storage.sqlite import Database
-from ..core.types import InjectedSkill, MemoryItem, TurnOutcome, now_iso
+from ..core.types import InjectedSkill, Message, MemoryItem, TurnOutcome, now_iso
 from ..prompts.system import SKILL_GUIDANCE
+from .curator.consolidate import ConsolidationEngine
 from .curator.curator import Curator
 from .interfaces import (
+    ArchiveProposal,
+    ConsolidateResult,
     CurateResult,
     ILearningService,
     LearningEffect,
     MemoryWritten,
     PatchProposal,
     PrefetchResult,
-    SkillCreated,
     SkillDetail,
     SkillState,
     SkillSummary,
@@ -44,23 +49,17 @@ from .interfaces import (
 )
 from .memory.search import MemorySearch
 from .memory.store import MemoryStore
-from .signals import (
-    FACT_PREFIXES,
-    PREF_PREFIXES,
-    extract_skill_name,
-    has_skill_creation_intent,
-)
+from .review.engine import ReviewEngine
+from .review.gate import ReviewGate
+from .signals import FACT_PREFIXES, PREF_PREFIXES
+from .skill import guard as skill_guard
 from .skill.lifecycle import SkillLifecycle
-from .skill.patch import build_diff, detect_patch_trigger
 from .skill.store import SkillData, SkillStore
 from .skill.usage import UsageStore
 from .user_model.profile import UserProfile
 
 # 토큰 추정: len(text) / 4 (대략적 — 정밀도 불필요, LEARNING_LOOP §7)
 _CHARS_PER_TOKEN = 4
-
-# 사용자 스킬 이름 규약: kebab-case ascii, 2~64자 (SKILL.md name 규약과 일치)
-_VALID_SKILL_NAME = re.compile(r"^[a-z][a-z0-9-]{1,63}$")
 
 
 def _estimate_tokens(text: str) -> int:
@@ -95,7 +94,25 @@ def _render_skills(skills: list[InjectedSkill]) -> str:
 
 
 class LearningService(ILearningService):
-    def __init__(self, db: Database, config: LearningConfig, paths: RicePaths | None = None) -> None:
+    """WHY `resolve_provider` (2026-07-02, Phase A.3): until now this facade was
+    deliberately "provider-agnostic" — `observe()` only ever did regex matching.
+    That purity is the reason skill-authoring quality was so poor (truncated
+    bodies, note-appended patches — see `learning/review/engine.py`'s module
+    docstring). Giving `review()`/`learn()` real judgment requires an LLM call,
+    so this seam now depends on `ILLMProvider` too. `resolve_provider=None`
+    (the default — most existing tests construct `LearningService(db, cfg,
+    paths)` with nothing else) disables `review`/`learn` entirely (they return
+    `[]`) rather than requiring every call site to wire a provider it doesn't
+    care about."""
+
+    def __init__(
+        self,
+        db: Database,
+        config: LearningConfig,
+        paths: RicePaths | None = None,
+        *,
+        resolve_provider: Callable[[], ILLMProvider] | None = None,
+    ) -> None:
         self._db = db
         self._config = config
         # paths가 None이면 기본 경로를 사용한다.
@@ -109,6 +126,32 @@ class LearningService(ILearningService):
         self._lifecycle = SkillLifecycle(self._skill_store, self._paths)
         self._curator = Curator(self._skill_store, self._lifecycle, config, self._usage_store)
         self._user_profile = UserProfile(self._mem_store)
+        self._review_gate = ReviewGate(
+            min_tool_calls=config.review_min_tool_calls, nudge_turns=config.review_nudge_turns
+        )
+        self._review_engine = (
+            ReviewEngine(
+                resolve_provider=resolve_provider,
+                skill_store=self._skill_store,
+                usage_store=self._usage_store,
+                mem_store=self._mem_store,
+                skill_catalog_token_budget=config.skill_inject_token_budget,
+                max_body_chars=config.skill_max_body_chars,
+            )
+            if resolve_provider is not None
+            else None
+        )
+        self._consolidation_engine = (
+            ConsolidationEngine(
+                resolve_provider=resolve_provider,
+                skill_store=self._skill_store,
+                usage_store=self._usage_store,
+                candidate_budget_chars=config.curator_candidate_budget_chars,
+                max_body_chars=config.skill_max_body_chars,
+            )
+            if resolve_provider is not None
+            else None
+        )
 
     # ── turn-critical ─────────────────────────────────────────────────────────
     def prefetch(self, session_id: str, user_message: str) -> PrefetchResult:
@@ -178,18 +221,19 @@ class LearningService(ILearningService):
         )
 
     async def observe(self, outcome: TurnOutcome) -> list[LearningEffect]:
-        """턴 결과를 관찰해 학습 효과를 반환한다 (LEARNING_LOOP §1).
+        """턴 결과를 관찰해 *즉시·저비용* 학습 효과만 반환한다 (LEARNING_LOOP §1).
 
-        수행 순서 (모두 보수적, 데모 안정성 우선):
+        수행 순서 (모두 보수적, 규칙 기반 — LLM 호출 없음, 턴의 SSE 스트림 안에서
+        `done` 이전에 동기 실행되므로 여기서 절대 느려져선 안 된다):
           ① 주입됐던 스킬 use += 1 & last_used_at 갱신
           ② fact / preference 기록 판단 → MemoryWritten 효과
-          ③ 스킬 생성 판단 → SkillCreated 효과 (보수적: tool_calls_made >= 5 조건)
-          ④ patch 트리거 판단 → PatchProposal 효과 (미적용)
 
-        NOTE(agent): 메모리/스킬 기록 판단은 LLM 분석 없이 규칙 기반으로만 한다.
-        규칙이 너무 느슨하면 노이즈가 생기므로 보수적으로 잡는다. 데모에서는
-        직접 memory_store.add()를 호출하는 경로(예: 별도 엔드포인트)가 더 신뢰할 수
-        있다. observe는 자동 감지 보조 경로다.
+        스킬 생성/patch 제안은 더 이상 여기서 만들지 않는다 — 그 판단은
+        `review()`(learning/review/engine.py, LLM 기반)로 완전히 옮겨졌다. 이유:
+        규칙 기반 저작은 내용 품질 문제(truncation/note-append)를 규칙을 더 다듬는
+        걸로는 해결 못 하고, 두 경로를 동시에 두면 같은 턴에 중복 제안이 뜰 위험이
+        있다. `signals.py`의 신호 탐지 함수는 폐기되지 않고 `review/gate.py`의
+        `should_review()`가 "LLM을 부를 가치가 있는가"를 판단하는 데 재사용된다.
         """
         effects: list[LearningEffect] = []
 
@@ -203,7 +247,7 @@ class LearningService(ILearningService):
                 pass
 
         if outcome.aborted:
-            # 중단된 턴에서는 메모리/스킬 판단을 하지 않는다 (fail-closed).
+            # 중단된 턴에서는 메모리 판단을 하지 않는다 (fail-closed).
             return effects
 
         msg = outcome.final_message or ""
@@ -227,63 +271,68 @@ class LearningService(ILearningService):
             except Exception:
                 pass
 
-        # 직전 사용자 메시지 — patch 트리거(교정/실패)는 보통 사용자가 말한다.
-        user_text = next(
-            (m.content for m in reversed(outcome.history) if m.role == "user"), None
-        )
-
-        # ③ 스킬 생성 판단 (보수적: tool_calls_made >= 5 + 명시적 스킬화 의도)
-        # 단, 주입된 스킬이 없을 때만 고려 (이미 있는 절차라면 생성 불필요)
-        if (
-            not outcome.injected_skill_ids
-            and outcome.tool_calls_made >= 5
-            and has_skill_creation_intent(msg)
-        ):
-            skill_effect = _try_create_skill(
-                final_message=msg,
-                session_id=outcome.session_id,
-                tool_calls_made=outcome.tool_calls_made,
-                skill_store=self._skill_store,
-                usage_store=self._usage_store,
-            )
-            if skill_effect is not None:
-                effects.append(skill_effect)
-
-        # ④ patch 트리거 판단 (보수적: 주입된 스킬 + 명확한 신호가 있을 때만)
-        trigger = detect_patch_trigger(
-            msg, outcome.tool_calls_made, outcome.injected_skill_ids, user_text=user_text
-        )
-        if trigger is not None and outcome.injected_skill_ids:
-            # 가장 최근에 주입된 스킬에 대한 patch 제안 (첫 번째)
-            target_skill_id = outcome.injected_skill_ids[0]
-            patch_proposal = _try_build_patch_proposal(
-                skill_id=target_skill_id,
-                trigger=trigger,
-                final_message=msg,
-                user_text=user_text,
-                skill_store=self._skill_store,
-            )
-            if patch_proposal is not None:
-                effects.append(patch_proposal)
-
         return effects
 
-    def apply_patch(self, skill_id: str, *, approved: bool, edited_body: str | None = None) -> int | None:
-        """HITL 승인 결정대로 패치를 적용하거나 버린다 (LEARNING_LOOP §5.2.4).
+    def apply_patch(
+        self,
+        skill_id: str,
+        *,
+        approved: bool,
+        proposed_body: str | None = None,
+        edited_body: str | None = None,
+        description: str = "",
+        tags: tuple[str, ...] = (),
+        source: str | None = None,
+    ) -> int | None:
+        """HITL 승인 결정대로 패치(또는 신규 생성 제안)를 적용하거나 버린다
+        (LEARNING_LOOP §5.2.4, Phase A.1: 생성 = v0에서의 patch로 통일).
 
-        On approve:
-          ① 현재 본문 → .history/v<N>.md
-          ② 새 본문 기록 (edited_body 있으면 그것), version += 1, updated_at 갱신
-          ③ usage patch += 1
-          ④ 새 version 반환
+        두 경로를 하나로 다룬다:
+          - **기존 스킬 patch**: ① 현재 본문 → .history/v<N>.md ② 새 본문 기록
+            (edited_body > proposed_body > 현재 본문 순 우선) + version += 1
+            ③ usage patch += 1.
+          - **신규 생성**(디스크에 skill_id가 아직 없음 — "from_version=0" 제안의 승인):
+            history에 보관할 이전 버전이 없으므로 그 단계를 건너뛰고 바로 v1을
+            새로 쓴다. `description`/`tags`/`source`는 이 경로에서만 쓰인다(기존
+            patch는 메타데이터를 건드리지 않는다 — update_skill의 몫). usage는
+            patch 카운터를 올리지 않고 0-초기화 사이드카만 만든다(생성은 "패치
+            횟수"가 아니므로 — create_skill의 기존 관례와 동일).
 
         On reject: None 반환, 변경 없음.
+
+        버그#0 교정(2026-07-02): 이전에는 edited_body가 None이면 무조건 current.body로
+        되돌아가 — 사용자가 diff 카드를 보고 그냥 "승인"만 누르면(가장 흔한 경로) 실제
+        제안 본문이 반영되지 않고 버전만 올라가는 채로 방치되어 있었다. 호출부
+        (orchestrator._surface_effect)가 이제 PatchProposal.proposed_body를 항상 넘긴다.
         """
         if not approved:
             return None
 
         try:
             current = self._skill_store.read(skill_id)
+        except NotFoundError:
+            # 신규 생성 경로 — history에 보관할 이전 버전이 없다.
+            new_body = edited_body if edited_body is not None else proposed_body
+            if new_body is None:
+                return None  # 본문이 전혀 없으면 만들 수 없다 (fail-closed)
+            skill_guard.validate_content_size(new_body, self._config.skill_max_body_chars)
+            new_body, _ = skill_guard.scrub_secrets(new_body)  # 방어적 재적용(대부분 이미 클린)
+            now = now_iso()
+            skill = SkillData(
+                name=skill_id,
+                version=1,
+                description=description,
+                state="active",
+                body=new_body,
+                tags=list(tags),
+                source=source,
+                created_at=now,
+                updated_at=now,
+            )
+            self._skill_store.write(skill)
+            usage = self._usage_store.read(skill_id)  # 0-초기화 사이드카 생성 보장
+            self._usage_store._write(usage)  # noqa: SLF001 (create_skill과 동일 관례)
+            return 1
         except Exception:
             return None
 
@@ -292,8 +341,15 @@ class LearningService(ILearningService):
         if current_path.exists():
             self._skill_store.archive_to_history(skill_id, current.version, current_path.read_text(encoding="utf-8"))
 
-        # ② 새 본문 적용
-        new_body = edited_body if edited_body is not None else current.body
+        # ② 새 본문 적용 — edited_body > proposed_body > 현재 본문(둘 다 없을 때만) 순.
+        if edited_body is not None:
+            new_body = edited_body
+        elif proposed_body is not None:
+            new_body = proposed_body
+        else:
+            new_body = current.body
+        skill_guard.validate_content_size(new_body, self._config.skill_max_body_chars)
+        new_body, _ = skill_guard.scrub_secrets(new_body)
         new_version = current.version + 1
         current.version = new_version
         current.body = new_body
@@ -304,6 +360,34 @@ class LearningService(ILearningService):
         self._usage_store.increment_patch(skill_id)
 
         return new_version
+
+    # ── post-turn, LLM-backed (Phase A.3) ────────────────────────────────────
+    async def review(
+        self, session_id: str, history: list[Message], tool_calls_made: int
+    ) -> list[LearningEffect]:
+        """게이트 통과 시에만 LLM 1회 호출 — POST /sessions/{id}/learning-review 가
+        메인 턴의 done 이후 논블로킹으로 호출한다(§1 아키텍처 결정)."""
+        if self._review_engine is None:
+            return []  # resolve_provider 미배선(대부분의 단위 테스트) — 조용히 스킵
+
+        final_message = next(
+            (m.content for m in reversed(history) if m.role == "assistant" and m.content), ""
+        )
+        user_text = next((m.content for m in reversed(history) if m.role == "user"), None)
+        if not self._review_gate.should_review(
+            session_id, tool_calls_made=tool_calls_made, final_message=final_message, user_text=user_text
+        ):
+            return []
+        self._review_gate.mark_reviewed(session_id)
+        return await self._review_engine.review(session_id, history)
+
+    async def learn(
+        self, session_id: str, history: list[Message], instruction: str = ""
+    ) -> list[LearningEffect]:
+        """명시적 사용자 요청 — 게이트 없이 항상 실행(POST /sessions/{id}/learn, Phase C)."""
+        if self._review_engine is None:
+            return []
+        return await self._review_engine.learn(session_id, history, instruction)
 
     # ── management ────────────────────────────────────────────────────────────
     def list_skills(self) -> list[SkillSummary]:
@@ -364,7 +448,7 @@ class LearningService(ILearningService):
         tags: tuple[str, ...] = (),
     ) -> SkillDetail:
         """사용자 직접 스킬 생성 (POST /skills, CONTRACTS §1.3)."""
-        if not _VALID_SKILL_NAME.match(name):
+        if not skill_guard.VALID_SKILL_NAME.match(name):
             raise ValidationError(
                 f"스킬 이름은 kebab-case(소문자/숫자/하이픈, 2~64자)여야 합니다: {name!r}"
             )
@@ -373,6 +457,11 @@ class LearningService(ILearningService):
             raise ValidationError(f"이미 존재하는 스킬입니다: {name!r}")
         except NotFoundError:
             pass
+
+        # Phase D: 사용자 직접 작성 경로도 동일 가드를 거친다(이전엔 크기/시크릿
+        # 검증이 전혀 없었다 — 지금 함께 닫는다).
+        skill_guard.validate_content_size(body, self._config.skill_max_body_chars)
+        body, _ = skill_guard.scrub_secrets(body)
 
         now = now_iso()
         skill = SkillData(
@@ -408,13 +497,16 @@ class LearningService(ILearningService):
 
         body_changed = body is not None and body != current.body
         if body_changed:
+            assert body is not None  # narrows for the type checker (body_changed implies this)
+            skill_guard.validate_content_size(body, self._config.skill_max_body_chars)
+            body, _ = skill_guard.scrub_secrets(body)
             current_path = self._paths.skills / f"{skill_id}.md"
             if current_path.exists():
                 self._skill_store.archive_to_history(
                     skill_id, current.version, current_path.read_text(encoding="utf-8")
                 )
             current.version += 1
-            current.body = body  # type: ignore[assignment]
+            current.body = body
 
         if description is not None:
             current.description = description
@@ -435,6 +527,29 @@ class LearningService(ILearningService):
     def curate(self) -> CurateResult:
         """수동 "스킬 정리": 시간 규칙을 즉시 적용한다 (LEARNING_LOOP §5.1)."""
         return self._curator.curate()
+
+    async def consolidate(self) -> ConsolidateResult:
+        """"스킬 정리"의 심화판(Phase B, POST /skills/curate?mode=consolidate).
+        규칙 기반 전이를 항상 먼저 실행(Hermes의 2단계 모델과 동일 — LLM 패스는
+        보완이지 대체가 아니다)한 뒤, provider가 배선돼 있으면 통합 제안을 더한다.
+        게이트 없음 — 수동 트리거는 항상 시도한다(비용은 사용자가 감수)."""
+        rule_result = self._curator.curate()
+        if self._consolidation_engine is None:
+            return ConsolidateResult(transitioned=rule_result.transitioned)
+        proposals = await self._consolidation_engine.analyze()
+        return ConsolidateResult(transitioned=rule_result.transitioned, proposals=tuple(proposals))
+
+    def decide_archive(
+        self, skill_id: str, *, approved: bool, absorbed_into: str | None = None
+    ) -> bool:
+        """ArchiveProposal 승인/거부. 승인 시 archived 전이 + absorbed_into 기록."""
+        if not approved:
+            return False
+        try:
+            self._lifecycle.archive_with_absorption(skill_id, absorbed_into)
+        except NotFoundError:
+            return False
+        return True
 
     def set_state(self, skill_id: str, state: SkillState) -> None:
         """스킬 상태를 수동으로 변경한다."""
@@ -459,8 +574,9 @@ class LearningService(ILearningService):
 
 
 # ── observe 헬퍼 함수들 (모듈 수준, LearningService에서 호출) ─────────────────
-# NL 신호셋(fact/pref 도입구, 스킬화 의도, patch 트리거)은 learning/signals.py 에
-# 한국어+영어로 중앙화되어 있다 (버그#8 교정 — v1 은 영어 전용이었다).
+# NL 신호셋(fact/pref 도입구)은 learning/signals.py 에 한국어+영어로 중앙화되어
+# 있다 (버그#8 교정 — v1 은 영어 전용이었다). 스킬화 의도/patch 트리거 신호는
+# 이제 review/gate.py의 should_review()가 재사용한다 (observe()는 fact/pref만).
 
 
 def _try_extract_fact(message: str) -> str | None:
@@ -504,107 +620,9 @@ def _try_extract_preference(message: str) -> str | None:
     return None
 
 
-def _try_create_skill(
-    final_message: str,
-    session_id: str,
-    tool_calls_made: int,
-    skill_store: SkillStore,
-    usage_store: UsageStore,
-) -> SkillCreated | None:
-    """보수적으로 스킬 생성을 시도한다 (LEARNING_LOOP §4).
-
-    NOTE(agent): 스킬 이름은 final_message에서 추출하거나 세션 ID로 fallback한다.
-    이름 충돌 시 생성을 건너뛴다 (fail-closed). 생성 HITL은 계약에 없으므로
-    skill_created SSE 이벤트로 알림만 한다 (learning.md T3 주의사항).
-    """
-    # 스킬 이름 추출 — "save this as a skill: <name>" / "스킬: <name>" (kebab ascii).
-    # 신호/추출 로직은 signals.py 에 중앙화(한·영). 없으면 세션 id 기반 fallback.
-    skill_name = extract_skill_name(final_message)
-    if not skill_name:
-        short = session_id[-8:] if session_id else "auto"
-        skill_name = f"auto-{short}"
-
-    # 이미 존재하면 생성하지 않는다 (fail-closed, 중복 방지)
-    try:
-        skill_store.read(skill_name)
-        return None  # 이미 존재
-    except Exception:
-        pass  # 없으면 계속
-
-    # 스킬 본문은 final_message 첫 500자 (내용 없는 것보다는 나음)
-    body = final_message[:500] if final_message else "Auto-generated skill.\n"
-
-    skill = SkillData(
-        name=skill_name,
-        version=1,
-        description=f"Auto-created from session {session_id} ({tool_calls_made} tool calls)",
-        state="active",
-        body=body,
-        tags=[],
-        source=f"session:{session_id}",
-        created_at=now_iso(),
-        updated_at=now_iso(),
-    )
-    try:
-        skill_store.write(skill)
-    except Exception:
-        return None
-
-    return SkillCreated(skill_id=skill_name, title=skill_name, version=1)
-
-
-def _try_build_patch_proposal(
-    skill_id: str,
-    trigger: str,
-    final_message: str,
-    skill_store: SkillStore,
-    user_text: str | None = None,
-) -> PatchProposal | None:
-    """스킬 patch 제안을 생성한다 (LEARNING_LOOP §5.2.3, 미적용 상태로 반환).
-
-    proposed_body 는 기존 본문 끝에 **읽을 수 있는 Markdown 보완 섹션**을 덧붙인다
-    (v1 의 HTML 주석 노이즈 제거 — 버그#7). 주입 시 LLM 이 자연스럽게 읽고, HITL 에서
-    사용자가 edited_body 로 다듬을 수 있다. 보완 텍스트는 (사용자 교정 > 최종 메시지)
-    순으로 가장 의미 있는 신호를 사용한다.
-
-    NOTE(agent): 진짜 개선 본문 생성은 LLM 호출이 이상적이나(LEARNING_LOOP §5.2.3),
-    learning 서비스는 provider 를 보지 않는 순수 계층이라 MVP 는 '검토 필요' 메모로
-    신호를 전달하고 최종 품질은 HITL 편집에 맡긴다.
-    """
-    try:
-        current = skill_store.read(skill_id)
-    except Exception:
-        return None
-
-    old_body = (current.body or "").rstrip()
-
-    note = (user_text or final_message or "").strip()
-    note = " ".join(note.split())  # 개행/연속공백 정리
-    if len(note) > 280:
-        note = note[:280].rstrip() + "…"
-    if not note:
-        return None
-
-    label = "사용자 교정 반영" if trigger == "T1a" else "실패 사례 보완"
-    # 기존 본문은 보존하고, 명확히 표시된 Markdown 섹션을 덧붙인다(검토 후 편집 전제).
-    proposed_body = (
-        f"{old_body}\n\n## 보완 사항 (검토 필요 · {label})\n"
-        f"- {note}\n"
-    )
-
-    diff = build_diff(old_body, proposed_body)
-    new_version = current.version + 1
-
-    # diff가 비어 있으면 제안하지 않는다 (아무 변화가 없음)
-    if not diff["lines"]:
-        return None
-
-    return PatchProposal(
-        skill_id=skill_id,
-        changelog=f"{label} 제안 (트리거 {trigger})",
-        diff=diff,
-        trigger=trigger,  # type: ignore[arg-type]
-        proposed_body=proposed_body,
-        from_version=current.version,
-        to_version=new_version,
-    )
+    # NOTE(agent): 스킬 생성/patch 제안을 규칙 기반으로 직접 산출하던
+    # `_try_create_skill`/`_try_build_patch_proposal`은 여기서 완전히 제거됐다
+    # (2026-07-02, Hermes learning_loop 이식 작업). 그 책임은
+    # `learning/review/engine.py::ReviewEngine`(LLM 기반, `/learning-review`·`/learn`
+    # 에서 호출)로 옮겨졌다 — 저작 품질 문제는 규칙을 다듬는 걸로 해결되지 않고,
+    # 두 경로가 공존하면 같은 턴에 중복 제안이 뜰 위험이 있었다.

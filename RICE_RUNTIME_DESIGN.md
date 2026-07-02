@@ -154,7 +154,7 @@
 
 **Provider 차이 정규화** — `ILLMProvider` Protocol이 다음을 흡수한다:
 - **tool calling**: Claude native `tool_use` ↔ Ollama function-calling(모델별 상이·미지원 가능) → 공통 tool_call 표현으로 정규화, 미지원 모델은 프롬프트 기반 폴백
-- **streaming**: 각 provider 스트림 → 공통 **SSE 이벤트**(9종, 명세 정본 [RICE_CONTRACTS.md](RICE_CONTRACTS.md) 1.3)로 변환
+- **streaming**: 각 provider 스트림 → 공통 **SSE 이벤트**(8종, 2026-07-02 정정 — `skill_created` 제거, 명세 정본 [RICE_CONTRACTS.md](RICE_CONTRACTS.md) 1.3)로 변환
 - **prompt caching**: Claude `cache_control`(스킬 주입 비용 상쇄, Hermes 검증 #6) ↔ Ollama 미지원 → keep-alive·컨텍스트 재사용으로 대체
 
 - ★ 키 보관: SaaS(Claude) 키만 OS 키체인 (macOS Keychain / Windows Credential Manager), Electron `safeStorage` 활용. `.env` 평문 금지. on-prem(Ollama)은 키 없음

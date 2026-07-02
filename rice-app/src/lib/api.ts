@@ -5,6 +5,7 @@ import type {
   PendingApproval,
   ToolApprovalDecision,
   SkillPatchDecision,
+  CurateConsolidateResult,
   PlatformArtifact,
   PlatformFileResponse,
   PlatformPublishPayload,
@@ -181,9 +182,13 @@ class ApiClient {
   getSkill(id: string): Promise<ApiResponse> {
     return this.get(`/skills/${id}`);
   }
-  /** manual "스킬 정리" — curator transition trigger */
+  /** manual "스킬 정리" — curator transition trigger (rule-based only) */
   curateSkills(): Promise<ApiResponse> {
     return this.send('POST', '/skills/curate');
+  }
+  /** Phase B: 규칙 전이 + LLM 통합 제안(있으면) — provider 미배선이면 proposals=[] */
+  consolidateSkills(): Promise<ApiResponse<CurateConsolidateResult>> {
+    return this.send('POST', '/skills/curate?mode=consolidate');
   }
   setSkillState(id: string, state: 'active' | 'stale' | 'archived'): Promise<ApiResponse> {
     return this.send('PATCH', `/skills/${id}/state`, { state });
@@ -191,6 +196,24 @@ class ApiClient {
   /** respond to a skill_patch_proposed control event (approve/reject/edited) */
   respondSkillPatch(id: string, decision: SkillPatchDecision): Promise<ApiResponse> {
     return this.send('POST', `/skills/${id}/patch`, decision);
+  }
+  /** Phase B: ArchiveProposal(순수 정리 or 병합 흡수) 승인/거부 — approval_id 없음 */
+  answerArchiveDecision(id: string, approved: boolean, absorbedInto?: string | null): Promise<ApiResponse> {
+    return this.send('POST', `/skills/${id}/archive-decision`, { approved, absorbed_into: absorbedInto ?? null });
+  }
+  /** Phase B: 통합 병합 제안(umbrella 생성/patch) 승인/거부 — approval_id 없음,
+   *  프론트가 들고 있던 proposed_body를 그대로 반송한다. */
+  answerConsolidateDecision(
+    id: string,
+    approved: boolean,
+    proposal?: { proposedBody?: string; description?: string; tags?: string[] },
+  ): Promise<ApiResponse<{ version: number | null }>> {
+    return this.send('POST', `/skills/${id}/consolidate-decision`, {
+      approved,
+      proposed_body: proposal?.proposedBody,
+      description: proposal?.description ?? '',
+      tags: proposal?.tags ?? [],
+    });
   }
   /** version history (diff · rollback UI) */
   getSkillHistory(id: string): Promise<ApiResponse> {

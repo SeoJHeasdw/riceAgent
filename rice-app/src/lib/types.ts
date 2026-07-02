@@ -133,11 +133,6 @@ export interface MessageEventData {
   /** full content (non-streaming / final) */
   content?: string;
 }
-export interface SkillCreatedEventData {
-  skill_id: string;
-  title: string;
-  version: number;
-}
 export interface MemoryWrittenEventData {
   memory_type: 'fact' | 'preference';
   content: string;
@@ -151,8 +146,10 @@ export interface ErrorEventData {
   message: string;
 }
 
-/** what raised a patch proposal — audit trail (LEARNING_LOOP 5.2.2) */
-export type PatchTrigger = 'T1a' | 'T1b' | 'T1c' | 'T3';
+/** what raised a patch proposal — audit trail (LEARNING_LOOP 5.2.2).
+ * T4 = brand-new skill proposal (from_version=0, Phase A.1 — creation unified
+ * into the patch flow instead of a separate skill_created event). */
+export type PatchTrigger = 'T1a' | 'T1b' | 'T1c' | 'T3' | 'T4';
 
 export interface SkillDiffLine {
   type: 'add' | 'remove' | 'context';
@@ -177,6 +174,11 @@ export interface SkillPatchProposedData {
   trigger: PatchTrigger;
   from_version?: number;
   to_version?: number;
+  /** authoritative proposed full body — prefer this over reconstructing from
+   * diff.lines (which was a fragile client-side join, see ChatScreen.tsx) */
+  proposed_body?: string;
+  /** Phase D guard redaction notices (secret-scrub/size-cap), empty/absent when clean */
+  warnings?: string[];
 }
 
 export type SSEEvent =
@@ -184,7 +186,6 @@ export type SSEEvent =
   | { type: 'tool_call'; data: ToolCallEventData }
   | { type: 'tool_result'; data: ToolResultEventData }
   | { type: 'message'; data: MessageEventData }
-  | { type: 'skill_created'; data: SkillCreatedEventData }
   | { type: 'memory_written'; data: MemoryWrittenEventData }
   | { type: 'skill_patched'; data: SkillPatchedEventData }
   | { type: 'done'; data: Record<string, never> }
@@ -213,6 +214,34 @@ export interface PendingApproval {
   approval_id: string;
   kind: 'tool_approval' | 'skill_patch';
   payload: ToolApprovalRequiredData | SkillPatchProposedData;
+}
+
+// ── curator 통합 (Phase B, POST /skills/curate?mode=consolidate) ──────────
+// approval_id 없음 — /learning-review와 달리 SSE 스트림이 아닌 일반 REST 응답에
+// 그대로 실려온다. 승인/거부는 approval_id 조회 없이 이 데이터를 그대로 반송한다.
+export interface ConsolidateMergeProposal {
+  kind: 'patch';
+  skill_id: string;
+  changelog: string;
+  diff: SkillDiff;
+  trigger: PatchTrigger;
+  proposed_body: string;
+  from_version: number;
+  to_version: number;
+  description?: string;
+  tags?: string[];
+  warnings?: string[];
+}
+export interface ConsolidateArchiveProposal {
+  kind: 'archive';
+  skill_id: string;
+  reason: string;
+  absorbed_into: string | null;
+}
+export type ConsolidateProposal = ConsolidateMergeProposal | ConsolidateArchiveProposal;
+export interface CurateConsolidateResult {
+  transitioned: [string, string][];
+  proposals: ConsolidateProposal[];
 }
 
 // ── Learning Impact (eval results, RICE_LEARNING_EVAL 6.3) ────────

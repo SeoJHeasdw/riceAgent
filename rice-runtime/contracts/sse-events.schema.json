@@ -2,13 +2,12 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://rice.app/contracts/sse-events.schema.json",
   "title": "RICE runtime SSE events",
-  "description": "9 stream events + 2 control events streamed over POST /sessions/{id}/messages (RICE_CONTRACTS §1.3). Owned by rice-runtime; rice-app codegens/mirrors it (lib/types.ts). Each frame is `event: <type>\\n data: <json>\\n\\n`; `data` matches the schema selected by `type`.",
+  "description": "8 stream events + 2 control events streamed over POST /sessions/{id}/messages, and (2026-07-02) the identical vocabulary streamed over POST /sessions/{id}/learning-review and /learn (RICE_CONTRACTS §1.3, LEARNING_LOOP §4/§5.3). Owned by rice-runtime; rice-app codegens/mirrors it (lib/types.ts). Each frame is `event: <type>\\n data: <json>\\n\\n`; `data` matches the schema selected by `type`. `skill_created` was removed 2026-07-02 — skill creation is now a `skill_patch_proposed` with `from_version=0` (LEARNING_LOOP §4), so it never fires.",
   "oneOf": [
     { "$ref": "#/$defs/thinking" },
     { "$ref": "#/$defs/tool_call" },
     { "$ref": "#/$defs/tool_result" },
     { "$ref": "#/$defs/message" },
-    { "$ref": "#/$defs/skill_created" },
     { "$ref": "#/$defs/memory_written" },
     { "$ref": "#/$defs/skill_patched" },
     { "$ref": "#/$defs/done" },
@@ -81,21 +80,6 @@
         }
       }
     },
-    "skill_created": {
-      "allOf": [{ "$ref": "#/$defs/event" }],
-      "properties": {
-        "type": { "const": "skill_created" },
-        "data": {
-          "type": "object",
-          "required": ["skill_id", "title", "version"],
-          "properties": {
-            "skill_id": { "type": "string" },
-            "title": { "type": "string" },
-            "version": { "type": "integer" }
-          }
-        }
-      }
-    },
     "memory_written": {
       "allOf": [{ "$ref": "#/$defs/event" }],
       "properties": {
@@ -164,7 +148,7 @@
     },
     "skill_patch_proposed": {
       "allOf": [{ "$ref": "#/$defs/event" }],
-      "description": "Control event: park the turn until POST /skills/{id}/patch (LEARNING_LOOP §5.2.3).",
+      "description": "Control event: park the turn until POST /skills/{id}/patch (LEARNING_LOOP §5.2.3). from_version=0 means this is a brand-new skill proposal (LEARNING_LOOP §4), not a patch to an existing one.",
       "properties": {
         "type": { "const": "skill_patch_proposed" },
         "data": {
@@ -174,9 +158,18 @@
             "approval_id": { "type": "string" },
             "skill_id": { "type": "string" },
             "changelog": { "type": "string" },
-            "trigger": { "enum": ["T1a", "T1b", "T1c", "T3"] },
+            "trigger": { "enum": ["T1a", "T1b", "T1c", "T3", "T4"] },
             "from_version": { "type": "integer" },
             "to_version": { "type": "integer" },
+            "proposed_body": {
+              "type": "string",
+              "description": "Authoritative full proposed body (2026-07-02) — prefer this over reconstructing from diff.lines."
+            },
+            "warnings": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Guard redaction notices (secret-scrub/size-cap, LEARNING_LOOP §8), e.g. 'AWS access key 자동 마스킹됨'. Empty/absent when clean."
+            },
             "diff": {
               "type": "object",
               "required": ["lines"],

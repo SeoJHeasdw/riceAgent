@@ -14,8 +14,16 @@ Writing rules enforced here (LEARNING_LOOP §6):
   - `preference`: answer-style preferences (concise/verbose/technical, preferred
     model/tool).
 
-The store doesn't validate *content* — that judgement belongs to the observer
-(`loop.py`, T4). We only validate `kind` at the boundary.
+The store doesn't validate *semantic* content ("is this a good fact") — that
+judgement belongs to the observer (`service.py::observe`, `review/engine.py`).
+We validate `kind` at the boundary, AND (Phase D, 2026-07-02) scrub obvious
+secret patterns (`skill/guard.py::scrub_secrets`) — a narrow, deliberate
+exception to "content is the caller's job". Unlike skill writes (which funnel
+through exactly 3 `LearningService` methods), memory is written from two
+different modules (`observe()`'s regex path AND `ReviewEngine`'s LLM path,
+both calling `add()` directly) — memory is also NEVER HITL-reviewed before
+persisting, so it's the higher-risk, ungated path. Putting the scrub at this
+single true chokepoint means neither caller can forget it.
 """
 
 from __future__ import annotations
@@ -23,6 +31,7 @@ from __future__ import annotations
 from ...core.errors import ValidationError
 from ...core.storage.sqlite import Database
 from ...core.types import MemoryItem, new_id, now_iso
+from ..skill.guard import scrub_secrets
 
 _ALLOWED_KINDS = frozenset({"fact", "preference"})
 
@@ -52,14 +61,20 @@ class MemoryStore:
         if not content or not content.strip():
             raise ValidationError("Memory content must not be empty")
 
+        clean_content, _redacted_labels = scrub_secrets(content.strip())
+        # NOTE(agent): 발견 라벨(_redacted_labels)은 memory 경로에선 사용자에게
+        # 즉시 보여줄 화면이 없다(비HITL, 즉시 반영) — best-effort로 조용히
+        # 치환만 한다. 스킬 경로는 HITL 카드가 있어 PatchProposal.warnings로
+        # 노출한다(learning/service.py).
+
         mem_id = new_id("mem")
         created_at = now_iso()
         self._db.execute(
             "INSERT INTO memories (id, kind, content, created_at, source_session_id) "
             "VALUES (?, ?, ?, ?, ?)",
-            (mem_id, kind, content.strip(), created_at, source_session_id),
+            (mem_id, kind, clean_content, created_at, source_session_id),
         )
-        return MemoryItem(kind=kind, content=content.strip(), id=mem_id)  # type: ignore[arg-type]
+        return MemoryItem(kind=kind, content=clean_content, id=mem_id)  # type: ignore[arg-type]
 
     def list(self) -> list[MemoryItem]:
         """Return all memories, newest first.

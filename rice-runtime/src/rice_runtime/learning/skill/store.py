@@ -55,6 +55,10 @@ class SkillData:
     source: str | None
     created_at: str | None
     updated_at: str | None
+    # Phase B(curator 통합): 병합으로 archived됐을 때 흡수한 umbrella skill 이름.
+    # 순수 정리(prune, 병합 대상 없음)로 archived됐으면 None. 기존 파서가 미지
+    # frontmatter 키를 관대하게 처리하므로 순수 추가(마이그레이션 불필요).
+    absorbed_into: str | None = None
 
 
 # ── frontmatter 파싱 ──────────────────────────────────────────────────────────
@@ -164,6 +168,7 @@ def parse_skill_md(text: str) -> SkillData:
         source=fm.get("source"),
         created_at=fm.get("created_at"),
         updated_at=fm.get("updated_at"),
+        absorbed_into=fm.get("absorbed_into"),
     )
 
 
@@ -183,6 +188,8 @@ def serialize_skill_md(skill: SkillData) -> str:
         fm["created_at"] = skill.created_at
     if skill.updated_at is not None:
         fm["updated_at"] = skill.updated_at
+    if skill.absorbed_into is not None:
+        fm["absorbed_into"] = skill.absorbed_into
 
     return f"---\n{_dump_yaml(fm)}---\n{skill.body}"
 

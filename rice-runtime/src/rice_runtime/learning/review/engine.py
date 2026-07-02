@@ -1,0 +1,268 @@
+"""learning/review/engine.py — LLM 기반 스킬/메모리 저작 엔진 (Phase A.3).
+
+`observe()`가 정규식으로 하던 저작 판단(무엇을 스킬로 만들지, patch 본문에 뭘
+쓸지)을 대체한다. 실제로 판단력이 필요한 일이라 LLM 1회 호출을 쓴다 — 대신
+`AgentLoop` 전체(다중 라운드 tool 디스패치)를 쓰지 않고 `ILLMProvider.stream()`을
+직접 한 번만 소비한다: 이 엔진은 파일을 쓸 권한이 전혀 없고(propose_* pseudo-tool은
+`ToolDispatcher`를 거치지 않는다 — 절대 실행되지 않고 인자만 읽힌다), 오직 구조화된
+제안(`LearningEffect`)만 산출한다.
+
+WHY `ReviewEngine`이 `LearningService`의 provider 의존을 만드는가: 이전까지
+`LearningService`는 "provider를 보지 않는 순수 계층"이었다(observe()가 정규식만
+썼으므로). 이 엔진이 그 경계를 의도적으로 옮긴다 — 진짜 저작 지능을 넣는 것이
+이번 진화의 핵심이므로 이 트레이드오프는 불가피하다. (learning/service.py의
+`LearningService.__init__` docstring 참고.)
+
+WHY `agent.providers.interfaces`를 여기서 import해도 순환 의존이 아닌가: 그 파일은
+`core.types`만 본다(다른 어느 것도 `learning`을 보지 않는다) — orchestrator.py가
+이미 `learning.interfaces`를 보는 것과 대칭인 반대 방향의 **Protocol 전용** 참조일
+뿐, 구현체(concrete provider)는 여전히 `server/composition_root.py`에서만 조립된다.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Callable, Sequence
+
+from ...agent.providers.interfaces import ILLMProvider
+from ...core.errors import NotFoundError
+from ...core.types import Message, ToolCall
+from ...prompts.review import (
+    LEARN_SYSTEM_PROMPT,
+    REVIEW_SYSTEM_PROMPT,
+    build_learn_instruction,
+    build_review_messages,
+    build_review_tool_specs,
+)
+from ..interfaces import LearningEffect, MemoryWritten, PatchProposal
+from ..memory.store import MemoryStore
+from ..skill import guard as skill_guard
+from ..skill.patch import build_diff
+from ..skill.store import SkillStore
+from ..skill.usage import UsageStore
+
+log = logging.getLogger("rice.learning.review")
+
+_CHARS_PER_TOKEN = 4  # LEARNING_LOOP §7과 동일 추정 — 정밀도 불필요
+_REVIEW_TEMPERATURE = 0.3  # titler.py와 동일 원칙: 구조화된 산출물은 낮은 변동성이 낫다
+_MAX_KNOWN_FACTS = 20
+_MAX_CHANGELOG_CHARS = 200
+
+
+def _estimate_tokens(text: str) -> int:
+    return max(1, len(text) // _CHARS_PER_TOKEN)
+
+
+class ReviewEngine:
+    """review()/learn() — 1회성 LLM 호출로 구조화된 skill/memory 제안을 산출한다.
+
+    쓰기 권한은 오직 memory에만 있다(`propose_memory_write` → 즉시 반영, memory는
+    이 앱 설계상 원래도 HITL 대상이 아니다). skill 관련 제안은 전부 `PatchProposal`
+    (생성도 patch로 통일 — Phase A.1)로 돌려주고, 실제 파일 쓰기는 호출자가
+    HITL 승인 후 `apply_patch`로 한다.
+    """
+
+    def __init__(
+        self,
+        *,
+        resolve_provider: Callable[[], ILLMProvider],
+        skill_store: SkillStore,
+        usage_store: UsageStore,
+        mem_store: MemoryStore,
+        skill_catalog_token_budget: int,
+        max_body_chars: int = skill_guard.DEFAULT_MAX_BODY_CHARS,
+    ) -> None:
+        self._resolve_provider = resolve_provider
+        self._skill_store = skill_store
+        self._usage_store = usage_store
+        self._mem_store = mem_store
+        self._catalog_budget = skill_catalog_token_budget
+        self._max_body_chars = max_body_chars
+
+    async def review(self, session_id: str, history: Sequence[Message]) -> list[LearningEffect]:
+        """정기 리뷰 — `learning/review/gate.py::ReviewGate`가 호출 여부를 이미
+        결정했다고 가정한다(이 메서드 자체는 게이팅하지 않는다)."""
+        return await self._run(session_id, history, system_prompt=REVIEW_SYSTEM_PROMPT, instruction=None)
+
+    async def learn(self, session_id: str, history: Sequence[Message], instruction: str) -> list[LearningEffect]:
+        """명시적 사용자 요청("이 대화를 스킬로 저장") — Phase C. 게이트 없이 항상
+        실행한다(호출 자체가 명시적 의도)."""
+        return await self._run(
+            session_id,
+            history,
+            system_prompt=LEARN_SYSTEM_PROMPT,
+            instruction=build_learn_instruction(instruction),
+        )
+
+    # ── internals ────────────────────────────────────────────────────────────
+
+    async def _run(
+        self,
+        session_id: str,
+        history: Sequence[Message],
+        *,
+        system_prompt: str,
+        instruction: str | None,
+    ) -> list[LearningEffect]:
+        provider = self._resolve_provider()
+        if getattr(provider, "name", "") == "echo":
+            # titler.py와 동일 가드 — API 키 미설정/오프라인 폴백 provider로는
+            # 구조화된 제안을 만들 수 없다(에코는 입력을 그대로 반사할 뿐).
+            return []
+
+        full_body_skills, compact_skills, patchable_ids = self._build_catalog()
+        known_facts = self._recent_fact_strings()
+        kwargs = {} if instruction is None else {"instruction": instruction}
+        _, messages = build_review_messages(
+            history,
+            full_body_skills=full_body_skills,
+            compact_skills=compact_skills,
+            known_facts=known_facts,
+            **kwargs,
+        )
+        tools = build_review_tool_specs(patchable_ids)
+
+        calls: list[ToolCall] = []
+        try:
+            async for chunk in provider.stream(
+                system=system_prompt, messages=messages, tools=tools, temperature=_REVIEW_TEMPERATURE
+            ):
+                if chunk.kind == "tool_call" and chunk.tool_call is not None:
+                    calls.append(chunk.tool_call)
+        except Exception:
+            # best-effort — 리뷰 실패가 (이미 사용자에게 답변이 끝난) 상위 흐름을
+            # 깨서는 안 된다. titler.py의 "titling must never break a turn"과 동일.
+            log.exception("review LLM call failed for session %s", session_id)
+            return []
+
+        effects: list[LearningEffect] = []
+        for call in calls:
+            effect = self._to_effect(session_id, call)
+            if effect is not None:
+                effects.append(effect)
+        return effects
+
+    def _build_catalog(
+        self,
+    ) -> tuple[list[tuple[str, str, str]], list[tuple[str, str]], tuple[str, ...]]:
+        """active 스킬을 use 상위 정렬 후 예산 내에서 전체 본문으로, 나머지는
+        name+description만 담는다. `prefetch()`의 budget-fit과 같은 모양이지만
+        렌더링 목적이 달라(리뷰는 skill_id를 명시적으로 라벨링해야 모델이
+        propose_skill_patch에서 정확히 참조할 수 있다) 별도로 둔다."""
+        all_active = [s for s in self._skill_store.list() if s.state == "active"]
+
+        def _use_count(name: str) -> int:
+            return self._usage_store.read(name).use
+
+        active_sorted = sorted(all_active, key=lambda s: _use_count(s.name), reverse=True)
+
+        full_body: list[tuple[str, str, str]] = []
+        compact: list[tuple[str, str]] = []
+        remaining_budget = self._catalog_budget
+        for skill in active_sorted:
+            body = skill.body or ""
+            tokens = _estimate_tokens(body)
+            if tokens <= remaining_budget:
+                full_body.append((skill.name, skill.description, body))
+                remaining_budget -= tokens
+            else:
+                compact.append((skill.name, skill.description))
+
+        patchable_ids = tuple(s[0] for s in full_body)
+        return full_body, compact, patchable_ids
+
+    def _recent_fact_strings(self, limit: int = _MAX_KNOWN_FACTS) -> list[str]:
+        return [m.content for m in self._mem_store.list()[:limit]]
+
+    def _to_effect(self, session_id: str, call: ToolCall) -> LearningEffect | None:
+        args = call.arguments if isinstance(call.arguments, dict) else {}
+        if call.tool_name == "propose_skill_create":
+            return self._skill_create_effect(args)
+        if call.tool_name == "propose_skill_patch":
+            return self._skill_patch_effect(args)
+        if call.tool_name == "propose_memory_write":
+            return self._memory_effect(session_id, args)
+        log.warning("review engine: unknown tool call %r", call.tool_name)
+        return None
+
+    def _skill_create_effect(self, args: dict) -> PatchProposal | None:
+        name = str(args.get("name") or "").strip()
+        body = str(args.get("body") or "")
+        if not name or not body.strip():
+            return None
+        try:
+            self._skill_store.read(name)
+            # 모델이 실제로 존재하는 이름으로 "생성"을 제안했다 — patch를 썼어야
+            # 한다. 잘못된 제안을 그대로 흘리지 않고 버린다(fail-closed).
+            log.warning("review engine: propose_skill_create for existing skill %r ignored", name)
+            return None
+        except NotFoundError:
+            pass
+        try:
+            skill_guard.validate_content_size(body, self._max_body_chars)
+        except Exception:
+            log.warning("review engine: propose_skill_create body too large for %r, dropped", name)
+            return None
+        body, warnings = skill_guard.scrub_secrets(body)
+        description = str(args.get("description") or "")
+        tags = tuple(str(t) for t in (args.get("tags") or ()))
+        return PatchProposal(
+            skill_id=name,
+            changelog=(f"신규 스킬 제안 · {description}" if description else "신규 스킬 제안")[
+                :_MAX_CHANGELOG_CHARS
+            ],
+            diff=build_diff("", body),
+            trigger="T4",
+            proposed_body=body,
+            from_version=0,
+            to_version=1,
+            description=description,
+            tags=tags,
+            warnings=tuple(f"{label} 자동 마스킹됨" for label in warnings),
+        )
+
+    def _skill_patch_effect(self, args: dict) -> PatchProposal | None:
+        skill_id = str(args.get("skill_id") or "").strip()
+        new_body = str(args.get("new_body") or "")
+        changelog = str(args.get("changelog") or "review 제안")[:_MAX_CHANGELOG_CHARS]
+        trigger = str(args.get("trigger_reason") or "T1a")
+        if trigger not in ("T1a", "T1b", "T1c"):
+            trigger = "T1a"
+        if not skill_id or not new_body.strip():
+            return None
+        try:
+            current = self._skill_store.read(skill_id)
+        except Exception:
+            # 모델이 카탈로그에 없는/유효하지 않은 skill_id를 줬다 — 스키마의 enum이
+            # 이미 이걸 막지만(build_review_tool_specs), 방어적으로 한 번 더 확인.
+            return None
+        try:
+            skill_guard.validate_content_size(new_body, self._max_body_chars)
+        except Exception:
+            log.warning("review engine: propose_skill_patch body too large for %r, dropped", skill_id)
+            return None
+        new_body, warnings = skill_guard.scrub_secrets(new_body)
+        diff = build_diff(current.body, new_body)
+        if not diff["lines"]:
+            return None  # 실질적 변경 없음 — 빈 제안은 만들지 않는다
+        return PatchProposal(
+            skill_id=skill_id,
+            changelog=changelog,
+            diff=diff,
+            trigger=trigger,  # type: ignore[arg-type]
+            proposed_body=new_body,
+            from_version=current.version,
+            to_version=current.version + 1,
+            warnings=tuple(f"{label} 자동 마스킹됨" for label in warnings),
+        )
+
+    def _memory_effect(self, session_id: str, args: dict) -> MemoryWritten | None:
+        kind = args.get("kind")
+        content = str(args.get("content") or "").strip()
+        if kind not in ("fact", "preference") or not content:
+            return None
+        try:
+            self._mem_store.add(kind, content, source_session_id=session_id)
+        except Exception:
+            return None
+        return MemoryWritten(memory_type=kind, content=content)  # type: ignore[arg-type]

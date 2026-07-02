@@ -347,6 +347,8 @@ export type ThreadMessage =
       newRules?: SkillVersionRule[];
       /** 적용 후 사용처에 남길 한 줄 (선택) */
       note?: string;
+      /** Phase D 가드 경고 (예: "AWS access key 자동 마스킹됨") — 비어있으면 표시 안 함 */
+      warnings?: string[];
     }
   | {
       kind: 'toolrun';

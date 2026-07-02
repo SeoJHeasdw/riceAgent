@@ -2,23 +2,36 @@
 
   GET   /skills                 list + usage stats (MySkillsScreen)
   GET   /skills/{id}            detail
-  POST  /skills/curate          manual "스킬 정리" trigger
+  POST  /skills/curate          manual "스킬 정리" trigger (mode=rules|consolidate, Phase B)
   PATCH /skills/{id}/state      archive / activate
   POST  /skills/{id}/patch      answer a skill_patch_proposed (approve/reject/edit)
+  POST  /skills/{id}/archive-decision      answer a consolidation ArchiveProposal (Phase B)
+  POST  /skills/{id}/consolidate-decision  answer a consolidation merge PatchProposal (Phase B)
   GET   /skills/{id}/history    version history (diff · rollback UI)
   POST  /skills/{id}/rollback   restore a prior version
 
 Reads/writes go through `ILearningService`; the patch answer resolves the parked
 approval the orchestrator is awaiting (shared HITL mechanism, §5.1).
+
+`POST /skills/curate?mode=consolidate` and `/archive-decision` are Phase B
+(curator LLM consolidation) — deliberately NOT SSE/`IApprovalGate`-parked like
+`/patch`: `/curate` is a plain non-streaming REST call the user explicitly
+triggers (a button), not a live turn the server is suspended inside awaiting an
+answer to. Proposals come back synchronously in the JSON body; the client holds
+them in local state and answers each one at its own pace via `/patch` (for a
+merge, which is patch-shaped) or `/archive-decision` (for a prune, which isn't).
 """
 
 from __future__ import annotations
+
+from typing import Literal
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from ...core.errors import ConflictError, NotFoundError, ValidationError
 from ...core.types import ApprovalResponse
+from ...learning.interfaces import ArchiveProposal, PatchProposal
 from ..composition_root import Container
 from .deps import get_container
 
@@ -27,6 +40,19 @@ router = APIRouter(prefix="/skills", tags=["skills"])
 
 class StateIn(BaseModel):
     state: str  # active | stale | archived
+
+
+class ArchiveDecisionIn(BaseModel):
+    approved: bool
+    absorbed_into: str | None = None
+
+
+class ConsolidateDecisionIn(BaseModel):
+    approved: bool
+    proposed_body: str | None = None
+    edited_body: str | None = None
+    description: str = ""
+    tags: list[str] = []
 
 
 class CreateSkillIn(BaseModel):
@@ -96,9 +122,55 @@ async def delete_skill(skill_id: str, c: Container = Depends(get_container)):
 
 
 @router.post("/curate")
-async def curate(c: Container = Depends(get_container)):
+async def curate(mode: Literal["rules", "consolidate"] = "rules", c: Container = Depends(get_container)):
+    """수동 "스킬 정리". mode=rules(기본, 하위호환): 시간 규칙 전이만, 즉시 반환.
+    mode=consolidate(Phase B): 규칙 전이 + LLM 통합 제안(provider 미배선이면
+    proposals가 그냥 빈 배열 — 하위호환). 스트림이 아닌 일반 REST라 오래 걸릴 수
+    있음(스킬 전체 본문을 프롬프트에 태움) — 프론트는 로딩 상태를 보여줘야 한다."""
+    if mode == "consolidate":
+        result = await c.learning.consolidate()
+        proposals = [
+            {"kind": "patch", **p.__dict__} if isinstance(p, PatchProposal) else {"kind": "archive", **p.__dict__}
+            for p in result.proposals
+        ]
+        return {
+            "success": True,
+            "data": {"transitioned": list(result.transitioned), "proposals": proposals},
+        }
     result = c.learning.curate()
-    return {"success": True, "data": {"transitioned": list(result.transitioned)}}
+    return {"success": True, "data": {"transitioned": list(result.transitioned), "proposals": []}}
+
+
+@router.post("/{skill_id}/archive-decision")
+async def archive_decision(skill_id: str, body: ArchiveDecisionIn, c: Container = Depends(get_container)):
+    """Curator 통합(Phase B)이 제안한 ArchiveProposal에 대한 승인/거부. `/patch`와
+    달리 diff가 없는 상태전이라 `IApprovalGate` 파킹을 쓰지 않는다 — 프론트가 로컬에
+    들고 있던 제안을 바로 이 엔드포인트로 보낸다(비동기 승인 대기 없음)."""
+    applied = c.learning.decide_archive(
+        skill_id, approved=body.approved, absorbed_into=body.absorbed_into
+    )
+    return {"success": True, "data": {"applied": applied}}
+
+
+@router.post("/{skill_id}/consolidate-decision")
+async def consolidate_decision(skill_id: str, body: ConsolidateDecisionIn, c: Container = Depends(get_container)):
+    """Curator 통합(Phase B)이 제안한 병합(PatchProposal 모양 — 신규 umbrella 생성
+    또는 기존 umbrella patch)에 대한 승인/거부. `/patch`와 달리 이 제안도
+    `IApprovalGate`에 파킹된 적이 없다(스트림 밖, `/curate` 응답에 그대로 실려
+    프론트가 들고 있었을 뿐) — approval_id 조회 없이 프론트가 들고 있던
+    proposed_body를 그대로 반송하면 바로 apply_patch로 적용한다."""
+    if not body.approved:
+        return {"success": True, "data": {"version": None}}
+    new_version = c.learning.apply_patch(
+        skill_id,
+        approved=True,
+        proposed_body=body.proposed_body,
+        edited_body=body.edited_body,
+        description=body.description,
+        tags=tuple(body.tags),
+        source="curator:consolidate",
+    )
+    return {"success": True, "data": {"version": new_version}}
 
 
 @router.patch("/{skill_id}/state")

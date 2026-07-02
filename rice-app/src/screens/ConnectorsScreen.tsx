@@ -284,7 +284,6 @@ const ToolDescription: React.FC<{ text: string; blocked?: boolean }> = ({ text, 
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [text, expanded]);
 
   return (

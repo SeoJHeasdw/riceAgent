@@ -97,10 +97,60 @@ paths:
         "200":
           description: >
             text/event-stream of SSE events. Each frame's `data` validates against
-            contracts/sse-events.schema.json (9 stream + 2 control events).
+            contracts/sse-events.schema.json (8 stream + 2 control events;
+            `skill_created` removed 2026-07-02 — see LEARNING_LOOP §4).
           content:
             text/event-stream:
               schema: { type: string }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /sessions/{id}/title:
+    post:
+      tags: [sessions]
+      summary: >
+        Name an untitled session from its opening exchange (post-turn,
+        non-blocking — client calls after the main turn's `done`).
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses: { "200": { $ref: "#/components/responses/Ok" }, "404": { $ref: "#/components/responses/Error" } }
+
+  /sessions/{id}/learning-review:
+    post:
+      tags: [sessions]
+      summary: >
+        Gated LLM skill/memory review (LEARNING_LOOP §4) — non-blocking, called
+        after the main turn's `done`. SSE stream, same event vocabulary as
+        /messages. Fast no-op (`done` only) when the server-side gate declines.
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: { tool_calls_made: { type: integer, default: 0 } }
+      responses:
+        "200":
+          description: text/event-stream, same schema as /messages.
+          content: { text/event-stream: { schema: { type: string } } }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /sessions/{id}/learn:
+    post:
+      tags: [sessions]
+      summary: >
+        Explicit user-triggered learning ("이 대화를 스킬로 저장", LEARNING_LOOP
+        §5.3) — always attempts (no gate), reuses the same engine as
+        /learning-review with a more directive prompt.
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: { instruction: { type: string, default: "" } }
+      responses:
+        "200":
+          description: text/event-stream, same schema as /messages.
+          content: { text/event-stream: { schema: { type: string } } }
         "404": { $ref: "#/components/responses/Error" }
 
   /sessions/{id}/abort:
@@ -151,7 +201,19 @@ paths:
       parameters: [{ $ref: "#/components/parameters/Id" }]
       responses: { "200": { $ref: "#/components/responses/Ok" }, "404": { $ref: "#/components/responses/Error" } }
   /skills/curate:
-    post: { tags: [skills], summary: Manual curator trigger, responses: { "200": { $ref: "#/components/responses/Ok" } } }
+    post:
+      tags: [skills]
+      summary: >
+        Manual curator trigger. mode=rules (default, backward-compatible):
+        time-based transitions only. mode=consolidate (LEARNING_LOOP §5.1):
+        rules first, then an LLM merge/prune analysis — response includes
+        `proposals[]` (each `{"kind":"patch"|"archive", ...}`) for the client
+        to answer individually via /consolidate-decision or /archive-decision.
+      parameters:
+        - name: mode
+          in: query
+          schema: { enum: [rules, consolidate], default: rules }
+      responses: { "200": { $ref: "#/components/responses/Ok" } }
   /skills/{id}/state:
     patch:
       tags: [skills]
@@ -174,6 +236,47 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/Ok" }
         "409": { $ref: "#/components/responses/Error" }
+  /skills/{id}/archive-decision:
+    post:
+      tags: [skills]
+      summary: >
+        Answer a curator consolidation prune proposal (LEARNING_LOOP §5.1).
+        No approval_id parking — the proposal arrived synchronously in the
+        /skills/curate?mode=consolidate response body, not over SSE.
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approved]
+              properties:
+                approved: { type: boolean }
+                absorbed_into: { type: string, nullable: true }
+      responses: { "200": { $ref: "#/components/responses/Ok" } }
+  /skills/{id}/consolidate-decision:
+    post:
+      tags: [skills]
+      summary: >
+        Answer a curator consolidation merge (umbrella create/patch) proposal
+        (LEARNING_LOOP §5.1). No approval_id parking, same reason as
+        /archive-decision — the client sends back the proposed_body it already
+        holds.
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approved]
+              properties:
+                approved: { type: boolean }
+                proposed_body: { type: string }
+                description: { type: string }
+                tags: { type: array, items: { type: string } }
+      responses: { "200": { $ref: "#/components/responses/Ok" } }
   /skills/{id}/history:
     get:
       tags: [skills]

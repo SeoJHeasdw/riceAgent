@@ -14,6 +14,7 @@ import { languageFromPath } from '../lib/skillFiles';
 import { api } from '../lib/api';
 import type { Skill, SkillDetail, SkillRule, SkillVersion, SkillHealth, SkillActivity, SkillOrigin, SkillUpstream } from '../lib/learningData';
 import type { IconName } from '../components/ui';
+import type { ConsolidateProposal } from '../lib/types';
 
 /**
  * MySkillsScreen ("내 스킬") — full management screen for the user's own learned
@@ -1300,6 +1301,11 @@ function MySkillsScreen() {
   // 수동 "스킬 정리"(curator) 트리거 상태
   const [curating, setCurating] = useState(false);
   const [curateNote, setCurateNote] = useState<string | null>(null);
+  // Phase B: curator LLM 통합 제안 — /skills/curate?mode=consolidate 결과를 들고
+  // 있다가 사용자가 각 제안을 개별 승인/거부한다(approval_id 없음, §서버 설계).
+  const [consolidating, setConsolidating] = useState(false);
+  const [consolidateProposals, setConsolidateProposals] = useState<ConsolidateProposal[]>([]);
+  const [consolidateNote, setConsolidateNote] = useState<string | null>(null);
 
   // Resizable left rail
   const railPanel = useResizable({
@@ -1383,6 +1389,67 @@ function MySkillsScreen() {
     setTimeout(() => setCurating(false), 600);
   };
 
+  /** Phase B: curator LLM 통합 분석 실행 (POST /skills/curate?mode=consolidate).
+   *  스킬 전체 본문을 프롬프트에 태우는 일반 REST 호출이라 규칙 정리보다 훨씬
+   *  오래 걸릴 수 있다 — 진짜 로딩 상태가 필요하다(curateSkills의 600ms 흉내와 다름).
+   *  결과 proposals는 서버 응답을 그대로 신뢰한다(클라이언트에서 예측 불가능 — LLM
+   *  판단이므로 curateSkills의 규칙 기반 클라이언트 예측 패턴을 따르지 않는다). */
+  const runConsolidate = async () => {
+    if (consolidating) return;
+    setConsolidating(true);
+    setConsolidateNote(null);
+    const res = await api.consolidateSkills();
+    setConsolidating(false);
+    if (!res.success || !res.data) {
+      setConsolidateNote(`통합 분석 실패: ${res.error ?? '알 수 없는 오류'}`);
+      return;
+    }
+    const { proposals } = res.data;
+    setConsolidateProposals(proposals);
+    setConsolidateNote(
+      proposals.length
+        ? `${proposals.length}건의 통합 제안을 찾았습니다 — 아래에서 검토하세요.`
+        : '통합할 만한 유사/중복 스킬을 찾지 못했습니다.',
+    );
+  };
+
+  /** 통합 제안 1건 승인/거부. 승인 시 실제로 적용된 결과(서버 응답)로 로컬 skills
+   *  목록을 갱신한다 — merge 제안은 새 버전/신규 스킬로, archive 제안은 보관 상태로. */
+  const decideProposal = async (p: ConsolidateProposal, approved: boolean) => {
+    if (p.kind === 'patch') {
+      const res = await api.answerConsolidateDecision(p.skill_id, approved, {
+        proposedBody: p.proposed_body,
+        description: p.description,
+        tags: p.tags,
+      });
+      if (approved && res.success) {
+        const newVersion = res.data?.version ?? p.to_version;
+        setSkills((arr) => {
+          if (arr.some((s) => s.id === p.skill_id)) {
+            return arr.map((s) =>
+              s.id === p.skill_id ? { ...s, ver: `v${newVersion}`, patches: (s.patches ?? 0) + 1, trend: '통합됨' } : s,
+            );
+          }
+          return [
+            ...arr,
+            {
+              id: p.skill_id, name: p.skill_id, ver: `v${newVersion}`, uses: 0,
+              trend: '통합 생성', enabled: true, patches: 0, command: p.skill_id, state: 'active' as const,
+            },
+          ];
+        });
+      }
+    } else {
+      const res = await api.answerArchiveDecision(p.skill_id, approved, p.absorbed_into);
+      if (approved && res.success) {
+        setSkills((arr) =>
+          arr.map((s) => (s.id === p.skill_id ? { ...s, state: 'archived' as const, enabled: false } : s)),
+        );
+      }
+    }
+    setConsolidateProposals((arr) => arr.filter((x) => x !== p));
+  };
+
   // keep selection valid as skills change
   const selectedExists = sel && skills.some((s) => s.id === sel);
   const effectiveSel = selectedExists ? sel : list[0]?.id ?? skills[0]?.id ?? null;
@@ -1440,6 +1507,56 @@ function MySkillsScreen() {
             {curateNote ?? `${STALE_DAYS}일↑ Stale · ${ARCHIVE_DAYS}일↑ 보관`}
           </span>
         </button>
+
+        {/* Phase B: curator LLM 통합 — 유사/중복 스킬을 하나의 class-level umbrella로
+            묶는 제안을 분석한다. 규칙 정리와 달리 LLM 판단이 필요해 훨씬 오래 걸릴 수
+            있어(스킬 전체 본문을 프롬프트에 태움) 별도 버튼으로 분리했다. */}
+        <button
+          onClick={() => void runConsolidate()}
+          disabled={consolidating}
+          title="유사/중복 스킬을 하나의 통합 스킬로 합치는 제안을 분석합니다 (POST /skills/curate?mode=consolidate)"
+          className="group flex items-center gap-2 mx-4 mb-1 px-2 py-1.5 rounded-md text-text-secondary hover:bg-layer-hover-01 hover:text-text-primary transition-colors disabled:opacity-50"
+        >
+          <Icon name="flow" size={14} className={`flex-shrink-0 ${consolidating ? 'animate-spin text-icon-primary' : 'text-icon-secondary group-hover:text-icon-primary'}`} />
+          <span className="text-body-short-01 font-medium flex-shrink-0">{consolidating ? '분석 중…' : 'AI 통합 제안'}</span>
+          {consolidateNote && (
+            <span className="text-caption-01 text-text-helper truncate ml-1" title={consolidateNote}>
+              {consolidateNote}
+            </span>
+          )}
+        </button>
+
+        {/* 통합 제안 검토 목록 — 제안마다 개별 승인/거부(approval_id 없음, 서버가
+            일반 REST 응답으로 그대로 반환한 것을 로컬에서 들고 있다가 반송). */}
+        {consolidateProposals.length > 0 && (
+          <div className="mx-4 mb-2 space-y-1.5">
+            {consolidateProposals.map((p, i) => (
+              <div
+                key={`${p.kind}-${p.skill_id}-${i}`}
+                className="rounded-lg border border-border-subtle-01 bg-layer-01 p-2.5"
+              >
+                <div className="flex items-center gap-1.5 mb-1">
+                  <Icon name={p.kind === 'patch' ? 'flow' : 'trash'} size={12} className="text-icon-secondary flex-shrink-0" />
+                  <span className="text-caption-01 font-semibold text-text-primary truncate">{p.skill_id}</span>
+                  <Tag type={p.kind === 'patch' ? 'blue' : 'gray'} size="sm">
+                    {p.kind === 'patch' ? (p.from_version === 0 ? '신규 통합' : '병합') : '정리'}
+                  </Tag>
+                </div>
+                <p className="text-caption-01 text-text-secondary mb-2 line-clamp-2">
+                  {p.kind === 'patch' ? p.changelog : p.reason}
+                </p>
+                <div className="flex items-center gap-1.5">
+                  <Button kind="ghost" size="sm" onClick={() => void decideProposal(p, false)}>
+                    거부
+                  </Button>
+                  <Button kind="primary" size="sm" onClick={() => void decideProposal(p, true)}>
+                    승인
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* 유지보수 영역과 필터 목록을 시각적으로 분리 */}
         <div className="mx-4 mt-1.5 mb-1 border-t border-border-subtle-01" />

@@ -1,14 +1,16 @@
 """test_learning_t3.py — T3 수용 기준 검증 (observe, patch, user_model).
 
-수용 기준 (learning.md T3):
-  1. patch: v1→PatchProposal→apply_patch(approve)→v2 + .history/v1.md + patch 카운터.
+수용 기준 (learning.md T3, 2026-07-02 갱신 — 스킬 생성/patch 판단은 observe()에서
+review()로 옮겨졌다. 그 수용 기준은 test_learning_t4.py가 검증한다):
+  1. patch: PatchProposal→apply_patch(approve)→v2 + .history/v1.md + patch 카운터.
   2. curator: 오래된 스킬 stale/archived 전이 (T2에서 이미 검증되나 T3 연계 재확인).
   3. observe가 주입 스킬 use 카운터를 올린다.
-  4. observe가 교정 신호를 감지해 PatchProposal을 반환한다 (미적용).
-  5. observe가 fact를 감지해 MemoryWritten 효과를 반환하고 list_memories에 반영한다.
-  6. prefetch가 active 스킬 전부 주입 + 가이드 문구 포함.
-  7. UserProfile: preference가 system prompt에 반영된다.
-  8. build_diff: unified diff → SkillDiff 형태.
+  4. observe가 fact를 감지해 MemoryWritten 효과를 반환하고 list_memories에 반영한다.
+  5. prefetch가 active 스킬 전부 주입 + 가이드 문구 포함.
+  6. UserProfile: preference가 system prompt에 반영된다.
+  7. build_diff: unified diff → SkillDiff 형태.
+  8. apply_patch: proposed_body가 실제로 반영된다(버그#0 회귀 방지), from_version=0
+     (스킬이 아직 없음)이면 신규 생성으로 처리된다(Phase A.1).
 
 격리: 실제 ~/.rice 건드리지 않음. tempfile.mkdtemp().
 외부 의존성 없음 — 순수 로직 + 파일시스템.
@@ -25,10 +27,10 @@ from rice_runtime.core.config import LearningConfig
 from rice_runtime.core.paths import RicePaths
 from rice_runtime.core.storage.sqlite import Database
 from rice_runtime.core.types import TurnOutcome
-from rice_runtime.learning.interfaces import MemoryWritten, PatchProposal, SkillCreated
+from rice_runtime.learning.interfaces import MemoryWritten, PatchProposal
 from rice_runtime.learning.memory.store import MemoryStore
 from rice_runtime.learning.service import LearningService
-from rice_runtime.learning.skill.patch import build_diff, detect_patch_trigger
+from rice_runtime.learning.skill.patch import build_diff
 from rice_runtime.learning.skill.store import SkillData, SkillStore
 from rice_runtime.learning.skill.usage import UsageStore
 from rice_runtime.learning.user_model.profile import UserProfile
@@ -109,38 +111,6 @@ class TestBuildDiff:
         for item in diff["lines"]:
             assert item["type"] in valid_types
             assert "text" in item
-
-
-# ── detect_patch_trigger 테스트 ───────────────────────────────────────────────
-
-class TestDetectPatchTrigger:
-    def test_no_injected_skills_returns_none(self):
-        result = detect_patch_trigger("actually, that was wrong", 3, ())
-        assert result is None
-
-    def test_correction_signal_returns_t1a(self):
-        result = detect_patch_trigger(
-            "Actually, the correct way is to use pytest.",
-            3,
-            ("my-skill",),
-        )
-        assert result == "T1a"
-
-    def test_failure_signal_returns_t1b(self):
-        result = detect_patch_trigger(
-            "The command failed during execution.",
-            3,
-            ("my-skill",),
-        )
-        assert result == "T1b"
-
-    def test_neutral_message_returns_none(self):
-        result = detect_patch_trigger(
-            "Here is the summary of what was done.",
-            3,
-            ("my-skill",),
-        )
-        assert result is None
 
 
 # ── LearningService.observe 테스트 ────────────────────────────────────────────
@@ -229,8 +199,10 @@ class TestObserve:
         assert len(pref_effects) >= 1
 
     @pytest.mark.asyncio
-    async def test_observe_patch_proposal_not_applied(self):
-        """PatchProposal은 미적용 상태로 반환된다 (적용 = apply_patch만)."""
+    async def test_observe_never_produces_patch_proposal(self):
+        """observe()는 규칙 기반 patch 제안을 더 이상 만들지 않는다(2026-07-02) — 강한
+        교정 신호가 있어도 memory 효과만 반환한다. 저작 판단은 review()의 몫이다
+        (test_learning_t4.py)."""
         self._store.write(_make_skill("target-sk"))
         outcome = TurnOutcome(
             session_id="sess3",
@@ -240,37 +212,9 @@ class TestObserve:
             injected_skill_ids=("target-sk",),
         )
         effects = await self._svc.observe(outcome)
-        proposals = [e for e in effects if isinstance(e, PatchProposal)]
-        # 제안이 있으면 미적용 확인 (스킬 버전 그대로)
-        if proposals:
-            proposal = proposals[0]
-            assert proposal.skill_id == "target-sk"
-            assert proposal.from_version == 1
-            assert proposal.to_version == 2
-            # apply_patch 호출 전이므로 현재 버전은 여전히 1
-            current = self._store.read("target-sk")
-            assert current.version == 1
-
-    @pytest.mark.asyncio
-    async def test_observe_patch_diff_has_correct_shape(self):
-        """PatchProposal.diff가 SkillDiff 형태를 갖는다."""
-        self._store.write(_make_skill("diff-sk"))
-        outcome = TurnOutcome(
-            session_id="sess4",
-            final_message="Actually, the correct procedure should be different.",
-            history=(),
-            tool_calls_made=0,
-            injected_skill_ids=("diff-sk",),
-        )
-        effects = await self._svc.observe(outcome)
-        proposals = [e for e in effects if isinstance(e, PatchProposal)]
-        if proposals:
-            diff = proposals[0].diff
-            assert "lines" in diff
-            assert isinstance(diff["lines"], list)
-            for item in diff["lines"]:
-                assert "type" in item
-                assert "text" in item
+        assert not any(isinstance(e, PatchProposal) for e in effects)
+        # 스킬 버전도 그대로다 (부수효과 없음)
+        assert self._store.read("target-sk").version == 1
 
 
 # ── apply_patch → history → rollback 통합 테스트 ─────────────────────────────
@@ -316,14 +260,45 @@ class TestApplyPatchFull:
         assert detail.version == 1
         assert UsageStore(self._paths).read("reject-sk").patch == 0
 
-    def test_apply_patch_without_edited_body_uses_current_body(self):
-        """edited_body 없으면 기존 본문을 그대로 새 버전으로 기록."""
+    def test_apply_patch_without_edited_body_or_proposed_body_keeps_current_body(self):
+        """edited_body·proposed_body 둘 다 없으면(퇴화 케이스) 기존 본문을 그대로 유지."""
         self._store.write(_make_skill("no-body-sk"))
         new_v = self._svc.apply_patch("no-body-sk", approved=True)
         assert new_v == 2
         detail = self._svc.get_skill("no-body-sk")
         assert detail is not None
         assert "Do thing A" in detail.body  # 원본 유지
+
+    def test_apply_patch_uses_proposed_body_when_not_edited(self):
+        """버그#0 회귀 방지: 사용자가 diff 카드에서 편집 없이 그냥 "승인"만 눌러도
+        (edited_body=None) 제안 자체의 proposed_body가 실제로 반영돼야 한다 — 이전에는
+        이 경로에서 조용히 current.body로 되돌아가 버전만 올라가고 본문은 안 바뀌었다."""
+        self._store.write(_make_skill("proposed-only-sk"))
+        new_v = self._svc.apply_patch(
+            "proposed-only-sk",
+            approved=True,
+            proposed_body="## Proposed Steps\n1. Do the new thing\n",
+        )
+        assert new_v == 2
+        detail = self._svc.get_skill("proposed-only-sk")
+        assert detail is not None
+        assert "Do the new thing" in detail.body
+        assert "Do thing A" not in detail.body
+
+    def test_apply_patch_edited_body_overrides_proposed_body(self):
+        """edited_body가 있으면 proposed_body보다 우선한다(사용자가 승인 카드에서 직접 고친 경우)."""
+        self._store.write(_make_skill("override-sk"))
+        new_v = self._svc.apply_patch(
+            "override-sk",
+            approved=True,
+            proposed_body="## Proposed\n",
+            edited_body="## User Edited\n",
+        )
+        assert new_v == 2
+        detail = self._svc.get_skill("override-sk")
+        assert detail is not None
+        assert "User Edited" in detail.body
+        assert "Proposed" not in detail.body
 
     def test_history_after_multiple_patches(self):
         """2번 패치 후 history에 v1, v2 각각 존재."""
@@ -393,40 +368,43 @@ class TestT3Acceptance:
         self._svc = _service(self._paths, self._db)
         self._store = SkillStore(self._paths)
 
-    @pytest.mark.asyncio
-    async def test_acceptance_patch_full(self):
-        """수용 기준 3: v1 → PatchProposal → apply_patch(approve) → v2 + history + counter."""
+    def test_acceptance_patch_full(self):
+        """수용 기준 1: v1 → PatchProposal(review()가 만든다고 가정 — 여기선 직접 구성해
+        apply_patch 메커니즘 자체를 검증) → apply_patch(approve) → v2 + history + counter."""
         # 1. v1 스킬 생성
         self._store.write(_make_skill("ac-patch"))
 
-        # 2. observe로 PatchProposal 유도
-        outcome = TurnOutcome(
-            session_id="sess_ac",
-            final_message="Actually, the correct way should use a different approach.",
-            history=(),
-            tool_calls_made=0,
-            injected_skill_ids=("ac-patch",),
+        # 2. PatchProposal 구성(review()가 만들 모양을 그대로 흉내 — observe()는 더 이상
+        #    이걸 만들지 않는다, test_learning_t4.py가 review() 자체를 검증한다)
+        old_body = self._store.read("ac-patch").body
+        proposed_body = "## Improved Steps\n"
+        proposal = PatchProposal(
+            skill_id="ac-patch",
+            changelog="사용자 교정 반영",
+            diff=build_diff(old_body, proposed_body),
+            trigger="T1a",
+            proposed_body=proposed_body,
+            from_version=1,
+            to_version=2,
         )
-        effects = await self._svc.observe(outcome)
-        proposals = [e for e in effects if isinstance(e, PatchProposal)]
-        # 제안이 있다면 검증 (보수적 감지이므로 없을 수도 있지만 있어야 함)
-        assert len(proposals) >= 1, "PatchProposal should be produced on correction signal"
-        proposal = proposals[0]
-        assert proposal.skill_id == "ac-patch"
-        assert proposal.from_version == 1
         assert not (self._paths.skill_history("ac-patch") / "v1.md").exists(), \
             "v1.md should NOT exist before apply_patch (proposal is not yet applied)"
 
-        # 3. apply_patch 승인
-        new_v = self._svc.apply_patch("ac-patch", approved=True, edited_body="## Improved Steps\n")
+        # 3. apply_patch 승인 (edited_body 없이 — proposed_body가 반영돼야 한다, 버그#0)
+        new_v = self._svc.apply_patch(
+            "ac-patch", approved=True, proposed_body=proposal.proposed_body
+        )
         assert new_v == 2
 
         # 4. .history/v1.md 존재
         assert (self._paths.skill_history("ac-patch") / "v1.md").exists()
 
-        # 5. usage.patch == 1
+        # 5. usage.patch == 1, 본문이 실제로 교체됨
         usage = UsageStore(self._paths).read("ac-patch")
         assert usage.patch == 1
+        detail = self._svc.get_skill("ac-patch")
+        assert detail is not None
+        assert "Improved Steps" in detail.body
 
     @pytest.mark.asyncio
     async def test_acceptance_observe_increments_use(self):

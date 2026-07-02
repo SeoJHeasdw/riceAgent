@@ -181,9 +181,15 @@ class ApprovalResponse:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SSE events — the 9 stream events + 2 control events (RICE_CONTRACTS §1.3).
+# SSE events — the 8 stream events + 2 control events (RICE_CONTRACTS §1.3).
 # `type` strings + `data` shapes mirror rice-app/src/lib/types.ts exactly.
 # Emitting is done via server/sse/emitter.py; the orchestrator yields these.
+#
+# NOTE(agent): `skill_created`/`SKILL_CREATED` was retired 2026-07-02 (Phase A.1,
+# Hermes learning_loop 이식). Skill creation is now unified into the
+# `skill_patch_proposed`(from_version=0) HITL flow — a bare creation event with
+# no approval gate contradicted RICE's own "스킬은 사용자 확인 후 저장" contract
+# (RICE_CONTRACTS §4). Do not resurrect it; see PatchProposal's docstring.
 # ─────────────────────────────────────────────────────────────────────────────
 class EventType(str, Enum):
     # stream events
@@ -191,7 +197,6 @@ class EventType(str, Enum):
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
     MESSAGE = "message"
-    SKILL_CREATED = "skill_created"
     MEMORY_WRITTEN = "memory_written"
     SKILL_PATCHED = "skill_patched"
     DONE = "done"
@@ -246,10 +251,6 @@ def ev_message(delta: str | None = None, content: str | None = None) -> SSEEvent
     return SSEEvent(EventType.MESSAGE, data)
 
 
-def ev_skill_created(skill_id: str, title: str, version: int) -> SSEEvent:
-    return SSEEvent(EventType.SKILL_CREATED, {"skill_id": skill_id, "title": title, "version": version})
-
-
 def ev_memory_written(memory_type: Literal["fact", "preference"], content: str) -> SSEEvent:
     return SSEEvent(EventType.MEMORY_WRITTEN, {"memory_type": memory_type, "content": content})
 
@@ -281,6 +282,8 @@ def ev_skill_patch_proposed(
     trigger: str,
     from_version: int | None = None,
     to_version: int | None = None,
+    proposed_body: str | None = None,
+    warnings: tuple[str, ...] = (),
 ) -> SSEEvent:
     data: dict[str, Any] = {
         "approval_id": approval_id,
@@ -293,4 +296,12 @@ def ev_skill_patch_proposed(
         data["from_version"] = from_version
     if to_version is not None:
         data["to_version"] = to_version
+    if proposed_body is not None:
+        # 견고성 개선(버그#0과 연계, 2026-07-02): 프론트가 diff.lines를 필터링해
+        # proposedBody를 재구성하던 것을 서버가 준 원문으로 대체할 수 있게 한다 —
+        # 재구성 로직은 remove 아닌 줄을 이어붙이는 방식이라 원문과 미묘하게
+        # 어긋날 잠재 위험이 있었다(개행/공백 edge case).
+        data["proposed_body"] = proposed_body
+    if warnings:
+        data["warnings"] = list(warnings)
     return SSEEvent(EventType.SKILL_PATCH_PROPOSED, data)

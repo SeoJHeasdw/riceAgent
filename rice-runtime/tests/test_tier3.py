@@ -336,14 +336,11 @@ class TestSignals:
         assert extract_skill_name("save this as a skill: my-flow") == "my-flow"
         assert extract_skill_name("그냥 아무 말") is None
 
-    def test_patch_trigger_scans_user_text(self):
-        from rice_runtime.learning.skill.patch import detect_patch_trigger
-
-        # 어시스턴트 최종 메시지엔 신호 없음, 사용자 메시지(교정)에 있음 → T1a
-        assert detect_patch_trigger("알겠습니다", 1, ("sk",), user_text="아니 그건 틀렸어") == "T1a"
-        # 주입 스킬 없으면 트리거 없음
-        assert detect_patch_trigger("틀렸어", 1, (), user_text="틀렸어") is None
-
+    # NOTE(agent): detect_patch_trigger(skill/patch.py)는 2026-07-02 제거됐다 —
+    # T1a/T1b 트리거 자기분류는 이제 review 엔진의 LLM이 propose_skill_patch의
+    # trigger_reason으로 직접 한다(has_correction_signal/has_failure_signal 자체는
+    # 위 test_korean_correction_and_failure가 계속 검증하며, review/gate.py의
+    # should_review()가 재사용한다).
 
 # ── Skill CRUD ────────────────────────────────────────────────────────────────
 

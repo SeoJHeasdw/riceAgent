@@ -9,7 +9,7 @@ import type { ThreadMessage } from '../lib/learningData';
 import { defaultModelSettings } from '../lib/mockData';
 import { api } from '../lib/api';
 import { sseClient } from '../lib/sse';
-import type { PendingApproval, ToolApprovalRequiredData, SkillPatchProposedData, SSEEvent } from '../lib/types';
+import type { PatchTrigger, PendingApproval, ToolApprovalRequiredData, SkillPatchProposedData, SSEEvent } from '../lib/types';
 import { Icon, ResizeHandle, ConfirmDialog } from '../components/ui';
 import { FileViewerProvider } from '../lib/fileViewer/FileViewerProvider';
 import { useToast } from '../lib/toast/ToastContext';
@@ -109,6 +109,15 @@ const toThread = (msgs: RawMessage[]): ThreadMessage[] => {
   return out;
 };
 
+// 트리거 코드 → 사람이 읽는 한 줄 라벨 (LEARNING_LOOP 5.2.2, T4는 Phase A.1 신규).
+const TRIGGER_LABELS: Record<PatchTrigger, string> = {
+  T1a: '사용자 교정',
+  T1b: '실패 후 개선',
+  T1c: '누락 보완',
+  T3: '정리 통합',
+  T4: '신규 제안',
+};
+
 // Map a parked approval (recovered after an SSE reconnect via
 // GET /sessions/{id}/pending-approvals, CONTRACTS 1.2) into a thread card so the
 // prompt re-renders. Approval state lives on the server, independent of the SSE
@@ -126,21 +135,28 @@ const pendingToThread = (p: PendingApproval): ThreadMessage | null => {
     };
   }
   const d = p.payload as SkillPatchProposedData;
+  const isNew = d.from_version === 0; // Phase A.1: 생성도 patch(from_version=0)로 온다
   return {
     kind: 'patch',
     approvalId: p.approval_id,
     skillId: d.skill_id,
     skillName: d.skill_id,
-    fromVer: d.from_version ? `v${d.from_version}` : '현재',
-    toVer: d.to_version ? `v${d.to_version}` : '개선',
+    // from_version은 0이 유효값(신규 생성)이라 `d.from_version ? ... : ...`(0을
+    // falsy로 오판)를 쓰면 안 된다 — undefined만 "값 없음"으로 취급한다.
+    fromVer: isNew ? '(신규)' : d.from_version !== undefined ? `v${d.from_version}` : '현재',
+    toVer: d.to_version !== undefined ? `v${d.to_version}` : '개선',
     changelog: d.changelog,
     trigger: d.trigger,
-    triggerLabel: '복구됨',
+    triggerLabel: TRIGGER_LABELS[d.trigger] ?? d.trigger,
     diff: d.diff.lines.map((l) => ({ t: l.type === 'context' ? 'ctx' : l.type, text: l.text })),
-    proposedBody: d.diff.lines
-      .filter((l) => l.type !== 'remove')
-      .map((l) => l.text)
-      .join('\n'),
+    // 서버가 준 원문을 그대로 쓴다(버그#0 견고성 개선) — diff.lines 재구성은 폴백만.
+    proposedBody:
+      d.proposed_body ??
+      d.diff.lines
+        .filter((l) => l.type !== 'remove')
+        .map((l) => l.text)
+        .join('\n'),
+    warnings: d.warnings,
   };
 };
 
@@ -398,6 +414,9 @@ function ChatScreen() {
   const needsTitleRefresh = useRef(false);
   // handle to the in-flight SSE turn so the user can stop it (see stopTurn)
   const streamHandleRef = useRef<{ abort: () => void } | null>(null);
+  // 이번 턴의 tool_call 이벤트 수 — 턴 시작 시 0으로 리셋, done에서 /learning-review
+  // 호출 시 넘긴다(트랜스크립트만으로는 유도 불가능한 유일한 값, Phase A.5).
+  const toolCallsMadeRef = useRef(0);
 
   const sessionPanel = useResizable({ initial: 264, min: 200, max: 420, storageKey: 'rice.panel.sessions' });
   const learningPanel = useResizable({ initial: 320, min: 240, max: 480, storageKey: 'rice.panel.learning', invert: true });
@@ -635,6 +654,7 @@ function ChatScreen() {
   const regenerate = () => {
     if (busy || !api.isEnabled || !liveSessionId.current) return;
     setBusy(true);
+    toolCallsMadeRef.current = 0;
     setThread((p) => {
       let end = p.length; // strip trailing assistant turn (blocks after the last user msg)
       for (let i = p.length - 1; i >= 0; i--) {
@@ -695,6 +715,99 @@ function ChatScreen() {
 
   const pushAgentText = (text: string) => setThread((p) => [...p, { kind: 'agent', text }]);
 
+  // memory_written / skill_patch_proposed / skill_patched 렌더링 — 메인 턴 스트림과
+  // /learning-review·/learn 스트림(Phase A) 양쪽에서 재사용한다. 어느 스트림에서
+  // 왔든 렌더링 로직은 동일해야 한다(같은 SSE 이벤트 어휘를 공유).
+  const handleMemoryWritten = (d: { memory_type: 'fact' | 'preference'; content: string }) => {
+    const label = d.memory_type === 'fact' ? '사실 기억됨' : '선호 기억됨';
+    toast.notify({ message: `💾 ${label}: ${d.content.slice(0, 60)}`, duration: 4000 });
+  };
+
+  const handleSkillPatchProposed = (d: SkillPatchProposedData) => {
+    // HITL gate — diff 카드 렌더링. 스트림은 계속 흐르지만 사용자 결정은
+    // POST /skills/{id}/patch 로 별도 전송 (pendingToThread 로직 재사용).
+    const card = pendingToThread({ approval_id: d.approval_id, kind: 'skill_patch', payload: d });
+    if (card) setThread((p) => [...p, card]);
+  };
+
+  const handleSkillPatched = (d: { skill_id: string; version: number }) => {
+    // 이전에 승인된 patch(또는 신규 생성 — from_version=0, Phase A.1)가 서버에서
+    // 적용 완료됨. 로컬 skills 상태 동기화 — id가 없으면(=방금 생성된 스킬,
+    // skill_created 이벤트는 더 이상 없음) map이 조용히 no-op하지 않도록 삽입한다.
+    let wasNew = false;
+    setSkills((arr) => {
+      if (arr.some((s) => s.id === d.skill_id)) {
+        return arr.map((s) =>
+          s.id === d.skill_id ? { ...s, ver: `v${d.version}`, patches: (s.patches ?? 0) + 1, trend: '개선됨' } : s,
+        );
+      }
+      wasNew = true;
+      return [
+        ...arr,
+        {
+          id: d.skill_id,
+          name: d.skill_id,
+          ver: `v${d.version}`,
+          uses: 0,
+          trend: '방금 생성',
+          enabled: true,
+          patches: 0,
+          command: d.skill_id,
+          state: 'active' as const,
+        },
+      ];
+    });
+    if (wasNew) {
+      setDetails((prev) =>
+        prev[d.skill_id]
+          ? prev
+          : {
+              ...prev,
+              [d.skill_id]: {
+                summary: d.skill_id,
+                createdFrom: '대화에서 자동 생성',
+                lastUsed: '방금',
+                shared: false,
+                rules: [],
+                versions: [{ ver: `v${d.version}`, when: '방금', note: '자동 생성', current: true }],
+                usage: [{ kind: '대화', name: activeSession?.title ?? '대화', icon: 'chat' as const }],
+                permissions: [],
+              },
+            },
+      );
+      jumpToSkill(d.skill_id);
+    }
+  };
+
+  // "이 대화를 스킬로 저장" — 명시적 사용자 트리거 (Phase C, learn_prompt.py 이식).
+  // /learning-review와 달리 게이트 없이 항상 시도한다. 같은 이벤트 어휘를 공유하므로
+  // 렌더링은 위의 shared handler 3종을 그대로 재사용 — 이 함수는 스트림을 열고
+  // 진행 상황만 toast로 알린다.
+  const learnFromConversation = () => {
+    const sid = liveSessionId.current;
+    if (!connected || !sid) return;
+    toast.notify({ message: '💡 대화를 스킬로 정리하는 중…', duration: 3000 });
+    let proposed = false;
+    sseClient.learnFromConversation(sid, '', {
+      onEvent: (e: SSEEvent) => {
+        if (e.type === 'memory_written') {
+          handleMemoryWritten(e.data as { memory_type: 'fact' | 'preference'; content: string });
+        } else if (e.type === 'skill_patch_proposed') {
+          proposed = true;
+          handleSkillPatchProposed(e.data as SkillPatchProposedData);
+        } else if (e.type === 'skill_patched') {
+          handleSkillPatched(e.data as { skill_id: string; version: number });
+        } else if (e.type === 'done' && !proposed) {
+          toast.notify({ message: '이 대화에서 저장할 만한 절차를 찾지 못했어요.', duration: 3000 });
+        } else if (e.type === 'error') {
+          const d = e.data as { message?: string };
+          toast.notify({ message: `⚠️ 학습 실패: ${d.message ?? '알 수 없는 오류'}`, duration: 4000 });
+        }
+      },
+      onError: (msg) => toast.notify({ message: `⚠️ 연결 오류: ${msg}`, duration: 4000 }),
+    });
+  };
+
   // Live path: stream a real turn from the local runtime over SSE.
   // SSE event handlers for a live turn — shared by sendLive (new turn) and
   // regenerateLive (re-answer). The multi-round reducer (thinking ↔ tool ↔
@@ -707,6 +820,7 @@ function ChatScreen() {
       } else if (e.type === 'tool_call') {
         // a tool round begins → close the reasoning block, push a running trace card
         finalizeThinking();
+        toolCallsMadeRef.current += 1; // POST /learning-review 호출 시 넘길 값 (Phase A.5)
         const d = e.data as { tool_call_id: string; tool_name: string; arguments?: Record<string, unknown> };
         setThread((p) => [
           ...p,
@@ -751,83 +865,39 @@ function ChatScreen() {
       } else if (e.type === 'message') {
         finalizeThinking();
         appendAnswer(e.data as { delta?: string; content?: string });
-      } else if (e.type === 'skill_created') {
-        // runtime이 새 스킬을 자동 생성했음을 알림 — learning store에 추가 + 패널 강조.
-        // 스킬 본문은 없으므로 최소 Skill 레코드로 등록하고, detail은 API로 지연 로드.
-        const d = e.data as { skill_id: string; title: string; version: number };
-        setSkills((arr) => {
-          if (arr.some((s) => s.id === d.skill_id)) return arr;
-          return [
-            ...arr,
-            {
-              id: d.skill_id,
-              name: d.title,
-              ver: `v${d.version}`,
-              uses: 0,
-              trend: '방금 생성',
-              enabled: true,
-              patches: 0,
-              command: d.skill_id,
-              state: 'active' as const,
-            },
-          ];
-        });
-        setDetails((prev) =>
-          prev[d.skill_id]
-            ? prev
-            : {
-                ...prev,
-                [d.skill_id]: {
-                  summary: d.title,
-                  createdFrom: '대화에서 자동 생성',
-                  lastUsed: '방금',
-                  shared: false,
-                  rules: [],
-                  versions: [{ ver: `v${d.version}`, when: '방금', note: '자동 생성', current: true }],
-                  usage: [{ kind: '대화', name: activeSession?.title ?? '대화', icon: 'chat' as const }],
-                  permissions: [],
-                },
-              },
-        );
-        jumpToSkill(d.skill_id);
       } else if (e.type === 'memory_written') {
-        // runtime이 메모리에 사실/선호를 기록했음을 toast로 알림.
-        const d = e.data as { memory_type: 'fact' | 'preference'; content: string };
-        const label = d.memory_type === 'fact' ? '사실 기억됨' : '선호 기억됨';
-        toast.notify({ message: `💾 ${label}: ${d.content.slice(0, 60)}`, duration: 4000 });
+        handleMemoryWritten(e.data as { memory_type: 'fact' | 'preference'; content: string });
       } else if (e.type === 'skill_patch_proposed') {
-        // HITL gate — diff 카드 렌더링. 스트림은 계속 흐르지만 사용자 결정은
-        // POST /skills/{id}/patch 로 별도 전송 (pendingToThread 로직 재사용).
-        const d = e.data as SkillPatchProposedData;
-        const card = pendingToThread({
-          approval_id: d.approval_id,
-          kind: 'skill_patch',
-          payload: d,
-        });
-        if (card) setThread((p) => [...p, card]);
+        handleSkillPatchProposed(e.data as SkillPatchProposedData);
       } else if (e.type === 'skill_patched') {
-        // 이전에 승인된 patch가 서버에서 적용 완료됨 (자동 경로: HITL 없이 적용된 경우).
-        // 로컬 skills 상태도 동기화.
-        const d = e.data as { skill_id: string; version: number };
-        setSkills((arr) =>
-          arr.map((s) =>
-            s.id === d.skill_id ? { ...s, ver: `v${d.version}`, patches: (s.patches ?? 0) + 1, trend: '개선됨' } : s,
-          ),
-        );
+        handleSkillPatched(e.data as { skill_id: string; version: number });
       } else if (e.type === 'done') {
         finalizeThinking();
         setBusy(false);
+        const sid = liveSessionId.current;
         // First turn of a new session → ask the runtime to name it from the opening
         // exchange. Separate, non-blocking call (POST /title): it does NOT hold up
         // this stream, and we patch just that row's title in place — no list refetch.
         if (connected && needsTitleRefresh.current) {
           needsTitleRefresh.current = false;
-          const sid = liveSessionId.current;
           if (sid)
             void api.generateTitle(sid).then((res) => {
               const title = res.success ? (res.data as { title?: string } | undefined)?.title : undefined;
               if (title) setSessions((prev) => prev.map((s) => (s.id === sid ? { ...s, title } : s)));
             });
+        }
+        // Gated LLM skill/memory review (Phase A) — another separate, non-blocking
+        // call right alongside the title one, same reasoning: an LLM call must
+        // never sit inline in this stream. Fast no-op when the server-side gate
+        // declines (ReviewGate) — most turns just get back a bare `done`.
+        if (connected && sid) {
+          sseClient.reviewLearning(sid, toolCallsMadeRef.current, {
+            onEvent: (re: SSEEvent) => {
+              if (re.type === 'memory_written') handleMemoryWritten(re.data as { memory_type: 'fact' | 'preference'; content: string });
+              else if (re.type === 'skill_patch_proposed') handleSkillPatchProposed(re.data as SkillPatchProposedData);
+              else if (re.type === 'skill_patched') handleSkillPatched(re.data as { skill_id: string; version: number });
+            },
+          });
         }
       } else if (e.type === 'error') {
         finalizeThinking();
@@ -868,6 +938,7 @@ function ChatScreen() {
         return;
       }
     }
+    toolCallsMadeRef.current = 0;
     streamHandleRef.current = sseClient.streamText(liveSessionId.current, q, buildStreamHandlers());
   };
 
@@ -1363,6 +1434,15 @@ function ChatScreen() {
                       <SkillsPopover onInsert={insertSkill} onClose={() => setSkillsOpen(false)} onEscape={() => composerRef.current?.focus()} onManage={manageFromPopover} />
                     )}
                   </div>
+                  {connected && liveSessionId.current && (
+                    <button
+                      onClick={learnFromConversation}
+                      className="p-1.5 hover:bg-layer-hover-01 transition-colors rounded-md text-icon-primary"
+                      title="이 대화를 스킬로 저장"
+                    >
+                      <Icon name="bookmark" size={16} />
+                    </button>
+                  )}
                   <div className="flex-1" />
                   <button
                     onClick={busy ? stopTurn : send}

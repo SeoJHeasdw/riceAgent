@@ -61,6 +61,22 @@ class LearningConfig:
     # 백그라운드 curator 주기(초). 0 이면 비활성(수동 POST /skills/curate 만).
     # 기본 1시간 — 데스크톱 앱이 떠 있는 동안 stale/archive 전이를 자동 반영.
     curator_interval_seconds: int = 3600
+    # review()(LLM 기반 스킬 저작 리뷰, /learning-review) 호출 여부 게이트
+    # (learning/review/gate.py::should_review) — 매 턴 LLM을 부르지 않기 위한
+    # 비용 통제. 이 턴의 tool_calls_made가 이 값 이상이면 리뷰를 시도한다.
+    review_min_tool_calls: int = 3
+    # 명확한 신호(교정/실패/스킬화 의도)가 없어도, 세션당 이만큼 턴이 지나면 그냥
+    # 한 번 리뷰를 시도한다(Hermes의 nudge-interval 카운터와 같은 목적 — 서서히
+    # 쌓이는 학습 기회를 놓치지 않기 위한 폴백).
+    review_nudge_turns: int = 8
+    # Phase D 하드닝: 스킬 본문 상한(자) — 폭주한 LLM 응답에 대한 마지막 방어선.
+    # 넉넉하게 잡음(실제 스킬은 이 근처도 안 감).
+    skill_max_body_chars: int = 20_000
+    # Phase B(curator 통합): 통합 분석 1회 호출에 담을 후보 스킬 전체 본문 총합
+    # 상한(자) — 수동 트리거+저빈도라 review()보다 훨씬 관대하게 잡는다(전체
+    # 본문을 보여줘야 진짜 중복/유사 판단이 가능하므로). 넘으면 use 하위 스킬부터
+    # 후보에서 제외.
+    curator_candidate_budget_chars: int = 300_000
 
 
 @dataclass(frozen=True)

@@ -92,7 +92,7 @@ RICE는 단순 프론트엔드 앱이 아니라 아래 3개 축의 결합이다.
 - Electron main process가 런타임 프로세스의 spawn / health check / 재시작 / 종료를 책임짐
 - 포트 충돌 회피와 인증(로컬 토큰) 최소 수준 포함
 
-스트리밍은 **SSE 이벤트 9종**으로 learning loop을 가시화한다(이벤트 명세 정본은 [RICE_CONTRACTS.md](RICE_CONTRACTS.md) 1.3).
+스트리밍은 **SSE 이벤트 8종**으로 learning loop을 가시화한다(이벤트 명세 정본은 [RICE_CONTRACTS.md](RICE_CONTRACTS.md) 1.3).
 
 이 계약(API 스키마)이 두 레포의 공유 지점이므로, OpenAPI 스펙으로 정의하고 양쪽에서 타입을 생성하는 것을 기본 전략으로 한다 (4.3 참조).
 
@@ -164,7 +164,7 @@ RICE는 단순 프론트엔드 앱이 아니라 아래 3개 축의 결합이다.
 - **connector management** (외부 서비스 연결 관리)
 - **credential storage** (OS 키체인 연동)
 - **permission system** (plugin/tool → connector 접근 검증)
-- 로컬 API 서버 (4.1의 IPC 계약 구현) — SSE 9종 + 승인 parking(`approval.py`)
+- 로컬 API 서버 (4.1의 IPC 계약 구현) — SSE 8종 + 승인 parking(`approval.py`)
 - **학습 측정 harness** (`eval/` — cold/warm 비교, `tests/`와 별개. [RICE_LEARNING_EVAL.md](RICE_LEARNING_EVAL.md))
 - 추후 remote execution 확장 포인트
 

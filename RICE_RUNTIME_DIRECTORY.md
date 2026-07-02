@@ -28,24 +28,24 @@ rice-runtime/                                # 배포물 ② : 로컬 단일 프
 ├── pyproject.toml
 ├── contracts/                               # 이 레포가 소유하는 API 계약 (rice-app이 코드젠)
 │   ├── runtime.yaml                         #   runtime OpenAPI 스펙
-│   └── sse-events.schema.json               #   9종 SSE 이벤트 + 제어 이벤트(tool_approval_required·skill_patch_proposed) 스키마 (CONTRACTS 문서 1.3)
+│   └── sse-events.schema.json               #   8종 SSE 이벤트 + 제어 이벤트(tool_approval_required·skill_patch_proposed) 스키마 (CONTRACTS 문서 1.3, 2026-07-02: skill_created 제거)
 ├── src/rice_runtime/
 │   │
 │   ├── server/                              # ▣ #13 로컬 API 서버  + #9(세션 부분)
 │   │   ├── app.py                           #   FastAPI 인스턴스
 │   │   ├── composition_root.py              #   ★ 모든 모듈 와이어링 (유일한 DI 진입점)
 │   │   ├── routes/
-│   │   │   ├── messages.py                  #   POST /sessions/{id}/messages (SSE) · abort
+│   │   │   ├── messages.py                  #   POST /sessions/{id}/messages (SSE) · title · learning-review · learn · abort
 │   │   │   │                                #     tool-approval · pending-approvals (HITL, RUNTIME_DESIGN 5장)
-│   │   │   ├── skills.py                    #   GET /skills · curate · state
-│   │   │   │                                #     patch/history/rollback (개선, LEARNING_LOOP 5.2)
+│   │   │   ├── skills.py                    #   GET /skills · curate(mode=rules|consolidate) · state
+│   │   │   │                                #     patch/history/rollback (개선, LEARNING_LOOP 5.2) · archive-decision/consolidate-decision (통합, 5.1)
 │   │   │   ├── plugins.py                   #   GET /plugins ...
 │   │   │   ├── connectors.py                #   GET/POST/DELETE /connectors
 │   │   │   ├── artifacts.py                 #   POST /artifacts/install
 │   │   │   └── settings.py
 │   │   ├── sse/
 │   │   │   └── emitter.py                   #   thinking/tool_call/tool_result/message/
-│   │   │                                    #     skill_created/memory_written/skill_patched/done/error
+│   │   │                                    #     memory_written/skill_patched/done/error (8종, skill_created 2026-07-02 제거)
 │   │   │                                    #     + 제어: tool_approval_required·skill_patch_proposed
 │   │   ├── approval.py                      #   ▣ HITL 승인 parking 레지스트리 (approval_id→Future,
 │   │   │                                    #     timeout·세션 abort/shutdown 정리) — RUNTIME_DESIGN 5장
@@ -60,6 +60,8 @@ rice-runtime/                                # 배포물 ② : 로컬 단일 프
 │   │   ├── tool_dispatch.py                 # ▣ #2 스키마 조립·가용성 필터(check_fn식)·라우팅·결과 수집
 │   │   │                                    #     연결 안 된 Connector tool 제외 (RUNTIME_DESIGN 2.1)
 │   │   ├── orchestrator.py                  #   얇은 조율: learning/connector/execution 호출
+│   │   ├── effect_surfacing.py              #   ★ 신규(2026-07-02) — LearningEffect→SSE(+HITL), 메인 턴과 /learning-review·/learn이 공유
+│   │   ├── titler.py                        #   세션 제목 생성 (post-turn, 논블로킹 — /learning-review·/learn과 같은 트리거 지점 패턴)
 │   │   ├── providers/                       #   모델 교체 지점 (Claude SaaS ↔ Ollama on-prem)
 │   │   │   ├── interfaces.py                #     ILLMProvider (tool_use·streaming·caching 정규화)
 │   │   │   ├── claude.py                    #     SaaS (Anthropic API)
@@ -81,17 +83,23 @@ rice-runtime/                                # 배포물 ② : 로컬 단일 프
 │   │
 │   ├── learning/                            # ▣ #3 memory #4 skill #5 curator #6 loop +#9 user
 │   │   ├── interfaces.py                    #   ILearningService (Protocol) — 분리 솔기
-│   │   ├── loop.py                          # ▣ #6 learning loop (경험→축적→재사용→개선)
+│   │   ├── service.py                       # ▣ #6 learning loop 파사드 (경험→축적→재사용→개선; 문서 초판의 loop.py에서 개명)
+│   │   ├── signals.py                       #   교정/실패/스킬화 의도 신호셋(한/영) — review gate가 재사용
 │   │   ├── memory/                          # ▣ #3 memory manager
-│   │   │   ├── store.py                     #   사실 메모리·선호 프로필
+│   │   │   ├── store.py                     #   사실 메모리·선호 프로필 (add() 시 §8 시크릿 스크러빙 적용)
 │   │   │   └── search.py                    #   FTS5 세션 검색
 │   │   ├── skill/                           # ▣ #4 skill lifecycle
-│   │   │   ├── lifecycle.py                 #   생성·상태전이(active→stale→archived)
-│   │   │   ├── patch.py                     #   개선(patch) 제안 산출·승인 적용·version++·.history 보관 (LEARNING_LOOP 5.2)
+│   │   │   ├── lifecycle.py                 #   상태전이(active→stale→archived) + curator 통합 archive
+│   │   │   ├── patch.py                     #   diff 산출(build_diff)만 — patch 저작 판단은 review/engine.py로 이관(2026-07-02)
 │   │   │   ├── usage.py                     #   use/view/patch 카운터
+│   │   │   ├── guard.py                     #   ★ 신규(Phase D): 크기 상한 + 시크릿 스크러빙, 스킬 이름 규약
 │   │   │   └── store.py                     #   ~/.rice/skills/*.md + .usage.json + <name>/.history/v<N>.md
+│   │   ├── review/                          #   ★ 신규(2026-07-02, Phase A) — LLM 기반 스킬/메모리 저작
+│   │   │   ├── gate.py                      #     ReviewGate — LLM 호출 가치 판단(값싼 휴리스틱, 내용 판단은 안 함)
+│   │   │   └── engine.py                    #     ReviewEngine — review()/learn() LLM 1회 호출, 쓰기 권한 없음(제안만)
 │   │   ├── curator/                         # ▣ #5 curator
-│   │   │   └── curator.py                   #   자동 전이 규칙 + 수동 "스킬 정리"
+│   │   │   ├── curator.py                   #   자동 전이 규칙 + 수동 "스킬 정리"(mode=rules)
+│   │   │   └── consolidate.py               #   ★ 신규(2026-07-02, Phase B) — ConsolidationEngine, LLM 스킬 통합 분석(mode=consolidate)
 │   │   ├── user_model/                      # ▣ #9 (user modeling 부분)
 │   │   │   └── profile.py                   #   개인화·답변 스타일 학습
 │   │   └── tests/

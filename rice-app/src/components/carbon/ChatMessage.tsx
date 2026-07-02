@@ -855,6 +855,14 @@ const PatchProposalCard: React.FC<{
           {m.changelog}
         </p>
 
+        {/* Phase D 가드 경고 — 시크릿 자동 마스킹 등 */}
+        {!!m.warnings?.length && (
+          <div className="mb-3 flex items-start gap-1.5 px-2.5 py-1.5 rounded-md bg-support-warning bg-opacity-10 border border-support-warning border-opacity-30">
+            <Icon name="warning" size={13} className="text-support-warning mt-0.5 flex-shrink-0" />
+            <p className="text-caption-01 text-text-secondary">{m.warnings.join(' · ')}</p>
+          </div>
+        )}
+
         {/* diff (or editable body) */}
         <div className="mb-3 border border-border-subtle-01 rounded-lg overflow-hidden bg-layer-01">
           <div className="px-3 py-2 border-b border-border-subtle-01 flex items-center gap-1.5">

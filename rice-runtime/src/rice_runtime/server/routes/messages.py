@@ -6,25 +6,43 @@ This router owns the ChatScreen's hot path:
   GET  /sessions/{id}/messages?cursor=        paginated history
   POST /sessions/{id}/messages                → SSE stream (the turn)
   POST /sessions/{id}/title                   name an untitled session (post-turn)
+  POST /sessions/{id}/learning-review         → SSE stream, gated LLM skill/memory
+                                                 review (post-turn, Phase A)
+  POST /sessions/{id}/learn                   → SSE stream, explicit "save this
+                                                 conversation as a skill" (Phase C)
   POST /sessions/{id}/abort                   cancel in-flight turn
   POST /sessions/{id}/tool-approval           answer a tool_approval_required
   GET  /sessions/{id}/pending-approvals       reconnect recovery (§5.1)
 
 The turn endpoint adapts `agent.run_turn(...)` (an SSEEvent async-gen) to an HTTP
 SSE response via the emitter. The route is thin: all behavior is in the orchestrator.
+
+`/learning-review` and `/learn` follow the exact same "separate, non-blocking,
+post-`done`" shape as `/title` — an LLM call must never sit inline in the main
+turn's stream (see agent/orchestrator.py's docstring + learning/interfaces.py
+§1b). Unlike `/title`, they return their OWN SSE stream (not a single JSON reply)
+because a review can produce a `skill_patch_proposed` that needs the same
+park-for-HITL dance the main turn already does — reusing `effect_surfacing`
+(agent/effect_surfacing.py) so both places drive that dance identically.
 """
 
 from __future__ import annotations
+
+import logging
+from typing import AsyncIterator
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from ...agent.effect_surfacing import surface_learning_effect
 from ...core.errors import ConflictError, NotFoundError
-from ...core.types import ApprovalResponse
+from ...core.types import ApprovalResponse, SSEEvent, ev_done, ev_error
 from ..composition_root import Container
 from ..sse.emitter import to_sse_stream
 from .deps import get_container
+
+log = logging.getLogger("rice.routes.messages")
 
 router = APIRouter(tags=["sessions"])
 
@@ -37,6 +55,16 @@ class MessageIn(BaseModel):
 class ToolApprovalIn(BaseModel):
     approval_id: str
     decision: str  # "approve" | "reject"
+
+
+class LearningReviewIn(BaseModel):
+    # tool_calls_made는 트랜스크립트만으로는 유도 불가능한 유일한 값 — 프론트가 방금
+    # 소비한 메인 턴 SSE 스트림에서 tool_call 이벤트 수를 세어 전달한다.
+    tool_calls_made: int = 0
+
+
+class LearnIn(BaseModel):
+    instruction: str = ""
 
 
 @router.post("/sessions")
@@ -98,6 +126,58 @@ async def generate_title(session_id: str, c: Container = Depends(get_container))
         raise NotFoundError(f"session {session_id} not found")
     title = await c.titler.maybe_title(session_id, c.sessions.history(session_id))
     return {"success": True, "data": {"title": title or info.title}}
+
+
+async def _stream_learning_effects(session_id: str, c: Container, coro) -> AsyncIterator[SSEEvent]:
+    """Shared tail for /learning-review and /learn: await the effects list, surface
+    each one as SSE (+ HITL park for skill proposals via the same helper the main
+    turn uses), then always close with `done` — mirrors orchestrator._drive_turn's
+    steps 7/8 exactly, just off the main stream. `coro` is the already-built
+    `c.learning.review(...)`/`c.learning.learn(...)` awaitable."""
+    try:
+        effects = await coro
+        timeout_s = c.config.learning.approval_timeout_seconds
+        for effect in effects:
+            async for event in surface_learning_effect(
+                session_id=session_id,
+                effect=effect,
+                learning=c.learning,
+                approvals=c.approvals,
+                approval_timeout_s=timeout_s,
+            ):
+                yield event
+    except Exception as exc:  # best-effort — must never leave the stream hanging
+        log.exception("learning effect stream failed for session %s", session_id)
+        yield ev_error("learning_review_failed", str(exc))
+    finally:
+        yield ev_done()
+
+
+@router.post("/sessions/{session_id}/learning-review")
+async def learning_review(session_id: str, body: LearningReviewIn, c: Container = Depends(get_container)):
+    """Gated LLM review, called fire-and-forget by the client right after the main
+    turn's `done` (same trigger point as /title). Fast no-op (single `done` frame)
+    when `ReviewGate` decides the turn doesn't warrant an LLM call."""
+    info = c.sessions.get(session_id)
+    if info is None:
+        raise NotFoundError(f"session {session_id} not found")
+    history = c.sessions.history(session_id)
+    coro = c.learning.review(session_id, list(history), body.tool_calls_made)
+    stream = to_sse_stream(_stream_learning_effects(session_id, c, coro))
+    return StreamingResponse(stream, media_type="text/event-stream")
+
+
+@router.post("/sessions/{session_id}/learn")
+async def learn(session_id: str, body: LearnIn, c: Container = Depends(get_container)):
+    """Explicit user-triggered learning ("이 대화를 스킬로 저장", Phase C) — same
+    engine as /learning-review, always runs (no gate), more directive prompt."""
+    info = c.sessions.get(session_id)
+    if info is None:
+        raise NotFoundError(f"session {session_id} not found")
+    history = c.sessions.history(session_id)
+    coro = c.learning.learn(session_id, list(history), body.instruction)
+    stream = to_sse_stream(_stream_learning_effects(session_id, c, coro))
+    return StreamingResponse(stream, media_type="text/event-stream")
 
 
 @router.post("/sessions/{session_id}/regenerate")

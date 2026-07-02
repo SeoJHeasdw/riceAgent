@@ -35,8 +35,18 @@ def _fresh_db() -> Database:
     return db
 
 
+def _fresh_paths() -> RicePaths:
+    tmp = tempfile.mkdtemp(prefix="rice-t1-test-")
+    return RicePaths.from_env(tmp).ensure()
+
+
 def _service(db: Database) -> LearningService:
-    return LearningService(db, LearningConfig())
+    # 버그#T1-격리: paths를 안 넘기면 RicePaths.from_env()가 실제 ~/.rice로
+    # 폴백한다 — 이 파일 docstring이 주장하는 "실제 ~/.rice 는 건드리지 않는다"가
+    # 실제로는 지켜지지 않고 있었다(사용자가 앱을 직접 렌더링해 만든 진짜
+    # ~/.rice/skills/caveman.md가 있으면 prefetch 관련 테스트가 그걸 읽어버려
+    # 깨짐). t2/t3/t4와 동일하게 임시 경로를 명시로 격리한다.
+    return LearningService(db, LearningConfig(), _fresh_paths())
 
 
 # ── MemoryStore tests (pure logic, no external deps) ──────────────────────────

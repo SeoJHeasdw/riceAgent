@@ -8,7 +8,7 @@
 
 ## 1. 목적 & 측정 철학
 
-RICE의 단 하나의 핵심 주장은 **"쓸수록 사용자에게 맞춰 똑똑해진다"**([RICE_PRODUCT_IDEA.md](RICE_PRODUCT_IDEA.md))이다. 지금까지 이 주장의 증거는 **정성적**이다 — SSE 이벤트(9종, [RICE_CONTRACTS.md](RICE_CONTRACTS.md) 1.3)로 `skill_created`·`memory_written`·`skill_patched`가 화면에 흐르는 것을 *보여준다*. 그러나 "스킬이 생성되는 것이 보인다"는 "스킬 덕분에 실제로 더 잘/빨리 한다"와 다르다.
+RICE의 단 하나의 핵심 주장은 **"쓸수록 사용자에게 맞춰 똑똑해진다"**([RICE_PRODUCT_IDEA.md](RICE_PRODUCT_IDEA.md))이다. 지금까지 이 주장의 증거는 **정성적**이다 — SSE 이벤트(8종, [RICE_CONTRACTS.md](RICE_CONTRACTS.md) 1.3)로 `skill_patch_proposed`(신규 생성은 `from_version=0`)·`memory_written`·`skill_patched`가 화면에 흐르는 것을 *보여준다*. 그러나 "스킬이 생성되는 것이 보인다"는 "스킬 덕분에 실제로 더 잘/빨리 한다"와 다르다.
 
 이 문서는 그 간극을 닫는다: **동일한 과제를 학습 전(cold) vs 학습 후(warm)로 실행해, 더 적은 turn·tool call로 더 높은 성공률에 도달함을 숫자로 증명**한다.
 

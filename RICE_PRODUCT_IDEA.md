@@ -45,7 +45,7 @@ RICE는 사용자의 업무 경험을 축적하며 학습·진화하는 개인 �
 - 사용자 선호와 스타일 학습
 - 이후 작업에서 자동 적용
 
-> Learning loop 진행은 실시간 SSE 이벤트로 화면에 가시화된다(이벤트 명세 정본은 [RICE_CONTRACTS.md](RICE_CONTRACTS.md) 1.3 — 생성·개선(patch) 포함 9종).
+> Learning loop 진행은 실시간 SSE 이벤트로 화면에 가시화된다(이벤트 명세 정본은 [RICE_CONTRACTS.md](RICE_CONTRACTS.md) 1.3 — 개선(patch) 포함 8종, 생성은 2026-07-02부터 patch(from_version=0)로 통일).
 
 ### 3.2 User Modeling
 사용자별 개인화
