@@ -111,13 +111,15 @@ const toThread = (msgs: RawMessage[]): ThreadMessage[] => {
   return out;
 };
 
-// 트리거 코드 → 사람이 읽는 한 줄 라벨 (LEARNING_LOOP 5.2.2, T4는 Phase A.1 신규).
+// 트리거 코드 → 사람이 읽는 한 줄 라벨 (LEARNING_LOOP 5.2.2, T4는 Phase A.1,
+// T5는 Self-Improvement v3 — 대화 중 에이전트가 propose_skill로 직접 발의).
 const TRIGGER_LABELS: Record<PatchTrigger, string> = {
   T1a: '사용자 교정',
   T1b: '실패 후 개선',
   T1c: '누락 보완',
   T3: '정리 통합',
   T4: '신규 제안',
+  T5: '에이전트 제안',
 };
 
 // Map a parked approval (recovered after an SSE reconnect via
@@ -562,7 +564,7 @@ const ChatStarter: React.FC<{ skills: Skill[]; onPick: (text: string) => void }>
 };
 
 function ChatScreen() {
-  const { skills, jumpToSkill, setSkills, setDetails, panelScrollRef } = useLearning();
+  const { skills, jumpToSkill, setSkills, setDetails, panelScrollRef, refreshSuggestions } = useLearning();
   const toast = useToast();
 
   const [thread, setThread] = useState<ThreadMessage[]>([]);
@@ -586,6 +588,9 @@ function ChatScreen() {
   const [learningPanelOpen, setLearningPanelOpen] = useState(true);
   const [settingsPanelOpen, setSettingsPanelOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
+  // "이 대화를 스킬로 저장" 팝오버 — 선택 instruction 입력 후 /learn 스트림 시작
+  const [learnOpen, setLearnOpen] = useState(false);
+  const [learnInstruction, setLearnInstruction] = useState('');
   // a live (runtime) turn is streaming — gates the composer so we can't double-send,
   // and drives the "생성 중" affordance on the send button.
   const [busy, setBusy] = useState(false);
@@ -867,9 +872,24 @@ function ChatScreen() {
         },
       };
     });
-    // contract response (parking match by approval_id) — no-op until runtime is up
-    void api.respondSkillPatch(m.skillId, { approval_id: m.approvalId, decision: 'approve', edited_body: editedBody });
+    // contract response (parking match by approval_id) — no-op until runtime is up.
+    // 만료된 제안(파킹 타임아웃)은 서버가 이미 제안함으로 옮겼다(Self-Improvement v3)
+    // — 409가 오면 카드 대신 제안함에서 결정하라고 안내한다.
+    void api.respondSkillPatch(m.skillId, { approval_id: m.approvalId, decision: 'approve', edited_body: editedBody }).then((res) => {
+      if (!res.success && connected) {
+        toast.notify({ message: '⏳ 카드가 만료되어 제안함으로 이동했어요 · 학습 패널에서 결정할 수 있습니다', duration: 5000 });
+        void refreshSuggestions();
+      }
+    });
     jumpToSkill(m.skillId);
+  };
+
+  // 명시적 거부 → 서버 파킹 즉시 해소 + ledger에 'rejected' 기록(반복 거부 쿨다운의
+  // 원천, Self-Improvement v3). 이전엔 거부가 로컬 카드 상태만 바꿔 서버는 타임아웃까지
+  // 기다렸다 — v3에선 타임아웃이 제안함으로 이동하므로, 명시적 거부를 서버에 알리지
+  // 않으면 사용자가 거부한 제안이 제안함에 다시 나타나는 모순이 생긴다.
+  const handleRejectPatch = (m: Extract<ThreadMessage, { kind: 'patch' }>) => {
+    void api.respondSkillPatch(m.skillId, { approval_id: m.approvalId, decision: 'reject' });
   };
 
   // tool-execution approval (HITL) → POST the decision back to the runtime,
@@ -1012,13 +1032,15 @@ function ChatScreen() {
   // "이 대화를 스킬로 저장" — 명시적 사용자 트리거 (Phase C, learn_prompt.py 이식).
   // /learning-review와 달리 게이트 없이 항상 시도한다. 같은 이벤트 어휘를 공유하므로
   // 렌더링은 위의 shared handler 3종을 그대로 재사용 — 이 함수는 스트림을 열고
-  // 진행 상황만 toast로 알린다.
-  const learnFromConversation = () => {
+  // 진행 상황만 toast로 알린다. instruction(선택)은 학습 팝오버에서 사용자가 직접
+  // 입력한 초점("배포 단계만 정리해줘")이며 빈 문자열이면 대화 전체를 자동 증류한다.
+  const learnFromConversation = (instruction = '') => {
     const sid = liveSessionId.current;
     if (!connected || !sid) return;
-    toast.notify({ message: '💡 대화를 스킬로 정리하는 중…', duration: 3000 });
+    setLearnOpen(false);
+    toast.notify({ message: '✨ 대화를 스킬로 정리하는 중…', duration: 3000 });
     let proposed = false;
-    sseClient.learnFromConversation(sid, '', {
+    sseClient.learnFromConversation(sid, instruction, {
       onEvent: (e: SSEEvent) => {
         if (e.type === 'memory_written') {
           handleMemoryWritten(e.data as { memory_type: 'fact' | 'preference'; content: string });
@@ -1602,6 +1624,7 @@ function ChatScreen() {
                       onRegenerate={regenerate}
                       onSaveSkill={saveSkillFromChat}
                       onApprovePatch={handleApprovePatch}
+                      onRejectPatch={handleRejectPatch}
                       onRespondApproval={handleToolApproval}
                       highlightIndex={highlightMsg}
                       actionsCopyAt={actionsCopyAt}
@@ -1746,14 +1769,62 @@ function ChatScreen() {
                     )}
                   </div>
                   {connected && liveSessionId.current && (
-                    <Tooltip label="이 대화를 스킬로 저장">
-                      <button
-                        onClick={learnFromConversation}
-                        className="p-1.5 rounded-lg text-icon-secondary hover:text-icon-primary hover:bg-layer-hover-01 transition-colors"
-                      >
-                        <Icon name="bookmark" size={16} />
-                      </button>
-                    </Tooltip>
+                    <div className="relative">
+                      <Tooltip label="이 대화를 스킬로 저장">
+                        <button
+                          onClick={() => setLearnOpen((o) => !o)}
+                          className={`p-1.5 rounded-lg transition-colors ${
+                            learnOpen
+                              ? 'bg-interactive/15 text-blue-30'
+                              : 'text-icon-secondary hover:text-icon-primary hover:bg-layer-hover-01'
+                          }`}
+                        >
+                          <Icon name="sparkle" size={16} />
+                        </button>
+                      </Tooltip>
+                      {learnOpen && (
+                        <div className="absolute bottom-10 left-0 z-30 w-72 bg-layer-02 border border-border-subtle-01 rounded-lg shadow-elevation-2 p-3">
+                          <div className="flex items-center gap-1.5 mb-2">
+                            <Icon name="sparkle" size={14} className="text-blue-30" />
+                            <span className="text-body-short-01 font-semibold text-text-primary">이 대화를 스킬로 저장</span>
+                          </div>
+                          <textarea
+                            value={learnInstruction}
+                            onChange={(e) => setLearnInstruction(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && !e.shiftKey) {
+                                e.preventDefault();
+                                learnFromConversation(learnInstruction.trim());
+                                setLearnInstruction('');
+                              } else if (e.key === 'Escape') {
+                                setLearnOpen(false);
+                              }
+                            }}
+                            placeholder="무엇을 중심으로 정리할까요? (비워두면 대화 전체를 자동 증류)"
+                            rows={2}
+                            autoFocus
+                            className="w-full bg-field-01 border border-border-subtle-01 rounded-md px-2.5 py-2 text-body-short-01 text-text-primary placeholder:text-text-placeholder resize-none focus:outline-none focus:border-interactive"
+                          />
+                          <div className="flex items-center justify-end gap-1.5 mt-2">
+                            <button
+                              onClick={() => setLearnOpen(false)}
+                              className="h-7 px-2.5 rounded-md text-caption-01 text-text-secondary hover:bg-layer-hover-01 transition-colors"
+                            >
+                              취소
+                            </button>
+                            <button
+                              onClick={() => {
+                                learnFromConversation(learnInstruction.trim());
+                                setLearnInstruction('');
+                              }}
+                              className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-caption-01 font-semibold bg-interactive text-white hover:bg-[#0353e9] transition-colors"
+                            >
+                              <Icon name="sparkle" size={12} /> 스킬로 정리
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   )}
                   <div className="flex-1" />
                   <Tooltip label={busy ? '생성 중지' : '전송'}>

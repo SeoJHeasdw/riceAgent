@@ -135,25 +135,45 @@ def _render_known_facts(facts: Sequence[str]) -> str:
     return "\n".join(lines)
 
 
+def _render_rejections(rejected: Sequence[str]) -> str:
+    """Self-Improvement v3: 사용자가 최근 거부한 제안 목록. LLM이 같은 제안을
+    반복하지 않게 하는 사전(prompt) 방어 — 사후 방어(엔진의 쿨다운 억제)와 짝."""
+    if not rejected:
+        return ""
+    lines = [
+        "## Recently REJECTED proposals (the user said no — do NOT re-propose "
+        "the same change; only touch these skills again for a clearly different reason)"
+    ]
+    lines.extend(f"- {r}" for r in rejected)
+    return "\n".join(lines)
+
+
 def build_review_messages(
     history: Sequence[Message],
     *,
     full_body_skills: Sequence[tuple[str, str, str]],
     compact_skills: Sequence[tuple[str, str]],
     known_facts: Sequence[str],
+    rejected_recently: Sequence[str] = (),
     instruction: str = "Review the conversation above and propose any durable skill/memory updates.",
 ) -> tuple[str, list[Message]]:
     """Build (system, messages) for a one-shot review call. `history` is the
     actual conversation transcript (not a compact excerpt like `title.py` uses —
     the review needs the real detail to judge nuance), followed by one final
-    user-role message carrying the skill catalog + known facts + the ask.
+    user-role message carrying the skill catalog + known facts + recent
+    rejections (meta-learning, Self-Improvement v3) + the ask.
     `instruction` is overridden by Phase C's explicit "save this as a skill"
     action (learn()) — same engine, more directive final message.
     """
-    context = (
-        f"{_render_skill_catalog(full_body_skills, compact_skills)}\n\n"
-        f"{_render_known_facts(known_facts)}\n\n{instruction}"
-    )
+    rejection_block = _render_rejections(rejected_recently)
+    parts = [
+        _render_skill_catalog(full_body_skills, compact_skills),
+        _render_known_facts(known_facts),
+    ]
+    if rejection_block:
+        parts.append(rejection_block)
+    parts.append(instruction)
+    context = "\n\n".join(parts)
     messages = list(history) + [Message(role="user", content=context)]
     return REVIEW_SYSTEM_PROMPT, messages
 

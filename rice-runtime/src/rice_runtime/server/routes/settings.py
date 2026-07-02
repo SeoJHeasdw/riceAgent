@@ -170,3 +170,20 @@ async def ollama_model_health(c: Container = Depends(get_container)):
 @router.get("/memories")
 async def get_memories(c: Container = Depends(get_container)):
     return {"success": True, "data": [m.__dict__ for m in c.learning.list_memories()]}
+
+
+@router.delete("/memories/{memory_id}")
+async def delete_memory(memory_id: str, c: Container = Depends(get_container)):
+    """메모리 삭제 (Self-Improvement v3). 메모리는 HITL 없이 즉시 반영되는 유일한
+    학습 경로 — 잘못 들어간 항목이 매 턴 영구 주입되지 않도록 사후 제거 수단을
+    제공한다. 없으면 NotFoundError → 404."""
+    c.learning.delete_memory(memory_id)
+    return {"success": True}
+
+
+@router.get("/learning/events")
+async def learning_events(limit: int = 100, c: Container = Depends(get_container)):
+    """학습 감사 로그 (Self-Improvement v3) — 제안/승인/거부/타임아웃/메모리 기록의
+    영속 이력. '루프가 실제로 무엇을 배우고 무엇이 기각됐는가'를 UI가 보여줄 수
+    있게 하는 원천(편집가능·감사가능·롤백 원칙의 감사 축)."""
+    return {"success": True, "data": c.learning.learning_events(min(max(limit, 1), 500))}

@@ -132,7 +132,9 @@ def build_container(args: RuntimeArgs | None = None, *, paths: RicePaths | None 
     )
 
     # ── builtin tools (in-process; advertised to the LLM + dispatched directly) ─
-    builtin_specs, builtins = build_builtin_tools(paths)
+    # learning을 넘겨 propose_skill(미드턴 스킬 승격, Self-Improvement v3)을 함께
+    # 등록한다 — 도구는 스테이징만 하고 쓰기는 여전히 HITL 카드 승인 뒤에만 일어난다.
+    builtin_specs, builtins = build_builtin_tools(paths, learning=learning)
 
     # ── session titler (names a new chat from its opening exchange, post-answer) ─
     # Decoupled from the store via two callables, so it binds to neither seam.

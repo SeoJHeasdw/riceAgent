@@ -148,8 +148,9 @@ export interface ErrorEventData {
 
 /** what raised a patch proposal — audit trail (LEARNING_LOOP 5.2.2).
  * T4 = brand-new skill proposal (from_version=0, Phase A.1 — creation unified
- * into the patch flow instead of a separate skill_created event). */
-export type PatchTrigger = 'T1a' | 'T1b' | 'T1c' | 'T3' | 'T4';
+ * into the patch flow instead of a separate skill_created event).
+ * T5 = 미드턴 에이전트 발의 (Self-Improvement v3, propose_skill 빌트인). */
+export type PatchTrigger = 'T1a' | 'T1b' | 'T1c' | 'T3' | 'T4' | 'T5';
 
 export interface SkillDiffLine {
   type: 'add' | 'remove' | 'context';
@@ -179,6 +180,54 @@ export interface SkillPatchProposedData {
   proposed_body?: string;
   /** Phase D guard redaction notices (secret-scrub/size-cap), empty/absent when clean */
   warnings?: string[];
+}
+
+// ── suggestion inbox + learning ledger (Self-Improvement v3) ──
+/** 영속 제안함 항목 — payload는 SkillPatchProposedData와 같은 어휘(approval_id 제외).
+ * 파킹 타임아웃/백그라운드 발굴처럼 스트림 밖에서 태어난 제안이 여기 산다. */
+export interface SkillSuggestion {
+  id: string;
+  created_at: string;
+  origin: 'review' | 'learn' | 'agent' | 'discovery' | 'consolidation' | 'timeout';
+  kind: 'create' | 'patch' | 'archive';
+  skill_id: string;
+  payload: {
+    skill_id: string;
+    changelog: string;
+    diff: SkillDiff;
+    trigger: PatchTrigger;
+    from_version: number;
+    to_version: number;
+    proposed_body: string;
+    description?: string;
+    tags?: string[];
+    warnings?: string[];
+    session_id?: string;
+    /** archive kind 전용 */
+    reason?: string;
+    absorbed_into?: string | null;
+  };
+  status: 'pending' | 'approved' | 'rejected' | 'expired';
+  decided_at: string | null;
+}
+
+/** 학습 감사 로그 한 줄 (GET /learning/events) */
+export interface LearningEvent {
+  id: string;
+  ts: string;
+  kind: string; // proposed | approved | rejected | timeout | memory_written | ...
+  skill_id: string | null;
+  session_id: string | null;
+  origin: string | null;
+  trigger: string | null;
+  detail: Record<string, unknown> | null;
+}
+
+/** 런타임 메모리 항목 (GET /memories) */
+export interface RuntimeMemory {
+  id: string;
+  kind: 'fact' | 'preference';
+  content: string;
 }
 
 export type SSEEvent =

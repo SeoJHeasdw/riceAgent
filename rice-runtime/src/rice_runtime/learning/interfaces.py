@@ -40,7 +40,9 @@ SkillState = Literal["active", "stale", "archived"]
 # 맞아 하나만 추가했다. T1a/b/c는 이제 규칙이 아니라 review 엔진의 LLM이 스스로
 # 고른다(propose_skill_patch의 trigger_reason) — T1c(누락 단계/낡은 값 organically
 # 발견)는 정규식으론 애초에 판단 불가능해 지금까지 한 번도 실사용되지 않았다.
-PatchTrigger = Literal["T1a", "T1b", "T1c", "T3", "T4"]
+# T5 신규(Self-Improvement v3): 미드턴 에이전트 발의 — 대화 중 `propose_skill`
+# 빌트인 도구로 스테이징된 제안(생성이든 개선이든 발의 주체가 다르므로 별도 코드).
+PatchTrigger = Literal["T1a", "T1b", "T1c", "T3", "T4", "T5"]
 
 
 # ── prefetch output (LEARNING_LOOP §6, §7) ───────────────────────────────────
@@ -195,6 +197,60 @@ class ILearningService(Protocol):
         "patching"). On reject/timeout: returns None."""
         ...
 
+    # ── mid-turn staging (agent/builtins/skill_tools.py::propose_skill, T5) ───
+    def stage_proposal(
+        self,
+        session_id: str,
+        *,
+        name: str,
+        body: str,
+        description: str = "",
+        tags: tuple[str, ...] = (),
+        changelog: str = "",
+    ) -> dict:
+        """대화 중 에이전트가 발의한 스킬 승격/개선 제안을 세션별로 스테이징한다
+        (Self-Improvement v3). 파일에 닿지 않는다 — observe()가 턴 종료 때 드레인해
+        기존 HITL 카드(surface_learning_effect)로 서피싱한다. 반환은 모델에게
+        돌려줄 상태 dict({"status": "staged"|"dropped", "message": ...})."""
+        ...
+
+    def resolve_proposal(
+        self,
+        proposal: PatchProposal,
+        *,
+        session_id: str,
+        decision: str,
+        edited_body: str | None = None,
+    ) -> int | None:
+        """파킹된 PatchProposal의 HITL 결정 처리 — apply_patch를 감싸며 (1) 결정을
+        ledger에 기록하고(메타학습 원천), (2) timeout이면 폐기 대신 제안함
+        (skill_suggestions)으로 옮긴다. approve면 새 버전 번호, 그 외 None."""
+        ...
+
+    # ── suggestion inbox (Self-Improvement v3) ───────────────────────────────
+    def suggestions(self) -> list[dict]:
+        """pending 제안함 목록 (GET /skills/suggestions). payload는 SSE
+        skill_patch_proposed와 같은 어휘 — 프론트가 동일 카드로 렌더링."""
+        ...
+
+    def decide_suggestion(
+        self, suggestion_id: str, *, approved: bool, edited_body: str | None = None
+    ) -> dict:
+        """제안함 항목 승인/거부 (POST /skills/suggestions/{id}/decision). 승인 시
+        kind에 따라 apply_patch(create/patch) 또는 decide_archive(archive)로 적용.
+        반환: {"applied": bool, "version": int | None}."""
+        ...
+
+    async def discover(self, digests: list) -> list[dict]:
+        """크로스세션 반복 패턴 발굴 (POST /skills/discover + 백그라운드 스케줄러).
+        산출된 신규 스킬 제안을 제안함에 넣고, 새로 추가된 suggestion 목록을
+        반환한다. provider 미배선이면 빈 목록."""
+        ...
+
+    def learning_events(self, limit: int = 100) -> list[dict]:
+        """학습 감사 로그 (GET /learning/events) — 제안/결정/적용/메모리 기록."""
+        ...
+
     # ── post-turn, LLM-backed (routes/messages.py: /learning-review, /learn) ──
     async def review(
         self, session_id: str, history: list[Message], tool_calls_made: int
@@ -272,3 +328,9 @@ class ILearningService(Protocol):
 
     # ── memory (routes/memories) ─────────────────────────────────────────────
     def list_memories(self) -> list[MemoryItem]: ...
+
+    def delete_memory(self, memory_id: str) -> None:
+        """메모리 삭제 (DELETE /memories/{id}, Self-Improvement v3). 메모리는
+        HITL 없이 즉시 반영되는 유일한 학습 경로라, 사후 제거 수단이 있어야
+        '한 번 잘못 들어가면 매 턴 영구 주입'이 되지 않는다."""
+        ...

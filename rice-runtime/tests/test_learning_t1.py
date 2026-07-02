@@ -167,7 +167,7 @@ class TestLearningServiceT1:
 
     def test_prefetch_includes_guidance(self):
         result = self._svc.prefetch("sess_1", "hello")
-        assert "SKILL.md" in result.system_prompt_additions
+        assert "propose_skill" in result.system_prompt_additions
 
     def test_prefetch_no_memories_returns_empty_tuple(self):
         result = self._svc.prefetch("sess_1", "hello")

@@ -1,10 +1,12 @@
 # RICE Learning Loop Design
 
-> 작성일: 2026-06-18 (개정: 2026-06-26, **2026-07-02 대개정 — Hermes learning_loop 이식**) · 상태: **확정 (결정 완료)**
+> 작성일: 2026-06-18 (개정: 2026-06-26, **2026-07-02 대개정 — Hermes learning_loop 이식**, **2026-07-03 v3 — Self-Improvement 리모델**) · 상태: **확정 (결정 완료)**
 > 범위: RICE의 핵심 차별점인 learning loop의 **자체 스펙** — SKILL.md 포맷, usage 텔레메트리, 생성 트리거, **개선(patch)**, curator 규칙+LLM 통합, memory/user modeling, 안전장치(시크릿 스크러빙)
 > 관계: [HERMES_LEARNING_LOOP_REFERENCE.md](HERMES_LEARNING_LOOP_REFERENCE.md)는 *참조*(Hermes 코드 분석), 이 문서는 *RICE의 결정*이다. 런타임 통합은 [RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md) 3·4장, 모듈 위치는 [RICE_RUNTIME_DIRECTORY.md](RICE_RUNTIME_DIRECTORY.md) `learning/`. **학습이 실제로 일어났음을 측정·증명하는 방법**은 [RICE_LEARNING_EVAL.md](RICE_LEARNING_EVAL.md).
 >
 > **2026-07-02 대개정 요지**: 이 문서의 초판(§4·§5)이 서술한 "시스템 프롬프트 가이드로 LLM이 자율 판단" 트리거는 실제로는 **정규식/키워드 매칭**으로만 구현돼 있었다(스킬 생성 본문이 `final_message`를 그냥 500자 자르는 수준). 진짜 저작 지능(무엇을 스킬로 만들지, patch 본문에 뭘 쓸지)을 LLM에 맡기도록 학습 루프 전체를 다시 짰다 — Hermes의 `background_review.py`/`curator.py`를 참조해 RICE의 HITL 불변식(스킬은 항상 사람 승인 후 저장, §5.2.1)에 맞게 이식. 아래 §4·§5·§8은 전면 재작성됐다.
+>
+> **2026-07-03 v3 (Self-Improvement 리모델) 요지**: v2까지의 루프는 제안을 잘 만들지만 **자기 결정 이력에서 아무것도 배우지 못했다** — 제안→결정이 in-memory 파킹에만 존재해 재시작·타임아웃과 함께 증발했고, 거부된 제안이 무한 재등장할 수 있었으며(§5.2.4의 "(향후) 반복 거부 시 하향"이 미구현), 리뷰는 프론트 호출 의존 + 단일 세션 시야였고, 메인 에이전트는 "SKILL.md로 저장하라"는 지시만 받고 도구가 없었다(공중 지시). v3는 **Learning Ledger**(제안/결정 영속 감사 로그 → 반복 거부 쿨다운 + 프롬프트 회피 목록)와 **Suggestion Inbox**(파킹 밖에서 살아남는 영속 제안함 — 타임아웃 이동 + 발굴 수신)를 중심으로 리모델했다. 신규: §9 (Ledger·Inbox·Discovery), §4/§5.2.2의 T5(미드턴 에이전트 발의), §6의 정규식 추출 제거 + 메모리 삭제.
 
 ---
 
@@ -186,6 +188,18 @@ patch로 표현되고(`from_version=0`), `skill_patch_proposed`가 diff 카드�
   SSE는 없음 — 애초에 스트림 밖의 일반 REST 편집).
 - **T3 — curator 통합 (수동 "AI 통합 제안").** §5.1 참고. `ConsolidationEngine`이
   중복/유사 스킬 묶음을 하나의 umbrella로 합치는 patch를 제안한다.
+- **T5 — 미드턴 에이전트 발의 (2026-07-03 신규, Self-Improvement v3).** 메인
+  에이전트가 대화 **도중** `propose_skill` 빌트인 도구로 직접 발의한다("이걸
+  스킬로 승격할까요?"). v2까지 SKILL_GUIDANCE는 "SKILL.md로 저장하라"고 지시만
+  하고 도구가 없었다(공중 지시 — 에이전트가 말만 하고 아무 일도 안 일어남).
+  도구는 파일에 닿지 않는다: `LearningService.stage_proposal()`에 세션별로
+  스테이징하고, `observe()`가 턴 종료 때 드레인해 **같은 턴의 스트림**에서 기존
+  HITL diff 카드로 서피싱한다(`skill_patch_proposed`, trigger="T5" — 생성/개선
+  모두). 스팸 방어: 턴당 3건 상한, plugin 소유 스킬 거부, 중단(abort)된 턴의
+  스테이징은 폐기. **반복 거부 쿨다운(§9)을 적용하지 않는 유일한 경로** —
+  사용자가 대화에 현전해 카드를 바로 거부할 수 있고, 명시적 "스킬로 저장해줘"
+  요청일 수 있기 때문(쿨다운은 무인 재제안을 막는 장치지 명시적 의도를 막는
+  장치가 아니다).
 
 **신호 소스가 둘로 나뉜다는 점에 주의**: (1) 메인 턴 안에서 정규식이 감지하는
 신호는 `ReviewGate.should_review()`의 **게이트 판단**에만 쓰인다(LLM을 부를지
@@ -227,7 +241,8 @@ patch로 표현되고(`from_version=0`), `skill_patch_proposed`가 diff 카드�
 6. MySkillsScreen: 버전 배지, patch 카운터, .history에 이전 버전(기존 patch만 — 롤백 가능)
 ```
 
-거부 시: 변경 없음. **무응답(timeout, 기본 5분)도 거부로 간주** — 본문 불변, 제안 폐기(안전 기본값, [RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md) 5.1). (향후) 동일 스킬에 대한 반복 거부 시 제안 빈도를 하향한다.
+거부 시: 변경 없음 + **ledger에 `rejected` 기록**(§9 — 반복 거부 쿨다운의 원천).
+**무응답(timeout, 기본 5분)은 2026-07-03부터 폐기가 아니라 제안함(suggestion inbox, §9)으로 이동**한다 — 무응답은 거부 의사표시가 아니라 자리 비움일 수 있다. 적용은 여전히 하지 않으므로(본문 불변) safe-default는 유지된다([RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md) 5.1). 턴 중단(abort)로 인한 cancelled는 그대로 폐기. ~~(향후) 동일 스킬에 대한 반복 거부 시 제안 빈도를 하향한다~~ → **구현 완료(2026-07-03)**: 쿨다운 창(`review_rejection_cooldown_hours`, 기본 24h) 안에서 `review_max_rejections`(기본 2)회 이상 거부된 스킬은 리뷰/발굴이 제안을 만들지 않고(사후 억제), 최근 거부 목록이 리뷰 프롬프트에 실려 LLM이 애초에 재제안을 피한다(사전 회피) — §9.
 
 #### 5.2.5 계약 변경 요약 (CONTRACTS 반영 필요)
 
@@ -246,6 +261,12 @@ patch로 표현되고(`from_version=0`), `skill_patch_proposed`가 diff 카드�
 | 엔드포인트 | **`POST /skills/{id}/consolidate-decision`** | **신규(§5.1).** curator 병합(umbrella) 제안 승인/거부 — `/patch`와 달리 approval_id 파킹 없음(§5.1 참고). body: `{approved, proposed_body?, description?, tags?}` |
 | 엔드포인트 | `GET /skills/{id}/history` | 버전 히스토리 (diff·롤백 UI) |
 | 엔드포인트 | `POST /skills/{id}/rollback` | 이전 버전 복구 |
+| 엔드포인트 | **`GET /skills/suggestions`** | **신규(§9, 2026-07-03).** 영속 제안함 — 타임아웃 이동분 + 발굴 산출물 |
+| 엔드포인트 | **`POST /skills/suggestions/{sid}/decision`** | **신규(§9).** 제안함 항목 승인/거부. body: `{approved, edited_body?}` |
+| 엔드포인트 | **`POST /skills/discover`** | **신규(§9).** 크로스세션 발굴 수동 트리거 (LLM 1회, 결과는 제안함으로) |
+| 엔드포인트 | **`GET /learning/events`** | **신규(§9).** 학습 감사 로그 (제안/결정/적용/메모리 이력) |
+| 엔드포인트 | **`DELETE /memories/{id}`** | **신규(§6, 2026-07-03).** 메모리 사후 삭제(위생) |
+| 빌트인 도구 | **`propose_skill`** | **신규(§5.2.2 T5).** 미드턴 스테이징 — 쓰기 권한 없음, HITL 카드는 동일 |
 
 > `skill_patch_proposed`의 정지/재개·`approval_id`·timeout·재연결 복구(`GET /sessions/{id}/pending-approvals`)는 tool 승인과 **공유 메커니즘**이라 patch 전용 추가가 아니다 — 정본 [RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md) 5.1. `/archive-decision`·`/consolidate-decision`은 **이 메커니즘을 쓰지 않는다** — 제안이 애초에 스트림 위에서 파킹된 적이 없기 때문(§5.1).
 
@@ -293,6 +314,16 @@ patch로 표현되고(`from_version=0`), `skill_patch_proposed`가 diff 카드�
 
 - **prefetch 기본값**: 턴 시작에 **최근 facts N=20** + **쿼리 FTS 매칭 상위 K=10(메모리)** + **active 스킬 전부 주입**(스킬 예산 내, §7). N·K는 `config.yaml`로 노출. 스킬은 예산 초과 시에만 FTS 랭킹으로 선별 — 그 구간이 retrieval 취약점이며([RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md) 3장), `skill_hit`으로 진단한다([RICE_LEARNING_EVAL.md](RICE_LEARNING_EVAL.md) 2장)
 - ★ memory 기록 시 `memory_written` SSE 이벤트 → 개인화 가시화
+- **작성 주체 단일화 (2026-07-03, v3)**: `observe()`의 정규식 fact/preference
+  추출(FACT_PREFIXES/PREF_PREFIXES 도입구 매칭)은 **제거됐다**. 리뷰 LLM의
+  `propose_memory_write`와 이중 작성자였고, "항상"/"저는" 같은 느슨한 도입구는
+  노이즈 메모리를 만들었다 — 메모리는 HITL 없이 매 턴 주입되는 가장 위생에
+  민감한 경로다. 이제 기록 판단은 리뷰 LLM 하나뿐이고, `observe()`는 use++와
+  T5 스테이징 드레인만 한다.
+- **사후 삭제 (2026-07-03, v3)**: `DELETE /memories/{id}` + LearningPanel
+  신호 행의 제거 버튼. 메모리는 승인 게이트가 없는 유일한 학습 경로라, 잘못
+  들어간 항목이 "매 턴 영구 주입"되지 않으려면 사후 제거 수단이 필수다. 삭제는
+  ledger에 `memory_deleted`로 남는다(§9).
 
 ---
 
@@ -359,3 +390,71 @@ persistence/network/obfuscation/traversal — 제3자 마켓플레이스 설치�
 포팅하지 않는다. `skill_preprocessing.py`의 inline shell 치환(스킬 로드 시점에
 쉘 커맨드 실행)도 포팅하지 않는다 — prefetch 시점에 임의 커맨드가 실행되는
 구조 자체가 RICE의 로컬-신뢰 모델에서도 과도한 위험이다.
+
+---
+
+## 9. Learning Ledger & Suggestion Inbox — 루프의 메타학습 (2026-07-03 신규, v3)
+
+v2까지의 루프는 "무엇을 배울까"는 잘 판단했지만 **"내 제안이 어떻게 받아들여졌나"를
+기억하지 못했다.** 제안→결정은 in-memory 파킹(`IApprovalGate`)에만 존재해
+재시작·타임아웃과 함께 증발했고, 그 결과: 거부된 제안이 다음 리뷰에서 그대로
+재등장할 수 있었고, 타임아웃된 제안(= 자리 비움)은 소멸했으며, 시스템의 학습
+행동 전체가 감사 불가능했다. v3는 이 구멍을 두 개의 영속 테이블(state.db,
+`0012_learning_ledger.sql`)로 닫는다. 구현: `learning/ledger.py::LearningLedger`.
+
+### 9.1 learning_events — append-only 감사 로그
+
+모든 제안/결정/적용이 기록된다: `proposed`(리뷰·learn·T5·발굴), `approved`/
+`rejected`/`timeout`(HITL 결정 — `effect_surfacing`이 `resolve_proposal`로 위임),
+`memory_written`/`memory_deleted`, `discovery_run`, `suggestion_added`/
+`suggestion_decided`. `GET /learning/events`로 노출 — "루프가 실제로 무엇을
+배우고 무엇이 기각됐는가"의 단일 원천(편집가능·감사가능·롤백 원칙의 감사 축).
+기록은 전부 best-effort — 감사 실패가 턴을 깨지 않는다(usage 카운터와 동일 원칙).
+
+**메타학습 두 겹** (같은 데이터, 다른 방어선):
+1. **사전(프롬프트) 회피** — 최근 거부 목록(`recent_rejections`)이 리뷰·발굴
+   프롬프트에 "Recently REJECTED proposals (do NOT re-propose)" 블록으로 실린다.
+2. **사후(엔진) 억제** — 그래도 나온 제안 중 쿨다운 창(`review_rejection_cooldown_hours`,
+   기본 24h) 안에서 `review_max_rejections`(기본 2)회 이상 거부된 skill_id의
+   제안은 엔진이 버린다(fail-closed). T5(미드턴)만 예외 — §5.2.2 참고.
+
+### 9.2 skill_suggestions — 영속 제안함(inbox)
+
+파킹(스트림) 밖에서 살아남는 제안의 수신처. 두 유입원:
+- **타임아웃 이동** (§5.2.4) — 무응답 제안은 폐기 대신 여기로.
+- **발굴(discovery)** (§9.3) — 애초에 파킹할 스트림이 없는 백그라운드 산출물.
+
+payload는 SSE `skill_patch_proposed`와 **같은 어휘**(approval_id 제외) — 프론트가
+파킹 카드와 제안함 카드를 동일 렌더러로 그린다. 결정은
+`POST /skills/suggestions/{sid}/decision`(승인 시 create/patch → `apply_patch`,
+archive → `decide_archive`로 수렴, 거부는 ledger로 흘러 쿨다운을 먹인다).
+위생: 같은 skill_id+kind의 pending 중복은 멱등 스킵, pending 총량 상한
+(`suggestion_pending_cap`, 기본 30). UI: LearningPanel "제안함" 섹션(실배선 —
+이전의 목업 proposals와 별개).
+
+### 9.3 크로스세션 발굴 (DiscoveryEngine)
+
+단일 세션 리뷰(§4)가 구조적으로 못 보는 것: **세션 경계를 넘는 반복**("이 사람은
+매주 같은 리포트를 처음부터 다시 시킨다" — 각 세션 안에서는 '한 번'일 뿐이므로).
+`learning/discovery.py::DiscoveryEngine`이 최근 세션들의 압축 다이제스트
+(`prompts/discovery.py::build_session_digest` — 세션당 `discovery_digest_chars`,
+tool 결과는 이름만)를 놓고 LLM 1회 호출로 2회+ 반복 패턴을 신규 스킬로 제안한다.
+
+- **생성만 제안** (`propose_skill_create`만 노출) — 다이제스트는 압축본이라 기존
+  본문을 안전하게 고칠 근거가 못 된다(§4의 "본문을 못 봤으면 patch 금지"를 도구
+  수준에서 강제). 기존 스킬명 재발명·억제 대상은 엔진이 버린다. 실행당 최대 2건.
+- **트리거**: 수동 `POST /skills/discover`(LearningPanel "패턴 발굴" 버튼) +
+  백그라운드 `discovery_interval_seconds`(기본 **0=off** — LLM 비용) —
+  `CuratorScheduler`가 curator 규칙 전이와 같은 루프에서 주기 관리.
+- **산출물은 전부 제안함으로** — 백그라운드에서 사용자를 실시간 방해하지 않는다.
+
+### 9.4 v3에서 의도적으로 안 한 것
+
+- **스킬 효과성 점수(helped/hurt)** — use++는 주입 횟수지 유효성이 아니다. 주입된
+  턴의 교정 신호와 상관 짓는 자동 감점은 오탐 위험이 커서 보류 — ledger가 이미
+  원천 데이터를 쌓고 있으므로 향후 순수 추가로 가능.
+- **메모리 HITL 게이트** — 메모리를 제안함에 태우는 안은 기각. 메모리는 저비용·
+  고빈도라 카드 승인이 UX를 압도한다. 대신 작성 주체 단일화(§6) + 사후 삭제 +
+  ledger 기록으로 통제.
+- **제안함 항목의 자동 만료** — pending cap으로 충분. 시간 기반 expired 전이는
+  curator에 붙일 수 있는 향후 순수 추가.

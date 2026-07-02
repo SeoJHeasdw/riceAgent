@@ -1,9 +1,11 @@
 """memory/store.py — fact/preference CRUD on `state.db`.
 
-Responsibility (single): write and list memories. Deletion is intentionally
-omitted for T1 — memories are append-only in the MVP (LEARNING_LOOP §6 says
-nothing about deletion, and fail-closed means we don't delete without a clear
-contract).
+Responsibility (single): write, list, delete memories. Deletion was intentionally
+omitted for T1 (append-only MVP), but Self-Improvement v3 adds it: memory is the
+only learning path with no HITL gate (writes apply immediately), so a *post-hoc*
+removal affordance is the counterweight — without it a bad fact is injected into
+every future turn forever. The FTS delete trigger (`memories_ad`, 0001_init.sql)
+keeps `memories_fts` in sync automatically.
 
 The FTS5 trigger defined in `0001_init.sql` (`memories_ai`) keeps `memories_fts`
 in sync automatically on INSERT — no extra work here.
@@ -28,7 +30,7 @@ single true chokepoint means neither caller can forget it.
 
 from __future__ import annotations
 
-from ...core.errors import ValidationError
+from ...core.errors import NotFoundError, ValidationError
 from ...core.storage.sqlite import Database
 from ...core.types import MemoryItem, new_id, now_iso
 from ..skill.guard import scrub_secrets
@@ -75,6 +77,12 @@ class MemoryStore:
             (mem_id, kind, clean_content, created_at, source_session_id),
         )
         return MemoryItem(kind=kind, content=clean_content, id=mem_id)  # type: ignore[arg-type]
+
+    def delete(self, memory_id: str) -> None:
+        """메모리 하나를 삭제한다. 없으면 NotFoundError → 404 (routes 관례)."""
+        cur = self._db.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+        if cur.rowcount == 0:
+            raise NotFoundError(f"memory {memory_id} not found")
 
     def list(self) -> list[MemoryItem]:
         """Return all memories, newest first.

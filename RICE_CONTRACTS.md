@@ -62,6 +62,10 @@ Electron main process
 | **POST** | **`/skills/{id}/consolidate-decision`** | **curator 통합의 병합(umbrella patch/create) 제안 응답 (approved, proposed_body?, description?, tags?) — approval_id 파킹 없음, LEARNING_LOOP §5.1** |
 | **GET** | **`/skills/{id}/history`** | **스킬 버전 히스토리 (diff·롤백 UI)** |
 | **POST** | **`/skills/{id}/rollback`** | **이전 버전 복구 (선택)** |
+| **GET** | **`/skills/suggestions`** | **영속 제안함(Self-Improvement v3) — 타임아웃된 HITL 제안 + 발굴 산출물. payload는 `skill_patch_proposed`와 동일 어휘(approval_id 없음) — LEARNING_LOOP §9** |
+| **POST** | **`/skills/suggestions/{sid}/decision`** | **제안함 항목 승인/거부 (approved, edited_body?) — 승인 시 create/patch는 apply_patch, archive는 decide_archive로 수렴. 결정은 ledger에 기록 — LEARNING_LOOP §9** |
+| **POST** | **`/skills/discover`** | **크로스세션 반복 패턴 발굴(수동 트리거, LLM 1회) — 산출 제안은 제안함으로. `{scanned_sessions, suggestions}` 반환 — LEARNING_LOOP §9. 백그라운드 주기는 `discovery_interval_seconds`(기본 0=off)** |
+| **GET** | **`/learning/events?limit=`** | **학습 감사 로그 — 제안/승인/거부/타임아웃/메모리 기록의 영속 이력 (learning_events) — LEARNING_LOOP §9** |
 | GET | `/plugins` | 설치된 플러그인 목록 |
 | PATCH | `/plugins/{id}/enabled` | 플러그인 활성화/비활성화 |
 | DELETE | `/plugins/{id}` | 플러그인 삭제 |
@@ -72,6 +76,7 @@ Electron main process
 | **GET** | **`/connectors/{id}/status`** | **연결 상태 확인** |
 | **GET** | **`/connectors/oauth/callback`** | **OAuth callback 처리** |
 | GET | `/memories` | 메모리 목록 (개인화 가시화용) |
+| **DELETE** | **`/memories/{id}`** | **메모리 삭제(Self-Improvement v3 위생) — 메모리는 HITL 없이 즉시 반영되는 유일한 학습 경로라 사후 제거 수단이 필수. LEARNING_LOOP §6** |
 | GET | `/models` | 사용 가능 모델 목록 |
 | GET | `/settings` | 설정 조회 (모델·언어·테마·글꼴) |
 | PUT | `/settings` | 설정 갱신 (provider/model/temperature, api_key→키체인, language, theme, **font**) |

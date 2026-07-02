@@ -77,6 +77,20 @@ class LearningConfig:
     # 본문을 보여줘야 진짜 중복/유사 판단이 가능하므로). 넘으면 use 하위 스킬부터
     # 후보에서 제외.
     curator_candidate_budget_chars: int = 300_000
+    # ── Self-Improvement v3 (learning ledger + suggestion inbox, 2026-07-03) ──
+    # 반복 거부 쿨다운: 같은 스킬 제안이 이 시간창 안에서 이 횟수 이상 거부되면
+    # 리뷰/발굴이 그 스킬에 대한 제안을 만들지 않는다(설계문서 §5.2.4의 "(향후)
+    # 반복 거부 시 제안 빈도 하향" 구현). 최근 거부 목록은 프롬프트에도 실린다.
+    review_rejection_cooldown_hours: float = 24.0
+    review_max_rejections: int = 2
+    # 크로스세션 발굴 주기(초). 0 이면 백그라운드 비활성(수동 POST /skills/discover만).
+    # 발굴은 LLM 1회 호출이라 curator 규칙 전이보다 비싸다 — 기본 꺼짐.
+    discovery_interval_seconds: int = 0
+    # 발굴 1회에 넣을 최근 세션 수 / 세션당 다이제스트 길이(자).
+    discovery_max_sessions: int = 8
+    discovery_digest_chars: int = 2_000
+    # 제안함(pending) 상한 — 발굴/타임아웃이 쌓여도 인박스가 무한히 늘지 않게.
+    suggestion_pending_cap: int = 30
 
 
 @dataclass(frozen=True)

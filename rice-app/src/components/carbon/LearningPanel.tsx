@@ -8,6 +8,7 @@ import {
   type ProposalKind,
   type UserSignal,
 } from '../../lib/learningData';
+import type { SkillSuggestion } from '../../lib/types';
 
 /**
  * LearningPanel - the right-side learning surface. Interactive: users can
@@ -296,6 +297,89 @@ const ProposalCard: React.FC<{
   );
 };
 
+// ── 제안함(suggestion inbox) 카드 — 런타임 skill_suggestions 실배선 ──
+const SUGGESTION_KIND_META: Record<SkillSuggestion['kind'], { icon: IconName; tint: string; label: string }> = {
+  create: { icon: 'add', tint: 'text-support-success', label: '신규 스킬' },
+  patch: { icon: 'edit', tint: 'text-link-primary', label: '개선' },
+  archive: { icon: 'trash', tint: 'text-text-error', label: '보관' },
+};
+
+const SUGGESTION_ORIGIN_LABELS: Record<string, string> = {
+  discovery: '패턴 발굴',
+  timeout: '응답 없던 제안',
+  review: '대화 리뷰',
+  learn: '수동 학습',
+  agent: '에이전트 발의',
+  consolidation: '통합 정리',
+};
+
+const SuggestionCard: React.FC<{
+  s: SkillSuggestion;
+  onDecide: (approved: boolean) => void;
+  deciding: boolean;
+}> = ({ s, onDecide, deciding }) => {
+  const m = SUGGESTION_KIND_META[s.kind];
+  const adds = s.payload.diff?.lines.filter((l) => l.type === 'add').length ?? 0;
+  const dels = s.payload.diff?.lines.filter((l) => l.type === 'remove').length ?? 0;
+  const versionText =
+    s.kind === 'archive'
+      ? '보관 제안'
+      : s.payload.from_version === 0
+        ? 'v1 신규'
+        : `v${s.payload.from_version}→v${s.payload.to_version}`;
+  return (
+    <div className="bg-layer-01 border border-border-subtle-01 rounded-lg p-3">
+      <div className="flex items-start gap-2.5">
+        <div className="w-6 h-6 flex-shrink-0 flex items-center justify-center rounded-md bg-layer-02">
+          <Icon name={m.icon} size={14} className={m.tint} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5">
+            <span className="text-body-short-01 font-semibold text-text-primary truncate">{s.skill_id}</span>
+            <span className="text-caption-01 text-text-helper font-mono flex-shrink-0">{versionText}</span>
+          </div>
+          <div className="text-caption-01 text-text-helper mt-1 leading-snug">
+            {s.kind === 'archive' ? s.payload.reason ?? s.payload.changelog : s.payload.changelog}
+          </div>
+          <div className="flex items-center gap-2 mt-1.5 text-caption-01 text-text-helper">
+            <span className="inline-flex items-center gap-1">
+              <Icon name="renew" size={11} className="opacity-70" />
+              {SUGGESTION_ORIGIN_LABELS[s.origin] ?? s.origin}
+            </span>
+            {s.kind !== 'archive' && (adds > 0 || dels > 0) && (
+              <span className="font-mono">
+                <span className="text-support-success">+{adds}</span>{' '}
+                <span className="text-text-error">-{dels}</span>
+              </span>
+            )}
+            {(s.payload.warnings?.length ?? 0) > 0 && (
+              <span className="inline-flex items-center gap-1 text-support-warning">
+                <Icon name="warning" size={11} /> 민감정보 마스킹됨
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5 mt-2.5">
+            <button
+              onClick={() => onDecide(true)}
+              disabled={deciding}
+              className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-caption-01 font-semibold bg-interactive text-white hover:bg-[#0353e9] transition-colors disabled:opacity-50"
+            >
+              <Icon name="check" size={13} /> {s.kind === 'archive' ? '보관 승인' : '반영'}
+            </button>
+            <button
+              onClick={() => onDecide(false)}
+              disabled={deciding}
+              className="h-7 px-2.5 rounded-md text-caption-01 text-text-secondary hover:bg-layer-hover-01 transition-colors disabled:opacity-50"
+            >
+              거부
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export const LearningPanel: React.FC<LearningPanelProps> = ({ isLearning = true, width = 320, onOpenConversation }) => {
   const {
     skills,
@@ -307,6 +391,10 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ isLearning = true,
     setDetails,
     proposals,
     setProposals,
+    suggestions,
+    decideSuggestion,
+    discoverNow,
+    removeSignal,
     highlightedSkill,
     panelScrollRef,
   } = useLearning();
@@ -319,6 +407,35 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ isLearning = true,
     setFlash(msg);
     if (flashTimer.current) clearTimeout(flashTimer.current);
     flashTimer.current = setTimeout(() => setFlash(null), 2600);
+  };
+
+  // 제안함 결정/발굴 진행 상태 — 발굴은 LLM 1회 호출이라 느릴 수 있다.
+  const [decidingId, setDecidingId] = useState<string | null>(null);
+  const [discovering, setDiscovering] = useState(false);
+
+  const handleSuggestionDecision = async (s: SkillSuggestion, approved: boolean) => {
+    setDecidingId(s.id);
+    const ok = await decideSuggestion(s.id, approved);
+    setDecidingId(null);
+    if (!ok) {
+      showFlash('결정을 전달하지 못했어요 · 런타임 연결을 확인하세요');
+      return;
+    }
+    showFlash(
+      approved
+        ? s.kind === 'archive'
+          ? `${s.skill_id} 보관됨`
+          : `${s.skill_id} 반영됨 · My Skills에서 확인`
+        : '제안을 거부했어요 · 같은 제안은 당분간 다시 오지 않습니다',
+    );
+  };
+
+  const handleDiscover = async () => {
+    if (discovering) return;
+    setDiscovering(true);
+    const added = await discoverNow();
+    setDiscovering(false);
+    showFlash(added > 0 ? `반복 패턴 ${added}건을 찾았어요` : '새로 발굴된 패턴이 없어요');
   };
 
   // accept a loop proposal → mutate real state so it lands in My Skills too
@@ -400,6 +517,45 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ isLearning = true,
         </div>
 
       <div ref={panelScrollRef} className="flex-1 overflow-y-auto">
+        {/* suggestion inbox — 런타임 영속 제안함(skill_suggestions) 실배선.
+            파킹 카드(채팅 diff 카드)와 달리 스트림 밖에서 태어난 제안이 여기 산다:
+            응답 없이 만료된 제안, 백그라운드/수동 발굴 산출물. */}
+        <div className="border-b border-border-subtle-01">
+          <div className="flex items-center gap-2 px-4 pt-3.5 pb-2">
+            <Icon name="download" size={16} className="text-link-primary" />
+            <span className="text-caption-01 font-semibold uppercase tracking-wider text-text-secondary">
+              제안함
+            </span>
+            {suggestions.length > 0 && (
+              <span className="text-caption-01 text-text-helper font-mono">{suggestions.length}</span>
+            )}
+            <button
+              onClick={handleDiscover}
+              disabled={discovering}
+              title="최근 대화들에서 반복 패턴을 발굴합니다 (LLM 호출)"
+              className="ml-auto inline-flex items-center gap-1 h-6 px-2 rounded-md text-caption-01 text-text-secondary hover:bg-layer-hover-01 hover:text-text-primary transition-colors disabled:opacity-50"
+            >
+              <Icon name="search" size={12} className={discovering ? 'animate-pulse' : ''} />
+              {discovering ? '발굴 중…' : '패턴 발굴'}
+            </button>
+          </div>
+          <div className="px-4 pb-3.5 flex flex-col gap-2">
+            {suggestions.map((s) => (
+              <SuggestionCard
+                key={s.id}
+                s={s}
+                deciding={decidingId === s.id}
+                onDecide={(approved) => void handleSuggestionDecision(s, approved)}
+              />
+            ))}
+            {suggestions.length === 0 && (
+              <span className="text-caption-01 text-text-helper">
+                대기 중인 제안이 없어요. 시간이 지나면 발굴·리뷰 제안이 쌓입니다.
+              </span>
+            )}
+          </div>
+        </div>
+
         {/* loop proposals — pending decisions the learning loop surfaced */}
         {(proposals.length > 0 || flash) && (
           <div className="border-b border-border-subtle-01 bg-[#0f62fe]/[0.05]">
@@ -479,7 +635,9 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ isLearning = true,
                       onEdit={(v) =>
                         setSignals((arr) => arr.map((x) => (x.id === u.id ? { ...x, value: v, source: '명시적 교정' } : x)))
                       }
-                      onRemove={() => setSignals((arr) => arr.filter((x) => x.id !== u.id))}
+                      // 런타임 메모리(mem_*)는 서버에서도 삭제된다 — HITL 없는 유일한
+                      // 학습 경로의 사후 통제 수단(Self-Improvement v3 위생).
+                      onRemove={() => removeSignal(u.id)}
                     />
                   ))}
                 </div>

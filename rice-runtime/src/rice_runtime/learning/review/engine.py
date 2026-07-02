@@ -35,9 +35,10 @@ from ...prompts.review import (
     build_review_tool_specs,
 )
 from ..interfaces import LearningEffect, MemoryWritten, PatchProposal
+from ..ledger import LearningLedger
 from ..memory.store import MemoryStore
+from ..proposals import make_create_proposal, make_patch_proposal
 from ..skill import guard as skill_guard
-from ..skill.patch import build_diff
 from ..skill.store import SkillStore
 from ..skill.usage import UsageStore
 
@@ -46,7 +47,6 @@ log = logging.getLogger("rice.learning.review")
 _CHARS_PER_TOKEN = 4  # LEARNING_LOOP §7과 동일 추정 — 정밀도 불필요
 _REVIEW_TEMPERATURE = 0.3  # titler.py와 동일 원칙: 구조화된 산출물은 낮은 변동성이 낫다
 _MAX_KNOWN_FACTS = 20
-_MAX_CHANGELOG_CHARS = 200
 
 
 def _estimate_tokens(text: str) -> int:
@@ -71,6 +71,9 @@ class ReviewEngine:
         mem_store: MemoryStore,
         skill_catalog_token_budget: int,
         max_body_chars: int = skill_guard.DEFAULT_MAX_BODY_CHARS,
+        ledger: LearningLedger | None = None,
+        rejection_cooldown_hours: float = 0.0,
+        max_rejections: int = 0,
     ) -> None:
         self._resolve_provider = resolve_provider
         self._skill_store = skill_store
@@ -78,11 +81,20 @@ class ReviewEngine:
         self._mem_store = mem_store
         self._catalog_budget = skill_catalog_token_budget
         self._max_body_chars = max_body_chars
+        # Self-Improvement v3: ledger가 있으면 (1) 최근 거부 목록을 프롬프트에 실어
+        # LLM이 재제안을 피하게 하고(사전), (2) 그래도 나온 억제 대상 제안을 버리고
+        # (사후), (3) 제안/메모리 기록을 감사 로그에 남긴다. ledger=None(기존 테스트
+        # 대부분)이면 v2와 동일하게 동작.
+        self._ledger = ledger
+        self._rejection_cooldown_hours = rejection_cooldown_hours
+        self._max_rejections = max_rejections
 
     async def review(self, session_id: str, history: Sequence[Message]) -> list[LearningEffect]:
         """정기 리뷰 — `learning/review/gate.py::ReviewGate`가 호출 여부를 이미
         결정했다고 가정한다(이 메서드 자체는 게이팅하지 않는다)."""
-        return await self._run(session_id, history, system_prompt=REVIEW_SYSTEM_PROMPT, instruction=None)
+        return await self._run(
+            session_id, history, system_prompt=REVIEW_SYSTEM_PROMPT, instruction=None, origin="review"
+        )
 
     async def learn(self, session_id: str, history: Sequence[Message], instruction: str) -> list[LearningEffect]:
         """명시적 사용자 요청("이 대화를 스킬로 저장") — Phase C. 게이트 없이 항상
@@ -92,9 +104,27 @@ class ReviewEngine:
             history,
             system_prompt=LEARN_SYSTEM_PROMPT,
             instruction=build_learn_instruction(instruction),
+            origin="learn",
         )
 
     # ── internals ────────────────────────────────────────────────────────────
+
+    def _is_suppressed(self, skill_id: str) -> bool:
+        if self._ledger is None:
+            return False
+        return self._ledger.is_suppressed(
+            skill_id,
+            within_hours=self._rejection_cooldown_hours,
+            max_rejections=self._max_rejections,
+        )
+
+    def _recent_rejection_lines(self) -> list[str]:
+        if self._ledger is None or self._rejection_cooldown_hours <= 0:
+            return []
+        return [
+            f"[{r['skill_id']}] {r['changelog']}".strip()
+            for r in self._ledger.recent_rejections(within_hours=self._rejection_cooldown_hours)
+        ]
 
     async def _run(
         self,
@@ -103,6 +133,7 @@ class ReviewEngine:
         *,
         system_prompt: str,
         instruction: str | None,
+        origin: str,
     ) -> list[LearningEffect]:
         provider = self._resolve_provider()
         if getattr(provider, "name", "") == "echo":
@@ -118,6 +149,7 @@ class ReviewEngine:
             full_body_skills=full_body_skills,
             compact_skills=compact_skills,
             known_facts=known_facts,
+            rejected_recently=self._recent_rejection_lines(),
             **kwargs,
         )
         tools = build_review_tool_specs(patchable_ids)
@@ -138,8 +170,24 @@ class ReviewEngine:
         effects: list[LearningEffect] = []
         for call in calls:
             effect = self._to_effect(session_id, call)
-            if effect is not None:
-                effects.append(effect)
+            if effect is None:
+                continue
+            if isinstance(effect, PatchProposal):
+                if self._is_suppressed(effect.skill_id):
+                    # 프롬프트 회피 지시에도 불구하고 나온 재제안 — 쿨다운 창 안에서는
+                    # 사용자를 다시 방해하지 않는다(사후 억제, fail-closed).
+                    log.info("proposal for %r suppressed (recent rejections)", effect.skill_id)
+                    continue
+                if self._ledger is not None:
+                    self._ledger.record(
+                        "proposed",
+                        skill_id=effect.skill_id,
+                        session_id=session_id,
+                        origin=origin,
+                        trigger=effect.trigger,
+                        detail={"changelog": effect.changelog},
+                    )
+            effects.append(effect)
         return effects
 
     def _build_catalog(
@@ -198,37 +246,23 @@ class ReviewEngine:
             return None
         except NotFoundError:
             pass
-        try:
-            skill_guard.validate_content_size(body, self._max_body_chars)
-        except Exception:
-            log.warning("review engine: propose_skill_create body too large for %r, dropped", name)
-            return None
-        body, warnings = skill_guard.scrub_secrets(body)
-        description = str(args.get("description") or "")
-        tags = tuple(str(t) for t in (args.get("tags") or ()))
-        return PatchProposal(
-            skill_id=name,
-            changelog=(f"신규 스킬 제안 · {description}" if description else "신규 스킬 제안")[
-                :_MAX_CHANGELOG_CHARS
-            ],
-            diff=build_diff("", body),
+        return make_create_proposal(
+            name=name,
+            body=body,
+            description=str(args.get("description") or ""),
+            tags=tuple(str(t) for t in (args.get("tags") or ())),
             trigger="T4",
-            proposed_body=body,
-            from_version=0,
-            to_version=1,
-            description=description,
-            tags=tags,
-            warnings=tuple(f"{label} 자동 마스킹됨" for label in warnings),
+            max_body_chars=self._max_body_chars,
         )
 
     def _skill_patch_effect(self, args: dict) -> PatchProposal | None:
         skill_id = str(args.get("skill_id") or "").strip()
         new_body = str(args.get("new_body") or "")
-        changelog = str(args.get("changelog") or "review 제안")[:_MAX_CHANGELOG_CHARS]
+        changelog = str(args.get("changelog") or "review 제안")
         trigger = str(args.get("trigger_reason") or "T1a")
         if trigger not in ("T1a", "T1b", "T1c"):
             trigger = "T1a"
-        if not skill_id or not new_body.strip():
+        if not skill_id:
             return None
         try:
             current = self._skill_store.read(skill_id)
@@ -236,24 +270,12 @@ class ReviewEngine:
             # 모델이 카탈로그에 없는/유효하지 않은 skill_id를 줬다 — 스키마의 enum이
             # 이미 이걸 막지만(build_review_tool_specs), 방어적으로 한 번 더 확인.
             return None
-        try:
-            skill_guard.validate_content_size(new_body, self._max_body_chars)
-        except Exception:
-            log.warning("review engine: propose_skill_patch body too large for %r, dropped", skill_id)
-            return None
-        new_body, warnings = skill_guard.scrub_secrets(new_body)
-        diff = build_diff(current.body, new_body)
-        if not diff["lines"]:
-            return None  # 실질적 변경 없음 — 빈 제안은 만들지 않는다
-        return PatchProposal(
-            skill_id=skill_id,
+        return make_patch_proposal(
+            current=current,
+            new_body=new_body,
             changelog=changelog,
-            diff=diff,
             trigger=trigger,  # type: ignore[arg-type]
-            proposed_body=new_body,
-            from_version=current.version,
-            to_version=current.version + 1,
-            warnings=tuple(f"{label} 자동 마스킹됨" for label in warnings),
+            max_body_chars=self._max_body_chars,
         )
 
     def _memory_effect(self, session_id: str, args: dict) -> MemoryWritten | None:
@@ -265,4 +287,8 @@ class ReviewEngine:
             self._mem_store.add(kind, content, source_session_id=session_id)
         except Exception:
             return None
+        if self._ledger is not None:
+            self._ledger.record(
+                "memory_written", session_id=session_id, origin="review", detail={"kind": kind, "content": content[:120]}
+            )
         return MemoryWritten(memory_type=kind, content=content)  # type: ignore[arg-type]

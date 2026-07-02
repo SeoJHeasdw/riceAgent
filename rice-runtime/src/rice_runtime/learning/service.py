@@ -15,9 +15,13 @@ Implementation status per task batch:
   T3 (superseded by review engine, see below): observe() 는 한때 스킬 생성/patch도
              정규식으로 직접 산출했으나(truncation 본문/note-append 본문 — 품질이 나빴다),
              그 판단력을 통째로 learning/review/engine.py(LLM 기반, 비동기 `/learning-review`
-             경로)로 옮겼다. observe()는 이제 memory fact/preference 추출 + use 카운터
-             증가만 담당한다(턴 안에서 즉시·저비용으로 끝나야 하므로 LLM 호출 없음).
+             경로)로 옮겼다. v3(2026-07-03)에서 정규식 fact/pref 추출마저 제거 —
+             observe()는 이제 use 카운터 증가 + 미드턴(T5) 스테이징 드레인만 한다.
   T5 (done): user_model/profile.py — preferences → system prompt.
+  v3 (done, 2026-07-03): ledger.py(제안→결정 영속 감사 + 반복 거부 쿨다운) +
+             제안함(suggestions/decide_suggestion, 타임아웃 이동) + discovery.py
+             (크로스세션 발굴) + stage_proposal/resolve_proposal(미드턴 T5) +
+             delete_memory(위생). LEARNING_LOOP §9.
 """
 
 from __future__ import annotations
@@ -30,16 +34,17 @@ from ..core.errors import NotFoundError, ValidationError
 from ..core.paths import RicePaths
 from ..core.storage.sqlite import Database
 from ..core.types import InjectedSkill, Message, MemoryItem, TurnOutcome, now_iso
+from ..prompts.discovery import SessionDigest
 from ..prompts.system import SKILL_GUIDANCE
 from .curator.consolidate import ConsolidationEngine
 from .curator.curator import Curator
+from .discovery import DiscoveryEngine
 from .interfaces import (
     ArchiveProposal,
     ConsolidateResult,
     CurateResult,
     ILearningService,
     LearningEffect,
-    MemoryWritten,
     PatchProposal,
     PrefetchResult,
     SkillDetail,
@@ -47,11 +52,12 @@ from .interfaces import (
     SkillSummary,
     SkillVersion,
 )
+from .ledger import LearningLedger
 from .memory.search import MemorySearch
 from .memory.store import MemoryStore
+from .proposals import make_create_proposal, make_patch_proposal, proposal_to_payload
 from .review.engine import ReviewEngine
 from .review.gate import ReviewGate
-from .signals import FACT_PREFIXES, PREF_PREFIXES
 from .skill import guard as skill_guard
 from .skill.lifecycle import SkillLifecycle
 from .skill.store import SkillData, SkillStore
@@ -126,6 +132,14 @@ class LearningService(ILearningService):
         self._lifecycle = SkillLifecycle(self._skill_store, self._paths)
         self._curator = Curator(self._skill_store, self._lifecycle, config, self._usage_store)
         self._user_profile = UserProfile(self._mem_store)
+        # Self-Improvement v3: 제안→결정의 영속 기록 + 제안함. provider 유무와
+        # 무관하게 배선한다 — 미드턴 스테이징(T5)·수동 결정 기록은 LLM이 없어도
+        # 일어나는 일이므로.
+        self._ledger = LearningLedger(db, pending_cap=config.suggestion_pending_cap)
+        # 미드턴 propose_skill(T5) 스테이징 — 세션별, observe()가 드레인.
+        # in-memory로 충분: 같은 턴 안에서 스테이징→드레인이 끝난다(파킹과 달리
+        # 턴을 넘어 살아남을 필요가 없다).
+        self._staged: dict[str, list[PatchProposal]] = {}
         self._review_gate = ReviewGate(
             min_tool_calls=config.review_min_tool_calls, nudge_turns=config.review_nudge_turns
         )
@@ -137,6 +151,9 @@ class LearningService(ILearningService):
                 mem_store=self._mem_store,
                 skill_catalog_token_budget=config.skill_inject_token_budget,
                 max_body_chars=config.skill_max_body_chars,
+                ledger=self._ledger,
+                rejection_cooldown_hours=config.review_rejection_cooldown_hours,
+                max_rejections=config.review_max_rejections,
             )
             if resolve_provider is not None
             else None
@@ -148,6 +165,18 @@ class LearningService(ILearningService):
                 usage_store=self._usage_store,
                 candidate_budget_chars=config.curator_candidate_budget_chars,
                 max_body_chars=config.skill_max_body_chars,
+            )
+            if resolve_provider is not None
+            else None
+        )
+        self._discovery_engine = (
+            DiscoveryEngine(
+                resolve_provider=resolve_provider,
+                skill_store=self._skill_store,
+                max_body_chars=config.skill_max_body_chars,
+                ledger=self._ledger,
+                rejection_cooldown_hours=config.review_rejection_cooldown_hours,
+                max_rejections=config.review_max_rejections,
             )
             if resolve_provider is not None
             else None
@@ -223,17 +252,19 @@ class LearningService(ILearningService):
     async def observe(self, outcome: TurnOutcome) -> list[LearningEffect]:
         """턴 결과를 관찰해 *즉시·저비용* 학습 효과만 반환한다 (LEARNING_LOOP §1).
 
-        수행 순서 (모두 보수적, 규칙 기반 — LLM 호출 없음, 턴의 SSE 스트림 안에서
-        `done` 이전에 동기 실행되므로 여기서 절대 느려져선 안 된다):
+        수행 내용 (LLM 호출 없음 — 턴의 SSE 스트림 안에서 `done` 이전에 동기
+        실행되므로 여기서 절대 느려져선 안 된다):
           ① 주입됐던 스킬 use += 1 & last_used_at 갱신
-          ② fact / preference 기록 판단 → MemoryWritten 효과
+          ② 미드턴 `propose_skill`(T5) 스테이징 드레인 — 에이전트가 대화 중 발의한
+             제안을 이 턴의 스트림에서 HITL 카드로 서피싱하도록 effects에 싣는다.
+             중단된 턴은 폐기(fail-closed — 사용자가 멈춘 턴의 제안을 들이밀지 않는다).
 
-        스킬 생성/patch 제안은 더 이상 여기서 만들지 않는다 — 그 판단은
-        `review()`(learning/review/engine.py, LLM 기반)로 완전히 옮겨졌다. 이유:
-        규칙 기반 저작은 내용 품질 문제(truncation/note-append)를 규칙을 더 다듬는
-        걸로는 해결 못 하고, 두 경로를 동시에 두면 같은 턴에 중복 제안이 뜰 위험이
-        있다. `signals.py`의 신호 탐지 함수는 폐기되지 않고 `review/gate.py`의
-        `should_review()`가 "LLM을 부를 가치가 있는가"를 판단하는 데 재사용된다.
+        정규식 fact/preference 추출은 v3에서 **제거됐다**: LLM 리뷰 경로
+        (`propose_memory_write`)와 이중 작성자였고, "항상"/"저는" 같은 느슨한
+        도입구 매칭은 노이즈 메모리를 만들었다 — 잘못 들어간 메모리는 HITL 없이
+        매 턴 주입되므로 가장 위생에 민감한 경로다. 이제 메모리 기록의 판단
+        주체는 리뷰 LLM 하나뿐이고, 사후 제거는 delete_memory가 담당한다.
+        `signals.py`의 교정/실패/스킬화 신호는 여전히 `review/gate.py`가 쓴다.
         """
         effects: list[LearningEffect] = []
 
@@ -246,30 +277,12 @@ class LearningService(ILearningService):
                 # 턴을 깨지 않도록 (fail-safe 우선).
                 pass
 
+        # ② 미드턴 스테이징 드레인 (T5)
+        staged = self._staged.pop(outcome.session_id, [])
         if outcome.aborted:
-            # 중단된 턴에서는 메모리 판단을 하지 않는다 (fail-closed).
+            # 중단된 턴의 제안은 폐기 (fail-closed).
             return effects
-
-        msg = outcome.final_message or ""
-
-        # ② 메모리 기록 판단 (보수적: 명시적 키워드가 있을 때만)
-        # NOTE(agent): 자동 메모리 감지는 false positive 위험이 높다.
-        # "the project uses X" / "사용자는 Y를 선호한다" 같은 명시적 문구만 처리.
-        fact_item = _try_extract_fact(msg)
-        if fact_item:
-            try:
-                self._mem_store.add("fact", fact_item, source_session_id=outcome.session_id)
-                effects.append(MemoryWritten(memory_type="fact", content=fact_item))
-            except Exception:
-                pass
-
-        pref_item = _try_extract_preference(msg)
-        if pref_item:
-            try:
-                self._mem_store.add("preference", pref_item, source_session_id=outcome.session_id)
-                effects.append(MemoryWritten(memory_type="preference", content=pref_item))
-            except Exception:
-                pass
+        effects.extend(staged)
 
         return effects
 
@@ -360,6 +373,228 @@ class LearningService(ILearningService):
         self._usage_store.increment_patch(skill_id)
 
         return new_version
+
+    # ── mid-turn staging (T5, Self-Improvement v3) ────────────────────────────
+    def stage_proposal(
+        self,
+        session_id: str,
+        *,
+        name: str,
+        body: str,
+        description: str = "",
+        tags: tuple[str, ...] = (),
+        changelog: str = "",
+    ) -> dict:
+        """`propose_skill` 빌트인의 스테이징 백엔드. 파일에 닿지 않는다 — 검증
+        (가드/diff)을 통과한 PatchProposal을 세션 큐에 넣고, observe()가 턴 종료 때
+        드레인해 메인 스트림의 HITL 카드로 서피싱한다.
+
+        반복 거부 쿨다운을 **적용하지 않는다**(리뷰/발굴과 다른 점): 미드턴 발의는
+        사용자가 대화에 현전한 상태라 카드를 바로 거부할 수 있고, 무엇보다 사용자가
+        방금 명시적으로 "스킬로 저장해줘"라고 말한 경우일 수 있다 — 쿨다운은
+        무인(unattended) 재제안을 막는 장치지 명시적 의도를 막는 장치가 아니다.
+        """
+        queue = self._staged.setdefault(session_id, [])
+        if len(queue) >= 3:
+            # 카드 스팸 방어 — 한 턴에 제안 3개면 이미 과하다.
+            return {"status": "dropped", "message": "이 턴에 이미 3개의 제안이 대기 중입니다. 답변을 마치세요."}
+
+        proposal: PatchProposal | None
+        try:
+            current = self._skill_store.read(name.strip())
+        except NotFoundError:
+            current = None
+        except Exception:
+            return {"status": "dropped", "message": f"스킬 이름이 유효하지 않습니다: {name!r}"}
+
+        if current is None:
+            proposal = make_create_proposal(
+                name=name,
+                body=body,
+                description=description,
+                tags=tags,
+                changelog=changelog,
+                trigger="T5",
+                max_body_chars=self._config.skill_max_body_chars,
+            )
+        else:
+            if (current.source or "").startswith("plugin:"):
+                return {
+                    "status": "dropped",
+                    "message": f"'{name}'은(는) 플러그인 제공 스킬이라 학습 루프가 수정할 수 없습니다. 다른 이름으로 새 스킬을 제안하세요.",
+                }
+            proposal = make_patch_proposal(
+                current=current,
+                new_body=body,
+                changelog=changelog or "대화 중 에이전트 발의 개선",
+                trigger="T5",
+                max_body_chars=self._config.skill_max_body_chars,
+            )
+        if proposal is None:
+            return {
+                "status": "dropped",
+                "message": "제안이 성립하지 않습니다 (빈 본문, 크기 초과, 이름 규약 위반, 또는 기존 본문과 동일).",
+            }
+        queue.append(proposal)
+        self._ledger.record(
+            "proposed",
+            skill_id=proposal.skill_id,
+            session_id=session_id,
+            origin="agent",
+            trigger="T5",
+            detail={"changelog": proposal.changelog},
+        )
+        action = "생성" if proposal.from_version == 0 else f"v{proposal.from_version}→v{proposal.to_version} 개선"
+        return {
+            "status": "staged",
+            "message": (
+                f"스킬 '{proposal.skill_id}' {action} 제안이 준비되었습니다. 답변이 끝나면 "
+                "사용자에게 승인 카드가 표시됩니다 — 답변에서 제안했다고 언급하세요. 저장 여부는 사용자가 결정합니다."
+            ),
+        }
+
+    def resolve_proposal(
+        self,
+        proposal: PatchProposal,
+        *,
+        session_id: str,
+        decision: str,
+        edited_body: str | None = None,
+    ) -> int | None:
+        """파킹된 제안의 HITL 결정 처리 (effect_surfacing이 호출).
+
+        v3의 두 가지 변화:
+          - 모든 결정이 ledger에 남는다 → 반복 거부 쿨다운·프롬프트 회피 목록의 원천.
+          - **timeout은 더 이상 폐기가 아니다** — 제안함(skill_suggestions)으로
+            옮긴다. 무응답은 거부 의사표시가 아니라 자리 비움일 수 있다. 적용은
+            여전히 하지 않으므로(파일 불변) safe-default는 유지된다. abort로 인한
+            cancelled는 그대로 폐기한다(사용자가 턴 자체를 버렸다).
+        """
+        base_detail = {"changelog": proposal.changelog, "trigger": proposal.trigger}
+        if decision == "approve":
+            version = self.apply_patch(
+                proposal.skill_id,
+                approved=True,
+                proposed_body=proposal.proposed_body,
+                edited_body=edited_body,
+                description=proposal.description,
+                tags=proposal.tags,
+                source=f"session:{session_id}",
+            )
+            self._ledger.record(
+                "approved",
+                skill_id=proposal.skill_id,
+                session_id=session_id,
+                trigger=proposal.trigger,
+                detail={**base_detail, "version": version, "edited": edited_body is not None},
+            )
+            return version
+        if decision == "timeout":
+            payload = proposal_to_payload(proposal)
+            payload["session_id"] = session_id  # 승인 시 source 복원용
+            self._ledger.add_suggestion(
+                origin="timeout",
+                kind="create" if proposal.from_version == 0 else "patch",
+                skill_id=proposal.skill_id,
+                payload=payload,
+            )
+            self._ledger.record(
+                "timeout", skill_id=proposal.skill_id, session_id=session_id,
+                trigger=proposal.trigger, detail=base_detail,
+            )
+            return None
+        if decision == "reject":
+            self._ledger.record(
+                "rejected", skill_id=proposal.skill_id, session_id=session_id,
+                trigger=proposal.trigger, detail=base_detail,
+            )
+            return None
+        # cancelled(턴 abort) 등 — 기록만 남기고 폐기.
+        self._ledger.record(
+            decision, skill_id=proposal.skill_id, session_id=session_id,
+            trigger=proposal.trigger, detail=base_detail,
+        )
+        return None
+
+    # ── suggestion inbox (Self-Improvement v3) ───────────────────────────────
+    def suggestions(self) -> list[dict]:
+        return self._ledger.suggestions()
+
+    def decide_suggestion(
+        self, suggestion_id: str, *, approved: bool, edited_body: str | None = None
+    ) -> dict:
+        sug = self._ledger.get_suggestion(suggestion_id)
+        if sug is None or sug["status"] != "pending":
+            raise NotFoundError(f"suggestion {suggestion_id} not found or already decided")
+        payload = sug["payload"]
+        if not approved:
+            self._ledger.decide_suggestion(suggestion_id, "rejected")
+            self._ledger.record(
+                "rejected",
+                skill_id=sug["skill_id"],
+                origin=sug["origin"],
+                detail={"changelog": payload.get("changelog", ""), "suggestion_id": suggestion_id},
+            )
+            return {"applied": False, "version": None}
+
+        if sug["kind"] == "archive":
+            applied = self.decide_archive(
+                sug["skill_id"], approved=True, absorbed_into=payload.get("absorbed_into")
+            )
+            self._ledger.decide_suggestion(suggestion_id, "approved")
+            self._ledger.record(
+                "approved", skill_id=sug["skill_id"], origin=sug["origin"],
+                detail={"suggestion_id": suggestion_id, "kind": "archive"},
+            )
+            return {"applied": applied, "version": None}
+
+        # create/patch — 파킹 경로와 동일하게 apply_patch로 수렴.
+        source_session = payload.get("session_id")
+        source = f"session:{source_session}" if source_session else sug["origin"]
+        version = self.apply_patch(
+            sug["skill_id"],
+            approved=True,
+            proposed_body=payload.get("proposed_body"),
+            edited_body=edited_body,
+            description=payload.get("description", ""),
+            tags=tuple(payload.get("tags") or ()),
+            source=source,
+        )
+        self._ledger.decide_suggestion(suggestion_id, "approved")
+        self._ledger.record(
+            "approved", skill_id=sug["skill_id"], origin=sug["origin"],
+            detail={
+                "changelog": payload.get("changelog", ""),
+                "suggestion_id": suggestion_id,
+                "version": version,
+                "edited": edited_body is not None,
+            },
+        )
+        return {"applied": version is not None, "version": version}
+
+    async def discover(self, digests: list[SessionDigest]) -> list[dict]:
+        """크로스세션 반복 패턴 발굴 → 제안함. 파킹 없음(백그라운드/수동 트리거라
+        붙잡을 스트림이 없다). 반환은 이번 실행으로 **새로** 추가된 suggestion 목록."""
+        if self._discovery_engine is None:
+            return []
+        proposals = await self._discovery_engine.discover(digests)
+        added: list[dict] = []
+        for p in proposals:
+            sid = self._ledger.add_suggestion(
+                origin="discovery", kind="create", skill_id=p.skill_id, payload=proposal_to_payload(p)
+            )
+            if sid is not None:
+                sug = self._ledger.get_suggestion(sid)
+                if sug is not None:
+                    added.append(sug)
+        self._ledger.record(
+            "discovery_run",
+            detail={"digests": len(digests), "proposals": len(proposals), "added": len(added)},
+        )
+        return added
+
+    def learning_events(self, limit: int = 100) -> list[dict]:
+        return self._ledger.events(limit)
 
     # ── post-turn, LLM-backed (Phase A.3) ────────────────────────────────────
     async def review(
@@ -572,57 +807,16 @@ class LearningService(ILearningService):
         """Delegate to MemoryStore for consistent access (T1)."""
         return self._mem_store.list()
 
-
-# ── observe 헬퍼 함수들 (모듈 수준, LearningService에서 호출) ─────────────────
-# NL 신호셋(fact/pref 도입구)은 learning/signals.py 에 한국어+영어로 중앙화되어
-# 있다 (버그#8 교정 — v1 은 영어 전용이었다). 스킬화 의도/patch 트리거 신호는
-# 이제 review/gate.py의 should_review()가 재사용한다 (observe()는 fact/pref만).
-
-
-def _try_extract_fact(message: str) -> str | None:
-    """final_message에서 선언적 사실 문구를 추출한다.
-
-    NOTE(agent): 규칙 기반 감지로 false positive 최소화. 명시적 패턴만.
-    실제 배포에서는 LLM 기반 추출이 더 정확하겠지만 MVP에서는 보수적으로.
-    """
-    msg_lower = message.lower()
-    for prefix in FACT_PREFIXES:
-        idx = msg_lower.find(prefix)
-        if idx == -1:
-            continue
-        # 패턴 이후 첫 문장 (마침표/줄바꿈/80자 제한)
-        rest = message[idx:].strip()
-        end = min(
-            next((i for i, c in enumerate(rest) if c in (".", "\n")), len(rest)),
-            80,
-        )
-        candidate = rest[:end].strip()
-        if len(candidate) >= 10:  # 너무 짧은 건 노이즈
-            return candidate
-    return None
+    def delete_memory(self, memory_id: str) -> None:
+        """메모리 삭제 (DELETE /memories/{id}, Self-Improvement v3). 메모리는 HITL
+        없이 즉시 반영되는 유일한 경로라 사후 제거 수단이 위생의 핵심이다."""
+        self._mem_store.delete(memory_id)  # NotFoundError 위임 → 404
+        self._ledger.record("memory_deleted", detail={"memory_id": memory_id})
 
 
-def _try_extract_preference(message: str) -> str | None:
-    """final_message에서 사용자 선호 문구를 추출한다."""
-    msg_lower = message.lower()
-    for prefix in PREF_PREFIXES:
-        idx = msg_lower.find(prefix)
-        if idx == -1:
-            continue
-        rest = message[idx:].strip()
-        end = min(
-            next((i for i, c in enumerate(rest) if c in (".", "\n")), len(rest)),
-            80,
-        )
-        candidate = rest[:end].strip()
-        if len(candidate) >= 10:
-            return candidate
-    return None
-
-
-    # NOTE(agent): 스킬 생성/patch 제안을 규칙 기반으로 직접 산출하던
-    # `_try_create_skill`/`_try_build_patch_proposal`은 여기서 완전히 제거됐다
-    # (2026-07-02, Hermes learning_loop 이식 작업). 그 책임은
-    # `learning/review/engine.py::ReviewEngine`(LLM 기반, `/learning-review`·`/learn`
-    # 에서 호출)로 옮겨졌다 — 저작 품질 문제는 규칙을 다듬는 걸로 해결되지 않고,
-    # 두 경로가 공존하면 같은 턴에 중복 제안이 뜰 위험이 있었다.
+# NOTE(agent): 정규식 기반 fact/preference 추출(`_try_extract_fact`/
+# `_try_extract_preference`)은 Self-Improvement v3(2026-07-03)에서 완전히
+# 제거됐다. 판단 주체는 이제 리뷰 LLM(`propose_memory_write`) 하나다 — 두 작성자
+# 체제는 중복/노이즈 메모리를 만들었고, 메모리는 HITL 없이 매 턴 주입되는 가장
+# 위생에 민감한 경로다. signals.py의 교정/실패/스킬화 신호는 여전히
+# review/gate.py의 게이트 판단에 쓰인다.

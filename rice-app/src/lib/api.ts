@@ -9,6 +9,9 @@ import type {
   PlatformArtifact,
   PlatformFileResponse,
   PlatformPublishPayload,
+  SkillSuggestion,
+  LearningEvent,
+  RuntimeMemory,
 } from './types';
 
 /** stdio 또는 http 로컬 MCP 서버 정의 — GET /connectors/local/{test,''} 요청 바디 공통 shape. */
@@ -223,6 +226,38 @@ class ApiClient {
     return this.send('POST', `/skills/${id}/rollback`, { version });
   }
 
+  // ── suggestion inbox + discovery + ledger (Self-Improvement v3) ──
+  /** 영속 제안함 — 타임아웃된 HITL 제안 + 백그라운드/수동 발굴 산출물 */
+  getSkillSuggestions(): Promise<ApiResponse<SkillSuggestion[]>> {
+    return this.get<SkillSuggestion[]>('/skills/suggestions');
+  }
+  /** 제안함 항목 승인/거부 (approval_id 없음 — 제안함 id로 직접 결정) */
+  decideSkillSuggestion(
+    suggestionId: string,
+    approved: boolean,
+    editedBody?: string,
+  ): Promise<ApiResponse<{ applied: boolean; version: number | null }>> {
+    return this.send('POST', `/skills/suggestions/${suggestionId}/decision`, {
+      approved,
+      edited_body: editedBody,
+    });
+  }
+  /** 크로스세션 반복 패턴 발굴(수동 트리거) — LLM 1회 호출, 결과는 제안함으로 */
+  discoverSkills(): Promise<ApiResponse<{ scanned_sessions: number; suggestions: SkillSuggestion[] }>> {
+    return this.send('POST', '/skills/discover');
+  }
+  /** 학습 감사 로그 — 제안/승인/거부/타임아웃/메모리 기록의 영속 이력 */
+  getLearningEvents(limit = 100): Promise<ApiResponse<LearningEvent[]>> {
+    return this.get<LearningEvent[]>(`/learning/events?limit=${limit}`);
+  }
+  /** 메모리 삭제 — 잘못 학습된 fact/preference의 사후 제거(위생) */
+  deleteMemory(memoryId: string): Promise<ApiResponse> {
+    return this.send('DELETE', `/memories/${memoryId}`);
+  }
+  getMemories(): Promise<ApiResponse<RuntimeMemory[]>> {
+    return this.get<RuntimeMemory[]>('/memories');
+  }
+
   // ── plugins (CONTRACTS 1.3) ────────────────────────────────────
   getPlugins(): Promise<ApiResponse<Plugin[]>> {
     return this.get<Plugin[]>('/plugins');
@@ -329,9 +364,7 @@ class ApiClient {
   }
 
   // ── personalization / config (CONTRACTS 1.3) ───────────────────
-  getMemories(): Promise<ApiResponse> {
-    return this.get('/memories');
-  }
+  // getMemories는 위 learning 섹션(typed)으로 이동했다.
   getModels(): Promise<ApiResponse> {
     return this.get('/models');
   }

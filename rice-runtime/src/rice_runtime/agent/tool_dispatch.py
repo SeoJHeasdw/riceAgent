@@ -190,7 +190,13 @@ class ToolDispatcher:
                 fn = self._builtins.get(call.tool_name)
                 if fn is None:
                     raise KeyError(f"unknown builtin tool: {call.tool_name}")
-                value = await fn(call.arguments)
+                # 세션 문맥이 필요한 빌트인(예: propose_skill의 세션 단위 스테이징)은
+                # `needs_session` 마커로 opt-in한다 — 시그니처를 전 빌트인에 강제로
+                # 넓히는 대신 필요한 도구만 명시적으로 받는다.
+                if getattr(fn, "needs_session", False):
+                    value = await fn(call.arguments, session_id=session_id)
+                else:
+                    value = await fn(call.arguments)
                 res = ToolResult(call.id, ok=True, result=value)
             elif spec.source == "connector":
                 res = await self._connectors.invoke(call)

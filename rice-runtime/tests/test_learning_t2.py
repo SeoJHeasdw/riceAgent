@@ -437,7 +437,7 @@ class TestLearningServiceT2:
 
     def test_prefetch_includes_skill_guidance(self):
         result = self._svc.prefetch("sess1", "hello")
-        assert "SKILL.md" in result.system_prompt_additions
+        assert "propose_skill" in result.system_prompt_additions
 
     def test_prefetch_includes_skill_body_in_prompt(self):
         self._write_skill("body-sk", "active")

@@ -41,8 +41,11 @@ async def surface_learning_effect(
     `MemoryWritten` is an already-applied notification (memory writes are never
     HITL-gated — RICE_LEARNING_LOOP_DESIGN.md §4/§5.2.1 only require confirmation
     for skills). `PatchProposal` (skill create-or-patch, discriminated by
-    `from_version == 0`) parks an approval and only calls `apply_patch` once the
-    verdict is in — reject/timeout leaves the skill store untouched.
+    `from_version == 0`) parks an approval and hands the verdict to
+    `learning.resolve_proposal` (Self-Improvement v3): approve → apply + ledger,
+    reject → ledger (feeds the rejection cooldown), timeout → the proposal moves
+    to the persistent suggestion inbox instead of being discarded. In every
+    non-approve case the skill store is untouched.
     """
     if isinstance(effect, MemoryWritten):
         yield ev_memory_written(effect.memory_type, effect.content)
@@ -70,17 +73,13 @@ async def surface_learning_effect(
             warnings=effect.warnings,
         )
         response = await approvals.request(session_id, req, timeout_s=approval_timeout_s)
-        approved = response.decision == "approve"
-        new_version = learning.apply_patch(
-            effect.skill_id,
-            approved=approved,
-            proposed_body=effect.proposed_body,
+        new_version = learning.resolve_proposal(
+            effect,
+            session_id=session_id,
+            decision=response.decision,
             edited_body=response.edited_body,
-            description=effect.description,
-            tags=effect.tags,
-            source=f"session:{session_id}",
         )
-        if approved and new_version is not None:
+        if response.decision == "approve" and new_version is not None:
             yield ev_skill_patched(effect.skill_id, new_version)
     else:  # pragma: no cover - effect union is closed
         log.warning("unknown learning effect: %r", effect)

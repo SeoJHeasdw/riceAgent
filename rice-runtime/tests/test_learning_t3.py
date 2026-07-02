@@ -166,37 +166,58 @@ class TestObserve:
         assert not any(isinstance(e, MemoryWritten) for e in effects)
 
     @pytest.mark.asyncio
-    async def test_observe_detects_fact_and_writes_memory(self):
-        """fact 패턴이 있으면 MemoryWritten 효과 + list_memories에 반영."""
+    async def test_observe_never_writes_memory_from_regex(self):
+        """v3(2026-07-03): 정규식 fact/preference 추출은 제거됐다 — 명시적 fact
+        도입구가 있어도 observe()는 메모리를 쓰지 않는다. 메모리 기록의 판단
+        주체는 리뷰 LLM(propose_memory_write) 하나다(test_learning_t4.py)."""
         outcome = TurnOutcome(
             session_id="sess1",
-            final_message="The project uses pytest for all testing.",
+            final_message="The project uses pytest for all testing. I prefer concise answers always.",
             history=(),
             tool_calls_made=0,
             injected_skill_ids=(),
         )
         effects = await self._svc.observe(outcome)
-        mem_effects = [e for e in effects if isinstance(e, MemoryWritten)]
-        assert len(mem_effects) >= 1
-        assert mem_effects[0].memory_type == "fact"
-        # list_memories에 반영됐는지 확인
-        mems = self._svc.list_memories()
-        contents = [m.content for m in mems]
-        assert any("pytest" in c or "project uses" in c.lower() for c in contents)
+        assert [e for e in effects if isinstance(e, MemoryWritten)] == []
+        assert self._svc.list_memories() == []
 
     @pytest.mark.asyncio
-    async def test_observe_detects_preference_and_writes_memory(self):
-        """preference 패턴이 있으면 MemoryWritten(preference) 효과."""
-        outcome = TurnOutcome(
-            session_id="sess2",
-            final_message="I prefer concise and direct answers always.",
-            history=(),
-            tool_calls_made=0,
-            injected_skill_ids=(),
+    async def test_observe_drains_staged_proposals(self):
+        """미드턴 propose_skill(T5) 스테이징은 그 세션의 observe()에서 정확히 한 번
+        드레인된다 — 다른 세션의 스테이징은 건드리지 않는다."""
+        res = self._svc.stage_proposal(
+            "sessA", name="staged-sk", body="# staged\n1. step", description="d", changelog="cl"
         )
-        effects = await self._svc.observe(outcome)
-        pref_effects = [e for e in effects if isinstance(e, MemoryWritten) and e.memory_type == "preference"]
-        assert len(pref_effects) >= 1
+        assert res["status"] == "staged"
+        other = TurnOutcome(
+            session_id="sessB", final_message="x", history=(), tool_calls_made=0, injected_skill_ids=()
+        )
+        assert await self._svc.observe(other) == []
+        mine = TurnOutcome(
+            session_id="sessA", final_message="x", history=(), tool_calls_made=0, injected_skill_ids=()
+        )
+        effects = await self._svc.observe(mine)
+        proposals = [e for e in effects if isinstance(e, PatchProposal)]
+        assert len(proposals) == 1
+        assert proposals[0].skill_id == "staged-sk"
+        assert proposals[0].trigger == "T5"
+        # 드레인은 1회성 — 같은 세션을 다시 관찰해도 비어 있다.
+        assert await self._svc.observe(mine) == []
+
+    @pytest.mark.asyncio
+    async def test_observe_discards_staged_on_aborted_turn(self):
+        """중단된 턴의 스테이징은 폐기된다 (fail-closed)."""
+        self._svc.stage_proposal("sessC", name="aborted-sk", body="# b\n1. s")
+        aborted = TurnOutcome(
+            session_id="sessC", final_message="", history=(), tool_calls_made=0,
+            injected_skill_ids=(), aborted=True,
+        )
+        assert await self._svc.observe(aborted) == []
+        # abort로 버려졌으므로 다음 정상 턴에도 나오지 않는다.
+        normal = TurnOutcome(
+            session_id="sessC", final_message="x", history=(), tool_calls_made=0, injected_skill_ids=()
+        )
+        assert await self._svc.observe(normal) == []
 
     @pytest.mark.asyncio
     async def test_observe_never_produces_patch_proposal(self):
@@ -421,8 +442,9 @@ class TestT3Acceptance:
         assert UsageStore(self._paths).read("obs-sk").use == 1
 
     @pytest.mark.asyncio
-    async def test_acceptance_memory_fact_written(self):
-        """수용 기준 (T4 연계): fact가 감지되면 MemoryWritten + list_memories 반영."""
+    async def test_acceptance_memory_regex_path_removed(self):
+        """수용 기준(v3 개정): observe()는 어떤 문구에도 메모리를 쓰지 않는다 —
+        메모리 기록은 리뷰 LLM 경로(propose_memory_write)만 남았다."""
         outcome = TurnOutcome(
             session_id="s2",
             final_message="The project uses pytest for all unit tests here.",
@@ -431,7 +453,5 @@ class TestT3Acceptance:
             injected_skill_ids=(),
         )
         effects = await self._svc.observe(outcome)
-        mem_effects = [e for e in effects if isinstance(e, MemoryWritten)]
-        assert len(mem_effects) >= 1
-        mems = self._svc.list_memories()
-        assert len(mems) >= 1
+        assert [e for e in effects if isinstance(e, MemoryWritten)] == []
+        assert self._svc.list_memories() == []

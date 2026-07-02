@@ -18,8 +18,13 @@ BASE_SYSTEM_PROMPT = (
 # service injects it into the per-turn system-prompt additions — it owns *when*,
 # this package owns the *text*.
 SKILL_GUIDANCE = (
-    "If you complete a reusable, multi-step procedure (e.g. 5+ tool calls), save it "
-    "as a SKILL.md — capture repeatable *methods*, not declarative facts."
+    "If you complete a reusable, multi-step procedure (e.g. 5+ tool calls), or the "
+    "user asks to save/promote something as a skill, call the `propose_skill` tool — "
+    "capture repeatable *methods* (numbered steps, exact commands), not declarative "
+    "facts. It only stages a proposal: the user sees an approval card with a diff "
+    "after your answer and decides, so proposing is cheap and never destructive. "
+    "Also use it to fix an injected skill you noticed was wrong or outdated during "
+    "this conversation. Mention in your answer when you've proposed one."
 )
 
 

@@ -7,7 +7,7 @@ import {
   type SkillDetail,
   type UserSignal,
 } from '../learningData';
-import type { Skill as MarketSkill, Plugin as MarketPlugin } from '../types';
+import type { Skill as MarketSkill, Plugin as MarketPlugin, SkillSuggestion } from '../types';
 import {
   installedSkillId,
   marketSkillToOwned,
@@ -41,6 +41,17 @@ interface LearningContextValue {
   /** Pending learning-loop proposals awaiting accept/dismiss */
   proposals: Proposal[];
   setProposals: React.Dispatch<React.SetStateAction<Proposal[]>>;
+
+  /** 영속 제안함 (Self-Improvement v3) — 타임아웃된 HITL 제안 + 발굴 산출물 */
+  suggestions: SkillSuggestion[];
+  /** 제안함 재조회 (GET /skills/suggestions) */
+  refreshSuggestions: () => Promise<void>;
+  /** 제안함 항목 승인/거부 → 런타임 적용 + 목록/스킬 동기화 */
+  decideSuggestion: (id: string, approved: boolean, editedBody?: string) => Promise<boolean>;
+  /** 크로스세션 패턴 발굴(수동) — 새로 추가된 제안 수를 돌려준다 */
+  discoverNow: () => Promise<number>;
+  /** 신호 제거 — 런타임 메모리(mem_*)면 DELETE /memories/{id}까지 배선(위생) */
+  removeSignal: (id: string) => void;
 
   /**
    * 마켓 스킬을 "내 스킬"(소유 인스턴스)로 materialize 한다 — 설치의 학습-store 측 배선.
@@ -139,33 +150,42 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [details, setDetails] = useState<Record<string, SkillDetail>>({});
   const [myPlugins, setMyPlugins] = useState<MyPlugin[]>([]);
   const [proposals, setProposals] = useState<Proposal[]>([]);
+  const [suggestions, setSuggestions] = useState<SkillSuggestion[]>([]);
   /** 런타임 첫 hydrate 진행 중 — 스크린이 스켈레톤 vs 빈상태를 구분하는 데 쓴다. */
   const [hydrating, setHydrating] = useState(true);
   const [highlightedSkill, setHighlightedSkill] = useState<string | null>(null);
   const panelScrollRef = useRef<HTMLDivElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // 스킬/제안함 로더 — hydrate와 제안 결정(승인 후 목록 동기화) 양쪽에서 재사용하므로
+  // useCallback으로 훅 스코프에 둔다(useEffect 안에 가두면 decideSuggestion이 못 쓴다).
+  const loadSkills = useCallback(() => {
+    return api.getSkills().then((res) => {
+      if (!res.success || !res.data) return;
+      type RuntimeSkill = {
+        id: string; name: string; version: number; description: string;
+        state: 'active' | 'stale' | 'archived'; tags: string[];
+        use: number; patch: number; last_used_at: string | null; source?: string | null;
+      };
+      const raw = res.data as RuntimeSkill[];
+      const loadedSkills = raw.map(runtimeSkillToLearning);
+      const loadedDetails: Record<string, SkillDetail> = {};
+      raw.forEach((s) => { loadedDetails[s.id] = runtimeSkillToDetail({ ...s, source: s.source ?? null }); });
+      setSkills(loadedSkills);
+      setDetails(loadedDetails);
+    });
+  }, []);
+
+  const refreshSuggestions = useCallback(async () => {
+    const res = await api.getSkillSuggestions();
+    if (res.success && res.data) setSuggestions(res.data);
+  }, []);
+
   // runtime API에서 스킬 목록·메모리 로드 (GET /skills, GET /memories).
   // 런타임 연결은 Electron health probe라 비동기 — provider 마운트 시점엔 아직 offline일 수
   // 있다(그땐 ApiClient.get()이 { success: false } 반환). 그래서 마운트 때 한 번 시도하고,
   // enabled가 true로 바뀌는 순간 다시 로드한다(api.onEnabledChange). 안 그러면 빈 목록으로 굳는다.
   useEffect(() => {
-    const loadSkills = () => {
-      return api.getSkills().then((res) => {
-        if (!res.success || !res.data) return;
-        type RuntimeSkill = {
-          id: string; name: string; version: number; description: string;
-          state: 'active' | 'stale' | 'archived'; tags: string[];
-          use: number; patch: number; last_used_at: string | null; source?: string | null;
-        };
-        const raw = res.data as RuntimeSkill[];
-        const loadedSkills = raw.map(runtimeSkillToLearning);
-        const loadedDetails: Record<string, SkillDetail> = {};
-        raw.forEach((s) => { loadedDetails[s.id] = runtimeSkillToDetail({ ...s, source: s.source ?? null }); });
-        setSkills(loadedSkills);
-        setDetails(loadedDetails);
-      });
-    };
     const loadMemories = () => {
       return api.getMemories().then((res) => {
         if (!res.success || !res.data) return;
@@ -217,18 +237,46 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     };
 
     // 첫 hydrate가 끝나면(성공/실패 무관) 로딩 플래그를 내려 빈상태/스켈레톤을 전환한다.
-    void Promise.allSettled([loadSkills(), loadMemories(), loadPlugins()]).then(() =>
-      setHydrating(false),
+    void Promise.allSettled([loadSkills(), loadMemories(), loadPlugins(), refreshSuggestions()]).then(
+      () => setHydrating(false),
     );
     const unsub = api.onEnabledChange((enabled) => {
       if (enabled) {
         setHydrating(true);
-        void Promise.allSettled([loadSkills(), loadMemories(), loadPlugins()]).then(() =>
-          setHydrating(false),
+        void Promise.allSettled([loadSkills(), loadMemories(), loadPlugins(), refreshSuggestions()]).then(
+          () => setHydrating(false),
         );
       }
     });
     return unsub;
+  }, [loadSkills, refreshSuggestions]);
+
+  // 제안함 항목 승인/거부 — 승인이 적용되면(runtime이 create/patch/archive 수행)
+  // 스킬 목록을 재동기화해 MySkills/패널이 즉시 새 버전을 보여주게 한다.
+  const decideSuggestion = useCallback(
+    async (id: string, approved: boolean, editedBody?: string): Promise<boolean> => {
+      const res = await api.decideSkillSuggestion(id, approved, editedBody);
+      if (!res.success) return false;
+      setSuggestions((prev) => prev.filter((s) => s.id !== id));
+      if (approved) void loadSkills();
+      return true;
+    },
+    [loadSkills],
+  );
+
+  // 크로스세션 발굴(수동 트리거) — LLM 1회 호출이라 느릴 수 있다(호출측이 로딩 표시).
+  const discoverNow = useCallback(async (): Promise<number> => {
+    const res = await api.discoverSkills();
+    if (!res.success || !res.data) return 0;
+    await refreshSuggestions();
+    return res.data.suggestions.length;
+  }, [refreshSuggestions]);
+
+  // 신호 제거 — 런타임 메모리에서 온 신호(mem_*)는 서버에서도 지운다(위생: 메모리는
+  // HITL 없이 매 턴 주입되므로 사후 제거가 유일한 통제 수단).
+  const removeSignal = useCallback((id: string) => {
+    setSignals((prev) => prev.filter((x) => x.id !== id));
+    if (id.startsWith('mem_')) void api.deleteMemory(id);
   }, []);
 
   const jumpToSkill = useCallback((id: string) => {
@@ -269,13 +317,18 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setMyPlugins,
       proposals,
       setProposals,
+      suggestions,
+      refreshSuggestions,
+      decideSuggestion,
+      discoverNow,
+      removeSignal,
       installSkillFromMarket,
       installPluginFromMarket,
       highlightedSkill,
       jumpToSkill,
       panelScrollRef,
     }),
-    [hydrating, skills, signals, installed, details, myPlugins, proposals, installSkillFromMarket, installPluginFromMarket, highlightedSkill, jumpToSkill],
+    [hydrating, skills, signals, installed, details, myPlugins, proposals, suggestions, refreshSuggestions, decideSuggestion, discoverNow, removeSignal, installSkillFromMarket, installPluginFromMarket, highlightedSkill, jumpToSkill],
   );
 
   return <LearningCtx.Provider value={value}>{children}</LearningCtx.Provider>;

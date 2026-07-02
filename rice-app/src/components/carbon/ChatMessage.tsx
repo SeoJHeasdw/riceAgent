@@ -820,8 +820,11 @@ const DiffLine: React.FC<{ line: { t: 'add' | 'remove' | 'ctx'; text: string } }
 const PatchProposalCard: React.FC<{
   m: Extract<ThreadMessage, { kind: 'patch' }>;
   onApprove?: (editedBody?: string) => void;
+  /** 명시적 거부 — 서버 파킹을 즉시 해소한다(없으면 타임아웃까지 서버가 대기하다
+   *  제안함으로 이동해버린다 — 사용자가 이미 '아니'라고 한 제안인데도). */
+  onReject?: () => void;
   onJumpSkill?: (id: string) => void;
-}> = ({ m, onApprove, onJumpSkill }) => {
+}> = ({ m, onApprove, onReject, onJumpSkill }) => {
   const [state, setState] = useState<'pending' | 'approved' | 'denied'>('pending');
   const [editing, setEditing] = useState(false);
   const [body, setBody] = useState(m.proposedBody);
@@ -904,7 +907,14 @@ const PatchProposalCard: React.FC<{
               승인하면 이전 버전은 히스토리에 보관돼요 (롤백 가능).
             </span>
             <div className="flex-1" />
-            <Button kind="ghost" size="sm" onClick={() => setState('denied')}>
+            <Button
+              kind="ghost"
+              size="sm"
+              onClick={() => {
+                setState('denied');
+                onReject?.();
+              }}
+            >
               거부
             </Button>
             <Button
@@ -1011,10 +1021,11 @@ const AssistantBlock: React.FC<{
   onRegenerate?: () => void;
   onSaveSkill?: (m: Extract<ThreadMessage, { kind: 'skill' }>) => void;
   onApprovePatch?: (m: Extract<ThreadMessage, { kind: 'patch' }>, editedBody?: string) => void;
+  onRejectPatch?: (m: Extract<ThreadMessage, { kind: 'patch' }>) => void;
   onRespondApproval?: (m: Extract<ThreadMessage, { kind: 'approval' }>, decision: 'approve' | 'reject') => void;
   showActions?: boolean;
   actionsCopyText?: string;
-}> = ({ m, onCorrect, onJumpSkill, onRegenerate, onSaveSkill, onApprovePatch, onRespondApproval, showActions, actionsCopyText }) => {
+}> = ({ m, onCorrect, onJumpSkill, onRegenerate, onSaveSkill, onApprovePatch, onRejectPatch, onRespondApproval, showActions, actionsCopyText }) => {
   const { openFile } = useFileViewer();
   if (m.kind === 'thinking') return <ThinkingBlock m={m} />;
   if (m.kind === 'toolrun') return <ToolCallCard m={m} onJumpSkill={onJumpSkill} />;
@@ -1054,7 +1065,7 @@ const AssistantBlock: React.FC<{
   if (m.kind === 'patch')
     return (
       <>
-        <PatchProposalCard m={m} onApprove={(b) => onApprovePatch?.(m, b)} onJumpSkill={onJumpSkill} />
+        <PatchProposalCard m={m} onApprove={(b) => onApprovePatch?.(m, b)} onReject={() => onRejectPatch?.(m)} onJumpSkill={onJumpSkill} />
         {showActions && (
           <MessageActions onRegenerate={onRegenerate} onCorrect={onCorrect} copyText={actionsCopyText} />
         )}
@@ -1115,6 +1126,8 @@ export interface ChatTurnProps {
   onSaveSkill?: (m: Extract<ThreadMessage, { kind: 'skill' }>) => void;
   /** approve a skill-improvement (patch) proposal — bumps version, keeps history */
   onApprovePatch?: (m: Extract<ThreadMessage, { kind: 'patch' }>, editedBody?: string) => void;
+  /** reject a patch proposal — resolves the server-side parking immediately */
+  onRejectPatch?: (m: Extract<ThreadMessage, { kind: 'patch' }>) => void;
   /** respond to a tool-execution approval (HITL) — posts back to the runtime */
   onRespondApproval?: (m: Extract<ThreadMessage, { kind: 'approval' }>, decision: 'approve' | 'reject') => void;
   /** thread index of the message to highlight (jumped to from a proposal source) */
@@ -1130,6 +1143,7 @@ export const ChatTurn: React.FC<ChatTurnProps> = ({
   onRegenerate,
   onSaveSkill,
   onApprovePatch,
+  onRejectPatch,
   onRespondApproval,
   highlightIndex,
   actionsCopyAt = {},
@@ -1170,6 +1184,7 @@ export const ChatTurn: React.FC<ChatTurnProps> = ({
                 onRegenerate={onRegenerate}
                 onSaveSkill={onSaveSkill}
                 onApprovePatch={onApprovePatch}
+                onRejectPatch={onRejectPatch}
                 onRespondApproval={onRespondApproval}
                 showActions={index in actionsCopyAt}
                 actionsCopyText={actionsCopyAt[index]}

@@ -28,6 +28,7 @@ export type IconName =
   | 'thumbs-up'
   | 'thumbs-down'
   | 'bookmark'
+  | 'sparkle'
   | 'idea'
   | 'arrow-up-right'
   | 'arrow-right'
@@ -79,6 +80,8 @@ const PATHS: Record<IconName, React.ReactNode> = {
   'thumbs-up': <><path d="M7 10v11M2 11h5v10H2z" /><path d="M7 10l4-7a2 2 0 0 1 3 1.7V8h5a2 2 0 0 1 2 2.3l-1.3 7A2 2 0 0 1 16.7 19H7" /></>,
   'thumbs-down': <><path d="M17 14V3M22 13h-5V3h5z" /><path d="M17 14l-4 7a2 2 0 0 1-3-1.7V16H5a2 2 0 0 1-2-2.3l1.3-7A2 2 0 0 1 7.3 5H17" /></>,
   bookmark: <><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" /></>,
+  // 학습/증류 액션 전용 — "이 대화를 스킬로 저장" (bookmark 대체, Self-Improvement v3)
+  sparkle: <><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z" /><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z" /></>,
   idea: <><path d="M9 18h6" /><path d="M10 21h4" /><path d="M12 3a6 6 0 0 0-4 10.5c.7.7 1 1.2 1 2.5h6c0-1.3.3-1.8 1-2.5A6 6 0 0 0 12 3z" /></>,
   'arrow-up-right': <><path d="M7 17 17 7M8 7h9v9" /></>,
   'arrow-right': <><path d="M5 12h14M13 6l6 6-6 6" /></>,

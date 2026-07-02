@@ -79,6 +79,11 @@ class RollbackIn(BaseModel):
     version: int
 
 
+class SuggestionDecisionIn(BaseModel):
+    approved: bool
+    edited_body: str | None = None
+
+
 @router.get("")
 async def list_skills(c: Container = Depends(get_container)):
     return {"success": True, "data": [s.__dict__ for s in c.learning.list_skills()]}
@@ -91,6 +96,47 @@ async def create_skill(body: CreateSkillIn, c: Container = Depends(get_container
         name=body.name, body=body.body, description=body.description, tags=tuple(body.tags)
     )
     return {"success": True, "data": detail.__dict__}
+
+
+# NOTE: /suggestions·/discover는 GET /{skill_id}보다 먼저 선언해야 한다 —
+# FastAPI는 선언 순서대로 매칭하므로 뒤에 두면 "suggestions"가 skill_id로 잡힌다.
+
+
+@router.get("/suggestions")
+async def list_suggestions(c: Container = Depends(get_container)):
+    """영속 제안함 (Self-Improvement v3) — 타임아웃된 HITL 제안 + 백그라운드 발굴
+    산출물. payload는 SSE skill_patch_proposed와 같은 어휘라 프론트가 동일 diff
+    카드로 렌더링한다."""
+    return {"success": True, "data": c.learning.suggestions()}
+
+
+@router.post("/suggestions/{suggestion_id}/decision")
+async def decide_suggestion(
+    suggestion_id: str, body: SuggestionDecisionIn, c: Container = Depends(get_container)
+):
+    """제안함 항목 승인/거부. 파킹된 적 없는 제안이라 approval_id가 없다 — 제안함
+    id로 직접 결정한다. 승인 시 create/patch는 apply_patch, archive는
+    decide_archive로 수렴하고 결정은 ledger에 남는다(반복 거부 쿨다운의 원천)."""
+    result = c.learning.decide_suggestion(
+        suggestion_id, approved=body.approved, edited_body=body.edited_body
+    )
+    return {"success": True, "data": result}
+
+
+@router.post("/discover")
+async def discover(c: Container = Depends(get_container)):
+    """크로스세션 반복 패턴 발굴(수동 트리거). 최근 세션 다이제스트를 모아 LLM
+    1회 호출 — 산출된 신규 스킬 제안은 제안함에 들어가고 여기서도 그대로 반환된다.
+    /curate?mode=consolidate처럼 오래 걸릴 수 있는 일반 REST — 프론트는 로딩
+    상태를 보여줘야 한다."""
+    from ..scheduler import gather_recent_digests  # noqa: PLC0415 — 순환 회피
+
+    cfg = c.config.learning
+    digests = gather_recent_digests(
+        c, max_sessions=cfg.discovery_max_sessions, digest_chars=cfg.discovery_digest_chars
+    )
+    added = await c.learning.discover(digests)
+    return {"success": True, "data": {"scanned_sessions": len(digests), "suggestions": added}}
 
 
 @router.get("/{skill_id}")
