@@ -222,6 +222,35 @@ const SkillsPopover: React.FC<{
 
   const empty = skillItems.length === 0 && toolItems.length === 0 && pluginItems.length === 0;
 
+  // 키보드 탐색: 화면에 보이는 삽입 가능 명령을 렌더 순서 그대로 평탄화
+  const visibleCommands: string[] = [
+    ...skillItems.map((s) => s.command!),
+    ...toolItems.map((t) => t.command ?? t.id),
+    ...pluginItems.flatMap(({ plugin, provides }) =>
+      (query ? true : expanded.has(plugin.id)) ? provides.map((pr) => pr.command) : [],
+    ),
+  ];
+  const [active, setActive] = useState(0);
+  const activeIdx = Math.min(active, Math.max(visibleCommands.length - 1, 0));
+  useEffect(() => setActive(0), [query]);
+
+  // 그룹별 시작 인덱스 (visibleCommands 평탄화 순서와 동일)
+  const toolOffset = skillItems.length;
+  const pluginOffset = toolOffset + toolItems.length;
+  const pluginStarts: number[] = [];
+  {
+    let acc = pluginOffset;
+    for (const { plugin, provides } of pluginItems) {
+      pluginStarts.push(acc);
+      if (query ? true : expanded.has(plugin.id)) acc += provides.length;
+    }
+  }
+
+  const listRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    listRef.current?.querySelector('[data-active="true"]')?.scrollIntoView({ block: 'nearest' });
+  }, [activeIdx]);
+
   const insert = (command: string) => {
     onClose();
     onInsert(command);
@@ -234,35 +263,66 @@ const SkillsPopover: React.FC<{
       return next;
     });
 
+  // 카테고리별 액센트 (globals.css 도메인 액센트와 동기)
+  const ACCENT = {
+    skill: 'var(--accent-skill)',
+    tool: 'var(--accent-connector)',
+    plugin: 'var(--accent-plugin)',
+  } as const;
+
   // A clickable slash-command row
   const CmdRow: React.FC<{
     icon: Parameters<typeof Icon>[0]['name'];
     command: string;
     sub: string;
+    tint: string;
+    index: number;
     indent?: boolean;
-  }> = ({ icon, command, sub, indent }) => (
-    <button
-      onClick={() => insert(command)}
-      className={`group/row flex items-center gap-2.5 w-full py-1.5 pr-2.5 text-left hover:bg-layer-hover-02 transition-colors ${
-        indent ? 'pl-9' : 'pl-3'
-      }`}
-    >
-      <Icon name={icon} size={15} className="text-icon-secondary opacity-80 flex-shrink-0" />
-      <div className="flex-1 min-w-0">
-        <div className="font-mono text-body-short-01 text-text-primary truncate">
-          <span className="text-text-helper">/</span>
-          {command}
+  }> = ({ icon, command, sub, tint, index, indent }) => {
+    const isActive = index === activeIdx;
+    return (
+      <button
+        data-active={isActive || undefined}
+        onClick={() => insert(command)}
+        onMouseEnter={() => setActive(index)}
+        className={`relative flex items-center gap-2.5 w-full py-1.5 pr-2.5 text-left transition-colors ${
+          indent ? 'pl-8' : 'pl-3'
+        } ${isActive ? 'bg-layer-hover-02' : ''}`}
+      >
+        {isActive && (
+          <span className="absolute left-0 top-1 bottom-1 w-0.5 rounded-full" style={{ background: tint }} />
+        )}
+        <span
+          className="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0"
+          style={{ color: tint, background: `color-mix(in srgb, ${tint} 13%, transparent)` }}
+        >
+          <Icon name={icon} size={13} />
+        </span>
+        <div className="flex-1 min-w-0">
+          <div className="font-mono text-body-short-01 text-text-primary truncate">
+            <span className="text-text-helper">/</span>
+            {command}
+          </div>
+          <div className="text-caption-01 text-text-helper truncate">{sub}</div>
         </div>
-        <div className="text-caption-01 text-text-helper truncate">{sub}</div>
-      </div>
-      <span className="text-[10px] font-mono text-text-helper opacity-0 group-hover/row:opacity-100 transition-opacity flex-shrink-0">
-        ↵ 삽입
-      </span>
-    </button>
-  );
+        <span
+          className={`text-[10px] font-mono text-text-helper transition-opacity flex-shrink-0 ${
+            isActive ? 'opacity-100' : 'opacity-0'
+          }`}
+        >
+          ↵ 삽입
+        </span>
+      </button>
+    );
+  };
 
-  const GroupLabel: React.FC<{ children: React.ReactNode; count: number }> = ({ children, count }) => (
+  const GroupLabel: React.FC<{ children: React.ReactNode; count: number; tint: string }> = ({
+    children,
+    count,
+    tint,
+  }) => (
     <div className="flex items-center gap-1.5 px-3 pt-2.5 pb-1">
+      <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: tint }} />
       <span className="text-[10px] font-semibold uppercase tracking-wider text-text-helper">{children}</span>
       <span className="text-[10px] font-mono text-text-helper">{count}</span>
     </div>
@@ -271,9 +331,8 @@ const SkillsPopover: React.FC<{
   return (
     <div
       ref={ref}
-      className={`absolute z-30 w-[320px] bg-layer-02 border border-border-subtle-01 rounded-xl shadow-elevation-3 overflow-hidden flex flex-col ${
-        inlineMode ? 'bottom-full mb-2 left-0' : 'bottom-11 left-0'
-      }`}
+      className="absolute z-30 w-[340px] bottom-full mb-2 left-0 bg-layer-02/95 backdrop-blur-md border border-border-subtle-01 rounded-xl shadow-elevation-3 overflow-hidden flex flex-col"
+      style={{ animation: 'popoverIn 140ms cubic-bezier(0.16, 1, 0.3, 1)' }}
     >
       {/* Header + search */}
       <div className="px-3 pt-3 pb-2 flex-shrink-0">
@@ -290,7 +349,23 @@ const SkillsPopover: React.FC<{
             autoFocus
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); onClose(); onEscape?.(); } }}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                onClose();
+                onEscape?.();
+              } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                setActive((a) => Math.min(a + 1, Math.max(visibleCommands.length - 1, 0)));
+              } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                setActive((a) => Math.max(a - 1, 0));
+              } else if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                const cmd = visibleCommands[activeIdx];
+                if (cmd) insert(cmd);
+              }
+            }}
             placeholder="스킬·도구·전문가 검색"
             className="flex-1 min-w-0 bg-transparent border-none outline-none text-caption-01 text-text-primary placeholder:text-text-placeholder"
           />
@@ -298,31 +373,50 @@ const SkillsPopover: React.FC<{
       </div>
 
       {/* Body */}
-      <div className="max-h-[332px] overflow-y-auto pb-1">
-        {empty && <div className="px-3 py-6 text-center text-caption-01 text-text-helper">검색 결과가 없어요</div>}
+      <div ref={listRef} className="max-h-[332px] overflow-y-auto pb-1">
+        {empty && (
+          <div className="flex flex-col items-center gap-1.5 px-3 py-6 text-center">
+            <Icon name="search" size={18} className="text-icon-secondary opacity-50" />
+            <div className="text-caption-01 text-text-helper">검색 결과가 없어요</div>
+          </div>
+        )}
 
         {skillItems.length > 0 && (
           <div>
-            <GroupLabel count={skillItems.length}>스킬</GroupLabel>
-            {skillItems.map((s) => (
-              <CmdRow key={s.id} icon="skill" command={s.command!} sub={`${s.ver} · ${s.uses}회 사용`} />
+            <GroupLabel count={skillItems.length} tint={ACCENT.skill}>스킬</GroupLabel>
+            {skillItems.map((s, i) => (
+              <CmdRow
+                key={s.id}
+                icon="skill"
+                command={s.command!}
+                sub={`${s.ver} · ${s.uses}회 사용`}
+                tint={ACCENT.skill}
+                index={i}
+              />
             ))}
           </div>
         )}
 
         {toolItems.length > 0 && (
           <div>
-            <GroupLabel count={toolItems.length}>도구</GroupLabel>
-            {toolItems.map((t) => (
-              <CmdRow key={t.id} icon={t.icon} command={t.command ?? t.id} sub={t.meta} />
+            <GroupLabel count={toolItems.length} tint={ACCENT.tool}>도구</GroupLabel>
+            {toolItems.map((t, i) => (
+              <CmdRow
+                key={t.id}
+                icon={t.icon}
+                command={t.command ?? t.id}
+                sub={t.meta}
+                tint={ACCENT.tool}
+                index={toolOffset + i}
+              />
             ))}
           </div>
         )}
 
         {pluginItems.length > 0 && (
           <div>
-            <GroupLabel count={pluginItems.length}>플러그인 · 전문가</GroupLabel>
-            {pluginItems.map(({ plugin, provides }) => {
+            <GroupLabel count={pluginItems.length} tint={ACCENT.plugin}>플러그인 · 전문가</GroupLabel>
+            {pluginItems.map(({ plugin, provides }, pi) => {
               const open = query ? true : expanded.has(plugin.id);
               return (
                 <div key={plugin.id}>
@@ -330,7 +424,15 @@ const SkillsPopover: React.FC<{
                     onClick={() => toggle(plugin.id)}
                     className="flex items-center gap-2.5 w-full px-3 py-1.5 text-left hover:bg-layer-hover-02 transition-colors"
                   >
-                    <Icon name={plugin.icon} size={15} className="text-icon-secondary opacity-80 flex-shrink-0" />
+                    <span
+                      className="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0"
+                      style={{
+                        color: ACCENT.plugin,
+                        background: `color-mix(in srgb, ${ACCENT.plugin} 13%, transparent)`,
+                      }}
+                    >
+                      <Icon name={plugin.icon} size={13} />
+                    </span>
                     <div className="flex-1 min-w-0">
                       <div className="text-body-short-01 text-text-primary truncate">{plugin.name}</div>
                       <div className="text-caption-01 text-text-helper truncate">
@@ -344,8 +446,16 @@ const SkillsPopover: React.FC<{
                     />
                   </button>
                   {open &&
-                    provides.map((pr) => (
-                      <CmdRow key={pr.command} icon="skill" command={pr.command} sub={pr.desc} indent />
+                    provides.map((pr, j) => (
+                      <CmdRow
+                        key={pr.command}
+                        icon="skill"
+                        command={pr.command}
+                        sub={pr.desc}
+                        tint={ACCENT.plugin}
+                        index={pluginStarts[pi] + j}
+                        indent
+                      />
                     ))}
                 </div>
               );
@@ -355,18 +465,39 @@ const SkillsPopover: React.FC<{
       </div>
 
       {/* Footer */}
-      <button
-        onClick={() => {
-          onClose();
-          onManage();
-        }}
-        className="flex items-center gap-1.5 w-full px-3 py-2.5 border-t border-border-subtle-01 text-caption-01 text-link-primary hover:bg-layer-hover-02 transition-colors flex-shrink-0"
-      >
-        <Icon name="settings" size={14} /> 학습 패널에서 관리
-      </button>
+      <div className="flex items-center border-t border-border-subtle-01 flex-shrink-0">
+        <button
+          onClick={() => {
+            onClose();
+            onManage();
+          }}
+          className="flex items-center gap-1.5 px-3 py-2.5 text-caption-01 text-link-primary hover:bg-layer-hover-02 transition-colors"
+        >
+          <Icon name="settings" size={14} /> 학습 패널에서 관리
+        </button>
+        <div className="ml-auto flex items-center gap-1 pr-3 text-[10px] text-text-helper select-none">
+          <Kbd>↑↓</Kbd> 탐색
+          <Kbd>↵</Kbd> 삽입
+          <Kbd>esc</Kbd> 닫기
+        </div>
+      </div>
+
+      <style>{`
+        @keyframes popoverIn {
+          from { opacity: 0; transform: translateY(6px) scale(0.98); }
+          to { opacity: 1; transform: none; }
+        }
+      `}</style>
     </div>
   );
 };
+
+/* ── 키보드 힌트 뱃지 ── */
+const Kbd: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <kbd className="px-1 py-px rounded bg-layer-01 border border-border-subtle-01 font-mono text-[9px] text-text-secondary">
+    {children}
+  </kbd>
+);
 
 function ChatScreen() {
   const { jumpToSkill, setSkills, setDetails, panelScrollRef } = useLearning();
@@ -405,6 +536,14 @@ function ChatScreen() {
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+
+  // composer 자동 높이 — 내용만큼 자라고 max-h(200px)에서 내부 스크롤로 전환
+  useEffect(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+  }, [draft, command]);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Real backend session id for the live (runtime-connected) path. Created lazily
   // on first send; reused for the rest of this mounted ChatScreen. Independent of
@@ -1394,16 +1533,27 @@ function ChatScreen() {
                   inlineMode
                 />
               )}
-              <div data-tour="chat-input" className="bg-layer-01 border border-border-strong-01 rounded-xl shadow-elevation-1 transition-colors focus-within:border-focus">
+              <div
+                data-tour="chat-input"
+                className="bg-layer-01 border border-border-strong-01 rounded-2xl shadow-elevation-1 transition-all duration-200 focus-within:border-focus focus-within:shadow-glow-blue"
+              >
                 {/* Active slash-command chip — the command lives here, not in the textarea */}
                 {command && (
-                  <div className="flex items-center gap-2 px-3 pt-3 pb-1">
-                    <span className="inline-flex items-center gap-1.5 pl-2 pr-1 py-1 bg-blue-10 border border-blue-30 rounded-lg text-caption-01 text-blue-70 select-none">
-                      <Icon name="skill" size={12} className="text-blue-60" />
-                      <span className="font-mono font-medium">/{command}</span>
+                  <div
+                    className="flex items-center gap-2 px-3.5 pt-3 pb-1"
+                    style={{ animation: 'chipIn 160ms cubic-bezier(0.16, 1, 0.3, 1)' }}
+                  >
+                    <span className="inline-flex items-center gap-1.5 pl-1 pr-1 py-1 bg-interactive/15 border border-interactive/40 rounded-lg text-caption-01 select-none">
+                      <span
+                        className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0"
+                        style={{ background: 'var(--gradient-skill)' }}
+                      >
+                        <Icon name="skill" size={11} className="text-white" />
+                      </span>
+                      <span className="font-mono font-medium text-blue-30">/{command}</span>
                       <button
                         onClick={clearCommand}
-                        className="ml-0.5 p-0.5 rounded-md text-blue-60 hover:bg-blue-30 hover:text-blue-70 transition-colors"
+                        className="ml-0.5 p-0.5 rounded-md text-blue-30/70 hover:text-white hover:bg-interactive/40 transition-colors"
                         title="명령어 제거 (Backspace)"
                       >
                         <Icon name="close" size={11} />
@@ -1436,20 +1586,29 @@ function ChatScreen() {
                     }
                   }}
                   placeholder={command ? '추가 지시사항 입력 (선택) · Enter로 실행' : 'RICE에게 메시지…  (Enter로 전송)'}
+                  rows={1}
                   className="w-full resize-none border-none outline-none bg-transparent text-text-primary text-body-short-02 leading-5 px-4 pt-3.5 pb-1 min-h-[56px] max-h-[200px]"
                 />
-                <div className="flex items-center gap-1.5 px-2 pb-2">
-                  <button className="p-1.5 hover:bg-layer-hover-01 transition-colors rounded-md text-icon-primary" title="첨부">
+                <div className="flex items-center gap-1.5 px-2.5 pb-2.5">
+                  <button
+                    className="p-1.5 rounded-lg text-icon-secondary hover:text-icon-primary hover:bg-layer-hover-01 transition-colors"
+                    title="첨부"
+                  >
                     <Icon name="attachment" size={16} />
                   </button>
-                  <button className="p-1.5 hover:bg-layer-hover-01 transition-colors rounded-md text-icon-primary" title="음성">
+                  <button
+                    className="p-1.5 rounded-lg text-icon-secondary hover:text-icon-primary hover:bg-layer-hover-01 transition-colors"
+                    title="음성"
+                  >
                     <Icon name="microphone" size={16} />
                   </button>
                   <div className="relative">
                     <button
                       onClick={() => setSkillsOpen((o) => !o)}
-                      className={`flex items-center gap-1.5 px-2 py-1 border border-border-subtle-01 hover:bg-layer-hover-01 transition-colors text-text-secondary text-caption-01 rounded-md ${
-                        skillsOpen ? 'bg-layer-selected-01' : ''
+                      className={`flex items-center gap-1.5 px-2.5 h-7 rounded-full border text-caption-01 transition-colors ${
+                        skillsOpen
+                          ? 'bg-interactive/15 border-interactive/40 text-blue-30'
+                          : 'border-border-subtle-01 text-text-secondary hover:bg-layer-hover-01 hover:text-text-primary'
                       }`}
                     >
                       <Icon name="skill" size={14} /> 스킬·도구
@@ -1463,7 +1622,7 @@ function ChatScreen() {
                   {connected && liveSessionId.current && (
                     <button
                       onClick={learnFromConversation}
-                      className="p-1.5 hover:bg-layer-hover-01 transition-colors rounded-md text-icon-primary"
+                      className="p-1.5 rounded-lg text-icon-secondary hover:text-icon-primary hover:bg-layer-hover-01 transition-colors"
                       title="이 대화를 스킬로 저장"
                     >
                       <Icon name="bookmark" size={16} />
@@ -1473,24 +1632,36 @@ function ChatScreen() {
                   <button
                     onClick={busy ? stopTurn : send}
                     disabled={!busy && !command && !draft.trim()}
-                    className={`p-1.5 rounded-md transition-colors ${
+                    className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-150 ${
                       busy
-                        ? 'bg-layer-02 hover:bg-layer-hover-02 cursor-pointer'
+                        ? 'bg-layer-02 hover:bg-layer-hover-02 border border-border-subtle-01 cursor-pointer'
                         : command || draft.trim()
-                        ? 'bg-blue-60 hover:bg-blue-70 cursor-pointer'
+                        ? 'shadow-glow-blue hover:brightness-110 cursor-pointer'
                         : 'bg-layer-02 cursor-not-allowed opacity-50'
                     }`}
+                    style={!busy && (command || draft.trim()) ? { background: 'var(--gradient-skill)' } : undefined}
                     title={busy ? '생성 중지' : '전송'}
                   >
                     <Icon name={busy ? 'close' : 'send'} size={16} className={busy ? 'text-text-primary' : 'text-white'} />
                   </button>
                 </div>
               </div>
-              <div className="text-caption-01 text-text-helper text-center mt-2.5">
+              <div className="flex items-center justify-center gap-1.5 text-caption-01 text-text-helper mt-2.5">
+                <span
+                  className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                    modelMode === 'local' ? 'bg-support-success' : 'bg-interactive'
+                  }`}
+                />
                 {modelMode === 'local'
                   ? 'Ollama 로컬 모델로 실행 중 · 데이터가 기기를 벗어나지 않습니다'
                   : 'Claude(SaaS) 모델로 실행 중'}
               </div>
+              <style>{`
+                @keyframes chipIn {
+                  from { opacity: 0; transform: translateY(3px) scale(0.97); }
+                  to { opacity: 1; transform: none; }
+                }
+              `}</style>
             </div>
           </div>
         </div>

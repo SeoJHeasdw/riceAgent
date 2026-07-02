@@ -204,7 +204,14 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
       {/* ── 실행 위치 ── */}
       <div>
         <div className="text-label-01 text-text-secondary mb-2">실행 위치</div>
-        <div className="grid grid-cols-2 gap-0.5 p-0.5 bg-field-01 border border-border-subtle-01 rounded-lg">
+        <div className="relative grid grid-cols-2 p-0.5 bg-field-01 border border-border-subtle-01 rounded-lg">
+          {/* sliding pill — 활성 모드 아래에서 미끄러지는 인디케이터 */}
+          <span
+            aria-hidden
+            className={`absolute left-0.5 top-0.5 bottom-0.5 w-[calc(50%-2px)] rounded-md bg-interactive shadow-elevation-1 transition-transform duration-200 ease-out ${
+              draftMode === 'local' ? 'translate-x-full' : ''
+            }`}
+          />
           {([
             { mode: 'saas' as const, title: 'SaaS', caption: '클라우드 API' },
             { mode: 'local' as const, title: 'Local', caption: 'Ollama · 온디바이스' },
@@ -215,14 +222,14 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
                 key={mode}
                 onClick={() => handleModeChange(mode)}
                 aria-pressed={isActive}
-                className={`flex items-baseline gap-1.5 px-3 py-1.5 rounded-md transition-all duration-150 ${
+                className={`relative z-[1] flex items-baseline gap-1.5 px-3 py-1.5 rounded-md transition-colors duration-200 ${
                   isActive
-                    ? 'bg-interactive text-white shadow-elevation-1'
-                    : 'bg-transparent text-text-secondary hover:bg-layer-hover-01 hover:text-text-primary'
+                    ? 'text-white'
+                    : 'text-text-secondary hover:bg-layer-hover-01 hover:text-text-primary'
                 }`}
               >
                 <span className="text-body-short-01 font-semibold">{title}</span>
-                <span className={`text-caption-01 truncate ${isActive ? 'text-white/80' : 'text-text-helper'}`}>
+                <span className={`text-caption-01 truncate transition-colors duration-200 ${isActive ? 'text-white/80' : 'text-text-helper'}`}>
                   {caption}
                 </span>
               </button>
@@ -273,13 +280,14 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
                       key={r.modelId}
                       onClick={() => setDraftModel(r.modelId)}
                       aria-pressed={isSelected}
-                      className={`flex items-center gap-2.5 px-3 py-2.5 text-left rounded-lg border transition-all duration-150 w-full ${
+                      className={`group flex items-center gap-2.5 px-3 py-2.5 text-left rounded-lg border transition-all duration-150 w-full ${
                         isSelected
-                          ? 'border-interactive bg-[#0f62fe]/10'
+                          ? 'border-interactive bg-interactive/10 shadow-glow-interactive'
                           : 'border-border-subtle-01 bg-background hover:bg-layer-hover-01 hover:border-border-strong-01'
                       }`}
                     >
                       <RadioDot selected={isSelected} />
+                      <ProviderAvatar provider={r.provider} label={r.providerLabel} />
                       <div className="flex-1 min-w-0">
                         <div className="text-body-short-01 font-mono text-text-primary truncate">{r.modelId}</div>
                         <div className="text-caption-01 text-text-helper truncate">
@@ -291,10 +299,13 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
                         tabIndex={0}
                         onClick={(e) => { e.stopPropagation(); removeRegisteredModel(r.modelId); }}
                         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); removeRegisteredModel(r.modelId); } }}
-                        className="text-caption-01 text-support-error hover:underline cursor-pointer flex-shrink-0"
+                        className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-1 rounded-md text-icon-secondary hover:text-support-error hover:bg-support-error/10 transition-all cursor-pointer flex-shrink-0"
                         title="등록 해제"
                       >
-                        삭제
+                        <svg width="14" height="14" viewBox="0 0 32 32" fill="currentColor">
+                          <path d="M12 12h2v12h-2zM18 12h2v12h-2z" />
+                          <path d="M4 6v2h2v20a2 2 0 002 2h16a2 2 0 002-2V8h2V6zm4 22V8h16v20zM12 2h8v2h-8z" />
+                        </svg>
                       </span>
                     </button>
                   );
@@ -415,7 +426,7 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
                         aria-pressed={isSelected}
                         className={`flex items-center gap-2.5 px-3 py-2.5 text-left rounded-lg border transition-all duration-150 w-full ${
                           isSelected
-                            ? 'border-interactive bg-[#0f62fe]/10'
+                            ? 'border-interactive bg-interactive/10 shadow-glow-interactive'
                             : 'border-border-subtle-01 bg-background hover:bg-layer-hover-01 hover:border-border-strong-01'
                         }`}
                       >
@@ -458,8 +469,63 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }
         .animate-spin { animation: spin 1s linear infinite; }
+
+        /* rice-slider — 커스텀 thumb (트랙 fill은 인라인 gradient) */
+        .rice-slider::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          appearance: none;
+          width: 14px;
+          height: 14px;
+          border-radius: 9999px;
+          background: #fff;
+          border: 2px solid var(--cds-interactive);
+          box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+          transition: transform 120ms ease, box-shadow 120ms ease;
+        }
+        .rice-slider::-webkit-slider-thumb:hover {
+          transform: scale(1.2);
+          box-shadow: 0 0 0 4px rgb(var(--cds-interactive-rgb) / 0.25);
+        }
+        .rice-slider:active::-webkit-slider-thumb {
+          transform: scale(1.1);
+          box-shadow: 0 0 0 6px rgb(var(--cds-interactive-rgb) / 0.2);
+        }
+        .rice-slider::-moz-range-thumb {
+          width: 14px;
+          height: 14px;
+          border-radius: 9999px;
+          background: #fff;
+          border: 2px solid var(--cds-interactive);
+          box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+        }
       `}</style>
     </div>
+  );
+};
+
+/* ── 프로바이더 레터 아바타 (외부 브랜드 컬러라 토큰 대상 아님) ── */
+const PROVIDER_AVATARS: Record<string, { letter: string; color: string }> = {
+  anthropic: { letter: 'A', color: '#d97757' },
+  openai: { letter: 'O', color: '#10a37f' },
+  watsonx: { letter: 'W', color: '#4589ff' },
+  custom: { letter: 'C', color: '#a8a8a8' },
+};
+
+const ProviderAvatar: React.FC<{ provider?: string; label?: string }> = ({ provider, label }) => {
+  const spec =
+    PROVIDER_AVATARS[provider ?? ''] ??
+    { letter: (label ?? provider ?? '?').charAt(0).toUpperCase(), color: '#a8a8a8' };
+  return (
+    <span
+      className="flex-shrink-0 w-6 h-6 rounded-md flex items-center justify-center text-[11px] font-mono font-semibold"
+      style={{
+        color: spec.color,
+        background: `color-mix(in srgb, ${spec.color} 14%, transparent)`,
+        border: `1px solid color-mix(in srgb, ${spec.color} 32%, transparent)`,
+      }}
+    >
+      {spec.letter}
+    </span>
   );
 };
 
@@ -517,7 +583,10 @@ const Params: React.FC<{
           step="0.1"
           value={localSettings.temperature}
           onChange={(e) => setLocalSettings({ ...localSettings, temperature: parseFloat(e.target.value) })}
-          className="w-full h-1.5 rounded-full appearance-none cursor-pointer bg-layer-03 accent-[#0f62fe]"
+          className="rice-slider w-full h-1.5 rounded-full appearance-none cursor-pointer"
+          style={{
+            background: `linear-gradient(to right, var(--cds-interactive) ${(localSettings.temperature / 2) * 100}%, var(--cds-layer-03) ${(localSettings.temperature / 2) * 100}%)`,
+          }}
         />
         <div className="flex justify-between text-caption-01 text-text-helper mt-1">
           <span>정확하게</span>
@@ -542,16 +611,27 @@ const Params: React.FC<{
       {contextLength && (
         <div>
           <label className="text-label-01 text-text-secondary mb-1.5 block">컨텍스트 길이</label>
-          <select
-            value={localSettings.contextLength}
-            onChange={(e) => setLocalSettings({ ...localSettings, contextLength: e.target.value })}
-            className="w-full h-8 bg-field-01 border border-border-strong-01 rounded-lg px-3 text-body-short-01 text-text-primary outline-none transition-colors focus:border-focus focus:ring-1 focus:ring-focus appearance-none cursor-pointer"
-          >
-            <option value="8K">8K 토큰</option>
-            <option value="32K">32K 토큰</option>
-            <option value="128K">128K 토큰</option>
-            <option value="256K">256K 토큰</option>
-          </select>
+          <div className="relative">
+            <select
+              value={localSettings.contextLength}
+              onChange={(e) => setLocalSettings({ ...localSettings, contextLength: e.target.value })}
+              className="w-full h-8 bg-field-01 border border-border-strong-01 rounded-lg pl-3 pr-9 text-body-short-01 text-text-primary outline-none transition-colors focus:border-focus focus:ring-1 focus:ring-focus appearance-none cursor-pointer"
+            >
+              <option value="8K">8K 토큰</option>
+              <option value="32K">32K 토큰</option>
+              <option value="128K">128K 토큰</option>
+              <option value="256K">256K 토큰</option>
+            </select>
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 32 32"
+              fill="currentColor"
+              className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-icon-secondary"
+            >
+              <path d="M16 22L6 12l1.4-1.4 8.6 8.6 8.6-8.6L26 12z" />
+            </svg>
+          </div>
         </div>
       )}
     </div>

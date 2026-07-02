@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Button } from '../ui';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Button, Icon } from '../ui';
 import { ModelPicker, ModelDraft, ModelSettings } from './ModelPicker';
 
 /**
@@ -10,6 +10,8 @@ import { ModelPicker, ModelDraft, ModelSettings } from './ModelPicker';
 
 // 공용 타입 재노출 (기존 import 경로 호환: mockData, carbon/index 등)
 export type { Model, ModelSettings, RegisteredModel } from './ModelPicker';
+
+const CLOSE_MS = 180;
 
 export interface ModelSettingsPanelProps {
   isOpen: boolean;
@@ -35,35 +37,92 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
     canSave: false,
   });
 
+  // 닫힘 애니메이션: closing 동안 slide-out을 재생한 뒤 실제 onClose
+  const [closing, setClosing] = useState(false);
+  const closingRef = useRef(false);
+  const requestClose = useCallback(() => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    setClosing(true);
+    window.setTimeout(() => {
+      closingRef.current = false;
+      setClosing(false);
+      onClose();
+    }, CLOSE_MS);
+  }, [onClose]);
+
+  // ESC로 닫기
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') requestClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isOpen, requestClose]);
+
+  // 본문이 푸터 아래로 이어질 때만 푸터에 스크롤 그림자
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [footerLifted, setFooterLifted] = useState(false);
+  const updateFooterShadow = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setFooterLifted(el.scrollTop + el.clientHeight < el.scrollHeight - 1);
+  };
+  useEffect(() => {
+    if (!isOpen) return;
+    updateFooterShadow();
+    const el = scrollRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(updateFooterShadow);
+    ro.observe(el);
+    if (el.firstElementChild) ro.observe(el.firstElementChild);
+    return () => ro.disconnect();
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const handleSave = () => {
     onSave({ modelId: draft.modelId, settings: draft.settings, mode: draft.mode });
-    onClose();
+    requestClose();
   };
 
   return (
     <>
       <div
-        onClick={onClose}
+        onClick={requestClose}
         className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40"
-        style={{ animation: 'panelFadeIn 160ms ease' }}
+        style={{
+          animation: closing
+            ? `panelFadeOut ${CLOSE_MS}ms ease forwards`
+            : 'panelFadeIn 160ms ease',
+        }}
       />
 
       <div
         className="fixed top-0 right-0 bottom-0 w-[380px] bg-layer-01 border-l border-border-subtle-01 z-50 flex flex-col shadow-overlay"
-        style={{ animation: 'panelSlideIn 200ms cubic-bezier(0.16, 1, 0.3, 1)' }}
+        style={{
+          animation: closing
+            ? `panelSlideOut ${CLOSE_MS}ms cubic-bezier(0.4, 0, 1, 1) forwards`
+            : 'panelSlideIn 200ms cubic-bezier(0.16, 1, 0.3, 1)',
+        }}
         role="dialog"
         aria-modal="true"
         aria-label="Model settings"
       >
-        {/* Header */}
-        <div className="flex items-center px-5 py-3.5 border-b border-border-subtle-01">
-          <span className="text-heading-02 font-semibold text-text-primary">모델 설정</span>
+        {/* Header — 사이드바·채팅 헤더와 같은 52px 라인 */}
+        <div className="flex items-center gap-2 px-4 h-[52px] border-b border-border-subtle-01 flex-shrink-0">
+          <Icon name="model" size={18} className="text-icon-primary flex-shrink-0" />
+          <div className="flex items-baseline gap-2 min-w-0">
+            <span className="text-body-short-02 font-semibold text-text-primary flex-shrink-0">모델 설정</span>
+            <span className="text-caption-01 font-mono text-text-helper truncate">
+              {currentModel || '미설정'}
+            </span>
+          </div>
           <button
-            onClick={onClose}
-            className="ml-auto p-1.5 hover:bg-layer-hover-01 transition-colors rounded-md"
-            title="Close"
+            onClick={requestClose}
+            className="ml-auto p-1.5 hover:bg-layer-hover-01 transition-colors rounded-md flex-shrink-0"
+            title="닫기 (Esc)"
           >
             <svg width="20" height="20" viewBox="0 0 32 32" fill="currentColor" className="text-icon-primary">
               <path d="M24 9.4L22.6 8 16 14.6 9.4 8 8 9.4l6.6 6.6L8 22.6 9.4 24l6.6-6.6 6.6 6.6 1.4-1.4-6.6-6.6L24 9.4z" />
@@ -72,7 +131,7 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
         </div>
 
         {/* Content — 열릴 때마다 최신 prop으로 새로 초기화하도록 key로 remount */}
-        <div className="flex-1 overflow-y-auto px-5 py-4">
+        <div ref={scrollRef} onScroll={updateFooterShadow} className="flex-1 overflow-y-auto px-5 py-4">
           <ModelPicker
             key={`${currentModel}|${modelMode}`}
             currentModel={currentModel}
@@ -83,11 +142,15 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-2.5 border-t border-border-subtle-01 flex gap-2">
+        <div
+          className={`px-5 py-2.5 border-t border-border-subtle-01 flex gap-2 flex-shrink-0 transition-shadow duration-200 ${
+            footerLifted ? 'shadow-[0_-10px_18px_-10px_rgba(0,0,0,0.55)]' : ''
+          }`}
+        >
           <Button
             kind="secondary"
             size="sm"
-            onClick={onClose}
+            onClick={requestClose}
             className="flex-1 !bg-layer-02 hover:!bg-layer-hover-02"
           >
             취소
@@ -110,7 +173,9 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
 
       <style>{`
         @keyframes panelFadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes panelFadeOut { from { opacity: 1; } to { opacity: 0; } }
         @keyframes panelSlideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+        @keyframes panelSlideOut { from { transform: translateX(0); } to { transform: translateX(100%); } }
       `}</style>
     </>
   );
