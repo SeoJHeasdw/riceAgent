@@ -158,7 +158,7 @@
             "approval_id": { "type": "string" },
             "skill_id": { "type": "string" },
             "changelog": { "type": "string" },
-            "trigger": { "enum": ["T1a", "T1b", "T1c", "T3", "T4"] },
+            "trigger": { "enum": ["T1a", "T1b", "T1c", "T3", "T4", "T5"] },
             "from_version": { "type": "integer" },
             "to_version": { "type": "integer" },
             "proposed_body": {

@@ -58,8 +58,9 @@ class ToolApprovalIn(BaseModel):
 
 
 class LearningReviewIn(BaseModel):
-    # tool_calls_made는 트랜스크립트만으로는 유도 불가능한 유일한 값 — 프론트가 방금
-    # 소비한 메인 턴 SSE 스트림에서 tool_call 이벤트 수를 세어 전달한다.
+    # DEPRECATED (출품 전 P0, 2026-07-03): 서버가 턴 종료 시 learning_jobs에
+    # tool_calls_made를 직접 영속화하므로 프론트 카운트는 더 이상 쓰지 않는다
+    # (이벤트 누락/재시도에 취약했다). 구버전 클라이언트 호환을 위해 필드만 남긴다.
     tool_calls_made: int = 0
 
 
@@ -154,15 +155,20 @@ async def _stream_learning_effects(session_id: str, c: Container, coro) -> Async
 
 
 @router.post("/sessions/{session_id}/learning-review")
-async def learning_review(session_id: str, body: LearningReviewIn, c: Container = Depends(get_container)):
+async def learning_review(
+    session_id: str, body: LearningReviewIn | None = None, c: Container = Depends(get_container)
+):
     """Gated LLM review, called fire-and-forget by the client right after the main
     turn's `done` (same trigger point as /title). Fast no-op (single `done` frame)
-    when `ReviewGate` decides the turn doesn't warrant an LLM call."""
+    when there is no pending server-side review job (exactly-once — 출품 전 P0:
+    observe()가 턴 종료 시 영속화한 learning_jobs를 claim해 실행한다; 중복 호출·
+    재시도는 자동으로 no-op) or when `ReviewGate` decides the turn doesn't
+    warrant an LLM call. The request body is deprecated and ignored."""
     info = c.sessions.get(session_id)
     if info is None:
         raise NotFoundError(f"session {session_id} not found")
     history = c.sessions.history(session_id)
-    coro = c.learning.review(session_id, list(history), body.tool_calls_made)
+    coro = c.learning.review(session_id, list(history))
     stream = to_sse_stream(_stream_learning_effects(session_id, c, coro))
     return StreamingResponse(stream, media_type="text/event-stream")
 

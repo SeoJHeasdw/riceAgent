@@ -195,6 +195,17 @@ class Orchestrator:
             for msg in result.history[len(base_history):]:
                 self._transcript.append(session_id, msg)
 
+            # 5b. AUDIT context renders (출품 전 P0) — 이 턴의 매 LLM 호출에서
+            #     컨텍스트 매니저가 뭘 생략/삭제/증류했는지 ledger에 남긴다.
+            #     "모델이 정확히 뭘 못 봤는가"를 제품적으로 설명 가능하게 하는 로그.
+            if result.context_renders:
+                try:
+                    self._learning.record_context_renders(
+                        session_id, [s.to_dict() for s in result.context_renders]
+                    )
+                except Exception:  # noqa: BLE001 — 감사 실패가 턴을 깨면 안 된다
+                    log.warning("context render audit failed for %s", session_id, exc_info=True)
+
             # 6. OBSERVE (learning decides what to keep/propose)
             outcome = TurnOutcome(
                 session_id=session_id,

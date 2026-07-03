@@ -1419,6 +1419,7 @@ function MySkillsScreen() {
         proposedBody: p.proposed_body,
         description: p.description,
         tags: p.tags,
+        fromVersion: p.from_version,
       });
       if (approved && res.success) {
         const newVersion = res.data?.version ?? p.to_version;

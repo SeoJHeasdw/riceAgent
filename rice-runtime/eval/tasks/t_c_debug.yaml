@@ -1,8 +1,22 @@
 # Task T-C: 에러 트러블슈팅 (RICE_LEARNING_EVAL §4)
+# 출품 전 P0: 결정적 script — 스킬 본문의 ImagePullBackOff 대응 절차(describe →
+# imagePullSecret)를 아는 경우 2콜, 모르면 로그부터 뒤지는 5콜.
 id: "T-C"
 title: "배포 오류 트러블슈팅"
 prompt: "배포 중에 ImagePullBackOff 에러가 발생했어. 원인과 해결 방법을 알려줘."
 related_skill: "deploy-k8s-service"
+script:
+  skill_marker: "imagePullSecret"
+  warm_tools:
+    - { name: kubectl_describe_pod, arguments: { namespace: production } }
+    - { name: kubectl_create_secret, arguments: { kind: docker-registry, namespace: production } }
+  cold_tools:
+    - { name: kubectl_get_pods, arguments: { namespace: production } }
+    - { name: kubectl_logs, arguments: { namespace: production } }
+    - { name: search_docs, arguments: { query: "ImagePullBackOff" } }
+    - { name: kubectl_describe_pod, arguments: { namespace: production } }
+    - { name: kubectl_create_secret, arguments: { kind: docker-registry, namespace: production } }
+  final_answer: "ImagePullBackOff 원인은 registry 인증 문제 — imagePullSecret을 생성해 해결했습니다."
 success_check:
-  type: "contains_keywords"
-  keywords: ["ImagePullBackOff", "image", "registry"]
+  type: "tool_sequence"
+  expected_tools: ["kubectl_describe_pod", "kubectl_create_secret"]

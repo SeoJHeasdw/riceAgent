@@ -73,7 +73,16 @@ class Container:
         self.db.close()
 
 
-def build_container(args: RuntimeArgs | None = None, *, paths: RicePaths | None = None) -> Container:
+def build_container(
+    args: RuntimeArgs | None = None,
+    *,
+    paths: RicePaths | None = None,
+    resolve_provider_override: Callable[[], ILLMProvider] | None = None,
+) -> Container:
+    """`resolve_provider_override` (출품 전 P0, eval 하네스용): 주어지면 registry
+    대신 이 thunk가 메인 루프/learning의 provider가 된다 — eval이 결정적
+    ScriptedToolProvider를 꽂아 "스킬 유무에 따라 다른 tool sequence"를 재현하는
+    유일한 통로다. 프로덕션 경로에서는 절대 넘기지 않는다(titler는 영향 없음)."""
     args = args or RuntimeArgs()
     paths = (paths or RicePaths.from_env()).ensure()
     config_store = ConfigStore(load_config(paths))
@@ -110,7 +119,7 @@ def build_container(args: RuntimeArgs | None = None, *, paths: RicePaths | None 
 
     providers: IProviderRegistry = ProviderRegistry(config_store, credentials_for)
 
-    def resolve_provider() -> ILLMProvider:
+    def _resolve_registry_provider() -> ILLMProvider:
         """Resolve the *current* provider, falling back to `echo` so the runtime
         always boots (no API key / on-prem offline). Re-evaluated each turn, so a
         PUT /settings model switch takes effect without re-wiring (C-1)."""
@@ -120,6 +129,8 @@ def build_container(args: RuntimeArgs | None = None, *, paths: RicePaths | None 
         except ProviderError as exc:
             log.warning("provider %r unavailable (%s) → falling back to echo", kind, exc)
             return providers.get("echo")
+
+    resolve_provider = resolve_provider_override or _resolve_registry_provider
 
     # `learning` now depends on `resolve_provider` (Phase A.3 — review()/learn()
     # need real judgment, not just regex) so it's constructed AFTER provider

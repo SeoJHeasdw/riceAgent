@@ -209,13 +209,15 @@ class ApiClient {
   answerConsolidateDecision(
     id: string,
     approved: boolean,
-    proposal?: { proposedBody?: string; description?: string; tags?: string[] },
+    proposal?: { proposedBody?: string; description?: string; tags?: string[]; fromVersion?: number },
   ): Promise<ApiResponse<{ version: number | null }>> {
     return this.send('POST', `/skills/${id}/consolidate-decision`, {
       approved,
       proposed_body: proposal?.proposedBody,
       description: proposal?.description ?? '',
       tags: proposal?.tags ?? [],
+      // optimistic concurrency: 제안 기준 버전 — 그 사이 스킬이 바뀌면 서버가 409
+      from_version: proposal?.fromVersion,
     });
   }
   /** version history (diff · rollback UI) */

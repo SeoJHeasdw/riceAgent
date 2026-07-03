@@ -41,6 +41,7 @@ from ..proposals import make_create_proposal, make_patch_proposal
 from ..skill import guard as skill_guard
 from ..skill.store import SkillStore
 from ..skill.usage import UsageStore
+from .context import LearningContextManager
 
 log = logging.getLogger("rice.learning.review")
 
@@ -74,6 +75,7 @@ class ReviewEngine:
         ledger: LearningLedger | None = None,
         rejection_cooldown_hours: float = 0.0,
         max_rejections: int = 0,
+        context: LearningContextManager | None = None,
     ) -> None:
         self._resolve_provider = resolve_provider
         self._skill_store = skill_store
@@ -81,6 +83,9 @@ class ReviewEngine:
         self._mem_store = mem_store
         self._catalog_budget = skill_catalog_token_budget
         self._max_body_chars = max_body_chars
+        # 리뷰 전용 컨텍스트 렌더러 (출품 전 P0): None(기존 테스트)이면 v3와 동일하게
+        # 히스토리를 그대로 넘긴다. 실배선(composition)은 항상 렌더러를 준다.
+        self._context = context
         # Self-Improvement v3: ledger가 있으면 (1) 최근 거부 목록을 프롬프트에 실어
         # LLM이 재제안을 피하게 하고(사전), (2) 그래도 나온 억제 대상 제안을 버리고
         # (사후), (3) 제안/메모리 기록을 감사 로그에 남긴다. ledger=None(기존 테스트
@@ -144,8 +149,11 @@ class ReviewEngine:
         full_body_skills, compact_skills, patchable_ids = self._build_catalog()
         known_facts = self._recent_fact_strings()
         kwargs = {} if instruction is None else {"instruction": instruction}
+        # 리뷰 전용 렌더 (출품 전 P0): 긴 세션에서도 호출이 bounded가 되고, 도구
+        # 라운드는 순수 텍스트라 wire 규칙 위반이 구조적으로 불가능해진다.
+        rendered_history = self._context.render(history) if self._context is not None else history
         _, messages = build_review_messages(
-            history,
+            rendered_history,
             full_body_skills=full_body_skills,
             compact_skills=compact_skills,
             known_facts=known_facts,
@@ -282,6 +290,21 @@ class ReviewEngine:
         kind = args.get("kind")
         content = str(args.get("content") or "").strip()
         if kind not in ("fact", "preference") or not content:
+            return None
+        # Learning safety scanner (출품 전 P0): 메모리는 HITL 없이 매 턴 시스템
+        # 프롬프트에 재주입되는 유일한 경로다 — 위험 플래그(주입/exfil/파괴 명령)가
+        # 하나라도 있으면 카드에 물어볼 기회조차 없으므로 저장 자체를 거부한다
+        # (fail-closed). 스킬 경로는 같은 스캐너 결과를 warnings로 카드에 싣는다.
+        risks = skill_guard.scan_risks(content)
+        if risks:
+            log.warning("memory write blocked (risk flags: %s)", risks)
+            if self._ledger is not None:
+                self._ledger.record(
+                    "memory_blocked",
+                    session_id=session_id,
+                    origin="review",
+                    detail={"kind": kind, "risks": risks, "content": content[:120]},
+                )
             return None
         try:
             self._mem_store.add(kind, content, source_session_id=session_id)

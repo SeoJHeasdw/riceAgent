@@ -56,6 +56,7 @@ class CuratorScheduler:
         self._task: asyncio.Task | None = None
         self._since_curate = 0
         self._since_discovery = 0
+        self._since_review_sweep = 0
 
     def start(self) -> None:
         if self._task is None or self._task.done():
@@ -76,6 +77,7 @@ class CuratorScheduler:
             await asyncio.sleep(_TICK_SECONDS)
             self._since_curate += _TICK_SECONDS
             self._since_discovery += _TICK_SECONDS
+            self._since_review_sweep += _TICK_SECONDS
             cfg = self._container.config_store.config.learning
 
             if cfg.curator_interval_seconds and 0 < cfg.curator_interval_seconds <= self._since_curate:
@@ -86,6 +88,22 @@ class CuratorScheduler:
                         log.info("curator auto-run transitioned %d skills", len(result.transitioned))
                 except Exception as exc:  # noqa: BLE001
                     log.warning("curator auto-run failed: %s", exc)
+
+            # 서버 소유 리뷰 잡 sweep (출품 전 P0): 탭 종료 등으로 클라이언트가 끝내
+            # claim하지 않은 pending 잡을 백그라운드 실행 → 제안함 라우팅. 검사
+            # 주기는 stale 임계값 자체를 쓴다(그보다 자주 볼 이유가 없다).
+            if cfg.review_job_stale_seconds and 0 < cfg.review_job_stale_seconds <= self._since_review_sweep:
+                self._since_review_sweep = 0
+                try:
+                    sessions = self._container.sessions
+                    processed = await self._container.learning.sweep_review_jobs(
+                        lambda sid: list(sessions.history(sid)),
+                        older_than_seconds=cfg.review_job_stale_seconds,
+                    )
+                    if processed:
+                        log.info("review sweep processed %d stale jobs", processed)
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("review sweep failed: %s", exc)
 
             if cfg.discovery_interval_seconds and 0 < cfg.discovery_interval_seconds <= self._since_discovery:
                 self._since_discovery = 0

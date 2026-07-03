@@ -188,7 +188,7 @@ export interface SkillPatchProposedData {
 export interface SkillSuggestion {
   id: string;
   created_at: string;
-  origin: 'review' | 'learn' | 'agent' | 'discovery' | 'consolidation' | 'timeout';
+  origin: 'review' | 'learn' | 'agent' | 'discovery' | 'consolidation' | 'timeout' | 'review_sweep' | 'disconnected';
   kind: 'create' | 'patch' | 'archive';
   skill_id: string;
   payload: {

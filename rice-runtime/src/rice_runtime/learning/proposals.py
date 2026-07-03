@@ -30,6 +30,15 @@ def _clean_changelog(text: str, fallback: str) -> str:
     return (text.strip() or fallback)[:_MAX_CHANGELOG_CHARS]
 
 
+def _build_warnings(body: str, scrubbed_labels: list[str]) -> tuple[str, ...]:
+    """승인 카드에 실을 warnings: 시크릿 마스킹 알림 + 위험 플래그(출품 전 P0,
+    learning safety scanner). 위험 플래그는 차단이 아니다 — 스킬은 HITL이 있으므로
+    카드에 보여주고 사용자가 판단한다(guard.scan_risks docstring 참고)."""
+    warnings = [f"{label} 자동 마스킹됨" for label in scrubbed_labels]
+    warnings.extend(f"위험 플래그: {label}" for label in skill_guard.scan_risks(body))
+    return tuple(warnings)
+
+
 def make_create_proposal(
     *,
     name: str,
@@ -54,7 +63,7 @@ def make_create_proposal(
     except Exception:
         log.warning("create proposal dropped: body too large for %r", name)
         return None
-    body, warnings = skill_guard.scrub_secrets(body)
+    body, scrubbed = skill_guard.scrub_secrets(body)
     return PatchProposal(
         skill_id=name,
         changelog=_clean_changelog(
@@ -67,7 +76,7 @@ def make_create_proposal(
         to_version=1,
         description=description,
         tags=tags,
-        warnings=tuple(f"{label} 자동 마스킹됨" for label in warnings),
+        warnings=_build_warnings(body, scrubbed),
     )
 
 
@@ -88,7 +97,7 @@ def make_patch_proposal(
     except Exception:
         log.warning("patch proposal dropped: body too large for %r", current.name)
         return None
-    new_body, warnings = skill_guard.scrub_secrets(new_body)
+    new_body, scrubbed = skill_guard.scrub_secrets(new_body)
     diff = build_diff(current.body, new_body)
     if not diff["lines"]:
         return None
@@ -100,7 +109,7 @@ def make_patch_proposal(
         proposed_body=new_body,
         from_version=current.version,
         to_version=current.version + 1,
-        warnings=tuple(f"{label} 자동 마스킹됨" for label in warnings),
+        warnings=_build_warnings(new_body, scrubbed),
     )
 
 

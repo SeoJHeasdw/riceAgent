@@ -12,12 +12,15 @@ pulling it out means both call sites share one implementation instead of driftin
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import AsyncIterator
 
+from ..core.errors import ConflictError
 from ..core.types import (
     ApprovalRequest,
     SSEEvent,
+    ev_error,
     ev_memory_written,
     ev_skill_patch_proposed,
     ev_skill_patched,
@@ -72,13 +75,33 @@ async def surface_learning_effect(
             proposed_body=effect.proposed_body,
             warnings=effect.warnings,
         )
-        response = await approvals.request(session_id, req, timeout_s=approval_timeout_s)
-        new_version = learning.resolve_proposal(
-            effect,
-            session_id=session_id,
-            decision=response.decision,
-            edited_body=response.edited_body,
-        )
+        try:
+            response = await approvals.request(session_id, req, timeout_s=approval_timeout_s)
+        except (asyncio.CancelledError, GeneratorExit):
+            # 클라이언트가 카드에 답하기 전에 SSE 스트림이 끊겼다(탭 종료/새로고침
+            # → uvicorn이 이 제너레이터를 취소한다). 무응답은 거부 의사표시가
+            # 아니므로 timeout과 동일하게 제안을 **제안함으로 보존**한다 — 이전엔
+            # 여기서 제안이 ledger에도 inbox에도 남지 않고 증발했다(2026-07-03
+            # 적대 리뷰 High#1). 명시적 턴 abort(cancel_session)는 이 경로가 아니라
+            # decision="cancelled"로 정상 반환되어 여전히 폐기된다(사용자 의사).
+            try:
+                learning.resolve_proposal(effect, session_id=session_id, decision="disconnected")
+            except Exception:  # noqa: BLE001 — 보존 실패가 취소 전파를 막으면 안 된다
+                log.warning("failed to preserve proposal on disconnect (%s)", effect.skill_id, exc_info=True)
+            raise
+        try:
+            new_version = learning.resolve_proposal(
+                effect,
+                session_id=session_id,
+                decision=response.decision,
+                edited_body=response.edited_body,
+            )
+        except ConflictError as exc:
+            # Optimistic-concurrency miss (출품 전 P0): the skill moved past the
+            # proposal's base version while the card sat open. Never silently
+            # overwrite — tell the user to get a fresh proposal instead.
+            yield ev_error("skill_patch_conflict", str(exc))
+            return
         if response.decision == "approve" and new_version is not None:
             yield ev_skill_patched(effect.skill_id, new_version)
     else:  # pragma: no cover - effect union is closed

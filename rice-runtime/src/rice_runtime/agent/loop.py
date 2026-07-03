@@ -27,8 +27,10 @@ from ..core.types import (
     ev_error,
     ev_message,
     ev_thinking,
+    ev_tool_call,
+    ev_tool_result,
 )
-from .context_manager import ConversationContextManager
+from .context_manager import ContextRenderStats, ConversationContextManager
 from .interfaces import IToolDispatcher
 from .providers.interfaces import ILLMProvider
 from .tool_scheduler import ScheduledToolRequest, ToolBatchResult, ToolScheduler
@@ -40,6 +42,9 @@ class LoopResult:
     history: tuple[Message, ...] = ()
     tool_calls_made: int = 0
     aborted: bool = False
+    # 매 LLM 호출의 컨텍스트 렌더 감사 스탯 (출품 전 P0) — orchestrator가 턴 종료 시
+    # ledger에 `context_rendered` 이벤트로 영속화한다.
+    context_renders: list[ContextRenderStats] = field(default_factory=list)
 
 
 def _render_tool_result(res: ToolResult) -> str:
@@ -88,6 +93,8 @@ class AgentLoop:
             )
             provider_system = rendered_context.system_prompt if rendered_context is not None else ctx.system_prompt
             provider_messages = rendered_context.history if rendered_context is not None else tuple(messages)
+            if rendered_context is not None:
+                result.context_renders.append(rendered_context.stats)
 
             async for chunk in self._provider.stream(
                 system=provider_system,
@@ -136,8 +143,16 @@ class AgentLoop:
             for call in pending_calls:
                 spec = tool_index.get(call.tool_name)
                 if spec is None:
+                    # 미지의 도구도 SSE로 서피싱한다(이전엔 모델만 에러를 보고 UI/
+                    # 지표에는 보이지 않았다 — 감사 가능성 P0와 같은 원칙). tool
+                    # 메시지에 tool_call_id 메타데이터가 없으면 컨텍스트 압축의
+                    # wire repair가 이 라운드를 통째로 떨궈버리므로 반드시 싣는다.
                     res = ToolResult(call.id, ok=False, error=f"unknown tool: {call.tool_name}")
-                    messages.append(Message(role="tool", content=_render_tool_result(res)))
+                    yield ev_tool_call(call)
+                    yield ev_tool_result(res)
+                    messages.append(
+                        Message(role="tool", content=_render_tool_result(res), metadata={"tool_call_id": call.id})
+                    )
                     tool_calls_made += 1
                     continue
                 scheduled.append(ScheduledToolRequest(call=call, spec=spec))

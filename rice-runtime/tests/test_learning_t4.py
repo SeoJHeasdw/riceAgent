@@ -34,7 +34,7 @@ from rice_runtime.core.config import LearningConfig
 from rice_runtime.core.errors import NotFoundError, ValidationError
 from rice_runtime.core.paths import RicePaths
 from rice_runtime.core.storage.sqlite import Database
-from rice_runtime.core.types import ApprovalResponse, EventType, Message, ToolCall, ToolSpec
+from rice_runtime.core.types import ApprovalResponse, EventType, Message, ToolCall, ToolSpec, TurnOutcome
 from rice_runtime.learning.interfaces import MemoryWritten, PatchProposal
 from rice_runtime.learning.review.engine import ReviewEngine
 from rice_runtime.learning.review.gate import ReviewGate
@@ -568,15 +568,64 @@ class TestLearningServiceReviewFacade:
 
     @pytest.mark.asyncio
     async def test_review_above_gate_threshold_calls_engine(self):
+        """출품 전 P0: review()는 observe()가 영속화한 서버 소유 잡을 claim해서
+        실행한다 — 잡의 tool_calls_made가 게이트 입력이고, 파라미터는 무시된다."""
         cfg = LearningConfig(review_min_tool_calls=1, review_nudge_turns=100)
         call = ToolCall(
             tool_name="propose_memory_write", arguments={"kind": "fact", "content": "Learned via review()"}
         )
         svc = self._svc_with_provider(_FakeProvider([call]), cfg)
         history = [Message(role="assistant", content="완료")]
-        effects = await svc.review("s1", history, tool_calls_made=5)
+        await svc.observe(
+            TurnOutcome(
+                session_id="s1", final_message="완료", history=tuple(history),
+                tool_calls_made=5, injected_skill_ids=(),
+            )
+        )
+        effects = await svc.review("s1", history)
         assert len(effects) == 1
         assert isinstance(effects[0], MemoryWritten)
+
+    @pytest.mark.asyncio
+    async def test_review_without_pending_job_is_noop(self):
+        """exactly-once: observe()가 잡을 남기지 않았으면(또는 이미 claim됐으면)
+        review()는 게이트/엔진에 닿지 않고 즉시 []다 — 중복 POST 안전."""
+        cfg = LearningConfig(review_min_tool_calls=1, review_nudge_turns=100)
+        call = ToolCall(
+            tool_name="propose_memory_write", arguments={"kind": "fact", "content": "dup"}
+        )
+        svc = self._svc_with_provider(_FakeProvider([call]), cfg)
+        history = [Message(role="assistant", content="완료")]
+        assert await svc.review("s1", history) == []  # 잡 없음
+        await svc.observe(
+            TurnOutcome(
+                session_id="s1", final_message="완료", history=tuple(history),
+                tool_calls_made=5, injected_skill_ids=(),
+            )
+        )
+        first = await svc.review("s1", history)
+        assert len(first) == 1
+        assert await svc.review("s1", history) == []  # 두 번째 호출은 no-op
+
+    @pytest.mark.asyncio
+    async def test_job_merge_preserves_max_tool_calls(self):
+        """적대 리뷰 High#2 회귀: 복잡한 턴(5콜) 직후 짧은 턴(0콜)이 pending 잡에
+        병합돼도 게이트는 MAX(5)를 본다 — 이전엔 최신 값 0으로 덮여 skip됐다."""
+        cfg = LearningConfig(review_min_tool_calls=3, review_nudge_turns=100)
+        call = ToolCall(
+            tool_name="propose_memory_write", arguments={"kind": "fact", "content": "kept"}
+        )
+        svc = self._svc_with_provider(_FakeProvider([call]), cfg)
+        history = [Message(role="assistant", content="완료")]
+        for calls in (5, 0):
+            await svc.observe(
+                TurnOutcome(
+                    session_id="s1", final_message="완료", history=tuple(history),
+                    tool_calls_made=calls, injected_skill_ids=(),
+                )
+            )
+        effects = await svc.review("s1", history)
+        assert len(effects) == 1
 
     @pytest.mark.asyncio
     async def test_learn_always_runs_regardless_of_gate_config(self):
@@ -726,3 +775,41 @@ class TestGuardWiredIntoWritePaths:
         assert "AKIAABCDEFGHIJKLMNOP" not in proposal.proposed_body
         assert len(proposal.warnings) == 1
         assert "AWS access key" in proposal.warnings[0]
+
+
+# ── 스트림 단절 시 제안 보존 (출품 전 P0 후속, 적대 리뷰 High#1) ────────────────
+
+class TestDisconnectPreservation:
+    def setup_method(self):
+        self._paths = _fresh_paths()
+        self._svc = LearningService(_fresh_db(), LearningConfig(), self._paths)
+        self._approvals = ApprovalRegistry()
+
+    @pytest.mark.asyncio
+    async def test_disconnect_mid_approval_moves_proposal_to_inbox(self):
+        """카드 응답 전 SSE 스트림 단절(탭 종료) → 제안이 증발하지 않고 제안함에
+        origin='disconnected'로 보존된다. 파일은 여전히 불변(safe-default)."""
+        proposal = PatchProposal(
+            skill_id="disc-sk", changelog="신규", diff={"lines": []}, trigger="T4",
+            proposed_body="## body\n", from_version=0, to_version=1,
+        )
+        gen = surface_learning_effect(
+            session_id="s-disc", effect=proposal, learning=self._svc,
+            approvals=self._approvals, approval_timeout_s=30,
+        )
+        first = await gen.__anext__()
+        assert first.type == EventType.SKILL_PATCH_PROPOSED
+        # 다음 스텝은 approvals.request에서 파킹된다 — 클라이언트 단절처럼 취소.
+        nxt = asyncio.create_task(gen.__anext__())
+        for _ in range(1000):
+            if self._approvals.pending("s-disc"):
+                break
+            await asyncio.sleep(0)
+        nxt.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await nxt
+        sugs = self._svc.suggestions()
+        assert len(sugs) == 1
+        assert sugs[0]["origin"] == "disconnected"
+        assert sugs[0]["skill_id"] == "disc-sk"
+        assert self._svc.get_skill("disc-sk") is None  # 적용은 안 됐다

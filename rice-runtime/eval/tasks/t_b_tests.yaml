@@ -1,8 +1,19 @@
 # Task T-B: 프로젝트 테스트 실행 (RICE_LEARNING_EVAL §4)
+# 출품 전 P0: 결정적 script — 스킬(run-tests)이 있으면 pytest 직행(1콜),
+# 없으면 러너 추측(npm→unittest→pytest, 3콜).
 id: "T-B"
 title: "프로젝트 테스트 실행"
 prompt: "이 프로젝트의 유닛 테스트를 전부 돌려줘."
 related_skill: "run-tests"
+script:
+  skill_marker: "asyncio_mode"
+  warm_tools:
+    - { name: run_terminal, arguments: { command: ".venv/bin/python -m pytest tests/ -q" } }
+  cold_tools:
+    - { name: run_terminal, arguments: { command: "npm test" } }
+    - { name: run_terminal, arguments: { command: "python -m unittest discover" } }
+    - { name: run_terminal, arguments: { command: ".venv/bin/python -m pytest tests/ -q" } }
+  final_answer: "pytest로 전체 테스트를 실행했습니다. run 완료."
 success_check:
-  type: "contains_keywords"
-  keywords: ["test", "pytest", "run"]
+  type: "tool_sequence"
+  expected_tools: ["run_terminal"]

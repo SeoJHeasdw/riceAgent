@@ -120,12 +120,14 @@ export class SSEClient {
   /**
    * Gated LLM skill/memory review — the client calls this fire-and-forget right
    * after the main turn's `done`, same trigger point as the title call (Phase A).
-   * `toolCallsMade` is the one thing not derivable from stored history alone —
-   * count `tool_call` events seen during the just-finished turn's stream.
-   * Fast no-op (single `done` frame) when the server-side gate declines.
+   * 출품 전 P0: 서버가 턴 종료 시 TurnOutcome(tool_calls_made 포함)을 learning_jobs에
+   * 직접 영속화하고 리뷰를 exactly-once로 claim해 실행한다 — 클라이언트는 더 이상
+   * 아무것도 세지 않는다. 중복 호출·재시도·탭 종료 모두 안전(미수거 잡은 백그라운드
+   * sweep이 제안함으로 라우팅). Fast no-op (single `done` frame) when there is no
+   * pending job or the server-side gate declines.
    */
-  reviewLearning(sessionId: string, toolCallsMade: number, handlers: StreamHandlers): StreamHandle {
-    return this._streamPost(`/sessions/${sessionId}/learning-review`, { tool_calls_made: toolCallsMade }, handlers);
+  reviewLearning(sessionId: string, handlers: StreamHandlers): StreamHandle {
+    return this._streamPost(`/sessions/${sessionId}/learning-review`, {}, handlers);
   }
 
   /** Explicit "이 대화를 스킬로 저장" action (Phase C) — always attempts, no gate. */

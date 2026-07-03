@@ -30,7 +30,9 @@ def tools(runner: "SubAgentRunner") -> list[tuple[ToolSpec, BuiltinTool]]:
             "Delegate a focused research, analysis, review, or synthesis task to a "
             "parallel sub-agent. Use multiple calls in one round when independent "
             "workstreams can run concurrently; then synthesize their tool results "
-            "in your next answer."
+            "in your next answer. The result is structured: findings, evidence, "
+            "confidence (high/medium/low), open_questions — weigh low-confidence "
+            "findings accordingly and surface open questions to the user."
         ),
         parameters={
             "type": "object",

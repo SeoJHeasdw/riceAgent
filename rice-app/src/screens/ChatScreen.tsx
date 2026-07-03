@@ -665,9 +665,6 @@ function ChatScreen() {
   const needsTitleRefresh = useRef(false);
   // handle to the in-flight SSE turn so the user can stop it (see stopTurn)
   const streamHandleRef = useRef<{ abort: () => void } | null>(null);
-  // 이번 턴의 tool_call 이벤트 수 — 턴 시작 시 0으로 리셋, done에서 /learning-review
-  // 호출 시 넘긴다(트랜스크립트만으로는 유도 불가능한 유일한 값, Phase A.5).
-  const toolCallsMadeRef = useRef(0);
 
   const sessionPanel = useResizable({ initial: 264, min: 200, max: 420, storageKey: 'rice.panel.sessions' });
   const learningPanel = useResizable({ initial: 320, min: 240, max: 480, storageKey: 'rice.panel.learning', invert: true });
@@ -949,7 +946,6 @@ function ChatScreen() {
   const regenerate = () => {
     if (busy || !api.isEnabled || !liveSessionId.current) return;
     setBusy(true);
-    toolCallsMadeRef.current = 0;
     setThread((p) => {
       let end = p.length; // strip trailing assistant turn (blocks after the last user msg)
       for (let i = p.length - 1; i >= 0; i--) {
@@ -1117,7 +1113,6 @@ function ChatScreen() {
       } else if (e.type === 'tool_call') {
         // a tool round begins → close the reasoning block, push a running trace card
         finalizeThinking();
-        toolCallsMadeRef.current += 1; // POST /learning-review 호출 시 넘길 값 (Phase A.5)
         const d = e.data as { tool_call_id: string; tool_name: string; arguments?: Record<string, unknown> };
         setThread((p) => [
           ...p,
@@ -1185,10 +1180,12 @@ function ChatScreen() {
         }
         // Gated LLM skill/memory review (Phase A) — another separate, non-blocking
         // call right alongside the title one, same reasoning: an LLM call must
-        // never sit inline in this stream. Fast no-op when the server-side gate
-        // declines (ReviewGate) — most turns just get back a bare `done`.
+        // never sit inline in this stream. 출품 전 P0: 서버가 턴 종료 시 영속화한
+        // 리뷰 잡을 exactly-once로 claim하므로 여기선 그저 트리거만 한다 — 중복
+        // 호출/재시도/탭 종료 모두 안전. Fast no-op when there's no pending job
+        // or the gate declines — most turns just get back a bare `done`.
         if (connected && sid) {
-          sseClient.reviewLearning(sid, toolCallsMadeRef.current, {
+          sseClient.reviewLearning(sid, {
             onEvent: (re: SSEEvent) => {
               if (re.type === 'memory_written') handleMemoryWritten(re.data as { memory_type: 'fact' | 'preference'; content: string });
               else if (re.type === 'skill_patch_proposed') handleSkillPatchProposed(re.data as SkillPatchProposedData);
@@ -1235,7 +1232,6 @@ function ChatScreen() {
         return;
       }
     }
-    toolCallsMadeRef.current = 0;
     streamHandleRef.current = sseClient.streamText(liveSessionId.current, q, buildStreamHandlers());
   };
 

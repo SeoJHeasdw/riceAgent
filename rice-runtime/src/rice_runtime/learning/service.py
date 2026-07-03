@@ -30,7 +30,7 @@ from typing import Callable
 
 from ..agent.providers.interfaces import ILLMProvider
 from ..core.config import LearningConfig
-from ..core.errors import NotFoundError, ValidationError
+from ..core.errors import ConflictError, NotFoundError, ValidationError
 from ..core.paths import RicePaths
 from ..core.storage.sqlite import Database
 from ..core.types import InjectedSkill, Message, MemoryItem, TurnOutcome, now_iso
@@ -56,6 +56,7 @@ from .ledger import LearningLedger
 from .memory.search import MemorySearch
 from .memory.store import MemoryStore
 from .proposals import make_create_proposal, make_patch_proposal, proposal_to_payload
+from .review.context import LearningContextManager, ReviewContextConfig
 from .review.engine import ReviewEngine
 from .review.gate import ReviewGate
 from .skill import guard as skill_guard
@@ -154,6 +155,15 @@ class LearningService(ILearningService):
                 ledger=self._ledger,
                 rejection_cooldown_hours=config.review_rejection_cooldown_hours,
                 max_rejections=config.review_max_rejections,
+                context=LearningContextManager(
+                    ReviewContextConfig(
+                        recent_messages=config.review_context_recent_messages,
+                        max_total_tokens=config.review_context_max_tokens,
+                        tool_output_max_tokens=config.review_context_tool_output_tokens,
+                        message_max_tokens=config.review_context_message_tokens,
+                        older_summary_tokens=config.review_context_summary_tokens,
+                    )
+                ),
             )
             if resolve_provider is not None
             else None
@@ -280,9 +290,15 @@ class LearningService(ILearningService):
         # ② 미드턴 스테이징 드레인 (T5)
         staged = self._staged.pop(outcome.session_id, [])
         if outcome.aborted:
-            # 중단된 턴의 제안은 폐기 (fail-closed).
+            # 중단된 턴의 제안은 폐기 (fail-closed). 리뷰 잡도 만들지 않는다 —
+            # 사용자가 버린 턴을 학습 리뷰가 다시 들추지 않는다.
             return effects
         effects.extend(staged)
+
+        # ③ 서버 소유 리뷰 잡 영속화 (출품 전 P0): tool_calls_made는 이제 프론트가
+        #    세어 보내는 값이 아니라 서버가 턴 종료 시점에 직접 기록하는 값이다.
+        #    /learning-review(또는 스케줄러 sweep)가 이 잡을 claim해서 실행한다.
+        self._ledger.enqueue_review_job(outcome.session_id, outcome.tool_calls_made)
 
         return effects
 
@@ -296,6 +312,7 @@ class LearningService(ILearningService):
         description: str = "",
         tags: tuple[str, ...] = (),
         source: str | None = None,
+        expected_version: int | None = None,
     ) -> int | None:
         """HITL 승인 결정대로 패치(또는 신규 생성 제안)를 적용하거나 버린다
         (LEARNING_LOOP §5.2.4, Phase A.1: 생성 = v0에서의 patch로 통일).
@@ -317,6 +334,12 @@ class LearningService(ILearningService):
         되돌아가 — 사용자가 diff 카드를 보고 그냥 "승인"만 누르면(가장 흔한 경로) 실제
         제안 본문이 반영되지 않고 버전만 올라가는 채로 방치되어 있었다. 호출부
         (orchestrator._surface_effect)가 이제 PatchProposal.proposed_body를 항상 넘긴다.
+
+        Optimistic concurrency (출품 전 P0, 2026-07-03): `expected_version`은 제안이
+        만들어진 당시의 스킬 버전(PatchProposal.from_version). None이면 검사 생략
+        (직접 호출 하위호환), 값이 있으면 현재 버전과 불일치 시 ConflictError(409) —
+        사용자가 v1 제안 카드를 열어둔 사이 스킬이 v2가 됐을 때 오래된 제안이
+        최신 내용을 조용히 덮어쓰는 사고를 막는다.
         """
         if not approved:
             return None
@@ -325,6 +348,11 @@ class LearningService(ILearningService):
             current = self._skill_store.read(skill_id)
         except NotFoundError:
             # 신규 생성 경로 — history에 보관할 이전 버전이 없다.
+            if expected_version not in (None, 0):
+                # 제안은 기존 스킬 vN의 patch였는데 그 스킬이 사라졌다 — 적용 불가.
+                raise ConflictError(
+                    f"스킬 '{skill_id}'이(가) 삭제되어 v{expected_version} 기준 제안을 적용할 수 없습니다."
+                )
             new_body = edited_body if edited_body is not None else proposed_body
             if new_body is None:
                 return None  # 본문이 전혀 없으면 만들 수 없다 (fail-closed)
@@ -348,6 +376,14 @@ class LearningService(ILearningService):
             return 1
         except Exception:
             return None
+
+        if expected_version is not None and expected_version != current.version:
+            # 스킬은 존재하지만 제안이 만들어진 이후 버전이 움직였다(다른 제안 승인,
+            # 직접 편집, rollback 등). 그대로 쓰면 그 변경을 덮어쓴다 — rebase 필요.
+            raise ConflictError(
+                f"스킬 '{skill_id}'이(가) v{expected_version} → v{current.version}(으)로 변경되었습니다. "
+                "이 제안은 이전 버전 기준이라 적용할 수 없습니다 — 새로 제안을 받아주세요."
+            )
 
         # ① 현재 본문 history로 보관
         current_path = self._paths.skills / f"{skill_id}.md"
@@ -469,18 +505,36 @@ class LearningService(ILearningService):
             옮긴다. 무응답은 거부 의사표시가 아니라 자리 비움일 수 있다. 적용은
             여전히 하지 않으므로(파일 불변) safe-default는 유지된다. abort로 인한
             cancelled는 그대로 폐기한다(사용자가 턴 자체를 버렸다).
+
+        출품 전 P0 후속(2026-07-03, 적대 리뷰 High#1): **disconnected**(카드 응답
+        전 SSE 스트림 단절 — 탭 종료/새로고침)도 timeout과 동일하게 제안함으로
+        옮긴다. 단절은 의사표시가 아니고, 이전엔 이 경로에서 제안이 ledger에도
+        inbox에도 남지 않고 증발했다.
         """
         base_detail = {"changelog": proposal.changelog, "trigger": proposal.trigger}
         if decision == "approve":
-            version = self.apply_patch(
-                proposal.skill_id,
-                approved=True,
-                proposed_body=proposal.proposed_body,
-                edited_body=edited_body,
-                description=proposal.description,
-                tags=proposal.tags,
-                source=f"session:{session_id}",
-            )
+            try:
+                version = self.apply_patch(
+                    proposal.skill_id,
+                    approved=True,
+                    proposed_body=proposal.proposed_body,
+                    edited_body=edited_body,
+                    description=proposal.description,
+                    tags=proposal.tags,
+                    source=f"session:{session_id}",
+                    expected_version=proposal.from_version,
+                )
+            except ConflictError:
+                # 제안 생성 시점과 승인 시점 사이에 스킬 버전이 움직였다 — 기록 후
+                # 전파한다(effect_surfacing이 SSE error로 서피싱, 라우트는 409).
+                self._ledger.record(
+                    "conflict",
+                    skill_id=proposal.skill_id,
+                    session_id=session_id,
+                    trigger=proposal.trigger,
+                    detail={**base_detail, "expected_version": proposal.from_version},
+                )
+                raise
             self._ledger.record(
                 "approved",
                 skill_id=proposal.skill_id,
@@ -489,17 +543,17 @@ class LearningService(ILearningService):
                 detail={**base_detail, "version": version, "edited": edited_body is not None},
             )
             return version
-        if decision == "timeout":
+        if decision in ("timeout", "disconnected"):
             payload = proposal_to_payload(proposal)
             payload["session_id"] = session_id  # 승인 시 source 복원용
             self._ledger.add_suggestion(
-                origin="timeout",
+                origin=decision,
                 kind="create" if proposal.from_version == 0 else "patch",
                 skill_id=proposal.skill_id,
                 payload=payload,
             )
             self._ledger.record(
-                "timeout", skill_id=proposal.skill_id, session_id=session_id,
+                decision, skill_id=proposal.skill_id, session_id=session_id,
                 trigger=proposal.trigger, detail=base_detail,
             )
             return None
@@ -551,15 +605,33 @@ class LearningService(ILearningService):
         # create/patch — 파킹 경로와 동일하게 apply_patch로 수렴.
         source_session = payload.get("session_id")
         source = f"session:{source_session}" if source_session else sug["origin"]
-        version = self.apply_patch(
-            sug["skill_id"],
-            approved=True,
-            proposed_body=payload.get("proposed_body"),
-            edited_body=edited_body,
-            description=payload.get("description", ""),
-            tags=tuple(payload.get("tags") or ()),
-            source=source,
-        )
+        try:
+            version = self.apply_patch(
+                sug["skill_id"],
+                approved=True,
+                proposed_body=payload.get("proposed_body"),
+                edited_body=edited_body,
+                description=payload.get("description", ""),
+                tags=tuple(payload.get("tags") or ()),
+                source=source,
+                expected_version=payload.get("from_version"),
+            )
+        except ConflictError:
+            # 제안함에 머무는 동안 스킬이 다른 경로로 변경됐다. 계속 pending으로
+            # 두면 영원히 충돌만 나므로 expired로 옮기고 409를 전파한다 — 사용자는
+            # 최신 본문 기준으로 다시 제안을 받아야 한다(rebase).
+            self._ledger.decide_suggestion(suggestion_id, "expired")
+            self._ledger.record(
+                "conflict",
+                skill_id=sug["skill_id"],
+                origin=sug["origin"],
+                detail={
+                    "changelog": payload.get("changelog", ""),
+                    "suggestion_id": suggestion_id,
+                    "expected_version": payload.get("from_version"),
+                },
+            )
+            raise
         self._ledger.decide_suggestion(suggestion_id, "approved")
         self._ledger.record(
             "approved", skill_id=sug["skill_id"], origin=sug["origin"],
@@ -596,25 +668,124 @@ class LearningService(ILearningService):
     def learning_events(self, limit: int = 100) -> list[dict]:
         return self._ledger.events(limit)
 
-    # ── post-turn, LLM-backed (Phase A.3) ────────────────────────────────────
-    async def review(
-        self, session_id: str, history: list[Message], tool_calls_made: int
-    ) -> list[LearningEffect]:
-        """게이트 통과 시에만 LLM 1회 호출 — POST /sessions/{id}/learning-review 가
-        메인 턴의 done 이후 논블로킹으로 호출한다(§1 아키텍처 결정)."""
-        if self._review_engine is None:
-            return []  # resolve_provider 미배선(대부분의 단위 테스트) — 조용히 스킵
+    def record_context_renders(self, session_id: str, renders: list[dict]) -> None:
+        """컨텍스트 렌더 감사 (출품 전 P0) — 턴당 1개 ledger 이벤트로 영속화.
+        ledger.record 자체가 best-effort(fail-safe)라 여기서 추가 방어는 불필요."""
+        if not renders:
+            return
+        managed = [r for r in renders if r.get("managed")]
+        self._ledger.record(
+            "context_rendered",
+            session_id=session_id,
+            detail={
+                "llm_calls": len(renders),
+                "managed_calls": len(managed),
+                "calls": renders,
+            },
+        )
 
+    # ── post-turn, LLM-backed (Phase A.3; 서버 소유 잡으로 재구성 — 출품 전 P0) ─
+    @staticmethod
+    def _gate_inputs(history: list[Message]) -> tuple[str, str | None]:
         final_message = next(
             (m.content for m in reversed(history) if m.role == "assistant" and m.content), ""
         )
         user_text = next((m.content for m in reversed(history) if m.role == "user"), None)
+        return final_message, user_text
+
+    async def review(
+        self, session_id: str, history: list[Message], tool_calls_made: int = 0
+    ) -> list[LearningEffect]:
+        """게이트 통과 시에만 LLM 1회 호출 — POST /sessions/{id}/learning-review 가
+        메인 턴의 done 이후 논블로킹으로 호출한다(§1 아키텍처 결정).
+
+        출품 전 P0 (2026-07-03): 실행 근거가 **서버가 영속화한 리뷰 잡**으로 바뀌었다.
+        observe()가 턴 종료 시 learning_jobs에 pending 잡(+서버가 직접 센
+        tool_calls_made)을 남기고, 여기서 그 잡을 원자적으로 claim한다:
+          - 잡이 없으면(이미 실행됨/중복 POST/관찰된 턴 없음) 즉시 [] — exactly-once.
+          - `tool_calls_made` 파라미터는 하위호환용으로만 남았고 **무시된다** —
+            프론트 카운트는 이벤트 누락/재시도에 취약해 신뢰하지 않는다.
+        """
+        job = self._ledger.claim_review_job(session_id)
+        if job is None:
+            return []
+
+        if self._review_engine is None:
+            # resolve_provider 미배선(대부분의 단위 테스트) — 잡은 소진 처리.
+            self._ledger.finish_review_job(job["id"], "done", {"skipped": "no_provider"})
+            return []
+
+        final_message, user_text = self._gate_inputs(history)
         if not self._review_gate.should_review(
-            session_id, tool_calls_made=tool_calls_made, final_message=final_message, user_text=user_text
+            session_id,
+            tool_calls_made=job["tool_calls_made"],
+            final_message=final_message,
+            user_text=user_text,
         ):
+            self._ledger.finish_review_job(job["id"], "done", {"skipped": "gate"})
             return []
         self._review_gate.mark_reviewed(session_id)
-        return await self._review_engine.review(session_id, history)
+        try:
+            effects = await self._review_engine.review(session_id, history)
+        except Exception:
+            self._ledger.finish_review_job(job["id"], "failed", {"error": "engine"})
+            raise
+        self._ledger.finish_review_job(job["id"], "done", {"effects": len(effects)})
+        return effects
+
+    async def sweep_review_jobs(
+        self, history_for: Callable[[str], list[Message]], *, older_than_seconds: int, limit: int = 3
+    ) -> int:
+        """탭 종료 등으로 클라이언트가 끝내 트리거하지 않은 pending 리뷰 잡을
+        백그라운드로 실행한다 (server/scheduler.py가 주기 호출). 파킹할 SSE 스트림이
+        없으므로 PatchProposal은 HITL 카드 대신 **제안함**(skill_suggestions)으로
+        라우팅한다 — discovery와 동일한 수신처. 반환: 처리한 잡 수."""
+        if older_than_seconds <= 0 or self._review_engine is None:
+            return 0
+        processed = 0
+        for job in self._ledger.stale_pending_review_jobs(
+            older_than_seconds=older_than_seconds, limit=limit
+        ):
+            if not self._ledger.claim_job_by_id(job["id"]):
+                continue  # 경합 — 다른 경로가 방금 claim했다
+            session_id = job["session_id"]
+            try:
+                history = list(history_for(session_id))
+            except Exception:
+                self._ledger.finish_review_job(job["id"], "failed", {"error": "history_unavailable"})
+                continue
+            final_message, user_text = self._gate_inputs(history)
+            if not self._review_gate.should_review(
+                session_id,
+                tool_calls_made=job["tool_calls_made"],
+                final_message=final_message,
+                user_text=user_text,
+            ):
+                self._ledger.finish_review_job(job["id"], "done", {"skipped": "gate", "sweep": True})
+                continue
+            self._review_gate.mark_reviewed(session_id)
+            effects = await self._review_engine.review(session_id, history)
+            suggestions_added = 0
+            for effect in effects:
+                if not isinstance(effect, PatchProposal):
+                    continue  # MemoryWritten은 엔진이 이미 반영했다
+                payload = proposal_to_payload(effect)
+                payload["session_id"] = session_id
+                sid = self._ledger.add_suggestion(
+                    origin="review_sweep",
+                    kind="create" if effect.from_version == 0 else "patch",
+                    skill_id=effect.skill_id,
+                    payload=payload,
+                )
+                if sid is not None:
+                    suggestions_added += 1
+            self._ledger.finish_review_job(
+                job["id"],
+                "done",
+                {"effects": len(effects), "suggestions": suggestions_added, "sweep": True},
+            )
+            processed += 1
+        return processed
 
     async def learn(
         self, session_id: str, history: list[Message], instruction: str = ""

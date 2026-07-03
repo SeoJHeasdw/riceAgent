@@ -131,6 +131,109 @@ class LearningLedger:
             out.append({"skill_id": r["skill_id"], "changelog": detail.get("changelog", "")})
         return out
 
+    # ── review jobs (server-owned post-turn review, 출품 전 P0) ───────────────
+    def enqueue_review_job(self, session_id: str, tool_calls_made: int) -> str | None:
+        """턴 종료 시 observe()가 호출 — 이 세션의 리뷰 잡을 영속화한다.
+
+        같은 세션의 pending 잡이 이미 있으면(이전 턴 리뷰가 아직 안 돌았다) 새 행을
+        만들지 않고 병합한다 — 리뷰는 어차피 세션 히스토리 전체를 보므로 잡 하나면
+        충분하고, 이렇게 해야 빠르게 이어진 턴들이 잡을 도배하지 않는다.
+
+        병합 시 tool_calls_made는 **MAX를 보존**한다(2026-07-03 적대 리뷰 High#2):
+        복잡한 턴(5콜) 직후 짧은 턴(0콜)이 오면 최신 값으로 덮는 순간 게이트가
+        0만 보고 skip해 앞 턴의 학습 기회가 지워졌다. 잡은 "아직 리뷰 안 된 구간의
+        워터마크"이므로 그 구간에서 가장 리뷰 가치가 높았던 턴 기준으로 판단해야
+        한다. Best-effort(fail-safe)."""
+        try:
+            dup = self._db.query_one(
+                "SELECT id FROM learning_jobs WHERE session_id = ? AND status = 'pending' AND kind = 'review'",
+                (session_id,),
+            )
+            if dup is not None:
+                self._db.execute(
+                    "UPDATE learning_jobs SET tool_calls_made = MAX(tool_calls_made, ?), created_at = ? WHERE id = ?",
+                    (tool_calls_made, now_iso(), dup["id"]),
+                )
+                return dup["id"]
+            job_id = new_id("job")
+            self._db.execute(
+                "INSERT INTO learning_jobs (id, session_id, created_at, kind, status, tool_calls_made) "
+                "VALUES (?, ?, ?, 'review', 'pending', ?)",
+                (job_id, session_id, now_iso(), tool_calls_made),
+            )
+            return job_id
+        except Exception:  # noqa: BLE001
+            log.warning("enqueue_review_job failed for %s", session_id, exc_info=True)
+            return None
+
+    def claim_review_job(self, session_id: str) -> dict | None:
+        """pending 잡을 원자적으로 running으로 전이하고 반환한다. 없으면(이미
+        claim됨/실행됨/애초에 없음) None — 이 None이 exactly-once의 근거다:
+        중복 POST /learning-review의 두 번째 호출은 여기서 no-op이 된다."""
+        try:
+            row = self._db.query_one(
+                "SELECT id, session_id, tool_calls_made FROM learning_jobs "
+                "WHERE session_id = ? AND status = 'pending' AND kind = 'review' "
+                "ORDER BY created_at DESC LIMIT 1",
+                (session_id,),
+            )
+            if row is None:
+                return None
+            cur = self._db.execute(
+                "UPDATE learning_jobs SET status = 'running', claimed_at = ? "
+                "WHERE id = ? AND status = 'pending'",
+                (now_iso(), row["id"]),
+            )
+            if cur.rowcount == 0:  # 동시 claim 경합에서 짐 — 상대가 실행한다
+                return None
+            return {
+                "id": row["id"],
+                "session_id": row["session_id"],
+                "tool_calls_made": int(row["tool_calls_made"]),
+            }
+        except Exception:  # noqa: BLE001
+            log.warning("claim_review_job failed for %s", session_id, exc_info=True)
+            return None
+
+    def finish_review_job(self, job_id: str, status: str, detail: dict | None = None) -> None:
+        """running → done|failed 마감. Best-effort."""
+        try:
+            self._db.execute(
+                "UPDATE learning_jobs SET status = ?, finished_at = ?, detail = ? WHERE id = ?",
+                (status, now_iso(), json.dumps(detail, ensure_ascii=False) if detail else None, job_id),
+            )
+        except Exception:  # noqa: BLE001
+            log.warning("finish_review_job failed for %s", job_id, exc_info=True)
+
+    def stale_pending_review_jobs(self, *, older_than_seconds: int, limit: int = 5) -> list[dict]:
+        """탭 종료 등으로 클라이언트가 끝내 claim하지 않은 pending 잡 — 스케줄러
+        sweep이 백그라운드로 실행해 제안함으로 라우팅한다. (running 상태로 방치된
+        잡은 재수확하지 않는다 — 로컬 단일 프로세스에서 crash-mid-review는 드물고,
+        잘못 재실행하면 이중 리뷰가 된다. best-effort 손실로 감수.)"""
+        cutoff = _cutoff_iso(older_than_seconds / 3600)
+        rows = self._db.query_all(
+            "SELECT id, session_id, tool_calls_made FROM learning_jobs "
+            "WHERE status = 'pending' AND kind = 'review' AND created_at < ? "
+            "ORDER BY created_at ASC LIMIT ?",
+            (cutoff, limit),
+        )
+        return [
+            {"id": r["id"], "session_id": r["session_id"], "tool_calls_made": int(r["tool_calls_made"])}
+            for r in rows
+        ]
+
+    def claim_job_by_id(self, job_id: str) -> bool:
+        """sweep 경로의 claim — id 지정 pending → running 원자 전이."""
+        try:
+            cur = self._db.execute(
+                "UPDATE learning_jobs SET status = 'running', claimed_at = ? "
+                "WHERE id = ? AND status = 'pending'",
+                (now_iso(), job_id),
+            )
+            return cur.rowcount > 0
+        except Exception:  # noqa: BLE001
+            return False
+
     # ── suggestion inbox ─────────────────────────────────────────────────────
     def add_suggestion(self, *, origin: str, kind: str, skill_id: str, payload: dict) -> str | None:
         """제안함에 넣는다. 같은 skill_id+kind의 pending 제안이 이미 있으면 중복

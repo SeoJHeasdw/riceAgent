@@ -60,9 +60,11 @@ from rice_runtime.core.types import EventType
 if __package__:
     from .metrics import RunRecord, TaskConditionMetrics, aggregate
     from .report import build_report, print_summary, validate_report, write_results
+    from .scripted_provider import ScriptedToolProvider
 else:
     from eval.metrics import RunRecord, TaskConditionMetrics, aggregate  # type: ignore[no-redef]
     from eval.report import build_report, print_summary, validate_report, write_results  # type: ignore[no-redef]
+    from eval.scripted_provider import ScriptedToolProvider  # type: ignore[no-redef]
 
 
 # ── task 로드 ─────────────────────────────────────────────────────────────────
@@ -76,16 +78,21 @@ def _load_tasks(tasks_dir: Path) -> list[dict[str, Any]]:
     return tasks
 
 
-def _check_success(task: dict[str, Any], response_text: str) -> bool:
+def _check_success(task: dict[str, Any], response_text: str, tool_names: list[str]) -> bool:
     """task의 success_check 조건을 평가한다 (EVAL §4, 결정적 판정).
 
-    WHY: mock tool 호출 시퀀스 대신 echo provider에서는 응답 텍스트에
-    키워드가 포함되는지로 결정적으로 판정한다.
-    NOTE(agent): 실제 LLM provider를 쓸 때는 mock tool 호출 시퀀스로 판정해야
-    한다. echo provider는 단순 echo이므로 prompt 키워드가 response에 반영된다.
+    두 가지 판정 방식 (출품 전 P0에서 tool_sequence 추가):
+      - "tool_sequence": expected_tools가 실제 tool 호출 목록에 **순서를 지키며**
+        (중간에 다른 호출이 끼어도) 등장했는가 — "올바른 절차가 실행됐다"의
+        행동 기반 판정. ScriptedToolProvider와 짝을 이룬다.
+      - "contains_keywords": 응답 텍스트 키워드 포함 (echo provider 하위호환).
     """
     check = task.get("success_check", {})
     check_type = check.get("type", "contains_keywords")
+    if check_type == "tool_sequence":
+        expected: list[str] = check.get("expected_tools", [])
+        it = iter(tool_names)
+        return all(any(name == want for name in it) for want in expected)
     if check_type == "contains_keywords":
         keywords: list[str] = check.get("keywords", [])
         text_lower = response_text.lower()
@@ -125,10 +132,16 @@ async def _run_one(
     SSE 이벤트를 수집해 turns/tool_calls/success/skill_hit을 측정한다.
     """
     paths = RicePaths.from_env(rice_home)
-    # NOTE(agent): 항상 echo provider를 사용한다. 실제 모델로 돌리려면
-    # config.yaml에 provider.kind=claude 를 설정하면 된다.
+    # 출품 전 P0: task에 script가 있으면 결정적 ScriptedToolProvider를 꽂는다 —
+    # 스킬 유무(시스템 프롬프트의 skill_marker)에 따라 다른 tool sequence를 연기해
+    # "진짜 학습 효과"를 행동으로 재현한다. script가 없으면 기존 echo 경로.
     args = RuntimeArgs()
-    container = build_container(args, paths=paths)
+    script = task.get("script")
+    if script:
+        provider = ScriptedToolProvider(script)
+        container = build_container(args, paths=paths, resolve_provider_override=lambda: provider)
+    else:
+        container = build_container(args, paths=paths)
 
     # 헤드리스 실행: 학습 루프가 patch 제안을 내면 orchestrator가 HITL 승인을 await
     # 한다(기본 300s). eval에는 승인자가 없으므로 타임아웃을 0으로 줄여 즉시 reject
@@ -159,12 +172,16 @@ async def _run_one(
 
     # SSE 이벤트 수집
     tool_calls_count = 0
+    tool_names: list[str] = []
     final_message_parts: list[str] = []
 
     try:
         async for event in container.agent.run_turn(session.id, prompt):
             if event.type == EventType.TOOL_CALL:
                 tool_calls_count += 1
+                name = event.data.get("tool_name")
+                if name:
+                    tool_names.append(str(name))
             elif event.type == EventType.MESSAGE:
                 # delta 또는 content 필드에서 텍스트 수집
                 data = event.data
@@ -176,7 +193,8 @@ async def _run_one(
         container.shutdown()
 
     response_text = "".join(final_message_parts)
-    success = _check_success(task, response_text + " " + prompt)
+    # (echo 하위호환: contains_keywords는 prompt 반사를 전제하므로 prompt를 덧붙인다)
+    success = _check_success(task, response_text + " " + prompt, tool_names)
 
     return RunRecord(
         turns=1,  # 1 user turn = 1 turn (eval에서는 task당 1 turn으로 정의)
@@ -271,7 +289,7 @@ def main(runs_per_task: int = 3, *, results_dir: Path | None = None) -> int:
 
     report = build_report(
         task_suite="demo-v1",
-        model="echo",
+        model="scripted",  # 출품 전 P0: 결정적 ScriptedToolProvider (script 없는 task는 echo)
         runs_per_task=runs_per_task,
         generated_at=generated_at,
         task_ids=[t["id"] for t in tasks],

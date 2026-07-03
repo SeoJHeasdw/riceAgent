@@ -91,6 +91,20 @@ class LearningConfig:
     discovery_digest_chars: int = 2_000
     # 제안함(pending) 상한 — 발굴/타임아웃이 쌓여도 인박스가 무한히 늘지 않게.
     suggestion_pending_cap: int = 30
+    # ── 리뷰 전용 컨텍스트 (출품 전 P0, 2026-07-03) ───────────────────────────
+    # 리뷰 엔진은 메인 턴과 다른 렌더러(learning/review/context.py)를 탄다:
+    # 최근 N개 메시지는 전문(과대 도구 출력만 증류), 그 이전은 message id 라벨이
+    # 달린 구조화 요약 한 블록. 긴 세션에서도 리뷰 호출이 bounded가 된다.
+    review_context_recent_messages: int = 12
+    review_context_max_tokens: int = 24_000
+    review_context_tool_output_tokens: int = 600
+    review_context_message_tokens: int = 2_000
+    review_context_summary_tokens: int = 2_000
+    # ── 서버 소유 리뷰 잡 (출품 전 P0, 2026-07-03) ────────────────────────────
+    # 턴 종료 시 observe()가 남긴 pending 리뷰 잡을 클라이언트가 이만큼(초) 지나도
+    # claim하지 않으면(탭 종료 등) 스케줄러 sweep이 백그라운드로 실행해 제안함으로
+    # 라우팅한다. 0 이면 sweep 비활성(잡은 pending으로 남는다).
+    review_job_stale_seconds: int = 900
 
 
 @dataclass(frozen=True)
@@ -108,6 +122,12 @@ class ContextConfig:
     retained_tokens: int = 64_000
     recent_messages: int = 8
     subagent_history_messages: int = 24
+    # ── sub-agent 실행 한도 (출품 전 P0, 2026-07-03) ──────────────────────────
+    # 이전엔 timeout이 approval_timeout_seconds를 빌려 썼다(무관한 커플링) —
+    # 전용 노브로 분리. max_concurrent는 한 라운드에 병렬 스폰되는 sub-agent
+    # 폭주(토큰/비용)를 막는 세마포어 상한이다.
+    subagent_timeout_seconds: int = 90
+    subagent_max_concurrent: int = 3
     summary_tokens: int = 1_600
     tool_output_threshold_tokens: int = 4_000
     tool_output_retained_tokens: int = 1_200

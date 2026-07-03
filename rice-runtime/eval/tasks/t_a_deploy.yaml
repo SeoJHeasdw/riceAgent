@@ -1,10 +1,29 @@
 # Task T-A: K8s 서비스 배포 (RICE_LEARNING_EVAL §4)
-# mock tool 호출 시퀀스로 성공 여부를 결정적으로 판정한다.
+# 출품 전 P0: echo 반사 대신 결정적 ScriptedToolProvider가 script를 연기한다 —
+# 스킬(warm)이 주입되면 최소 절차 3콜, 없으면(cold) 시행착오가 섞인 6콜.
+# success는 tool 호출 시퀀스로 판정한다(키워드 반사가 아니라 실제 행동).
 id: "T-A"
 title: "K8s 서비스 배포"
 prompt: "my-service를 쿠버네티스에 배포해줘. 네임스페이스는 production이고 이미지는 my-service:latest야."
 related_skill: "deploy-k8s-service"
+script:
+  # warm 시드 스킬(deploy-k8s-service.md) 본문에만 있는 문구 — 시스템 프롬프트에
+  # 보이면 "스킬이 주입됐다"는 뜻이고 provider가 warm_tools를 연기한다.
+  skill_marker: "kubectl rollout status"
+  warm_tools:
+    - { name: kubectl_apply, arguments: { file: deployment.yaml, namespace: production } }
+    - { name: kubectl_rollout_status, arguments: { deployment: my-service, namespace: production } }
+    - { name: kubectl_get_pods, arguments: { namespace: production } }
+  cold_tools:
+    # 스킬 없이는 절차를 몰라 문서 검색·잘못된 네임스페이스 시도를 거친다.
+    - { name: search_docs, arguments: { query: "kubernetes deploy service" } }
+    - { name: kubectl_apply, arguments: { file: deployment.yaml, namespace: default } }
+    - { name: kubectl_get_pods, arguments: { namespace: default } }
+    - { name: kubectl_apply, arguments: { file: deployment.yaml, namespace: production } }
+    - { name: kubectl_rollout_status, arguments: { deployment: my-service, namespace: production } }
+    - { name: kubectl_get_pods, arguments: { namespace: production } }
+  final_answer: "my-service를 production 네임스페이스에 deploy 완료했습니다."
 success_check:
-  # echo provider가 'deploy' 와 'production' 단어를 포함한 응답을 만들면 성공으로 간주
-  type: "contains_keywords"
-  keywords: ["deploy", "production", "my-service"]
+  # 올바른 최소 절차가 이 순서로(중간에 다른 호출이 끼어도) 실행됐는가.
+  type: "tool_sequence"
+  expected_tools: ["kubectl_apply", "kubectl_rollout_status", "kubectl_get_pods"]

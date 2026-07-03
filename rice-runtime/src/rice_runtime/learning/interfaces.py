@@ -181,9 +181,16 @@ class ILearningService(Protocol):
         description: str = "",
         tags: tuple[str, ...] = (),
         source: str | None = None,
+        expected_version: int | None = None,
     ) -> int | None:
         """Commit (or discard) a previously proposed patch — or brand-new skill
         (`from_version=0`, no skill exists yet under `skill_id`) — after HITL.
+
+        `expected_version` (optimistic concurrency, 출품 전 P0): the skill version
+        the proposal was authored against (PatchProposal.from_version). If given
+        and it no longer matches the on-disk version, raises ConflictError (→ 409)
+        instead of silently overwriting newer content with a stale proposal.
+        None skips the check (direct-call backcompat).
 
         On approve, existing skill: archive prior body to `.history/`, write new
         body (edited_body if the user touched the approval card, else
@@ -251,16 +258,35 @@ class ILearningService(Protocol):
         """학습 감사 로그 (GET /learning/events) — 제안/결정/적용/메모리 기록."""
         ...
 
+    def record_context_renders(self, session_id: str, renders: list[dict]) -> None:
+        """턴의 매 LLM 호출 컨텍스트 렌더 감사 기록 (출품 전 P0). orchestrator가
+        턴 종료 시 호출 — ledger에 `context_rendered` 이벤트 1건(호출별 스탯 리스트)
+        으로 영속화해 "컨텍스트가 왜 이렇게 됐는가"(omitted/dropped message·tool_call
+        ids, before/after tokens)를 GET /learning/events에서 설명할 수 있게 한다.
+        Best-effort — 실패해도 턴을 깨지 않는다."""
+        ...
+
     # ── post-turn, LLM-backed (routes/messages.py: /learning-review, /learn) ──
     async def review(
-        self, session_id: str, history: list[Message], tool_calls_made: int
+        self, session_id: str, history: list[Message], tool_calls_made: int = 0
     ) -> list[LearningEffect]:
-        """Gated LLM review (Phase A.2/A.3). Checks the cheap heuristic gate
-        first (`review/gate.py::ReviewGate`) — returns `[]` immediately if the
-        turn doesn't warrant an LLM call, or if no provider was wired
-        (`resolve_provider=None`, e.g. most unit tests). Otherwise runs one
-        `ReviewEngine.review()` call and returns whatever it proposes (memory
-        writes already applied; skill effects still awaiting HITL)."""
+        """Gated LLM review (Phase A.2/A.3; 서버 소유 잡 재구성 — 출품 전 P0).
+
+        Runs against the review job `observe()` persisted at turn end
+        (learning_jobs): claims it atomically, so a duplicate/retried POST is a
+        no-op (exactly-once). Returns `[]` when there is no pending job, the
+        heuristic gate (`review/gate.py`) says no, or no provider was wired.
+        `tool_calls_made` is DEPRECATED and ignored — the server-recorded count
+        on the job is used instead (the client count was lossy)."""
+        ...
+
+    async def sweep_review_jobs(
+        self, history_for, *, older_than_seconds: int, limit: int = 3
+    ) -> int:
+        """Run review jobs the client never claimed (tab closed mid-review) —
+        called periodically by server/scheduler.py. Proposals route to the
+        suggestion inbox (no stream to park on). `history_for(session_id)`
+        returns that session's transcript. Returns the number processed."""
         ...
 
     async def learn(

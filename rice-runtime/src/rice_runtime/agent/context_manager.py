@@ -36,6 +36,14 @@ _MASK_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 
 @dataclass(frozen=True)
 class ContextRenderStats:
+    """Per-LLM-call render audit (출품 전 P0, 2026-07-03).
+
+    카운트만으로는 "모델이 정확히 뭘 못 봤는가"를 설명할 수 없다 — 특히 wire
+    repair(`_repair_tool_adjacency`)는 도구 메시지를 조용히 떨어뜨린다. id 튜플이
+    그 구멍을 감사 가능하게 만든다: 렌더마다 어떤 메시지가 요약으로 대체됐고
+    (omitted), 어떤 도구 결과가 wire 수리로 삭제됐는지(dropped) 그대로 남는다.
+    Orchestrator가 턴 종료 시 ledger에 `context_rendered` 이벤트로 영속화한다."""
+
     estimated_tokens_before: int
     estimated_tokens_after: int
     messages_before: int
@@ -44,6 +52,33 @@ class ContextRenderStats:
     distilled_tool_outputs: int = 0
     masked_messages: int = 0
     did_apply_management: bool = False
+    # ── audit ids ────────────────────────────────────────────────────────────
+    omitted_message_ids: tuple[str, ...] = ()  # 압축 요약으로 대체된 메시지
+    dropped_message_ids: tuple[str, ...] = ()  # wire repair/orphan 정리로 삭제된 메시지
+    dropped_tool_call_ids: tuple[str, ...] = ()  # 결과를 잃어 제거된 tool_call id
+    distilled_message_ids: tuple[str, ...] = ()  # head/tail 압축된 메시지
+    masked_message_ids: tuple[str, ...] = ()  # 시크릿 마스킹된 메시지
+
+    def to_dict(self) -> dict:
+        """Compact JSON for the ledger event — empty audit lists are elided."""
+        d: dict = {
+            "tokens_before": self.estimated_tokens_before,
+            "tokens_after": self.estimated_tokens_after,
+            "messages_before": self.messages_before,
+            "messages_after": self.messages_after,
+            "managed": self.did_apply_management,
+        }
+        if self.omitted_message_ids:
+            d["omitted_message_ids"] = list(self.omitted_message_ids)
+        if self.dropped_message_ids:
+            d["dropped_message_ids"] = list(self.dropped_message_ids)
+        if self.dropped_tool_call_ids:
+            d["dropped_tool_call_ids"] = list(self.dropped_tool_call_ids)
+        if self.distilled_message_ids:
+            d["distilled_message_ids"] = list(self.distilled_message_ids)
+        if self.masked_message_ids:
+            d["masked_message_ids"] = list(self.masked_message_ids)
+        return d
 
 
 @dataclass(frozen=True)
@@ -92,16 +127,22 @@ class ConversationContextManager:
             )
             return RenderedContext(system_prompt, tuple(messages), stats)
 
-        managed, masked_count, distilled_count = self._manage_messages(messages)
-        managed = self._drop_orphaned_tool_prefix(tuple(managed))
+        managed, masked_ids, distilled_ids = self._manage_messages(messages)
+        managed, orphan_ids = self._drop_orphaned_tool_prefix(tuple(managed))
 
         after_manage = estimate_context_tokens(system_prompt, managed)
-        omitted_messages = 0
+        omitted_ids: tuple[str, ...] = ()
+        dropped_msg_ids: list[str] = list(orphan_ids)
+        dropped_call_ids: list[str] = []
         final_system = system_prompt
         final_history = tuple(managed)
 
         if after_manage > self._config.max_tokens:
-            final_system, final_history, omitted_messages = self._compress_history(system_prompt, final_history)
+            final_system, final_history, omitted_ids, repair_msg_ids, repair_call_ids = (
+                self._compress_history(system_prompt, final_history)
+            )
+            dropped_msg_ids.extend(repair_msg_ids)
+            dropped_call_ids.extend(repair_call_ids)
 
         after_tokens = estimate_context_tokens(final_system, final_history)
         stats = ContextRenderStats(
@@ -109,27 +150,34 @@ class ConversationContextManager:
             estimated_tokens_after=after_tokens,
             messages_before=messages_before,
             messages_after=len(final_history),
-            omitted_messages=omitted_messages,
-            distilled_tool_outputs=distilled_count,
-            masked_messages=masked_count,
+            omitted_messages=len(omitted_ids),
+            distilled_tool_outputs=len(distilled_ids),
+            masked_messages=len(masked_ids),
             did_apply_management=(
-                masked_count > 0
-                or distilled_count > 0
-                or omitted_messages > 0
+                bool(masked_ids)
+                or bool(distilled_ids)
+                or bool(omitted_ids)
                 or len(final_history) != messages_before
             ),
+            omitted_message_ids=omitted_ids,
+            dropped_message_ids=tuple(dropped_msg_ids),
+            dropped_tool_call_ids=tuple(dropped_call_ids),
+            distilled_message_ids=distilled_ids,
+            masked_message_ids=masked_ids,
         )
         return RenderedContext(final_system, final_history, stats)
 
-    def _manage_messages(self, messages: Sequence[Message]) -> tuple[list[Message], int, int]:
+    def _manage_messages(
+        self, messages: Sequence[Message]
+    ) -> tuple[list[Message], tuple[str, ...], tuple[str, ...]]:
         managed: list[Message] = []
-        masked_count = 0
-        distilled_count = 0
+        masked_ids: list[str] = []
+        distilled_ids: list[str] = []
         for message in messages:
             content = message.content
             masked = _mask_secrets(content)
             if masked != content:
-                masked_count += 1
+                masked_ids.append(message.id)
                 content = masked
 
             if message.role == "tool" and estimate_tokens(content) > self._config.tool_output_threshold_tokens:
@@ -138,14 +186,14 @@ class ConversationContextManager:
                     max_tokens=self._config.tool_output_retained_tokens,
                     label="tool output",
                 )
-                distilled_count += 1
+                distilled_ids.append(message.id)
             elif estimate_tokens(content) > self._config.message_threshold_tokens:
                 content = _distill_text(
                     content,
                     max_tokens=self._config.message_retained_tokens,
                     label=f"{message.role} message",
                 )
-                distilled_count += 1
+                distilled_ids.append(message.id)
 
             if content == message.content:
                 managed.append(message)
@@ -167,11 +215,16 @@ class ConversationContextManager:
                         metadata=metadata,
                     )
                 )
-        return managed, masked_count, distilled_count
+        return managed, tuple(masked_ids), tuple(distilled_ids)
 
-    def _compress_history(self, system_prompt: str, messages: tuple[Message, ...]) -> tuple[str, tuple[Message, ...], int]:
+    def _compress_history(
+        self, system_prompt: str, messages: tuple[Message, ...]
+    ) -> tuple[str, tuple[Message, ...], tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+        """Returns (system, history, omitted_message_ids, wire-repair-dropped
+        message ids, wire-repair-dropped tool_call ids) — id 단위 감사가 목적
+        (ContextRenderStats docstring 참고)."""
         if not messages:
-            return system_prompt, messages, 0
+            return system_prompt, messages, (), (), ()
 
         target = min(self._config.retained_tokens, self._config.max_tokens)
         retained: list[Message] = []
@@ -193,10 +246,11 @@ class ConversationContextManager:
         retained.reverse()
         retained_ids_before_wire_repair = {m.id for m in retained}
         omitted = [m for m in messages if m.id not in retained_ids_before_wire_repair]
-        retained = list(_repair_tool_adjacency(tuple(retained)))
+        retained, dropped_msg_ids, dropped_call_ids = _repair_tool_adjacency(tuple(retained))
+        retained = list(retained)
 
         if not omitted:
-            return system_prompt, tuple(retained), 0
+            return system_prompt, tuple(retained), (), dropped_msg_ids, dropped_call_ids
 
         summary = _summarize_omitted(omitted, self._config.summary_tokens)
         final_system = "\n\n".join(
@@ -210,14 +264,23 @@ class ConversationContextManager:
             )
             if part
         )
-        return final_system, tuple(retained), len(omitted)
+        return (
+            final_system,
+            tuple(retained),
+            tuple(m.id for m in omitted),
+            dropped_msg_ids,
+            dropped_call_ids,
+        )
 
     @staticmethod
-    def _drop_orphaned_tool_prefix(messages: tuple[Message, ...]) -> tuple[Message, ...]:
+    def _drop_orphaned_tool_prefix(
+        messages: tuple[Message, ...],
+    ) -> tuple[tuple[Message, ...], tuple[str, ...]]:
         trimmed = list(messages)
+        dropped: list[str] = []
         while trimmed and trimmed[0].role == "tool":
-            trimmed.pop(0)
-        return tuple(trimmed)
+            dropped.append(trimmed.pop(0).id)
+        return tuple(trimmed), tuple(dropped)
 
 
 def _mask_secrets(text: str) -> str:
@@ -227,19 +290,27 @@ def _mask_secrets(text: str) -> str:
     return masked
 
 
-def _repair_tool_adjacency(messages: tuple[Message, ...]) -> tuple[Message, ...]:
+def _repair_tool_adjacency(
+    messages: tuple[Message, ...],
+) -> tuple[tuple[Message, ...], tuple[str, ...], tuple[str, ...]]:
     """Drop tool-use fragments that became invalid after budget selection.
 
     Compression may skip an oversized message but keep a shorter neighbor. That
     is useful for retaining more context, but provider APIs require assistant
     tool_calls and their tool results to remain adjacent. Wire-format repair is
-    not counted as "omitted context" and is not summarized.
+    not counted as "omitted context" and is not summarized — which is exactly
+    why it must be *audited*: returns (repaired, dropped message ids, dropped
+    tool_call ids) so the render log can say what silently fell out (출품 전 P0).
     """
     repaired: list[Message] = []
+    dropped_msg_ids: list[str] = []
+    dropped_call_ids: list[str] = []
     i = 0
     while i < len(messages):
         message = messages[i]
         if message.role == "tool":
+            # orphaned tool result (its assistant tool_call didn't survive)
+            dropped_msg_ids.append(message.id)
             i += 1
             continue
 
@@ -253,24 +324,34 @@ def _repair_tool_adjacency(messages: tuple[Message, ...]) -> tuple[Message, ...]
             tool_ids = {m.metadata.get("tool_call_id") for m in tool_block}
             if expected_ids.issubset(tool_ids):
                 repaired.append(message)
-                repaired.extend(m for m in tool_block if m.metadata.get("tool_call_id") in expected_ids)
-            elif message.content:
-                repaired.append(
-                    Message(
-                        role=message.role,
-                        content=message.content,
-                        id=message.id,
-                        ts=message.ts,
-                        metadata=message.metadata,
+                for m in tool_block:
+                    if m.metadata.get("tool_call_id") in expected_ids:
+                        repaired.append(m)
+                    else:
+                        dropped_msg_ids.append(m.id)
+            else:
+                # incomplete tool round: strip the tool_calls (and their results)
+                dropped_call_ids.extend(call.id for call in message.tool_calls)
+                dropped_msg_ids.extend(m.id for m in tool_block)
+                if message.content:
+                    repaired.append(
+                        Message(
+                            role=message.role,
+                            content=message.content,
+                            id=message.id,
+                            ts=message.ts,
+                            metadata=message.metadata,
+                        )
                     )
-                )
+                else:
+                    dropped_msg_ids.append(message.id)
             i = j
             continue
 
         repaired.append(message)
         i += 1
 
-    return tuple(repaired)
+    return tuple(repaired), tuple(dropped_msg_ids), tuple(dropped_call_ids)
 
 
 def _distill_text(text: str, *, max_tokens: int, label: str) -> str:
