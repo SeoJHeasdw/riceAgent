@@ -28,7 +28,7 @@ const MetricRow: React.FC<{
   const improved = betterIsLower ? warm <= cold : warm >= cold;
   const Bar: React.FC<{ value: number; tone: 'cold' | 'warm' }> = ({ value, tone }) => (
     <div className="flex items-center gap-2">
-      <span className="text-[10px] text-text-helper w-9 flex-shrink-0">{tone === 'cold' ? '학습 전' : '학습 후'}</span>
+      <span className="text-label-micro text-text-helper w-9 flex-shrink-0">{tone === 'cold' ? '학습 전' : '학습 후'}</span>
       <div className="flex-1 h-3 bg-layer-02 rounded-sm overflow-hidden">
         <div
           className={`h-full rounded-sm ${tone === 'warm' ? 'bg-blue-50' : 'bg-layer-03'}`}
@@ -108,7 +108,7 @@ export const LearningImpactPanel: React.FC<{ report: ImpactReport; onRerun?: () 
       {/* header */}
       <div className="px-7 pt-6 pb-5 border-b border-border-subtle-01">
         <div className="flex items-center gap-2.5 flex-wrap">
-          <div className="w-11 h-11 flex-shrink-0 flex items-center justify-center rounded-lg bg-gradient-to-br from-[#0f62fe] to-[#8a3ffc]">
+          <div className="w-11 h-11 flex-shrink-0 flex items-center justify-center rounded-lg bg-gradient-to-br from-blue-60 to-purple-60">
             <Icon name="growth" size={22} className="text-white" />
           </div>
           <div className="min-w-0">

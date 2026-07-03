@@ -163,7 +163,7 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
       />
 
       <div
-        className="fixed top-0 right-0 bottom-0 w-[380px] bg-layer-01 border-l border-border-subtle-01 z-50 flex flex-col shadow-overlay"
+        className="fixed top-0 right-0 bottom-0 w-[380px] bg-layer-01 border-l border-border-subtle-01 z-50 flex flex-col shadow-elevation-3"
         style={{
           animation: closing
             ? `panelSlideOut ${CLOSE_MS}ms cubic-bezier(0.4, 0, 1, 1) forwards`

@@ -333,7 +333,7 @@ export const TourOverlay: React.FC<TourOverlayProps> = ({ steps, currentPath, on
           {!bubblePos.centered && <BubbleArrow side={bubblePos.arrowSide} center={bubblePos.arrowCenter} />}
 
           {/* 카드 본체 — 온보딩과 동일한 Carbon 토큰 */}
-          <div className="relative rounded-2xl overflow-hidden bg-layer-01 border border-border-subtle-01 shadow-overlay">
+          <div className="relative rounded-xl overflow-hidden bg-layer-01 border border-border-subtle-01 shadow-elevation-3">
             {/* 상단 액센트 (단색, 차분) */}
             <div className="h-[3px] w-full bg-interactive" />
 
@@ -353,14 +353,14 @@ export const TourOverlay: React.FC<TourOverlayProps> = ({ steps, currentPath, on
               {/* 단계별 텍스트만 크로스페이드 (key=index) */}
               <div key={index} style={{ animation: `tourBodyIn 300ms ${EASE_IN}` }}>
                 <div className="flex items-center gap-2 mb-2.5 pr-7">
-                  <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-interactive text-white text-[10px] font-bold tabular-nums flex-shrink-0">
+                  <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-interactive text-white text-label-micro font-bold tabular-nums flex-shrink-0">
                     {index + 1}
                   </span>
-                  <span className="text-[13px] font-semibold leading-tight text-text-primary">
+                  <span className="text-body-short-01 font-semibold leading-tight text-text-primary">
                     {step.title}
                   </span>
                 </div>
-                <p className="text-[13px] leading-[1.65] text-text-secondary">
+                <p className="text-body-short-01 leading-[1.65] text-text-secondary">
                   {step.body}
                 </p>
               </div>
@@ -389,13 +389,13 @@ export const TourOverlay: React.FC<TourOverlayProps> = ({ steps, currentPath, on
               <div className="flex items-center gap-1.5">
                 <button
                   onClick={triggerDone}
-                  className="text-[12px] font-medium px-2.5 py-1.5 rounded-lg text-text-helper hover:text-text-secondary hover:bg-layer-hover-01 transition-colors"
+                  className="text-caption-01 font-medium px-2.5 py-1.5 rounded-lg text-text-helper hover:text-text-secondary hover:bg-layer-hover-01 transition-colors"
                 >
                   건너뛰기
                 </button>
                 <button
                   onClick={goNext}
-                  className="flex items-center gap-1.5 text-[12.5px] font-semibold px-4 py-1.5 rounded-lg bg-interactive text-white shadow-elevation-1 hover:bg-[#0353e9] active:scale-95 transition-all"
+                  className="flex items-center gap-1.5 text-caption-01 font-semibold px-4 py-1.5 rounded-lg bg-interactive text-white hover:bg-interactive-hover transition-colors"
                 >
                   {isLast ? '시작하기' : '다음'}
                   {!isLast && (

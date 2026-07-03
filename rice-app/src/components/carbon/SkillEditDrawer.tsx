@@ -110,9 +110,9 @@ const DiffLine: React.FC<{ line: EditPatch['diff'][number] }> = ({ line }) => {
   const gutter = line.t === 'add' ? '+' : line.t === 'remove' ? '−' : ' ';
   const cls =
     line.t === 'add'
-      ? 'bg-[#0c2b18] text-[#6fdc8c] border-l-2 border-l-[#42be65]'
+      ? 'bg-diff-add-bg text-diff-add-text border-l-2 border-l-diff-add-accent'
       : line.t === 'remove'
-        ? 'bg-[#341216] text-[#ff8389] border-l-2 border-l-[#fa4d56]'
+        ? 'bg-diff-remove-bg text-diff-remove-text border-l-2 border-l-diff-remove-accent'
         : 'text-text-helper border-l-2 border-l-transparent';
   return (
     <div className={`flex gap-2 px-2.5 py-0.5 ${cls}`}>
@@ -201,10 +201,10 @@ export const SkillEditDrawer: React.FC<{
       <div onClick={onClose} className={dialogBackdropCls} />
 
       {/* right drawer */}
-      <div className="relative ml-auto h-full w-[440px] max-w-full bg-layer-01 border-l border-border-subtle-01 shadow-overlay z-[61] flex flex-col animate-slide-in-right">
+      <div className="relative ml-auto h-full w-[440px] max-w-full bg-layer-01 border-l border-border-subtle-01 shadow-elevation-3 z-[61] flex flex-col animate-slide-in-right">
         {/* header */}
         <div className="flex-shrink-0 flex items-start gap-2.5 px-5 py-4 border-b border-border-subtle-01">
-          <div className="w-8 h-8 flex-shrink-0 flex items-center justify-center rounded-lg bg-[#8a3ffc]/15">
+          <div className="w-8 h-8 flex-shrink-0 flex items-center justify-center rounded-lg bg-purple-60/15">
             <Icon name="edit" size={16} className="text-purple-60" />
           </div>
           <div className="flex-1 min-w-0">
@@ -254,9 +254,9 @@ export const SkillEditDrawer: React.FC<{
 
           {/* pending patch card */}
           {pending && (
-            <div className="rounded-xl border border-border-subtle-01 bg-background overflow-hidden" style={{ borderLeft: '2px solid #be95ff' }}>
+            <div className="ai-tile overflow-hidden">
               <div className="flex items-center gap-2 px-3.5 py-2.5 border-b border-border-subtle-01">
-                <Icon name="renew" size={14} className="text-[#be95ff] flex-shrink-0" />
+                <Icon name="renew" size={14} className="text-purple-40 flex-shrink-0" />
                 <span className="text-body-short-01 font-semibold text-text-primary">스킬 개선 제안</span>
                 <span className="ml-auto inline-flex items-center gap-1.5 font-mono text-caption-01">
                   <span className="text-text-helper line-through">{pending.fromVer}</span>
@@ -288,11 +288,11 @@ export const SkillEditDrawer: React.FC<{
                     value={body}
                     onChange={(e) => setBody(e.target.value)}
                     spellCheck={false}
-                    className="w-full px-3 py-2.5 text-[11.5px] font-mono text-text-secondary leading-relaxed resize-none bg-transparent border-0 outline-none focus:ring-1 focus:ring-focus"
+                    className="w-full px-3 py-2.5 text-label-micro font-mono text-text-secondary leading-relaxed resize-none bg-transparent border-0 outline-none focus:ring-1 focus:ring-focus"
                     style={{ minHeight: '160px', maxHeight: '300px' }}
                   />
                 ) : (
-                  <div className="py-1 text-[11.5px] font-mono leading-[18px] max-h-[300px] overflow-y-auto">
+                  <div className="py-1 text-label-micro font-mono leading-[18px] max-h-[300px] overflow-y-auto">
                     {pending.diff.map((line, i) => (
                       <DiffLine key={i} line={line} />
                     ))}

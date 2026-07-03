@@ -39,7 +39,7 @@ export const SponsorModal: React.FC<SponsorModalProps> = ({
       <div onClick={onClose} className={dialogBackdropCls} />
 
       {/* Modal */}
-      <div className="relative w-[440px] max-w-full bg-layer-01 border border-border-subtle-01 rounded-2xl z-[61] shadow-overlay animate-scale-in overflow-hidden">
+      <div className="relative w-[440px] max-w-full bg-layer-01 border border-border-subtle-01 rounded-xl z-[61] shadow-elevation-3 animate-scale-in overflow-hidden">
         {/* Header */}
         <div className="flex items-center px-5 py-4 border-b border-border-subtle-01">
           <div className="flex-1">

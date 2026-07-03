@@ -147,28 +147,24 @@ function SkillMarketScreen() {
         className="flex-shrink-0 bg-layer-01 border-r border-border-subtle-01 flex flex-col min-w-0 overflow-hidden"
         style={{ width: railPanel.width }}
       >
-        {/* Blue Point Balance */}
+        {/* Blue Point Balance — 보조 정보라 neutral account panel로 (배너 아님) */}
         <div className="p-3">
-          <div className="relative overflow-hidden rounded-2xl gradient-skill p-4 text-white shadow-glow-blue">
-            {/* Decorative glow */}
-            <div className="absolute -top-8 -right-8 w-28 h-28 rounded-full bg-white/10 blur-2xl" aria-hidden="true" />
-            <div className="relative">
-              <div className="flex items-center gap-1.5 text-caption-01 text-white/80 mb-2">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12 2l2.4 7.2H22l-6 4.8 2.4 7.2-6.4-4.8L5.6 21.2 8 14 2 9.2h7.6z" />
-                </svg>
-                내 IBM 블루 포인트
-              </div>
-              <div className="text-[26px] font-semibold leading-none tracking-tight">
-                {bluePointBalance.toLocaleString()}
-                <span className="text-body-short-01 font-normal text-white/70 ml-1.5">BP</span>
-              </div>
-              <div className="inline-flex items-center gap-1 mt-3 px-2 py-0.5 rounded-full bg-white/15 text-caption-01">
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 19V5M5 12l7-7 7 7" />
-                </svg>
-                이번 달 +3,200
-              </div>
+          <div className="rounded-xl bg-layer-01 border border-border-subtle-01 p-4">
+            <div className="flex items-center gap-1.5 text-caption-01 text-text-helper mb-2">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2l2.4 7.2H22l-6 4.8 2.4 7.2-6.4-4.8L5.6 21.2 8 14 2 9.2h7.6z" />
+              </svg>
+              내 IBM 블루 포인트
+            </div>
+            <div className="text-heading-03 font-semibold text-text-primary leading-none tracking-tight tabular-nums">
+              {bluePointBalance.toLocaleString()}
+              <span className="text-body-short-01 font-normal text-text-helper ml-1.5">BP</span>
+            </div>
+            <div className="inline-flex items-center gap-1 mt-3 px-2 py-0.5 rounded-full bg-layer-02 text-caption-01 text-text-secondary">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 19V5M5 12l7-7 7 7" />
+              </svg>
+              이번 달 +3,200
             </div>
           </div>
         </div>
@@ -186,7 +182,7 @@ function SkillMarketScreen() {
                 onClick={() => setSelectedCategory(category)}
                 className={`block w-full text-left border-none px-2.5 py-2 text-body-short-01 rounded-lg transition-colors truncate ${
                   isActive
-                    ? 'bg-[#0f62fe]/15 text-text-primary font-semibold'
+                    ? 'bg-layer-selected-01 text-text-primary font-semibold'
                     : 'bg-transparent text-text-secondary hover:bg-layer-hover-01 hover:text-text-primary'
                 }`}
               >
@@ -201,10 +197,10 @@ function SkillMarketScreen() {
           <button
             onClick={() => setAuthorOpen(true)}
             className="
-              w-full flex items-center justify-center gap-2 py-2.5 rounded-xl
+              w-full flex items-center justify-center gap-2 py-2 rounded-lg
               border border-dashed border-border-strong-01 text-text-secondary
-              text-body-short-01 font-semibold transition-all
-              hover:border-interactive hover:text-interactive hover:bg-[#0f62fe]/5
+              text-body-short-01 font-semibold transition-colors
+              hover:border-border-strong-02 hover:text-text-primary hover:bg-layer-hover-01
             "
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -251,7 +247,7 @@ function SkillMarketScreen() {
                     onClick={() => setDetailModalSkill(skill)}
                     className={
                       isNew
-                        ? 'rounded-2xl ring-2 ring-interactive ring-offset-2 ring-offset-background transition-shadow'
+                        ? 'rounded-xl ring-2 ring-interactive ring-offset-2 ring-offset-background transition-shadow'
                         : undefined
                     }
                   >
@@ -266,7 +262,7 @@ function SkillMarketScreen() {
             </div>
           ) : (
             <div className="text-center py-16 text-text-helper">
-              <div className="text-[48px] mb-4">🔍</div>
+              <div className="text-heading-06 mb-4">🔍</div>
               <div className="text-body-long-01">스킬을 찾지 못했습니다</div>
               <div className="text-caption-01 mt-1">검색어나 필터를 조정해보세요</div>
             </div>

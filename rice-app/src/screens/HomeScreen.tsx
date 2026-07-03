@@ -61,8 +61,8 @@ const StatTile: React.FC<{
   value: React.ReactNode;
   label: string;
 }> = ({ accent, icon, value, label }) => (
-  <div className="flex items-center gap-3 rounded-xl border border-border-subtle-01 bg-layer-01 px-4 py-3.5 shadow-elevation-1 transition-shadow duration-150 hover:shadow-elevation-2">
-    <span className={`flex items-center justify-center w-9 h-9 rounded-lg flex-shrink-0 ${accent}`}>{icon}</span>
+  <div className="flex items-center gap-3 rounded-xl border border-border-subtle-01 bg-layer-01 px-3.5 py-3">
+    <span className={`flex items-center justify-center w-8 h-8 rounded-lg flex-shrink-0 ${accent}`}>{icon}</span>
     <div className="min-w-0">
       <div className="text-heading-03 font-semibold text-text-primary tabular-nums leading-none">{value}</div>
       <div className="text-caption-01 text-text-helper mt-1">{label}</div>
@@ -78,7 +78,7 @@ const NavCard: React.FC<{ dest: NavDestination; onClick: () => void; className?:
 }) => (
   <button
     onClick={onClick}
-    className={`group flex items-start gap-4 text-left rounded-xl border border-border-subtle-01 bg-layer-01 shadow-elevation-1 p-4 transition-all duration-150 hover:border-border-strong-01 hover:shadow-elevation-2 hover:-translate-y-0.5 active:translate-y-0 outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus ${className}`}
+    className={`group flex items-start gap-4 text-left rounded-xl border border-border-subtle-01 bg-layer-01 p-4 transition-colors duration-150 hover:border-border-strong-01 outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus ${className}`}
   >
     <span
       className={`flex items-center justify-center w-11 h-11 rounded-xl flex-shrink-0 ${
@@ -92,7 +92,7 @@ const NavCard: React.FC<{ dest: NavDestination; onClick: () => void; className?:
         <span className="font-semibold text-text-primary text-body-short-01">{dest.title ?? dest.label}</span>
         <NavIcon
           size={15}
-          className="text-text-helper opacity-0 -translate-x-1 transition-all duration-150 group-hover:opacity-100 group-hover:translate-x-0"
+          className="text-text-helper opacity-0 transition-opacity duration-150 group-hover:opacity-100"
         >
           {ARROW}
         </NavIcon>
@@ -119,34 +119,31 @@ const HomeScreen: React.FC = () => {
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="max-w-[1040px] mx-auto px-8 py-10">
-        {/* ── 히어로 ── */}
-        <header className="mb-9">
+      <div className="max-w-[1040px] mx-auto px-8 py-8">
+        {/* ── 히어로 — 인사·한 줄 소개·단일 강한 CTA ── */}
+        <header className="mb-6">
           <p className="text-body-short-01 text-text-helper">{greeting()}</p>
-          <h1 className="text-heading-04 font-light text-text-primary mt-1">무엇을 해볼까요?</h1>
+          <h1 className="text-heading-03 font-light text-text-primary mt-1">무엇을 해볼까요?</h1>
           <p className="text-body-short-01 text-text-secondary mt-2 max-w-[560px]">
             RICE는 대화할수록 내 작업 방식을 학습하고 반복 작업을 스킬로 저장해요. 이어서 일을 시작해 보세요.
           </p>
 
-          {/* 주요 행동 — 새 대화 */}
-          <div className="mt-5 flex flex-wrap items-center gap-2.5">
+          {/* 주요 행동 — 강한 CTA는 '새 대화' 하나, 나머지는 ghost */}
+          <div className="mt-4 flex flex-wrap items-center gap-2">
             <button
               onClick={() => navigate('/chat')}
-              className="group inline-flex items-center gap-2 rounded-xl bg-interactive px-4 py-2.5 text-white shadow-glow-blue transition-all duration-150 hover:brightness-110 hover:shadow-elevation-2 active:scale-[0.98] outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+              className="inline-flex items-center gap-2 h-9 rounded-lg bg-interactive px-4 text-white transition-colors duration-150 hover:bg-interactive-hover outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
             >
-              <LineIcon size={18}>
+              <LineIcon size={16}>
                 <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
               </LineIcon>
               <span className="text-body-short-01 font-semibold">새 대화 시작</span>
-              <NavIcon size={16} className="-translate-x-0.5 transition-transform duration-150 group-hover:translate-x-0">
-                {ARROW}
-              </NavIcon>
             </button>
             <button
               onClick={() => navigate('/skills')}
-              className="inline-flex items-center gap-2 rounded-xl border border-border-subtle-01 bg-layer-01 px-4 py-2.5 text-text-secondary transition-colors duration-150 hover:border-border-strong-01 hover:text-text-primary outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+              className="inline-flex items-center gap-2 h-9 rounded-lg px-3 text-text-secondary transition-colors duration-150 hover:bg-layer-hover-01 hover:text-text-primary outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
             >
-              <LineIcon size={18}>
+              <LineIcon size={16}>
                 <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
               </LineIcon>
               <span className="text-body-short-01 font-medium">스킬 마켓 둘러보기</span>
@@ -155,18 +152,19 @@ const HomeScreen: React.FC = () => {
         </header>
 
         {/* ── 학습 현황 ── */}
-        <section className="mb-8">
+        <section className="mb-6">
           <div className="flex items-center gap-2 mb-3">
             <h2 className="text-caption-01 font-semibold uppercase tracking-wider text-text-secondary">학습 현황</h2>
+            {/* AI 시각 문법 — 학습된 표면임을 표시 */}
+            <span className="ai-label">
+              <span className="ai-label__text">AI</span>
+            </span>
             {proposals.length > 0 && (
               <button
                 onClick={() => navigate('/chat')}
                 className="ml-auto inline-flex items-center gap-1.5 text-caption-01 font-medium text-blue-50 hover:text-blue-60 transition-colors"
               >
-                <span className="relative flex h-1.5 w-1.5">
-                  <span className="absolute inline-flex h-full w-full rounded-full bg-blue-50 opacity-60 animate-ping" />
-                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-blue-50" />
-                </span>
+                <span className="inline-flex h-1.5 w-1.5 rounded-full bg-blue-50" />
                 검토할 제안 {proposals.length}건
                 <NavIcon size={13}>{ARROW}</NavIcon>
               </button>
@@ -174,13 +172,13 @@ const HomeScreen: React.FC = () => {
           </div>
 
           {hydrating ? (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
               {Array.from({ length: 4 }).map((_, i) => (
                 <div key={i} className="h-[68px] rounded-xl border border-border-subtle-01 bg-layer-01 animate-pulse" />
               ))}
             </div>
           ) : hasLearning ? (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
               <StatTile
                 accent="text-blue-50 bg-blue-60/12"
                 icon={
@@ -251,7 +249,7 @@ const HomeScreen: React.FC = () => {
 
         {/* ── 자주 쓰는 스킬 ── */}
         {topSkills.length > 0 && (
-          <section className="mb-8">
+          <section className="mb-6">
             <div className="flex items-center mb-3">
               <h2 className="text-caption-01 font-semibold uppercase tracking-wider text-text-secondary">자주 쓰는 스킬</h2>
               <button
@@ -267,7 +265,7 @@ const HomeScreen: React.FC = () => {
                 <button
                   key={skill.id}
                   onClick={() => navigate('/my-skills')}
-                  className="group flex items-center gap-3 text-left rounded-xl border border-border-subtle-01 bg-layer-01 px-3.5 py-3 transition-all duration-150 hover:border-border-strong-01 hover:shadow-elevation-1 outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                  className="group flex items-center gap-3 text-left rounded-xl border border-border-subtle-01 bg-layer-01 px-3.5 py-3 transition-colors duration-150 hover:border-border-strong-01 outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                 >
                   <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-blue-60/12 text-blue-50 flex-shrink-0">
                     <LineIcon size={16}>
@@ -281,7 +279,7 @@ const HomeScreen: React.FC = () => {
                         {skill.command ? `/${skill.command}` : skill.name}
                       </span>
                       {skill.hot && (
-                        <span className="text-[10px] font-semibold text-[#ff832b] flex-shrink-0">인기</span>
+                        <span className="text-label-micro font-semibold text-orange-40 flex-shrink-0">인기</span>
                       )}
                     </div>
                     <div className="text-caption-01 text-text-helper mt-0.5 truncate">
@@ -291,7 +289,7 @@ const HomeScreen: React.FC = () => {
                   </div>
                   <NavIcon
                     size={15}
-                    className="text-text-helper opacity-0 -translate-x-1 transition-all duration-150 group-hover:opacity-100 group-hover:translate-x-0 flex-shrink-0"
+                    className="text-text-helper opacity-0 transition-opacity duration-150 group-hover:opacity-100 flex-shrink-0"
                   >
                     {ARROW}
                   </NavIcon>
@@ -321,7 +319,7 @@ const HomeScreen: React.FC = () => {
         )}
 
         {/* ── 모든 기능 (네비게이션 그리드) ── */}
-        <div className="flex flex-col gap-8">
+        <div className="flex flex-col gap-6">
           {GROUPS.map((group) => {
             const items = visible.filter((d) => d.group === group.id);
             if (items.length === 0) return null;

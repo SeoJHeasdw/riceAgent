@@ -51,7 +51,7 @@ export const SkillPublishDialog: React.FC<SkillPublishDialogProps> = ({ open, sk
       <div
         role="dialog"
         aria-modal="true"
-        className="relative w-full max-w-md mx-4 bg-layer-01 border border-border-subtle-01 rounded-2xl shadow-overlay animate-scale-in overflow-hidden"
+        className="relative w-full max-w-md mx-4 bg-layer-01 border border-border-subtle-01 rounded-xl shadow-elevation-3 animate-scale-in overflow-hidden"
       >
         {/* header */}
         <div className="flex items-center gap-2.5 px-5 pt-5 pb-3">

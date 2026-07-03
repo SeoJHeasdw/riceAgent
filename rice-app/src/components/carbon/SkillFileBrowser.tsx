@@ -61,7 +61,7 @@ export const SkillFileBrowser: React.FC<{ files: SkillFile[] }> = ({ files }) =>
           indent ? 'pl-7' : 'pl-2'
         } ${
           on
-            ? 'bg-[#0f62fe]/15 text-text-primary font-semibold'
+            ? 'bg-layer-selected-01 text-text-primary font-semibold'
             : 'text-text-secondary hover:bg-layer-hover-01 hover:text-text-primary'
         }`}
       >

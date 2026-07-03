@@ -24,7 +24,7 @@ const TINT: Record<FileKind, string> = {
   md: 'text-link-primary',
   sh: 'text-text-helper',
   py: 'text-support-success',
-  html: 'text-[#ff832b]',
+  html: 'text-orange-40',
   json: 'text-support-warning',
   txt: 'text-text-helper',
   file: 'text-icon-secondary',

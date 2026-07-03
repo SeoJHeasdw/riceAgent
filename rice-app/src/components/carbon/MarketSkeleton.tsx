@@ -16,7 +16,7 @@ export const CardSkeletonGrid: React.FC<{ count?: number; minWidth?: number }> =
     {Array.from({ length: count }).map((_, i) => (
       <div
         key={i}
-        className="min-h-[224px] rounded-2xl border border-border-subtle-01 bg-layer-01 p-4 animate-pulse"
+        className="min-h-[224px] rounded-xl border border-border-subtle-01 bg-layer-01 p-4 animate-pulse"
       >
         <div className="flex items-center gap-3 mb-3.5">
           <div className="w-10 h-10 rounded-xl bg-layer-02" />

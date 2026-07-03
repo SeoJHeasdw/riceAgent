@@ -132,7 +132,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       <div className="px-2 pt-2 pb-1 flex flex-col gap-0.5 flex-shrink-0">
         <button
           onClick={onNewSession}
-          className="flex items-center w-full gap-0.5 h-6 px-0.5 rounded-lg text-body-short-01 font-medium text-link-primary hover:bg-interactive/10 transition-colors"
+          className="flex items-center w-full gap-0.5 h-6 px-0.5 rounded-lg text-body-short-01 font-medium text-link-primary hover:bg-layer-hover-01 transition-colors"
         >
           <span className="flex items-center justify-center w-5 h-5 flex-shrink-0">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -218,7 +218,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                         }`}
                       >
                         <span
-                          className={`block flex-1 min-w-0 text-[13px] truncate ${
+                          className={`block flex-1 min-w-0 text-body-short-01 truncate ${
                             hoveredSession === session.id ? 'pr-6' : ''
                           } ${isActive ? 'text-text-primary font-medium' : 'text-text-secondary'}`}
                         >
@@ -256,12 +256,12 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
           className="flex items-center gap-2.5 border-t border-border-subtle-01 px-3 py-3 text-left flex-shrink-0 hover:bg-layer-hover-01 transition-colors"
           title="모델 설정"
         >
-          <div
-            className={`w-7 h-6 flex-shrink-0 flex items-center justify-center rounded-lg ${
-              modelMode === 'local' ? 'bg-teal-60' : 'bg-blue-60'
-            }`}
-          >
-            <Icon name={modelMode === 'local' ? 'server' : 'cloud'} size={15} className="text-white" />
+          <div className="w-7 h-6 flex-shrink-0 flex items-center justify-center rounded-lg bg-layer-02 border border-border-subtle-02">
+            <Icon
+              name={modelMode === 'local' ? 'server' : 'cloud'}
+              size={15}
+              className={modelMode === 'local' ? 'text-teal-40' : 'text-blue-50'}
+            />
           </div>
           <div className="flex-1 min-w-0">
             <div className="text-body-short-01 text-text-primary truncate">{modelName}</div>

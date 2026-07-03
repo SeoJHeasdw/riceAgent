@@ -155,7 +155,7 @@ const SignalRow: React.FC<{ s: UserSignal; onEdit: (v: string) => void; onRemove
               onEdit(val);
               setEditing(false);
             }}
-            className="px-2 h-7 text-caption-01 bg-interactive text-white rounded hover:bg-[#0353e9]"
+            className="px-2 h-7 text-caption-01 bg-interactive text-white rounded hover:bg-interactive-hover"
           >
             저장
           </button>
@@ -165,13 +165,16 @@ const SignalRow: React.FC<{ s: UserSignal; onEdit: (v: string) => void; onRemove
   }
 
   return (
-    <div className="group flex items-center gap-2.5">
+    <div className="group flex items-center gap-2.5 py-1">
       <div className="min-w-0 flex-1">
         {/* label은 그룹 헤더로 승격됐으므로 행에는 출처만 */}
         <div className="text-caption-01 text-text-helper">{s.source}</div>
         <div className="text-body-short-01 text-text-primary">{s.value}</div>
       </div>
-      <Confidence v={s.conf} />
+      {/* 신뢰도 바 — 항상 노출하면 로그처럼 읽혀서, 행에 관심을 줄 때만 */}
+      <span className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+        <Confidence v={s.conf} />
+      </span>
       <div className="flex flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
         <button
           onClick={() => setEditing(true)}
@@ -200,13 +203,9 @@ const InstalledRow: React.FC<{ t: InstalledTool; onToggle: () => void; onRemove:
   onToggle,
   onRemove,
 }) => (
-  <div className={`flex items-center gap-2 bg-layer-01 px-2 py-1 rounded-md ${t.enabled ? '' : 'opacity-55'}`}>
-    <div
-      className={`w-[22px] h-[22px] flex-shrink-0 flex items-center justify-center rounded ${
-        t.enabled ? 'bg-blue-60' : 'bg-layer-03'
-      }`}
-    >
-      <Icon name={t.icon} size={13} className="text-white" />
+  <div className={`flex items-center gap-2 px-2 py-1.5 rounded-md ${t.enabled ? '' : 'opacity-55'}`}>
+    <div className="w-[22px] h-[22px] flex-shrink-0 flex items-center justify-center rounded bg-layer-02 border border-border-subtle-02">
+      <Icon name={t.icon} size={13} className={t.enabled ? 'text-icon-primary' : 'text-icon-secondary'} />
     </div>
     <div className="flex-1 min-w-0">
       <div className="flex items-center gap-1.5">
@@ -278,8 +277,8 @@ const ProposalCard: React.FC<{
               onClick={onAccept}
               className={`inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-caption-01 font-semibold transition-colors ${
                 p.kind === 'prune'
-                  ? 'bg-[#684e00] text-[#fddc69] hover:bg-[#523c00]'
-                  : 'bg-interactive text-white hover:bg-[#0353e9]'
+                  ? 'bg-yellow-60 text-yellow-20 hover:bg-yellow-70'
+                  : 'bg-interactive text-white hover:bg-interactive-hover'
               }`}
             >
               <Icon name={p.kind === 'prune' ? 'warning' : 'check'} size={13} /> {p.acceptLabel}
@@ -362,7 +361,7 @@ const SuggestionCard: React.FC<{
             <button
               onClick={() => onDecide(true)}
               disabled={deciding}
-              className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-caption-01 font-semibold bg-interactive text-white hover:bg-[#0353e9] transition-colors disabled:opacity-50"
+              className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-caption-01 font-semibold bg-interactive text-white hover:bg-interactive-hover transition-colors disabled:opacity-50"
             >
               <Icon name="check" size={13} /> {s.kind === 'archive' ? '보관 승인' : '반영'}
             </button>
@@ -412,6 +411,9 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ isLearning = true,
   // 제안함 결정/발굴 진행 상태 — 발굴은 LLM 1회 호출이라 느릴 수 있다.
   const [decidingId, setDecidingId] = useState<string | null>(null);
   const [discovering, setDiscovering] = useState(false);
+
+  // "나에 대한 모델" 그룹 펼침 상태 — 기본은 preview 2개 + count로 접힘
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
   const handleSuggestionDecision = async (s: SkillSuggestion, approved: boolean) => {
     setDecidingId(s.id);
@@ -501,7 +503,7 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ isLearning = true,
           <span className="ml-auto flex-shrink-0">
             {isLearning ? (
               // 살아있는 루프임이 느껴지도록 도트에 은은한 pulse
-              <span className="inline-flex items-center gap-1.5 h-[18px] px-2 rounded-full text-[11px] font-semibold bg-support-success/12 text-support-success">
+              <span className="inline-flex items-center gap-1.5 h-[18px] px-2 rounded-full text-label-micro font-semibold bg-support-success/12 text-support-success">
                 <span className="relative flex h-1.5 w-1.5">
                   <span className="absolute inline-flex h-full w-full rounded-full bg-support-success opacity-60 animate-ping" />
                   <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-support-success" />
@@ -520,11 +522,14 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ isLearning = true,
         {/* suggestion inbox — 런타임 영속 제안함(skill_suggestions) 실배선.
             파킹 카드(채팅 diff 카드)와 달리 스트림 밖에서 태어난 제안이 여기 산다:
             응답 없이 만료된 제안, 백그라운드/수동 발굴 산출물. */}
-        <div className="border-b border-border-subtle-01">
+        <div className="border-b border-border-subtle-01 border-l-2 border-l-interactive/70 bg-interactive/[0.04]">
           <div className="flex items-center gap-2 px-4 pt-3.5 pb-2">
             <Icon name="download" size={16} className="text-link-primary" />
             <span className="text-caption-01 font-semibold uppercase tracking-wider text-text-secondary">
               제안함
+            </span>
+            <span className="ai-label">
+              <span className="ai-label__text">AI</span>
             </span>
             {suggestions.length > 0 && (
               <span className="text-caption-01 text-text-helper font-mono">{suggestions.length}</span>
@@ -558,7 +563,7 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ isLearning = true,
 
         {/* loop proposals — pending decisions the learning loop surfaced */}
         {(proposals.length > 0 || flash) && (
-          <div className="border-b border-border-subtle-01 bg-[#0f62fe]/[0.05]">
+          <div className="border-b border-border-subtle-01 border-l-2 border-l-interactive/70 bg-interactive/[0.04]">
             <div className="flex items-center gap-2 px-4 pt-3.5 pb-2">
               <Icon name="idea" size={16} className="text-link-primary" />
               <span className="text-caption-01 font-semibold uppercase tracking-wider text-text-secondary">
@@ -609,7 +614,8 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ isLearning = true,
           </div>
         </PanelSection>
 
-        {/* user model — editable signals, 같은 label끼리 묶어 반복 라벨 제거 */}
+        {/* user model — grouped memory card. 같은 label끼리 묶고, 반복 항목은
+            preview 2개 + count로 접어 raw log처럼 쌓이지 않게 한다. */}
         <PanelSection icon="user" title="나에 대한 모델" count={`신호 ${signals.length}`}>
           <div className="flex flex-col gap-3">
             {Array.from(
@@ -619,30 +625,50 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ isLearning = true,
                 m.set(u.label, arr);
                 return m;
               }, new Map<string, UserSignal[]>()),
-            ).map(([label, items]) => (
-              <div key={label}>
-                <div className="flex items-center gap-1.5 mb-1.5">
-                  <span className="text-caption-01 font-semibold text-text-secondary">{label}</span>
-                  {items.length > 1 && (
-                    <span className="text-caption-01 text-text-helper font-mono">{items.length}</span>
-                  )}
+            ).map(([label, items]) => {
+              const expanded = expandedGroups.has(label);
+              const visibleItems = expanded ? items : items.slice(0, 2);
+              const hiddenCount = items.length - visibleItems.length;
+              return (
+                <div key={label}>
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <span className="text-caption-01 font-semibold text-text-secondary">{label}</span>
+                    {items.length > 1 && (
+                      <span className="text-caption-01 text-text-helper font-mono">{items.length}</span>
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-1.5 border-l border-border-subtle-02 pl-2.5">
+                    {visibleItems.map((u) => (
+                      <SignalRow
+                        key={u.id}
+                        s={u}
+                        onEdit={(v) =>
+                          setSignals((arr) => arr.map((x) => (x.id === u.id ? { ...x, value: v, source: '명시적 교정' } : x)))
+                        }
+                        // 런타임 메모리(mem_*)는 서버에서도 삭제된다 — HITL 없는 유일한
+                        // 학습 경로의 사후 통제 수단(Self-Improvement v3 위생).
+                        onRemove={() => removeSignal(u.id)}
+                      />
+                    ))}
+                    {(hiddenCount > 0 || expanded) && (
+                      <button
+                        onClick={() =>
+                          setExpandedGroups((s) => {
+                            const next = new Set(s);
+                            if (next.has(label)) next.delete(label);
+                            else next.add(label);
+                            return next;
+                          })
+                        }
+                        className="self-start text-caption-01 text-text-helper hover:text-text-secondary transition-colors"
+                      >
+                        {expanded ? '접기' : `외 ${hiddenCount}개 더 보기`}
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <div className="flex flex-col gap-2.5">
-                  {items.map((u) => (
-                    <SignalRow
-                      key={u.id}
-                      s={u}
-                      onEdit={(v) =>
-                        setSignals((arr) => arr.map((x) => (x.id === u.id ? { ...x, value: v, source: '명시적 교정' } : x)))
-                      }
-                      // 런타임 메모리(mem_*)는 서버에서도 삭제된다 — HITL 없는 유일한
-                      // 학습 경로의 사후 통제 수단(Self-Improvement v3 위생).
-                      onRemove={() => removeSignal(u.id)}
-                    />
-                  ))}
-                </div>
-              </div>
-            ))}
+              );
+            })}
             {signals.length === 0 && (
               <span className="text-caption-01 text-text-helper">아직 학습된 신호가 없어요. 대화에서 자동으로 쌓입니다.</span>
             )}

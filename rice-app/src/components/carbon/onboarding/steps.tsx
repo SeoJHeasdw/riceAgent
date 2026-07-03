@@ -17,14 +17,14 @@ const ACCENT_CLASSES = {
   blue:   { bg: 'bg-blue-60/15',   text: 'text-blue-50',   ring: 'ring-blue-50',   dot: '#4589ff' },
   teal:   { bg: 'bg-teal-60/15',   text: 'text-teal-60',   ring: 'ring-teal-60',   dot: '#009d9a' },
   purple: { bg: 'bg-purple-60/15', text: 'text-purple-60', ring: 'ring-purple-60', dot: '#8a3ffc' },
-  orange: { bg: 'bg-[#ff832b]/10', text: 'text-[#ff832b]', ring: 'ring-[#ff832b]', dot: '#ff832b' },
+  orange: { bg: 'bg-orange-40/10', text: 'text-orange-40', ring: 'ring-orange-40', dot: '#ff832b' },
 } as const;
 
 // ── welcomeStep 전용: 채팅 시뮬레이션 ───────────────────────────────────────
 
 const ToolChip: React.FC<{ name: string; label: string }> = ({ name, label }) => (
   <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-layer-02 border border-border-subtle-01 text-caption-01">
-    <span className="font-mono text-[#78a9ff] flex-shrink-0">{name}</span>
+    <span className="font-mono text-blue-40 flex-shrink-0">{name}</span>
     <span className="text-text-helper truncate">{label}</span>
     <span className="ia-spinner w-3 h-3 flex-shrink-0 ml-auto" />
   </div>
@@ -64,10 +64,10 @@ const SkillProposalCard: React.FC<{ skillName: string; ver: string; desc: string
       {/* 헤더 */}
       <div className="flex items-center gap-2 mb-1">
         <span className="ai-label"><span className="ai-label__text">AI</span></span>
-        <span className="text-[10.5px] font-semibold text-text-primary font-mono">{skillName}</span>
-        <span className="text-[10.5px] text-text-helper">{ver}</span>
+        <span className="text-label-micro font-semibold text-text-primary font-mono">{skillName}</span>
+        <span className="text-label-micro text-text-helper">{ver}</span>
         <span
-          className="ml-auto text-[10.5px] font-semibold flex items-center gap-1 transition-colors duration-300"
+          className="ml-auto text-label-micro font-semibold flex items-center gap-1 transition-colors duration-300"
           style={{ color: saved ? 'var(--cds-support-success)' : 'var(--cds-text-helper)' }}
         >
           {saved ? '✓ 저장됨' : '제안됨'}
@@ -84,17 +84,17 @@ const SkillProposalCard: React.FC<{ skillName: string; ver: string; desc: string
           className="absolute inset-0 flex items-center gap-2 transition-opacity duration-300"
           style={{ opacity: saved ? 0 : 1, pointerEvents: saved ? 'none' : 'auto' }}
         >
-          <span className="text-[10px] text-text-helper">{meta}</span>
+          <span className="text-label-micro text-text-helper">{meta}</span>
           <div className="flex-1" />
           <button
             onClick={() => setSaved(false)}
-            className="text-[11px] text-text-helper px-2 py-0.5 rounded-md"
+            className="text-label-micro text-text-helper px-2 py-0.5 rounded-md"
           >
             이번만 쓰기
           </button>
           <button
             onClick={() => setSaved(true)}
-            className="text-[11px] font-semibold text-white bg-interactive px-2.5 py-0.5 rounded-md flex items-center gap-1"
+            className="text-label-micro font-semibold text-white bg-interactive px-2.5 py-0.5 rounded-md flex items-center gap-1"
           >
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
@@ -129,7 +129,7 @@ const ChatBubble: React.FC<{ msg: MockChatMessage }> = ({ msg }) => {
     <div className={`flex items-end gap-2 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
       {/* 아바타 — agent만 표시, user는 말풍선만 */}
       {!isUser && (
-        <div className="w-6 h-6 flex-shrink-0 flex items-center justify-center rounded-md bg-blue-60 text-white text-[10px] font-semibold font-mono self-start mt-0.5">
+        <div className="w-6 h-6 flex-shrink-0 flex items-center justify-center rounded-md bg-blue-60 text-white text-label-micro font-semibold font-mono self-start mt-0.5">
           R
         </div>
       )}
@@ -171,7 +171,7 @@ const WelcomeChatPreview: React.FC = () => (
       <span className="w-2.5 h-2.5 rounded-full bg-[#ff5f57]" />
       <span className="w-2.5 h-2.5 rounded-full bg-[#ffbd2e]" />
       <span className="w-2.5 h-2.5 rounded-full bg-[#28c840]" />
-      <span className="ml-2 text-[10.5px] text-text-helper font-medium">RICE — 새 대화</span>
+      <span className="ml-2 text-label-micro text-text-helper font-medium">RICE — 새 대화</span>
     </div>
 
     {/* 메시지 목록 — 모두 즉시 표시 */}
@@ -329,7 +329,7 @@ const NodeCards: React.FC<{ activeIdx: number }> = ({ activeIdx }) => (
           >
             {node.label}
           </span>
-          <span className="text-[10px] text-text-helper leading-tight whitespace-nowrap">{node.sublabel}</span>
+          <span className="text-label-micro text-text-helper leading-tight whitespace-nowrap">{node.sublabel}</span>
         </div>
       );
     })}
@@ -483,7 +483,7 @@ const EcoCard: React.FC<{
       {/* 예시 항목 */}
       <ul className="flex flex-col gap-1.5">
         {items.map((item) => (
-          <li key={item} className="flex items-center gap-2 text-[12.5px] text-text-helper">
+          <li key={item} className="flex items-center gap-2 text-caption-01 text-text-helper">
             <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: accentMap[accent].dot }} />
             {item}
           </li>
@@ -592,7 +592,7 @@ const modelStep: OnboardingStep = {
 /** 슬래시 명령 미니 입력바 — 깜빡이는 캐럿으로 "즉시 실행" 손맛 */
 const SlashDemo: React.FC = () => (
   <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-layer-01 border border-border-subtle-01 shadow-elevation-1">
-    <span className="font-mono text-[12px] font-bold text-blue-50">/read_excel</span>
+    <span className="font-mono text-caption-01 font-bold text-blue-50">/read_excel</span>
   </div>
 );
 
@@ -621,7 +621,7 @@ const LearningStack: React.FC = () => {
             }}
           >
             <span className="w-1 h-1 rounded-full flex-shrink-0" style={{ background: on ? '#009d9a' : 'var(--cds-text-helper)' }} />
-            <span className="text-[10.5px] font-medium truncate" style={{ color: on ? '#009d9a' : 'var(--cds-text-helper)' }}>{p}</span>
+            <span className="text-label-micro font-medium truncate" style={{ color: on ? '#009d9a' : 'var(--cds-text-helper)' }}>{p}</span>
           </div>
         );
       })}
@@ -646,8 +646,8 @@ const LocalDeviceDemo: React.FC = () => (
       </span>
     </span>
     <div className="flex flex-col leading-tight">
-      <span className="text-[11px] font-semibold text-purple-60">이 기기에 보관</span>
-      <span className="text-[10px] text-text-helper">클라우드 전송 없음</span>
+      <span className="text-label-micro font-semibold text-purple-60">이 기기에 보관</span>
+      <span className="text-label-micro text-text-helper">클라우드 전송 없음</span>
     </div>
   </div>
 );

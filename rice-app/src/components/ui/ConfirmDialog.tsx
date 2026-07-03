@@ -7,7 +7,7 @@ import { dialogBackdropCls, dialogSurfaceCls } from './surfaces';
 /**
  * ConfirmDialog — 재사용 확인 팝업.
  * "정말 진행할까요?"류의 되돌리기 어려운 작업(복원·삭제 등) 앞에 한 번 더 묻는다.
- * 투어 말풍선과 같은 문법: tone 색 3px 상단 액센트 바 + 단일 표면(푸터 띠 없음),
+ * 차가운 단일 표면: danger여도 색은 확인 버튼과 작은 아이콘 틴트에만 남긴다.
  * 취소는 조용한 텍스트 버튼·확인만 채운 버튼으로 위계를 만든다.
  */
 export interface ConfirmDialogProps {
@@ -63,22 +63,19 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
       <div
         role="alertdialog"
         aria-modal="true"
-        className={`relative w-full max-w-sm mx-4 overflow-hidden ${dialogSurfaceCls}`}
+        className={`relative w-full max-w-[420px] mx-4 overflow-hidden ${dialogSurfaceCls}`}
       >
-        {/* tone 액센트 바 — 투어 말풍선과 같은 문법 */}
-        <div className={`h-[3px] w-full ${tone === 'danger' ? 'bg-support-error' : 'bg-interactive'}`} />
-
         <div className="px-5 pt-4 pb-1">
           <div className="flex items-start gap-3">
             {tone === 'danger' && (
-              <span className="flex-shrink-0 w-8 h-8 rounded-full bg-support-error/15 flex items-center justify-center">
-                <Icon name="warning" size={15} className="text-support-error" />
+              <span className="flex-shrink-0 w-6 h-6 rounded-full bg-support-error/10 flex items-center justify-center">
+                <Icon name="warning" size={13} className="text-support-error" />
               </span>
             )}
             <div className="flex-1 min-w-0 pt-0.5">
               <h2 className="text-body-short-01 font-semibold text-text-primary">{title}</h2>
               {description && (
-                <div className="mt-1.5 text-[13px] leading-[1.65] text-text-secondary">{description}</div>
+                <div className="mt-1.5 text-body-short-01 leading-5 text-text-secondary">{description}</div>
               )}
             </div>
           </div>
@@ -95,6 +92,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
           <Button
             kind={tone}
             size="sm"
+            className="min-w-[72px]"
             icon={confirmIcon ? <Icon name={confirmIcon} size={14} /> : undefined}
             onClick={onConfirm}
           >

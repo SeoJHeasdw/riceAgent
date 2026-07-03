@@ -189,7 +189,7 @@ export const CommandPalette: React.FC = () => {
   const GroupLabel: React.FC<{ children: React.ReactNode; tint: string }> = ({ children, tint }) => (
     <div className="flex items-center gap-1.5 px-3 pt-2.5 pb-1">
       <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: tint }} />
-      <span className="text-[10px] font-semibold uppercase tracking-wider text-text-helper">{children}</span>
+      <span className="text-label-micro font-semibold uppercase tracking-wider text-text-helper">{children}</span>
     </div>
   );
 
@@ -209,11 +209,11 @@ export const CommandPalette: React.FC = () => {
         role="dialog"
         aria-modal="true"
         aria-label="커맨드 팔레트"
-        className="relative z-[1] w-[560px] max-w-[92vw] max-h-[60vh] bg-layer-02/95 backdrop-blur-md border border-border-subtle-01 rounded-2xl shadow-elevation-3 overflow-hidden flex flex-col"
+        className="relative z-[1] w-[560px] max-w-[92vw] max-h-[60vh] bg-layer-02/95 backdrop-blur-md border border-border-subtle-01 rounded-xl shadow-elevation-3 overflow-hidden flex flex-col"
         style={{ animation: 'cpPanelIn 160ms cubic-bezier(0.16, 1, 0.3, 1)' }}
       >
         {/* Search */}
-        <div className="flex items-center gap-2.5 px-4 h-12 border-b border-border-subtle-01 flex-shrink-0">
+        <div className="flex items-center gap-2.5 px-4 h-11 border-b border-border-subtle-01 flex-shrink-0">
           <Icon name="search" size={16} className="text-icon-secondary flex-shrink-0" />
           <input
             ref={inputRef}
@@ -266,7 +266,7 @@ export const CommandPalette: React.FC = () => {
         </div>
 
         {/* Footer */}
-        <div className="flex items-center gap-1 px-3 py-2 border-t border-border-subtle-01 text-[10px] text-text-helper select-none flex-shrink-0">
+        <div className="flex items-center gap-1 px-3 py-2 border-t border-border-subtle-01 text-label-micro text-text-helper select-none flex-shrink-0">
           <Kbd>↑↓</Kbd> 탐색
           <Kbd>↵</Kbd> 실행
           <span className="ml-auto flex items-center gap-1">

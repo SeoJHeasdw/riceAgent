@@ -122,25 +122,21 @@ function PluginMarketScreen() {
       >
         {/* Installed Summary */}
         <div className="p-3">
-          <div className="relative overflow-hidden rounded-2xl gradient-plugin p-4 text-white shadow-glow-plugin">
-            {/* Decorative glow */}
-            <div className="absolute -top-8 -right-8 w-28 h-28 rounded-full bg-white/10 blur-2xl" aria-hidden="true" />
-            <div className="relative">
-              <div className="flex items-center gap-1.5 text-caption-01 text-white/80 mb-2">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-                  <circle cx="12" cy="12" r="9" />
-                  <circle cx="12" cy="12" r="3.5" />
-                </svg>
-                내 전문가
-              </div>
-              <div className="text-[26px] font-semibold leading-none tracking-tight">
-                {installedCount}
-                <span className="text-body-short-01 font-normal text-white/70 ml-1.5">설치됨</span>
-              </div>
-              <div className="inline-flex items-center gap-1.5 mt-3 px-2 py-0.5 rounded-full bg-white/15 text-caption-01">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#42be65]" />
-                {activeCount} 활성
-              </div>
+          <div className="rounded-xl bg-layer-01 border border-border-subtle-01 p-4">
+            <div className="flex items-center gap-1.5 text-caption-01 text-text-helper mb-2">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                <circle cx="12" cy="12" r="9" />
+                <circle cx="12" cy="12" r="3.5" />
+              </svg>
+              내 전문가
+            </div>
+            <div className="text-heading-03 font-semibold text-text-primary leading-none tracking-tight tabular-nums">
+              {installedCount}
+              <span className="text-body-short-01 font-normal text-text-helper ml-1.5">설치됨</span>
+            </div>
+            <div className="inline-flex items-center gap-1.5 mt-3 px-2 py-0.5 rounded-full bg-layer-02 text-caption-01 text-text-secondary">
+              <span className="w-1.5 h-1.5 rounded-full bg-support-success" />
+              {activeCount} 활성
             </div>
           </div>
         </div>
@@ -158,7 +154,7 @@ function PluginMarketScreen() {
                 onClick={() => setSelectedCategory(category)}
                 className={`flex items-center w-full min-w-0 text-left border-none px-2.5 py-2 text-body-short-01 rounded-lg transition-colors ${
                   isActive
-                    ? 'bg-[#0f62fe]/15 text-text-primary font-semibold'
+                    ? 'bg-layer-selected-01 text-text-primary font-semibold'
                     : 'bg-transparent text-text-secondary hover:bg-layer-hover-01 hover:text-text-primary'
                 }`}
               >
@@ -220,7 +216,7 @@ function PluginMarketScreen() {
             </div>
           ) : (
             <div className="text-center py-16 text-text-helper">
-              <div className="text-[48px] mb-4">🔍</div>
+              <div className="text-heading-06 mb-4">🔍</div>
               <div className="text-body-long-01">
                   {selectedCategory === '설치됨'
                     ? '아직 설치된 전문가가 없습니다'

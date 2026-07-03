@@ -16,6 +16,15 @@
     @apply antialiased;
   }
 
+  /* 키보드 포커스 전역 기본값 — 모든 interactive 요소가 개별 클래스 없이도
+     포커스 링을 얻는다. 마우스 클릭(:focus)에는 나타나지 않고 키보드 탐색
+     (:focus-visible)에만 나타난다. 컴포지트 표면(부모가 focus-within으로
+     표시하는 내장 input 등)만 utilities의 outline-none으로 개별 억제한다. */
+  :focus-visible {
+    outline: 2px solid var(--cds-focus);
+    outline-offset: 2px;
+  }
+
   /* Scrollbar styles */
   ::-webkit-scrollbar {
     width: 8px;
@@ -263,22 +272,20 @@
   }
 
   /* Colorful message-action button — tint driven by --tint var */
+  /* rest는 중립 — 5개 버튼이 rest부터 제각각 색이면 액션바가 무지개로 읽힌다.
+     tint는 hover/활성처럼 상호작용의 의미를 되돌려줄 때만 등장한다. */
   .action-btn {
-    color: var(--tint, var(--cds-icon-secondary));
+    color: var(--cds-icon-secondary);
     transition:
       background-color 120ms ease,
-      color 120ms ease,
-      transform 120ms ease;
+      color 120ms ease;
   }
   .action-btn:hover {
-    background-color: color-mix(in srgb, var(--tint) 16%, transparent);
-    color: var(--tint);
-  }
-  .action-btn:active {
-    transform: scale(0.9);
+    background-color: var(--cds-layer-hover-01);
+    color: var(--tint, var(--cds-icon-primary));
   }
   .action-btn.is-active {
-    background-color: color-mix(in srgb, var(--tint) 24%, transparent);
+    background-color: color-mix(in srgb, var(--tint) 16%, transparent);
     color: var(--tint);
   }
 
@@ -502,6 +509,28 @@
   --ai-border-gradient: linear-gradient(90deg, var(--ai-gradient-start), var(--ai-gradient-end));
   --ai-aura: radial-gradient(circle at 0% 0%, rgba(120, 169, 255, 0.22), rgba(165, 110, 255, 0.1) 40%, transparent 72%);
   --ai-popover-bg: #262626;
+
+  /* Brand shell — titlebar와 아이콘 레일이 공유하는 앱 껍데기.
+     남색 기운이 도는 near-black으로, 회색 콘텐츠 표면과 분리되는
+     "RICE 프레임"을 만든다 (예전 navy 레일의 브랜드 역할을 계승). */
+  --rice-shell: #0b0f1a;
+  --rice-shell-border: rgba(255, 255, 255, 0.07);
+  --rice-shell-muted: #8b93a5; /* shell 위 비활성 아이콘 */
+
+  /* Interactive/danger 상태 토큰 — hover·active를 하드코딩 hex 대신 여기서.
+     테마(라이트 등) 전환 시 이 네 줄만 바꾸면 모든 버튼이 따라온다. */
+  --cds-interactive-hover: #0353e9;
+  --cds-interactive-active: #002d9c;
+  --cds-danger-hover: #ba1b23;
+  --cds-danger-active: #750e13;
+
+  /* Diff 표면 — 승인/패치 카드의 추가·삭제 행 (g100 기준 어두운 워시) */
+  --diff-add-bg: #0c2b18;
+  --diff-add-text: #6fdc8c;
+  --diff-add-accent: #42be65;
+  --diff-remove-bg: #341216;
+  --diff-remove-text: #ff8389;
+  --diff-remove-accent: #fa4d56;
 
   /* Domain accents — 도메인별 강조색을 Carbon 50 레벨로 통일해
      화면마다 채도·명도가 튀지 않게 한다. (스킬=블루, 플러그인=퍼플, 커넥터=teal) */

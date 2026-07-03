@@ -35,7 +35,7 @@ const TAG_SUGGESTIONS: Record<string, string[]> = {
 };
 
 const inputCls =
-  'w-full h-10 px-3.5 bg-field-01 text-text-primary text-body-short-01 border border-border-strong-01 rounded-lg outline-none transition-colors focus:border-focus focus:ring-1 focus:ring-focus placeholder:text-text-placeholder';
+  'w-full h-9 px-3 bg-field-01 text-text-primary text-body-short-01 border border-border-strong-01 rounded-lg outline-none transition-colors focus:border-focus focus:ring-1 focus:ring-focus placeholder:text-text-placeholder';
 
 // 한글 이름이 많은 제품이라 Hangul을 보존한다(예: "회의록 자동 요약" → "회의록-자동-요약").
 const slugify = (s: string) =>
@@ -305,7 +305,7 @@ ${tagBlock}
           </Button>
         )}
         {blockedReason && (step === 0 ? !step0Valid : step === 1 ? !step1Valid : false) && (
-          <div className="pointer-events-none absolute bottom-full right-0 mb-2 w-max max-w-[240px] px-2.5 py-1.5 rounded-md bg-text-primary text-text-inverse text-caption-01 shadow-overlay opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-150">
+          <div className="pointer-events-none absolute bottom-full right-0 mb-2 w-max max-w-[240px] px-2.5 py-1.5 rounded-md bg-text-primary text-text-inverse text-caption-01 shadow-elevation-2 opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-150">
             {blockedReason}
             <span className="absolute top-full right-4 -mt-px border-4 border-transparent border-t-text-primary" />
           </div>
@@ -325,8 +325,8 @@ ${tagBlock}
         className="hidden"
       />
 
-      {/* ── 스텝 인디케이터 ── */}
-      <div className="flex items-center mb-6">
+      {/* ── 스텝 인디케이터 — compact, ring 없이 ── */}
+      <div className="flex items-center mb-5">
         {STEPS.map((label, i) => {
           const state = i < step ? 'done' : i === step ? 'current' : 'todo';
           const reachable = canReach(i);
@@ -341,15 +341,15 @@ ${tagBlock}
                 }`}
               >
                 <span
-                  className={`w-7 h-7 flex items-center justify-center rounded-full text-caption-01 font-semibold transition-colors ${
+                  className={`w-6 h-6 flex items-center justify-center rounded-full text-caption-01 font-semibold transition-colors ${
                     state === 'current'
-                      ? 'bg-interactive text-white ring-4 ring-interactive/20'
+                      ? 'bg-interactive text-white'
                       : state === 'done'
                       ? 'bg-interactive text-white'
                       : 'bg-layer-02 text-text-helper border border-border-subtle-01'
                   }`}
                 >
-                  {state === 'done' ? <Icon name="check" size={15} /> : i + 1}
+                  {state === 'done' ? <Icon name="check" size={13} /> : i + 1}
                 </span>
                 <span
                   className={`text-body-short-01 hidden sm:inline ${
@@ -373,7 +373,7 @@ ${tagBlock}
 
       {/* ── 단계 1: 기본 정보 ── */}
       {step === 0 && (
-        <div className="space-y-5 animate-fade-in">
+        <div className="space-y-4 animate-fade-in">
           {/* SKILL.md로 시작 — 드롭/선택 */}
           <button
             type="button"
@@ -384,10 +384,10 @@ ${tagBlock}
             }}
             onDragLeave={() => setDragOver(false)}
             onDrop={onDrop}
-            className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl border border-dashed text-left transition-all ${
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg border border-dashed text-left transition-colors ${
               dragOver
-                ? 'border-interactive bg-[#0f62fe]/10'
-                : 'border-border-strong-01 hover:border-interactive hover:bg-[#0f62fe]/5'
+                ? 'border-interactive bg-layer-selected-01'
+                : 'border-border-strong-01 hover:border-border-strong-02 hover:bg-layer-hover-01'
             }`}
           >
             <span className="w-9 h-9 flex-shrink-0 flex items-center justify-center rounded-lg bg-layer-02 text-icon-secondary">
@@ -458,9 +458,9 @@ ${tagBlock}
                     type="button"
                     onClick={() => setCategory(c)}
                     aria-pressed={active}
-                    className={`px-3 h-8 rounded-lg border text-body-short-01 transition-all duration-150 ${
+                    className={`px-2.5 h-7 rounded-lg border text-body-short-01 transition-colors duration-150 ${
                       active
-                        ? 'border-interactive bg-[#0f62fe]/10 text-text-primary font-semibold'
+                        ? 'border-interactive bg-layer-selected-01 text-text-primary font-semibold'
                         : 'border-border-subtle-01 bg-background text-text-secondary hover:bg-layer-hover-01 hover:border-border-strong-01'
                     }`}
                   >
@@ -483,13 +483,13 @@ ${tagBlock}
               {tags.map((t) => (
                 <span
                   key={t}
-                  className="inline-flex items-center gap-1 h-6 pl-2 pr-1 rounded-full bg-[#0f62fe]/15 text-link-primary text-caption-01"
+                  className="inline-flex items-center gap-1 h-6 pl-2 pr-1 rounded-full bg-layer-02 ring-1 ring-inset ring-border-subtle-02 text-text-secondary text-caption-01"
                 >
                   {t}
                   <button
                     type="button"
                     onClick={() => setTags((prev) => prev.filter((x) => x !== t))}
-                    className="w-4 h-4 flex items-center justify-center rounded-full hover:bg-[#0f62fe]/25"
+                    className="w-4 h-4 flex items-center justify-center rounded-full hover:bg-layer-hover-02"
                     aria-label={`${t} 제거`}
                   >
                     <Icon name="close" size={11} />
@@ -622,13 +622,13 @@ ${tagBlock}
 
       {/* ── 단계 3: 검토 · 게시 ── */}
       {step === 2 && (
-        <div className="space-y-5 animate-fade-in">
+        <div className="space-y-4 animate-fade-in">
           <p className="text-body-short-01 text-text-secondary">
             마켓에 이렇게 보여요. 확인 후 게시하세요.
           </p>
 
           {/* 실시간 카드 미리보기 */}
-          <div className="rounded-2xl bg-background border border-border-subtle-01 p-5 flex justify-center">
+          <div className="rounded-xl bg-background border border-border-subtle-01 p-5 flex justify-center">
             <div className="w-full max-w-[360px] pointer-events-none select-none">
               <SkillCard
                 id="preview"

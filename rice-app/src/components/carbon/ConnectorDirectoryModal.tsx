@@ -54,7 +54,7 @@ export const ConnectorDirectoryModal: React.FC<ConnectorDirectoryModalProps> = (
             onChange={(e) => setQuery(e.target.value)}
             placeholder="커넥터 검색…"
             autoFocus
-            className="w-full h-10 pl-9 pr-3.5 bg-field-01 text-text-primary text-body-short-01 border border-border-strong-01 rounded-lg outline-none transition-colors focus:border-focus focus:ring-1 focus:ring-focus placeholder:text-text-placeholder"
+            className="w-full h-9 pl-9 pr-3 bg-field-01 text-text-primary text-body-short-01 border border-border-strong-01 rounded-lg outline-none transition-colors focus:border-focus focus:ring-1 focus:ring-focus placeholder:text-text-placeholder"
           />
         </div>
 

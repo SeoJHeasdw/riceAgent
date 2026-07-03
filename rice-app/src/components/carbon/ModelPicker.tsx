@@ -200,15 +200,15 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
   };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       {/* ── 실행 위치 ── */}
       <div>
         <div className="text-label-01 text-text-secondary mb-2">실행 위치</div>
         <div className="relative grid grid-cols-2 p-0.5 bg-field-01 border border-border-subtle-01 rounded-lg">
-          {/* sliding pill — 활성 모드 아래에서 미끄러지는 인디케이터 */}
+          {/* sliding indicator — 채운 파랑 대신 neutral 선택 표면 + 1px blue 테두리 */}
           <span
             aria-hidden
-            className={`absolute left-0.5 top-0.5 bottom-0.5 w-[calc(50%-2px)] rounded-md bg-interactive shadow-elevation-1 transition-transform duration-200 ease-out ${
+            className={`absolute left-0.5 top-0.5 bottom-0.5 w-[calc(50%-2px)] rounded-md bg-layer-selected-01 border border-interactive transition-transform duration-200 ease-out ${
               draftMode === 'local' ? 'translate-x-full' : ''
             }`}
           />
@@ -222,14 +222,14 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
                 key={mode}
                 onClick={() => handleModeChange(mode)}
                 aria-pressed={isActive}
-                className={`relative z-[1] flex items-baseline gap-1.5 px-3 py-1.5 rounded-md transition-colors duration-200 ${
+                className={`relative z-[1] flex items-baseline gap-1.5 px-3 py-1 rounded-md transition-colors duration-200 ${
                   isActive
-                    ? 'text-white'
+                    ? 'text-text-primary'
                     : 'text-text-secondary hover:bg-layer-hover-01 hover:text-text-primary'
                 }`}
               >
                 <span className="text-body-short-01 font-semibold">{title}</span>
-                <span className={`text-caption-01 truncate transition-colors duration-200 ${isActive ? 'text-white/80' : 'text-text-helper'}`}>
+                <span className={`text-caption-01 truncate transition-colors duration-200 ${isActive ? 'text-text-secondary' : 'text-text-helper'}`}>
                   {caption}
                 </span>
               </button>
@@ -278,9 +278,9 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
                       key={r.modelId}
                       onClick={() => setDraftModel(r.modelId)}
                       aria-pressed={isSelected}
-                      className={`group flex items-center gap-2.5 px-3 py-2.5 text-left rounded-lg border transition-all duration-150 w-full ${
+                      className={`group flex items-center gap-2.5 px-3 py-2 text-left rounded-lg border transition-all duration-150 w-full ${
                         isSelected
-                          ? 'border-interactive bg-interactive/10 shadow-glow-interactive'
+                          ? 'border-interactive bg-layer-selected-01'
                           : 'border-border-subtle-01 bg-background hover:bg-layer-hover-01 hover:border-border-strong-01'
                       }`}
                     >
@@ -417,9 +417,9 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
                         key={m.name}
                         onClick={() => setDraftModel(m.name)}
                         aria-pressed={isSelected}
-                        className={`flex items-center gap-2.5 px-3 py-2.5 text-left rounded-lg border transition-all duration-150 w-full ${
+                        className={`flex items-center gap-2.5 px-3 py-2 text-left rounded-lg border transition-all duration-150 w-full ${
                           isSelected
-                            ? 'border-interactive bg-interactive/10 shadow-glow-interactive'
+                            ? 'border-interactive bg-layer-selected-01'
                             : 'border-border-subtle-01 bg-background hover:bg-layer-hover-01 hover:border-border-strong-01'
                         }`}
                       >
@@ -510,7 +510,7 @@ const ProviderAvatar: React.FC<{ provider?: string; label?: string }> = ({ provi
     { letter: (label ?? provider ?? '?').charAt(0).toUpperCase(), color: '#a8a8a8' };
   return (
     <span
-      className="flex-shrink-0 w-6 h-6 rounded-md flex items-center justify-center text-[11px] font-mono font-semibold"
+      className="flex-shrink-0 w-6 h-6 rounded-md flex items-center justify-center text-label-micro font-mono font-semibold"
       style={{
         color: spec.color,
         background: `color-mix(in srgb, ${spec.color} 14%, transparent)`,
@@ -540,7 +540,7 @@ const EmptyState: React.FC<{
   desc: React.ReactNode;
   action: React.ReactNode;
 }> = ({ icon, title, desc, action }) => (
-  <div className="flex flex-col items-center gap-2.5 px-4 py-5 rounded-lg border border-dashed border-border-subtle-01 bg-layer-02 text-center">
+  <div className="flex flex-col items-center gap-2.5 px-4 py-4 rounded-lg border border-dashed border-border-subtle-01 bg-layer-02 text-center">
     {icon}
     <div>
       <div className="text-body-short-01 font-medium text-text-primary">{title}</div>

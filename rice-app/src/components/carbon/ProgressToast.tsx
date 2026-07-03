@@ -116,7 +116,7 @@ export const ProgressToast: React.FC<ProgressToastProps> = ({
         className={`
           relative flex items-center gap-3.5
           min-w-[340px] max-w-[460px]
-          rounded-2xl px-4 py-3.5
+          rounded-xl px-4 py-3.5
           ring-1 ${config.ring}
           ${floatingSurfaceCls}
         `}

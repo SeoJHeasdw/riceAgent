@@ -43,11 +43,11 @@ const RailButton: React.FC<{
       data-tour={`nav-${item.id}`}
       className={`
         flex items-center justify-center w-9 h-9 rounded-[10px]
-        transition-all duration-150 active:scale-95
+        transition-colors duration-150
         outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus
         ${isActive
-          ? 'bg-[#0f62fe]/15 text-[#78a9ff] shadow-[inset_0_0_0_1px_rgba(15,98,254,0.25)]'
-          : 'text-icon-secondary hover:bg-layer-hover-01 hover:text-icon-primary'
+          ? 'bg-white/[0.09] text-white'
+          : 'text-shell-muted hover:bg-white/[0.06] hover:text-white'
         }
       `}
       aria-label={item.label}
@@ -78,7 +78,7 @@ export const IconRail: React.FC<IconRailProps> = ({ items, activeId, onNavigate 
   const bottomItems = items.filter((item) => item.pinBottom);
 
   return (
-    <nav className="w-[52px] h-full bg-gradient-to-b from-[#0e1a3a] to-[#0a1020] border-r border-[#1d2c52] flex flex-col items-center py-2">
+    <nav className="w-[52px] h-full bg-shell border-r border-shell-border flex flex-col items-center py-2">
       {/* Main navigation */}
       <div className="flex flex-col items-center gap-1 w-full">
         {topItems.map((item) => (
@@ -90,7 +90,7 @@ export const IconRail: React.FC<IconRailProps> = ({ items, activeId, onNavigate 
             />
             {item.dividerAfter && (
               <div
-                className="w-6 h-px my-1 bg-text-secondary opacity-40"
+                className="w-6 h-px my-1 bg-white/10"
                 role="separator"
                 aria-orientation="horizontal"
               />

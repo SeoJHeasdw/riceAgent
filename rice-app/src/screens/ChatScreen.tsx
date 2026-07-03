@@ -5,7 +5,7 @@ import { LearningPanel } from '../components/carbon/LearningPanel';
 import { ChatTurn } from '../components/carbon/ChatMessage';
 import { useResizable } from '../hooks/useResizable';
 import { useLearning } from '../lib/learning/LearningContext';
-import type { Skill, ThreadMessage } from '../lib/learningData';
+import type { Skill, ThreadMessage, UserSignal } from '../lib/learningData';
 import { defaultModelSettings } from '../lib/mockData';
 import { RUN_SKILL_EVENT, NEW_CHAT_EVENT } from '../lib/commandBridge';
 import { api } from '../lib/api';
@@ -310,7 +310,7 @@ const SkillsPopover: React.FC<{
           <div className="text-caption-01 text-text-helper truncate">{sub}</div>
         </div>
         <span
-          className={`text-[10px] font-mono text-text-helper transition-opacity flex-shrink-0 ${
+          className={`text-label-micro font-mono text-text-helper transition-opacity flex-shrink-0 ${
             isActive ? 'opacity-100' : 'opacity-0'
           }`}
         >
@@ -327,8 +327,8 @@ const SkillsPopover: React.FC<{
   }) => (
     <div className="flex items-center gap-1.5 px-3 pt-2.5 pb-1">
       <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: tint }} />
-      <span className="text-[10px] font-semibold uppercase tracking-wider text-text-helper">{children}</span>
-      <span className="text-[10px] font-mono text-text-helper">{count}</span>
+      <span className="text-label-micro font-semibold uppercase tracking-wider text-text-helper">{children}</span>
+      <span className="text-label-micro font-mono text-text-helper">{count}</span>
     </div>
   );
 
@@ -343,11 +343,11 @@ const SkillsPopover: React.FC<{
         <div className="flex items-center gap-1.5 mb-2">
           <Icon name="skill" size={14} className="text-icon-primary" />
           <span className="text-body-short-01 font-semibold text-text-primary">이 대화에서 쓸 수 있는 것</span>
-          <span className="ml-auto text-[10px] font-mono text-text-helper">
+          <span className="ml-auto text-label-micro font-mono text-text-helper">
             <span className="text-text-secondary">/</span> 로 호출
           </span>
         </div>
-        <div className="flex items-center gap-1.5 px-2 h-7 bg-layer-01 border border-border-subtle-01 rounded-md focus-within:border-focus transition-colors">
+        <div className="flex items-center gap-1.5 px-2 h-7 bg-layer-01 border border-border-subtle-01 rounded-md focus-within:border-border-strong-02 transition-colors">
           <Icon name="search" size={13} className="text-icon-secondary flex-shrink-0" />
           <input
             autoFocus
@@ -479,7 +479,7 @@ const SkillsPopover: React.FC<{
         >
           <Icon name="settings" size={14} /> 학습 패널에서 관리
         </button>
-        <div className="ml-auto flex items-center gap-1 pr-3 text-[10px] text-text-helper select-none">
+        <div className="ml-auto flex items-center gap-1 pr-3 text-label-micro text-text-helper select-none">
           <Kbd>↑↓</Kbd> 탐색
           <Kbd>↵</Kbd> 삽입
           <Kbd>esc</Kbd> 닫기
@@ -507,10 +507,19 @@ const GENERIC_STARTERS: { icon: IconName; title: string; prompt: string }[] = [
   { icon: 'document', title: '글 다듬기', prompt: '내가 붙여넣을 글을 다듬고 피드백을 줘' },
 ];
 
-const ChatStarter: React.FC<{ skills: Skill[]; onPick: (text: string) => void }> = ({ skills, onPick }) => {
-  const topSkill = [...skills]
+const ChatStarter: React.FC<{
+  skills: Skill[];
+  signals: UserSignal[];
+  onPick: (text: string) => void;
+}> = ({ skills, signals, onPick }) => {
+  const usableSkills = [...skills]
     .filter((s) => s.enabled && s.command)
-    .sort((a, b) => b.uses - a.uses)[0];
+    .sort((a, b) => b.uses - a.uses);
+  const topSkill = usableSkills[0];
+  // 프롬프트 카드에 들어간 1위를 빼고, 나머지를 낮은 밀도의 chip으로
+  const skillChips = usableSkills.slice(1, 5);
+  // "RICE가 기억하는 것" — 신뢰도 높은 신호 위주로 3개까지만
+  const rememberedSignals = [...signals].sort((a, b) => b.conf - a.conf).slice(0, 3);
 
   const cards = [
     ...GENERIC_STARTERS,
@@ -520,29 +529,27 @@ const ChatStarter: React.FC<{ skills: Skill[]; onPick: (text: string) => void }>
   ];
 
   return (
-    <div className="pt-16 text-center">
+    <div className="max-w-xl mx-auto pt-16 text-center">
       <div
-        className="w-12 h-12 mx-auto mb-4 flex items-center justify-center rounded-xl shadow-glow-blue"
+        className="w-10 h-10 mx-auto mb-4 flex items-center justify-center rounded-xl"
         style={{ background: 'var(--gradient-skill)' }}
       >
-        <Icon name="model" size={24} className="text-white" />
+        <Icon name="model" size={20} className="text-white" />
       </div>
       <div className="text-heading-04 font-light text-text-primary mb-2">무엇을 도와드릴까요?</div>
       <div className="text-body-short-02 text-text-helper mb-7">
         쓸수록 당신의 방식에 맞춰 학습하고, 반복 작업은 스킬로 저장합니다.
       </div>
 
-      <div className="grid grid-cols-2 gap-2.5 max-w-[560px] mx-auto text-left">
+      <div className="grid grid-cols-2 gap-2.5 text-left">
         {cards.map((c, i) => (
           <button
             key={c.title}
             onClick={() => onPick(c.prompt)}
-            className="group flex items-start gap-3 p-3.5 rounded-xl border border-border-subtle-01 bg-layer-01 hover:border-border-strong-01 hover:bg-layer-hover-01 transition-all duration-150"
+            className="group flex items-start gap-3 p-3.5 rounded-xl border border-border-subtle-01 bg-layer-01 hover:border-border-strong-01 transition-colors duration-150"
             style={{ animation: `starterCardIn 220ms cubic-bezier(0.16, 1, 0.3, 1) both`, animationDelay: `${i * 30}ms` }}
           >
-            <span
-              className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-interactive bg-interactive/12 group-hover:bg-interactive/20 transition-colors"
-            >
+            <span className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-icon-secondary bg-layer-02 border border-border-subtle-02 group-hover:text-icon-primary transition-colors">
               <Icon name={c.icon} size={16} />
             </span>
             <div className="min-w-0">
@@ -552,6 +559,44 @@ const ChatStarter: React.FC<{ skills: Skill[]; onPick: (text: string) => void }>
           </button>
         ))}
       </div>
+
+      {/* 최근 스킬 chip — 클릭 즉시 실행. 낮은 밀도, 색 없는 표면 */}
+      {skillChips.length > 0 && (
+        <div className="flex flex-wrap items-center justify-center gap-1.5 mt-5">
+          {skillChips.map((s) => (
+            <button
+              key={s.id}
+              onClick={() => onPick(`/${s.command}`)}
+              className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full border border-border-subtle-01 bg-transparent text-caption-01 font-mono text-text-secondary hover:text-text-primary hover:border-border-strong-01 transition-colors"
+            >
+              /{s.command}
+              <span className="text-text-helper font-sans">{s.uses}회</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* RICE가 기억하는 것 — 학습된(AI) 순간에만 쓰는 좌측 그라디언트 문법 */}
+      {rememberedSignals.length > 0 && (
+        <div className="mt-6 text-left border border-dashed border-border-subtle-01 rounded-xl px-4 py-3 bg-interactive/[0.04]">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-caption-01 font-semibold uppercase tracking-wider text-text-secondary">
+              RICE가 기억하는 것
+            </span>
+            <span className="ai-label">
+              <span className="ai-label__text">AI</span>
+            </span>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            {rememberedSignals.map((u) => (
+              <div key={u.id} className="border-l border-border-subtle-02 pl-2.5">
+                <span className="text-caption-01 text-text-helper">{u.label} · </span>
+                <span className="text-caption-02 text-text-secondary">{u.value}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <style>{`
         @keyframes starterCardIn {
@@ -564,7 +609,7 @@ const ChatStarter: React.FC<{ skills: Skill[]; onPick: (text: string) => void }>
 };
 
 function ChatScreen() {
-  const { skills, jumpToSkill, setSkills, setDetails, panelScrollRef, refreshSuggestions } = useLearning();
+  const { skills, signals, jumpToSkill, setSkills, setDetails, panelScrollRef, refreshSuggestions } = useLearning();
   const toast = useToast();
 
   const [thread, setThread] = useState<ThreadMessage[]>([]);
@@ -1593,6 +1638,7 @@ function ChatScreen() {
             </span>
 
             <div className="ml-auto flex items-center gap-1">
+              {/* 패널이 열려 있으면 제목이 패널 헤더에 이미 있으므로 아이콘으로 축약 — 같은 라벨 이중 표기 방지 */}
               <button
                 onClick={() => setLearningPanelOpen((o) => !o)}
                 data-tour="learning-loop"
@@ -1602,7 +1648,7 @@ function ChatScreen() {
                 title={learningPanelOpen ? '학습 루프 접기' : '학습 루프 펼치기'}
               >
                 <Icon name="growth" size={14} />
-                학습 루프
+                {!learningPanelOpen && '학습 루프'}
                 <Icon name={learningPanelOpen ? 'side-panel-close' : 'side-panel-open'} size={14} />
               </button>
             </div>
@@ -1613,7 +1659,7 @@ function ChatScreen() {
             <div ref={scrollRef} onScroll={handleThreadScroll} className="h-full overflow-y-auto">
               <div className="w-full max-w-[920px] mx-auto px-5 py-4">
                 {isEmpty ? (
-                  <ChatStarter skills={skills} onPick={(text) => send(text)} />
+                  <ChatStarter skills={skills} signals={signals} onPick={(text) => send(text)} />
                 ) : (
                   turns.map((t) => (
                     <ChatTurn
@@ -1640,7 +1686,7 @@ function ChatScreen() {
                 onClick={jumpToBottom}
                 className={`absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1.5 pl-3 pr-3.5 h-8 rounded-full border text-caption-01 font-medium shadow-elevation-2 transition-colors ${
                   hasNewBelow
-                    ? 'bg-interactive border-interactive text-white hover:brightness-110'
+                    ? 'bg-interactive border-interactive text-white hover:bg-interactive-hover'
                     : 'bg-layer-02 border-border-subtle-01 text-text-secondary hover:bg-layer-hover-02'
                 }`}
                 style={{ animation: 'jumpBtnIn 160ms cubic-bezier(0.16, 1, 0.3, 1)' }}
@@ -1686,7 +1732,7 @@ function ChatScreen() {
               )}
               <div
                 data-tour="chat-input"
-                className="bg-layer-01 border border-border-strong-01 rounded-2xl shadow-elevation-1 transition-all duration-200 focus-within:border-focus focus-within:shadow-glow-blue"
+                className="bg-layer-01 border border-border-strong-01 rounded-xl transition-colors duration-150 focus-within:border-focus"
               >
                 {/* Active slash-command chip — the command lives here, not in the textarea */}
                 {command && (
@@ -1736,7 +1782,7 @@ function ChatScreen() {
                       setSkillsOpen(false);
                     }
                   }}
-                  placeholder={command ? '추가 지시사항 입력 (선택) · Enter로 실행' : 'RICE에게 메시지…  (Enter로 전송)'}
+                  placeholder={command ? '추가 지시사항 입력 (선택)' : 'RICE에게 메시지…'}
                   rows={1}
                   className="w-full resize-none border-none outline-none bg-transparent text-text-primary text-body-short-02 leading-5 px-4 pt-3.5 pb-1 min-h-[56px] max-h-[200px]"
                 />
@@ -1771,12 +1817,14 @@ function ChatScreen() {
                   {connected && liveSessionId.current && (
                     <div className="relative">
                       <Tooltip label="이 대화를 스킬로 저장">
+                        {/* 호출(스킬·도구 chip)과 달리 이 버튼은 '학습' — AI 액센트(purple)로
+                            성격을 구분한다 (AI 문법의 그라디언트 끝 색) */}
                         <button
                           onClick={() => setLearnOpen((o) => !o)}
                           className={`p-1.5 rounded-lg transition-colors ${
                             learnOpen
-                              ? 'bg-interactive/15 text-blue-30'
-                              : 'text-icon-secondary hover:text-icon-primary hover:bg-layer-hover-01'
+                              ? 'bg-layer-selected-01 text-purple-40'
+                              : 'text-purple-50 hover:text-purple-40 hover:bg-layer-hover-01'
                           }`}
                         >
                           <Icon name="sparkle" size={16} />
@@ -1785,8 +1833,11 @@ function ChatScreen() {
                       {learnOpen && (
                         <div className="absolute bottom-10 left-0 z-30 w-72 bg-layer-02 border border-border-subtle-01 rounded-lg shadow-elevation-2 p-3">
                           <div className="flex items-center gap-1.5 mb-2">
-                            <Icon name="sparkle" size={14} className="text-blue-30" />
+                            <Icon name="sparkle" size={14} className="text-purple-40" />
                             <span className="text-body-short-01 font-semibold text-text-primary">이 대화를 스킬로 저장</span>
+                            <span className="ai-label ml-auto">
+                              <span className="ai-label__text">AI</span>
+                            </span>
                           </div>
                           <textarea
                             value={learnInstruction}
@@ -1817,7 +1868,7 @@ function ChatScreen() {
                                 learnFromConversation(learnInstruction.trim());
                                 setLearnInstruction('');
                               }}
-                              className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-caption-01 font-semibold bg-interactive text-white hover:bg-[#0353e9] transition-colors"
+                              className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-caption-01 font-semibold bg-interactive text-white hover:bg-interactive-hover transition-colors"
                             >
                               <Icon name="sparkle" size={12} /> 스킬로 정리
                             </button>
@@ -1831,11 +1882,11 @@ function ChatScreen() {
                     <button
                       onClick={() => (busy ? stopTurn() : send())}
                       disabled={!busy && !command && !draft.trim()}
-                      className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-150 ${
+                      className={`w-8 h-8 rounded-full flex items-center justify-center transition-opacity duration-150 ${
                         busy
                           ? 'bg-layer-02 hover:bg-layer-hover-02 border border-border-subtle-01 cursor-pointer'
                           : command || draft.trim()
-                          ? 'shadow-glow-blue hover:brightness-110 cursor-pointer'
+                          ? 'hover:opacity-90 cursor-pointer'
                           : 'bg-layer-02 cursor-not-allowed opacity-50'
                       }`}
                       style={!busy && (command || draft.trim()) ? { background: 'var(--gradient-skill)' } : undefined}

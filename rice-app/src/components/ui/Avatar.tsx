@@ -34,10 +34,10 @@ export const Avatar: React.FC<AvatarProps> = ({
   };
 
   const typeStyles = {
-    user: 'bg-[#525252] text-white',
+    user: 'bg-gray-70 text-white',
     agent: 'bg-interactive text-white',
-    skill: 'bg-[#6929c4] text-white',
-    tool: 'bg-[#005d5d] text-white',
+    skill: 'bg-purple-70 text-white',
+    tool: 'bg-teal-70 text-white',
   };
 
   const defaultLabels = {

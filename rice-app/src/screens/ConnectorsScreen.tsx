@@ -394,7 +394,7 @@ const GroupPermissionMenu: React.FC<{ disabled?: boolean; onPick: (p: ScopePermi
         모두 설정 <Icon name={open ? 'chevron-up' : 'chevron-down'} size={11} />
       </button>
       {open && (
-        <div className="absolute right-0 top-full mt-1 z-10 min-w-[120px] py-1 rounded-lg bg-layer-02 border border-border-subtle-01 shadow-overlay">
+        <div className="absolute right-0 top-full mt-1 z-10 min-w-[120px] py-1 rounded-lg bg-layer-02 border border-border-subtle-01 shadow-elevation-2">
           {PERMS.map((p) => (
             <button
               key={p.id}
@@ -442,7 +442,7 @@ const AddConnectorMenu: React.FC<{ onBrowse: () => void; onCustom: () => void }>
         <Icon name="add" size={13} /> 추가
       </button>
       {open && (
-        <div className="absolute right-0 top-full mt-1 z-10 min-w-[170px] py-1 rounded-lg bg-layer-02 border border-border-subtle-01 shadow-overlay">
+        <div className="absolute right-0 top-full mt-1 z-10 min-w-[170px] py-1 rounded-lg bg-layer-02 border border-border-subtle-01 shadow-elevation-2">
           <button
             type="button"
             onClick={() => {
@@ -590,8 +590,8 @@ const ConnectorDetailView: React.FC<{
       {/* header */}
       <div className="px-7 pt-6 pb-5 border-b border-border-subtle-01">
         <div className="flex items-start gap-3.5">
-          <div className={`w-11 h-11 flex-shrink-0 flex items-center justify-center rounded-lg ${connected ? 'bg-blue-60' : 'bg-layer-03'}`}>
-            <Icon name={c.icon} size={22} className="text-white" />
+          <div className="w-11 h-11 flex-shrink-0 flex items-center justify-center rounded-lg bg-layer-02 border border-border-subtle-02">
+            <Icon name={c.icon} size={22} className={connected ? 'text-icon-primary' : 'text-icon-secondary'} />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
@@ -637,7 +637,7 @@ const ConnectorDetailView: React.FC<{
                   disabled={busy}
                   icon={<Icon name="trash" size={14} />}
                   onClick={() => setConfirmingRemove(true)}
-                  className="!text-[#da1e28] hover:!bg-[#da1e28]/10"
+                  className="!text-red-60 hover:!bg-red-60/10"
                 >
                   제거
                 </Button>
@@ -695,10 +695,10 @@ const ConnectorDetailView: React.FC<{
       <div className="px-7 pt-5 pb-10 flex flex-col gap-7">
         {/* local-mcp: 실행 신뢰 경고 */}
         {isMcp && (
-          <div className="flex items-start gap-2.5 px-3.5 py-3 rounded-lg bg-[#da1e28]/10 border border-[#da1e28]/30">
-            <Icon name="warning" size={16} filled className="text-[#ff8389] flex-shrink-0 mt-0.5" />
+          <div className="flex items-start gap-2.5 px-3.5 py-3 rounded-lg bg-red-60/10 border border-red-60/30">
+            <Icon name="warning" size={16} filled className="text-red-40 flex-shrink-0 mt-0.5" />
             <p className="text-caption-01 text-text-helper leading-relaxed">
-              이 서버는 <span className="text-[#ff8389] font-medium">내 컴퓨터에서 직접 코드를 실행</span>합니다.
+              이 서버는 <span className="text-red-40 font-medium">내 컴퓨터에서 직접 코드를 실행</span>합니다.
               신뢰할 수 있는 출처의 명령만 실행하세요.
             </p>
           </div>
@@ -1217,24 +1217,21 @@ function ConnectorsScreen() {
         </div>
 
         <div className="p-4">
-          <div className="relative overflow-hidden rounded-2xl gradient-connector p-4 text-white shadow-glow-connector">
-            <div className="absolute -top-8 -right-8 w-28 h-28 rounded-full bg-white/10 blur-2xl" aria-hidden="true" />
-            <div className="relative">
-              <div className="text-caption-01 text-white/85 mb-1">
-                {isLocal ? '실행 중인 MCP 서버' : '연결된 커넥터'}
-              </div>
-              <div className="text-[28px] font-light leading-none">
-                {connectedCount}
-                <span className="text-body-short-01 ml-1">개</span>
-              </div>
-              {(needsCount > 0 || updateCount > 0) && (
-                <div className="text-caption-01 text-white/85 mt-1.5 flex items-center gap-1.5">
-                  {needsCount > 0 && <span>{needsCount} {isLocal ? '중지됨' : '연결 필요'}</span>}
-                  {needsCount > 0 && updateCount > 0 && <span className="text-white/40">·</span>}
-                  {updateCount > 0 && <span>{updateCount} 업데이트</span>}
-                </div>
-              )}
+          <div className="rounded-xl bg-layer-01 border border-border-subtle-01 p-4">
+            <div className="text-caption-01 text-text-helper mb-1">
+              {isLocal ? '실행 중인 MCP 서버' : '연결된 커넥터'}
             </div>
+            <div className="text-heading-03 font-semibold text-text-primary leading-none tabular-nums">
+              {connectedCount}
+              <span className="text-body-short-01 font-normal text-text-helper ml-1">개</span>
+            </div>
+            {(needsCount > 0 || updateCount > 0) && (
+              <div className="text-caption-01 text-text-secondary mt-1.5 flex items-center gap-1.5">
+                {needsCount > 0 && <span>{needsCount} {isLocal ? '중지됨' : '연결 필요'}</span>}
+                {needsCount > 0 && updateCount > 0 && <span className="text-text-helper/50">·</span>}
+                {updateCount > 0 && <span>{updateCount} 업데이트</span>}
+              </div>
+            )}
           </div>
         </div>
 
@@ -1260,7 +1257,7 @@ function ConnectorsScreen() {
               >
                 {c}
                 {badge && (
-                  <span className="ml-auto inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 rounded-full bg-blue-60 text-white text-[11px]">
+                  <span className="ml-auto inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 rounded-full bg-blue-60 text-white text-label-micro">
                     {badge}
                   </span>
                 )}

@@ -35,14 +35,14 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     },
     ref
   ) => {
-    const baseStyles = 'inline-flex items-center justify-center gap-2 font-sans font-semibold transition-all rounded-lg border-none outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100';
+    const baseStyles = 'inline-flex items-center justify-center gap-2 font-sans font-semibold transition-colors duration-150 rounded-lg border-none outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:opacity-50 disabled:cursor-not-allowed';
 
     const kindStyles = {
-      primary: 'bg-interactive text-text-on-color shadow-elevation-1 hover:bg-[#0353e9] hover:shadow-elevation-2 active:bg-[#002d9c]',
+      primary: 'bg-interactive text-text-on-color hover:bg-interactive-hover active:bg-interactive-active',
       secondary: 'bg-layer-01 text-text-primary border border-border-strong-01 hover:bg-layer-hover-01 active:bg-layer-active-01',
       tertiary: 'bg-transparent text-interactive border border-interactive hover:bg-layer-hover-01 active:bg-layer-active-01',
       ghost: 'bg-transparent text-link-primary hover:bg-layer-hover-01 active:bg-layer-active-01',
-      danger: 'bg-support-error text-text-on-color shadow-elevation-1 hover:bg-[#ba1b23] hover:shadow-elevation-2 active:bg-[#750e13]',
+      danger: 'bg-support-error text-text-on-color hover:bg-danger-hover active:bg-danger-active',
     };
 
     const sizeStyles = {

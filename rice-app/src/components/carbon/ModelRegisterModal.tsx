@@ -201,7 +201,7 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
             등록
           </Button>
           {!canRegister && (
-            <div className="pointer-events-none absolute bottom-full right-0 mb-2 w-max max-w-[220px] px-2.5 py-1.5 rounded-md bg-text-primary text-text-inverse text-caption-01 shadow-overlay opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-150">
+            <div className="pointer-events-none absolute bottom-full right-0 mb-2 w-max max-w-[220px] px-2.5 py-1.5 rounded-md bg-text-primary text-text-inverse text-caption-01 shadow-elevation-2 opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-150">
               {fieldsReady
                 ? "먼저 '연결 테스트'를 통과하세요"
                 : '모델명과 API 키를 입력한 뒤 연결 테스트를 실행하세요'}
@@ -223,7 +223,7 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
       size="sm"
       footer={footer}
     >
-      <div className="space-y-5">
+      <div className="space-y-4">
         {/* Provider 선택 */}
         <div>
           <label className="text-label-01 text-text-secondary mb-2 block">제공자</label>
@@ -236,9 +236,9 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
                   type="button"
                   onClick={() => handleProvider(p.id)}
                   aria-pressed={active}
-                  className={`px-3 py-2 rounded-lg border text-body-short-01 text-left transition-all duration-150 ${
+                  className={`px-3 py-1.5 rounded-lg border text-body-short-01 text-left transition-colors duration-150 ${
                     active
-                      ? 'border-interactive bg-[#0f62fe]/10 text-text-primary font-semibold'
+                      ? 'border-interactive bg-layer-selected-01 text-text-primary font-semibold'
                       : 'border-border-subtle-01 bg-background text-text-secondary hover:bg-layer-hover-01 hover:border-border-strong-01'
                   }`}
                 >
@@ -260,7 +260,7 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
               invalidateTest();
             }}
             placeholder={provider.suggestions[0] ?? '모델 식별자를 입력하세요'}
-            className="w-full h-10 px-3.5 bg-field-01 text-text-primary font-mono text-body-short-01 border border-border-strong-01 rounded-lg outline-none transition-colors focus:border-focus focus:ring-1 focus:ring-focus placeholder:text-text-placeholder placeholder:font-sans"
+            className="w-full h-9 px-3 bg-field-01 text-text-primary font-mono text-body-short-01 border border-border-strong-01 rounded-lg outline-none transition-colors focus:border-focus focus:ring-1 focus:ring-focus placeholder:text-text-placeholder placeholder:font-sans"
           />
           {provider.suggestions.length > 0 && (
             <div className="flex flex-wrap gap-1.5 mt-2">
@@ -274,7 +274,7 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
                   }}
                   className={`px-2 py-1 rounded-md font-mono text-caption-01 border transition-colors ${
                     modelId === s
-                      ? 'border-interactive bg-[#0f62fe]/10 text-interactive'
+                      ? 'border-interactive bg-layer-selected-01 text-text-primary'
                       : 'border-border-subtle-01 bg-layer-02 text-text-secondary hover:bg-layer-hover-02 hover:text-text-primary'
                   }`}
                 >
@@ -296,7 +296,7 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
               placeholder="watsonx 프로젝트 ID"
               autoComplete="off"
               spellCheck={false}
-              className="w-full h-10 px-3.5 bg-field-01 text-text-primary font-mono text-body-short-01 border border-border-strong-01 rounded-lg outline-none transition-colors focus:border-focus focus:ring-1 focus:ring-focus placeholder:text-text-placeholder placeholder:font-sans"
+              className="w-full h-9 px-3 bg-field-01 text-text-primary font-mono text-body-short-01 border border-border-strong-01 rounded-lg outline-none transition-colors focus:border-focus focus:ring-1 focus:ring-focus placeholder:text-text-placeholder placeholder:font-sans"
             />
           </div>
         )}
@@ -314,7 +314,7 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
               placeholder={provider.baseUrlPlaceholder}
               autoComplete="off"
               spellCheck={false}
-              className="w-full h-10 px-3.5 bg-field-01 text-text-primary font-mono text-body-short-01 border border-border-strong-01 rounded-lg outline-none transition-colors focus:border-focus focus:ring-1 focus:ring-focus placeholder:text-text-placeholder placeholder:font-sans"
+              className="w-full h-9 px-3 bg-field-01 text-text-primary font-mono text-body-short-01 border border-border-strong-01 rounded-lg outline-none transition-colors focus:border-focus focus:ring-1 focus:ring-focus placeholder:text-text-placeholder placeholder:font-sans"
             />
           </div>
         )}
@@ -333,7 +333,7 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
               placeholder={provider.keyPlaceholder}
               autoComplete="off"
               spellCheck={false}
-              className="w-full h-10 pl-3.5 pr-11 bg-field-01 text-text-primary font-mono text-body-short-01 border border-border-strong-01 rounded-lg outline-none transition-colors focus:border-focus focus:ring-1 focus:ring-focus placeholder:text-text-placeholder placeholder:font-sans"
+              className="w-full h-9 pl-3 pr-10 bg-field-01 text-text-primary font-mono text-body-short-01 border border-border-strong-01 rounded-lg outline-none transition-colors focus:border-focus focus:ring-1 focus:ring-focus placeholder:text-text-placeholder placeholder:font-sans"
             />
             <button
               type="button"

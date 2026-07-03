@@ -30,30 +30,28 @@ export const Layout: React.FC<LayoutProps> = ({
 
   return (
     <div className="flex flex-col h-screen w-screen bg-background overflow-hidden">
-      {/* Titlebar / window drag region */}
+      {/* Titlebar / window drag region — 아이콘 레일과 함께 brand shell을 이룬다.
+          긴 태그라인은 window chrome이 아니라 Home·Settings About의 몫. */}
       <header
         className={`
           h-11 flex-shrink-0 flex items-center gap-2.5
-          bg-layer-01 border-b border-border-subtle-01 electron-drag
+          bg-shell border-b border-shell-border electron-drag
           ${isElectron ? 'pl-[84px]' : 'pl-4'} pr-4
         `}
       >
         <div
           className="
             flex items-center justify-center w-6 h-6 rounded-md
-            bg-gradient-to-br from-[#0f62fe] to-[#8a3ffc]
+            bg-gradient-to-br from-blue-60 to-purple-60
             text-white font-mono font-bold text-caption-01
-            shadow-elevation-1 select-none
+            select-none
           "
           aria-hidden="true"
         >
           R
         </div>
-        <span className="text-body-short-01 font-semibold text-text-primary select-none">
+        <span className="text-body-short-01 font-semibold text-white select-none">
           RICE
-        </span>
-        <span className="text-caption-01 text-text-helper select-none">
-          Runtime Intelligence & Continuous Evolution
         </span>
       </header>
 

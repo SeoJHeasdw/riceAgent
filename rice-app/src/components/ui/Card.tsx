@@ -2,7 +2,7 @@ import React from 'react';
 
 /**
  * Card component — Carbon color tokens with modernized shape
- * - Rounded corners with subtle elevation shadow
+ * - Flat by default: border가 형태를 잡고, 그림자는 overlay 표면 전용
  * - Uses layer backgrounds
  */
 
@@ -31,7 +31,7 @@ export const Card = React.forwardRef<HTMLDivElement, CardProps>(
     },
     ref
   ) => {
-    const baseStyles = 'rounded-xl shadow-elevation-1 transition-shadow';
+    const baseStyles = 'rounded-xl transition-colors';
 
     const paddingStyles = {
       none: '',

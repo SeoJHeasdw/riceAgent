@@ -98,7 +98,15 @@ function runtimeSkillToLearning(s: {
     const ms = Date.now() - new Date(s.last_used_at).getTime();
     return Math.floor(ms / 86_400_000);
   })();
-  const useTrend = s.use > 0 ? `${s.use}회 사용` : '아직 없음';
+  // LearningPanel이 "N회 사용 · {trend}"로 렌더하므로 사용 횟수를 반복하지 않는다
+  const useTrend =
+    s.use === 0
+      ? '아직 사용 전'
+      : idleDays == null
+        ? '사용 중'
+        : idleDays === 0
+          ? '오늘 사용'
+          : `${idleDays}일 전 사용`;
   return {
     id: s.id,
     name: s.name,

@@ -29,7 +29,7 @@ const AILabel: React.FC = () => (
 const Rich: React.FC<{ text: string }> = ({ text }) => {
   const { openFile } = useFileViewer();
   const chipCls =
-    'font-mono text-[0.86em] bg-layer-02 text-[#78a9ff] border border-border-subtle-01 rounded px-1 py-px';
+    'font-mono text-[0.86em] bg-layer-02 text-blue-40 border border-border-subtle-01 rounded px-1 py-px';
   return (
     <>
       {text.split(/(`[^`]+`)/g).map((part, i) => {
@@ -111,7 +111,7 @@ const ToolStep: React.FC<{ c: ToolCall }> = ({ c }) => {
         className="flex items-center gap-2.5 px-3 py-2.5 cursor-pointer hover:bg-layer-hover-01 transition-colors"
       >
         <StepStatus status={c.status} />
-        <span className="text-caption-01 font-mono text-[#78a9ff] flex-shrink-0">{c.tool}</span>
+        <span className="text-caption-01 font-mono text-blue-40 flex-shrink-0">{c.tool}</span>
         <span className="text-caption-01 text-text-secondary truncate">{c.label}</span>
         {c.scope && (
           <button
@@ -122,7 +122,7 @@ const ToolStep: React.FC<{ c: ToolCall }> = ({ c }) => {
               navigate(cid ? `/connectors/${cid}` : '/connectors');
             }}
             title={`커넥터에서 보기: ${c.scope.name} · ${c.scope.mode}`}
-            className="inline-flex items-center gap-1 flex-shrink-0 border border-border-subtle-01 px-1.5 py-0.5 rounded text-[10.5px] font-mono text-text-helper hover:bg-layer-hover-02 hover:text-text-secondary transition-colors"
+            className="inline-flex items-center gap-1 flex-shrink-0 border border-border-subtle-01 px-1.5 py-0.5 rounded text-label-micro font-mono text-text-helper hover:bg-layer-hover-02 hover:text-text-secondary transition-colors"
           >
             <Icon name="lock" size={10} className="opacity-70" />
             {c.scope.name} · {c.scope.mode}
@@ -134,10 +134,10 @@ const ToolStep: React.FC<{ c: ToolCall }> = ({ c }) => {
       {open && (
         <div className="pl-9 pr-3 pb-3 pt-0.5 flex flex-col gap-2">
           <div>
-            <div className="text-[10px] uppercase tracking-wider text-text-helper mb-1">parameters</div>
+            <div className="text-label-micro uppercase tracking-wider text-text-helper mb-1">parameters</div>
             <div className="bg-layer-01 border border-border-subtle-01 rounded-md px-2.5 py-2 flex flex-col gap-1">
               {Object.entries(c.params).map(([k, v]) => (
-                <div key={k} className="flex gap-2.5 text-[11.5px] font-mono">
+                <div key={k} className="flex gap-2.5 text-label-micro font-mono">
                   <span className="text-text-helper min-w-[64px] flex-shrink-0">{k}</span>
                   <span className="text-text-primary break-all">{String(v)}</span>
                 </div>
@@ -145,7 +145,7 @@ const ToolStep: React.FC<{ c: ToolCall }> = ({ c }) => {
             </div>
           </div>
           <div>
-            <div className="text-[10px] uppercase tracking-wider text-text-helper mb-1">result</div>
+            <div className="text-label-micro uppercase tracking-wider text-text-helper mb-1">result</div>
             <div className="text-caption-01 font-mono text-text-secondary flex items-center gap-1.5">
               <Icon name="arrow-right" size={12} />
               {c.result}
@@ -245,7 +245,7 @@ const BashCard: React.FC<{ m: Extract<ThreadMessage, { kind: 'tool_bash' }> }> =
           <Icon name="check-circle" size={13} className="text-support-success ml-auto flex-shrink-0" title="완료" />
         )}
       </div>
-      <div className="font-mono text-[11.5px] leading-[18px]">
+      <div className="font-mono text-label-micro leading-[18px]">
         <div className="flex gap-2.5 px-3 py-1.5">
           <span className="text-text-helper select-none w-7 flex-shrink-0">IN</span>
           <span className="text-text-primary whitespace-pre-wrap break-all">{m.cmd}</span>
@@ -274,9 +274,9 @@ const ReadCard: React.FC<{ m: Extract<ThreadMessage, { kind: 'tool_read' }> }> =
   <div className="my-1.5 max-w-[640px] flex items-center gap-2 px-3 py-2 border border-border-subtle-01 rounded-lg bg-layer-01">
     <Icon name="document" size={14} className="text-icon-secondary flex-shrink-0" />
     <span className="text-caption-01 font-semibold text-text-secondary flex-shrink-0">Read</span>
-    <span className="text-caption-01 font-mono text-[#78a9ff] truncate flex-shrink-0 max-w-[46%]">{m.file}</span>
+    <span className="text-caption-01 font-mono text-blue-40 truncate flex-shrink-0 max-w-[46%]">{m.file}</span>
     <span className="text-caption-01 text-text-helper truncate">— {m.summary}</span>
-    {m.meta && <span className="ml-auto text-[10.5px] font-mono text-text-helper flex-shrink-0">{m.meta}</span>}
+    {m.meta && <span className="ml-auto text-label-micro font-mono text-text-helper flex-shrink-0">{m.meta}</span>}
   </div>
 );
 
@@ -287,8 +287,8 @@ const HATCH: React.CSSProperties = {
 const EditRow: React.FC<{ row: EditDiffRow }> = ({ row }) => {
   const leftEmpty = row.t === 'add';
   const rightEmpty = row.t === 'remove';
-  const leftCls = row.t === 'remove' || row.t === 'change' ? 'bg-[#341216] text-[#ff8389]' : 'text-text-helper';
-  const rightCls = row.t === 'add' || row.t === 'change' ? 'bg-[#0c2b18] text-[#6fdc8c]' : 'text-text-helper';
+  const leftCls = row.t === 'remove' || row.t === 'change' ? 'bg-diff-remove-bg text-diff-remove-text' : 'text-text-helper';
+  const rightCls = row.t === 'add' || row.t === 'change' ? 'bg-diff-add-bg text-diff-add-text' : 'text-text-helper';
   return (
     <div className="grid grid-cols-2">
       <div
@@ -318,12 +318,12 @@ const EditCard: React.FC<{ m: Extract<ThreadMessage, { kind: 'tool_edit' }> }> =
       >
         <Icon name="edit" size={13} className="text-icon-secondary flex-shrink-0" />
         <span className="text-caption-01 font-semibold text-text-secondary flex-shrink-0">Edit</span>
-        <span className="text-caption-01 font-mono text-[#78a9ff] truncate">{m.file}</span>
-        <span className="ml-auto text-[10.5px] font-mono text-text-helper flex-shrink-0">{m.summary}</span>
+        <span className="text-caption-01 font-mono text-blue-40 truncate">{m.file}</span>
+        <span className="ml-auto text-label-micro font-mono text-text-helper flex-shrink-0">{m.summary}</span>
         <Icon name={open ? 'chevron-up' : 'chevron-down'} size={14} className="text-icon-secondary flex-shrink-0" />
       </button>
       {open && (
-        <div className="border-t border-border-subtle-01 font-mono text-[11.5px] leading-[18px] max-h-[280px] overflow-y-auto">
+        <div className="border-t border-border-subtle-01 font-mono text-label-micro leading-[18px] max-h-[280px] overflow-y-auto">
           {m.diff.map((row, i) => (
             <EditRow key={i} row={row} />
           ))}
@@ -530,7 +530,7 @@ const MemoryIndicator: React.FC<{
 }> = ({ m, onJumpSkill }) => (
   <div className="my-1 max-w-[640px]">
     <div className="ai-tile flex gap-2.5 items-start px-3.5 py-3">
-      <Icon name="bookmark" size={16} filled className="text-[#78a9ff] mt-0.5 flex-shrink-0" />
+      <Icon name="bookmark" size={16} filled className="text-blue-40 mt-0.5 flex-shrink-0" />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="text-body-short-01 font-semibold text-text-primary">{m.text}</span>
@@ -590,7 +590,7 @@ const ThinkingBlock: React.FC<{ m: Extract<ThreadMessage, { kind: 'thinking' }> 
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <span className="text-caption-01 text-text-secondary">{s.label}</span>
                   {s.tool && (
-                    <span className="text-[10px] font-mono text-[#78a9ff] border border-border-subtle-01 rounded px-1 py-px">
+                    <span className="text-label-micro font-mono text-blue-40 border border-border-subtle-01 rounded px-1 py-px">
                       {s.tool}
                     </span>
                   )}
@@ -618,7 +618,7 @@ const KeyVals: React.FC<{ obj: Record<string, unknown>; onFile: (p: string) => v
         <div key={k} className="flex gap-2 text-caption-01">
           <span className="text-text-helper font-mono min-w-[80px] flex-shrink-0">{k}</span>
           {k === 'path' && typeof v === 'string' ? (
-            <button onClick={() => onFile(v)} className="text-[#78a9ff] font-mono break-all text-left hover:underline">
+            <button onClick={() => onFile(v)} className="text-blue-40 font-mono break-all text-left hover:underline">
               {val}
             </button>
           ) : (
@@ -635,7 +635,7 @@ const BuiltinToolCard: React.FC<{ m: Extract<ThreadMessage, { kind: 'toolcall' }
   const { openFile } = useFileViewer();
   const path = typeof m.args.path === 'string' ? (m.args.path as string) : null;
   const dot =
-    m.status === 'running' ? 'bg-[#f1c21b] animate-pulse' : m.status === 'error' ? 'bg-[#fa4d56]' : 'bg-[#42be65]';
+    m.status === 'running' ? 'bg-support-warning animate-pulse' : m.status === 'error' ? 'bg-support-error' : 'bg-support-success';
 
   // tool results arrive as a string; pretty-render it as key→values when it's a JSON object
   const resultObj: Record<string, unknown> | null = (() => {
@@ -655,7 +655,7 @@ const BuiltinToolCard: React.FC<{ m: Extract<ThreadMessage, { kind: 'toolcall' }
         className="flex items-center gap-2 w-full text-left text-caption-01 text-text-secondary hover:text-text-primary transition-colors"
       >
         <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dot}`} />
-        <span className="font-mono text-[#78a9ff]">{m.tool}</span>
+        <span className="font-mono text-blue-40">{m.tool}</span>
         {path && <span className="font-mono text-text-helper truncate">{path}</span>}
         <span className="text-text-helper">
           {m.status === 'running' ? '실행 중…' : m.status === 'error' ? '실패' : '완료'}
@@ -666,17 +666,17 @@ const BuiltinToolCard: React.FC<{ m: Extract<ThreadMessage, { kind: 'toolcall' }
         <div className="mt-2 ml-3.5 border-l-2 border-border-subtle-01 pl-3 flex flex-col gap-2.5">
           {Object.keys(m.args).length > 0 && (
             <div>
-              <div className="text-[10px] uppercase tracking-wider text-text-helper mb-1">arguments</div>
+              <div className="text-label-micro uppercase tracking-wider text-text-helper mb-1">arguments</div>
               <KeyVals obj={m.args} onFile={openFile} />
             </div>
           )}
           {(m.result != null || m.error != null) && (
             <div>
-              <div className="text-[10px] uppercase tracking-wider text-text-helper mb-1">
+              <div className="text-label-micro uppercase tracking-wider text-text-helper mb-1">
                 {m.error != null ? 'error' : 'result'}
               </div>
               {m.error != null ? (
-                <span className="text-caption-01 font-mono text-[#fa4d56] break-all">{m.error}</span>
+                <span className="text-caption-01 font-mono text-support-error break-all">{m.error}</span>
               ) : resultObj ? (
                 <KeyVals obj={resultObj} onFile={openFile} />
               ) : (
@@ -712,15 +712,16 @@ const ApprovalCard: React.FC<{
   const [body, setBody] = useState(m.body ?? '');
   return (
     <div className="my-1.5 max-w-[620px]">
-      <div className="ai-tile p-4" style={{ borderLeft: '2px solid #ff832b' }}>
+      {/* 도구 실행 승인은 AI 문법이 아니라 warning 문법 — ai-tile 금지 */}
+      <div className="rounded-xl border border-border-subtle-01 border-l-2 border-l-support-warning bg-layer-01 p-4">
         <div className="flex items-center gap-2 mb-2">
-          <Icon name="warning" size={15} filled className="text-[#ff832b] flex-shrink-0" />
+          <Icon name="warning" size={15} filled className="text-orange-40 flex-shrink-0" />
           <span className="text-body-short-01 font-semibold text-text-primary">실행 승인이 필요해요</span>
         </div>
         <div className="flex items-center gap-2 mb-2 flex-wrap">
-          <span className="text-caption-01 font-mono text-[#78a9ff] flex-shrink-0">{m.tool}</span>
+          <span className="text-caption-01 font-mono text-blue-40 flex-shrink-0">{m.tool}</span>
           <span className="text-body-short-01 text-text-primary">{m.label}</span>
-          <span className="inline-flex items-center gap-1 flex-shrink-0 border border-border-subtle-01 px-1.5 py-0.5 rounded text-[10.5px] font-mono text-text-helper">
+          <span className="inline-flex items-center gap-1 flex-shrink-0 border border-border-subtle-01 px-1.5 py-0.5 rounded text-label-micro font-mono text-text-helper">
             <Icon name="lock" size={10} className="opacity-70" />
             {m.scope.name} · {m.scope.mode}
           </span>
@@ -805,9 +806,9 @@ const DiffLine: React.FC<{ line: { t: 'add' | 'remove' | 'ctx'; text: string } }
   const gutter = line.t === 'add' ? '+' : line.t === 'remove' ? '−' : ' ';
   const cls =
     line.t === 'add'
-      ? 'bg-[#0c2b18] text-[#6fdc8c] border-l-2 border-l-[#42be65]'
+      ? 'bg-diff-add-bg text-diff-add-text border-l-2 border-l-diff-add-accent'
       : line.t === 'remove'
-        ? 'bg-[#341216] text-[#ff8389] border-l-2 border-l-[#fa4d56]'
+        ? 'bg-diff-remove-bg text-diff-remove-text border-l-2 border-l-diff-remove-accent'
         : 'text-text-helper border-l-2 border-l-transparent';
   return (
     <div className={`flex gap-2 px-2.5 py-0.5 ${cls}`}>
@@ -832,9 +833,10 @@ const PatchProposalCard: React.FC<{
 
   return (
     <div className="my-1.5 max-w-[640px]">
-      <div className="ai-tile p-4" style={{ borderLeft: '2px solid #be95ff' }}>
+      {/* 스킬 개선 제안 = AI 순간 — ai-tile 그라디언트 보더 고정(색 오버라이드 금지) */}
+      <div className="ai-tile p-4">
         <div className="flex items-center gap-2 mb-2">
-          <Icon name="renew" size={15} className="text-[#be95ff] flex-shrink-0" />
+          <Icon name="renew" size={15} className="text-purple-40 flex-shrink-0" />
           <span className="text-body-short-01 font-semibold text-text-primary">스킬 개선 제안</span>
           <Tag type="purple" size="sm">
             {m.triggerLabel}
@@ -889,11 +891,11 @@ const PatchProposalCard: React.FC<{
               onChange={(e) => setBody(e.target.value)}
               disabled={state !== 'pending'}
               spellCheck={false}
-              className="w-full px-3 py-2.5 text-[11.5px] font-mono text-text-secondary leading-relaxed resize-none bg-transparent border-0 outline-none focus:ring-1 focus:ring-focus"
+              className="w-full px-3 py-2.5 text-label-micro font-mono text-text-secondary leading-relaxed resize-none bg-transparent border-0 outline-none focus:ring-1 focus:ring-focus"
               style={{ minHeight: '160px', maxHeight: '260px' }}
             />
           ) : (
-            <div className="py-1 text-[11.5px] font-mono leading-[18px] max-h-[260px] overflow-y-auto">
+            <div className="py-1 text-label-micro font-mono leading-[18px] max-h-[260px] overflow-y-auto">
               {m.diff.map((line, i) => (
                 <DiffLine key={i} line={line} />
               ))}

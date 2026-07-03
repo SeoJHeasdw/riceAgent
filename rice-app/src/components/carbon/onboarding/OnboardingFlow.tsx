@@ -79,7 +79,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
       aria-label="RICE 시작하기"
     >
       <div
-        className="flex w-full max-w-[920px] h-full max-h-[640px] rounded-2xl border border-border-subtle-01 bg-layer-01 shadow-overlay overflow-hidden"
+        className="flex w-full max-w-[920px] h-full max-h-[640px] rounded-xl border border-border-subtle-01 bg-layer-01 shadow-elevation-3 overflow-hidden"
         style={{ animation: 'onbIn 240ms cubic-bezier(0.16, 1, 0.3, 1)' }}
       >
         {/* ── 좌측 진행 레일 ── */}

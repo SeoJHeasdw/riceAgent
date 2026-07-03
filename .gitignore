@@ -18,3 +18,5 @@ venv/
 # Node (rice-app)
 node_modules/
 dist/
+
+screenshoot

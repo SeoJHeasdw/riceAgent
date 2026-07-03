@@ -32,25 +32,83 @@ export default {
             '01': 'var(--cds-layer-selected-01)',
           },
         },
-        // Carbon palette shades used directly in components
+        // Carbon palette shades used directly in components.
+        // 임의값 유틸(text-[#...])은 금지 — 여기 이름 붙은 단계만 쓴다.
         blue: {
           '10': '#edf5ff',
           '30': '#a6c8ff',
+          '40': '#78a9ff',
           '50': '#4589ff',
           '60': '#0f62fe',
           '70': '#0043ce',
+          '80': '#002d9c',
+          '100': '#001141',
         },
         red: {
+          '30': '#ffb3b8',
+          '40': '#ff8389',
+          '50': '#fa4d56',
           '60': '#da1e28',
           '70': '#ba1b23',
+          '80': '#750e13',
+        },
+        green: {
+          '30': '#6fdc8c',
+          '40': '#42be65',
+          '50': '#24a148',
+          '80': '#044317',
+        },
+        yellow: {
+          '20': '#fddc69',
+          '30': '#f1c21b',
+          '40': '#d2a106',
+          '60': '#684e00',
+          '70': '#523c00',
+        },
+        orange: {
+          '30': '#ffb784',
+          '40': '#ff832b',
+        },
+        magenta: {
+          '50': '#ee5396',
+        },
+        gray: {
+          '70': '#525252',
         },
         purple: {
+          '30': '#d4bbff',
+          '40': '#be95ff',
           '50': '#a56eff',
           '60': '#8a3ffc',
+          '70': '#6929c4',
+          '80': '#491d8b',
         },
         teal: {
+          '30': '#3ddbd9',
           '40': '#08bdba',
           '60': '#009d9a',
+          '70': '#005d5d',
+          '80': '#004144',
+        },
+        // 상태(hover/active) 시맨틱 — globals.css 토큰과 동기
+        'interactive-hover': 'var(--cds-interactive-hover)',
+        'interactive-active': 'var(--cds-interactive-active)',
+        'danger-hover': 'var(--cds-danger-hover)',
+        'danger-active': 'var(--cds-danger-active)',
+        // diff 표면 (추가/삭제 행)
+        diff: {
+          'add-bg': 'var(--diff-add-bg)',
+          'add-text': 'var(--diff-add-text)',
+          'add-accent': 'var(--diff-add-accent)',
+          'remove-bg': 'var(--diff-remove-bg)',
+          'remove-text': 'var(--diff-remove-text)',
+          'remove-accent': 'var(--diff-remove-accent)',
+        },
+        // Brand shell (titlebar + icon rail) — globals.css :root 정의와 동기
+        shell: {
+          DEFAULT: 'var(--rice-shell)',
+          border: 'var(--rice-shell-border)',
+          muted: 'var(--rice-shell-muted)',
         },
         // Domain accents (globals.css :root 정의와 동기)
         accent: {
@@ -153,19 +211,18 @@ export default {
       },
       boxShadow: {
         // Elevation scale tuned for dark surfaces:
-        // soft ambient shadow + 1px top inner highlight for edge definition
+        // soft ambient shadow + 1px top inner highlight for edge definition.
+        // 규율: 평면 카드에는 그림자 없음(border가 형태) — 그림자는 떠 있는
+        // 표면(popover=2, modal/drawer/toast=3)에만 쓴다.
         'elevation-1': '0 1px 2px rgba(0, 0, 0, 0.32), 0 1px 4px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.04)',
         'elevation-2': '0 2px 4px rgba(0, 0, 0, 0.32), 0 4px 12px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.05)',
         'elevation-3': '0 4px 8px rgba(0, 0, 0, 0.36), 0 8px 24px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.06)',
-        'overlay': '0 12px 32px rgba(0, 0, 0, 0.45), 0 24px 64px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.07)',
-        'glow-interactive': '0 0 0 1px var(--cds-interactive), 0 4px 16px rgba(15, 98, 254, 0.35)',
-        // 대형 CTA용 은은한 글로우 — 링 없이 색광만 (도메인별)
-        'glow-blue': '0 4px 18px rgba(69, 137, 255, 0.2)',
-        'glow-plugin': '0 4px 18px rgba(165, 110, 255, 0.22)',
-        'glow-connector': '0 4px 18px rgba(8, 189, 186, 0.18)',
       },
       fontSize: {
         // IBM Carbon type scale
+        // label-micro: Carbon 스케일(최소 12px) 아래 유일한 공식 마이크로 단계.
+        // 배지·Kbd·그룹라벨 전용 — 이 외 9~11.5px 임의값 금지.
+        'label-micro': ['0.6875rem', { lineHeight: '0.875rem', letterSpacing: '0.32px' }],
         'caption-01': ['0.75rem', { lineHeight: '1rem', letterSpacing: '0.32px' }],
         'caption-02': ['0.875rem', { lineHeight: '1.125rem', letterSpacing: '0.32px' }],
         'label-01': ['0.75rem', { lineHeight: '1rem', letterSpacing: '0.32px' }],

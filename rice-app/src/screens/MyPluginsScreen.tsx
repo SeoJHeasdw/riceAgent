@@ -68,10 +68,8 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
       {/* header */}
       <div className="px-7 pt-6 pb-5 border-b border-border-subtle-01">
         <div className="flex items-start gap-3.5">
-          <div
-            className={`w-11 h-11 flex-shrink-0 flex items-center justify-center rounded-lg ${plugin.enabled ? 'bg-blue-60' : 'bg-layer-03'}`}
-          >
-            <Icon name={plugin.icon} size={22} className="text-white" />
+          <div className="w-11 h-11 flex-shrink-0 flex items-center justify-center rounded-lg bg-layer-02 border border-border-subtle-02">
+            <Icon name={plugin.icon} size={22} className={plugin.enabled ? 'text-icon-primary' : 'text-icon-secondary'} />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
@@ -178,7 +176,7 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5">
                         <span className="text-body-short-01 font-semibold text-text-primary">{s.name}</span>
-                        <span className="text-[10px] font-mono text-text-helper border border-border-subtle-01 rounded px-1 py-px">
+                        <span className="text-label-micro font-mono text-text-helper border border-border-subtle-01 rounded px-1 py-px">
                           /{s.name.replace(/\s+/g, '')}
                         </span>
                       </div>
@@ -340,18 +338,15 @@ function MyPluginsScreen() {
         style={{ width: railPanel.width }}
       >
         <div className="p-4">
-          <div className="relative overflow-hidden rounded-2xl gradient-plugin p-4 text-white shadow-glow-plugin">
-            <div className="absolute -top-8 -right-8 w-28 h-28 rounded-full bg-white/10 blur-2xl" aria-hidden="true" />
-            <div className="relative">
-              <div className="text-caption-01 text-white/85 mb-1">설치된 플러그인</div>
-              <div className="text-[28px] font-light leading-none">
-                {myPlugins.length}
-                <span className="text-body-short-01 ml-1">개</span>
-              </div>
-              <div className="text-caption-01 text-white/85 mt-1.5 flex gap-3">
-                <span>{active} 활성</span>
-                {updateCount > 0 && <span>{updateCount} 업데이트</span>}
-              </div>
+          <div className="rounded-xl bg-layer-01 border border-border-subtle-01 p-4">
+            <div className="text-caption-01 text-text-helper mb-1">설치된 플러그인</div>
+            <div className="text-heading-03 font-semibold text-text-primary leading-none tabular-nums">
+              {myPlugins.length}
+              <span className="text-body-short-01 font-normal text-text-helper ml-1">개</span>
+            </div>
+            <div className="text-caption-01 text-text-secondary mt-1.5 flex gap-3">
+              <span>{active} 활성</span>
+              {updateCount > 0 && <span>{updateCount} 업데이트</span>}
             </div>
           </div>
         </div>
@@ -373,7 +368,7 @@ function MyPluginsScreen() {
               >
                 {c}
                 {badge && (
-                  <span className="ml-auto inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 rounded-full bg-blue-60 text-white text-[11px]">
+                  <span className="ml-auto inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 rounded-full bg-blue-60 text-white text-label-micro">
                     {badge}
                   </span>
                 )}

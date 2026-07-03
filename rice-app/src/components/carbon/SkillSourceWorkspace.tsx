@@ -108,14 +108,14 @@ export const SkillSourceWorkspace: React.FC<{
           indent ? 'pl-7' : 'pl-2.5'
         } ${
           on
-            ? 'bg-[#0f62fe]/15 text-text-primary font-semibold'
+            ? 'bg-layer-selected-01 text-text-primary font-semibold'
             : 'text-text-secondary hover:bg-layer-hover-01 hover:text-text-primary'
         }`}
       >
         <FileTypeIcon path={file.path} size={16} />
         <span className="truncate flex-1 min-w-0">{base}</span>
         {isEntry && (
-          <span className="text-[10px] font-medium text-link-primary bg-[#0f62fe]/12 rounded px-1 py-px flex-shrink-0">정의</span>
+          <span className="text-label-micro font-medium text-link-primary bg-layer-02 rounded px-1 py-px flex-shrink-0">정의</span>
         )}
       </button>
     );
@@ -153,7 +153,7 @@ export const SkillSourceWorkspace: React.FC<{
           onClick={() => active && onEdit(active.path)}
           disabled={!active}
           title={active ? `${active.path.split('/').pop()} 편집` : '편집'}
-          className="electron-no-drag inline-flex items-center gap-1.5 h-8 pl-2.5 pr-3 rounded-lg text-body-short-01 font-semibold bg-interactive text-text-on-color hover:bg-[#0353e9] transition-colors flex-shrink-0 disabled:opacity-40 max-w-[260px]"
+          className="electron-no-drag inline-flex items-center gap-1.5 h-8 pl-2.5 pr-3 rounded-lg text-body-short-01 font-semibold bg-interactive text-text-on-color hover:bg-interactive-hover transition-colors flex-shrink-0 disabled:opacity-40 max-w-[260px]"
         >
           <Icon name="edit" size={14} className="flex-shrink-0" />
           <span className="truncate">{active ? `${active.path.split('/').pop()} 편집` : '편집'}</span>
@@ -163,7 +163,7 @@ export const SkillSourceWorkspace: React.FC<{
 
       {/* synthesized notice (learned skills have no real files) */}
       {synthesized && (
-        <div className="flex-shrink-0 flex items-center gap-2 px-5 py-2 bg-[#0f62fe]/8 border-b border-border-subtle-01">
+        <div className="flex-shrink-0 flex items-center gap-2 px-5 py-2 bg-interactive/8 border-b border-border-subtle-01">
           <Icon name="idea" size={14} className="text-icon-primary flex-shrink-0" />
           <span className="text-caption-01 text-text-secondary">
             이 스킬은 대화로 학습돼 <span className="text-text-primary font-semibold">정의가 자동 구성</span>됐어요. 규칙·단계는 학습 뷰에서, 또는 위 <span className="font-semibold">편집</span>으로 다듬을 수 있어요.

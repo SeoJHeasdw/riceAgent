@@ -11,11 +11,15 @@
 
 /** 다이얼로그 뒤 어두운 backdrop — 클릭 시 닫힘은 호출부에서 핸들러로. */
 export const dialogBackdropCls =
-  'absolute inset-0 bg-black/60 backdrop-blur-sm animate-fade-in';
+  'absolute inset-0 bg-black/50 backdrop-blur-sm animate-fade-in';
 
-/** 다이얼로그 본체 표면 — layer-01 카드 위에 떠 있는 깊은 그림자 + 라운드. */
+/**
+ * 다이얼로그 본체 표면.
+ * radius는 rounded-xl(12px)로 고정 — 데스크톱 모달은 카드(rounded-xl)와 같은
+ * 라운드 문법을 쓰고, 그림자는 overlay 표면에만 허용되는 elevation-3 한 단계.
+ */
 export const dialogSurfaceCls =
-  'bg-layer-01 border border-border-subtle-01 rounded-2xl shadow-overlay animate-scale-in';
+  'bg-layer-01 border border-border-subtle-01 rounded-xl shadow-elevation-3 animate-scale-in';
 
 /**
  * 토스트용 밝은 elevated 글래스 표면.

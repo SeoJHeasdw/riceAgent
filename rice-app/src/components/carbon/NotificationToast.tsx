@@ -116,7 +116,7 @@ export const NotificationToast: React.FC<NotificationToastProps> = ({
         className={`
           relative flex items-center gap-3.5
           min-w-[300px] max-w-[460px]
-          rounded-2xl px-4 py-3
+          rounded-xl px-4 py-3
           ring-1 ${config.ring}
           ${floatingSurfaceCls}
         `}

@@ -77,28 +77,22 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
       <div onClick={onClose} className={dialogBackdropCls} />
 
       {/* Modal */}
-      <div className={`relative ${isSkill ? 'w-[860px]' : 'w-[680px]'} max-w-full max-h-[85vh] bg-layer-01 border border-border-subtle-01 rounded-2xl z-[61] shadow-overlay animate-scale-in overflow-hidden flex flex-col`}>
+      <div className={`relative ${isSkill ? 'w-[860px]' : 'w-[680px]'} max-w-full max-h-[85vh] bg-layer-01 border border-border-subtle-01 rounded-xl z-[61] shadow-elevation-3 animate-scale-in overflow-hidden flex flex-col`}>
         {/* Header */}
-        <div className="flex items-start gap-3.5 px-5 py-5 border-b border-border-subtle-01 flex-shrink-0">
-          <div className="relative flex-shrink-0">
-            <div
-              className={`absolute inset-0 rounded-xl blur-md ${isSkill ? 'bg-interactive/25' : 'bg-[#8a3ffc]/25'}`}
-              aria-hidden="true"
-            />
-            <div
-              className={`relative w-11 h-11 flex items-center justify-center rounded-xl ring-1 ring-white/10 shadow-elevation-1 bg-gradient-to-br ${
-                isSkill ? 'from-[#4589ff] to-[#0043ce]' : 'from-[#8a3ffc] to-[#6929c4]'
-              }`}
-            >
-              {isSkill ? (
-                <Icon name="skill" size={22} className="text-white" />
-              ) : (
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round">
-                  <circle cx="12" cy="12" r="9" />
-                  <circle cx="12" cy="12" r="3.5" />
-                </svg>
-              )}
-            </div>
+        <div className="flex items-start gap-3.5 px-5 py-4 border-b border-border-subtle-01 flex-shrink-0">
+          <div
+            className={`flex-shrink-0 w-11 h-11 flex items-center justify-center rounded-lg bg-layer-02 border border-border-subtle-02 ${
+              isSkill ? 'text-blue-50' : 'text-purple-50'
+            }`}
+          >
+            {isSkill ? (
+              <Icon name="skill" size={22} />
+            ) : (
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                <circle cx="12" cy="12" r="9" />
+                <circle cx="12" cy="12" r="3.5" />
+              </svg>
+            )}
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1">
@@ -212,7 +206,7 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
               {/* Slim composition summary — counts at a glance */}
               <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 mb-4.5">
                 {[
-                  { label: '스킬', value: plugin.skills?.length ?? plugin.skillCount, accent: 'text-[#a56eff]' },
+                  { label: '스킬', value: plugin.skills?.length ?? plugin.skillCount, accent: 'text-purple-50' },
                   { label: '커넥터', value: plugin.connectors?.length ?? 0, accent: 'text-interactive' },
                   { label: '지식', value: plugin.knowledge?.length ?? 0, accent: 'text-support-success' },
                 ].map((s) => (
@@ -252,9 +246,9 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
                   <div className="flex flex-col gap-px bg-border-subtle-01 rounded-xl overflow-hidden">
                     {plugin.skills.map((s) => (
                       <div key={s.command} className="flex items-start gap-2.5 bg-background px-3.5 py-2.5">
-                        <Icon name="skill" size={16} className="flex-shrink-0 mt-1 text-[#a56eff]" />
+                        <Icon name="skill" size={16} className="flex-shrink-0 mt-1 text-purple-50" />
                         <div className="flex-1 min-w-0">
-                          <code className="inline-block font-mono text-[13px] font-semibold text-[#c4a7ff] bg-[#8a3ffc]/12 rounded-md px-1.5 py-0.5">
+                          <code className="inline-block font-mono text-body-short-01 font-semibold text-purple-40 bg-purple-60/12 rounded-md px-1.5 py-0.5">
                             /{s.command}
                           </code>
                           <div className="text-caption-01 text-text-helper mt-1">{s.desc}</div>

@@ -423,7 +423,7 @@ const VersionChipMenu: React.FC<{
                     <button
                       onClick={() => { onSwitch(v); setOpen(false); }}
                       title={`${v.ver}(으)로 전환`}
-                      className="group/sw flex-shrink-0 inline-flex items-center gap-1 text-caption-01 font-semibold text-support-error border border-support-error/50 rounded px-2 py-1 hover:bg-support-error hover:text-white hover:border-support-error active:scale-[0.97] transition-colors"
+                      className="group/sw flex-shrink-0 inline-flex items-center gap-1 text-caption-01 font-semibold text-support-error border border-support-error/50 rounded px-2 py-1 hover:bg-support-error hover:text-white hover:border-support-error transition-colors"
                     >
                       <Icon name="renew" size={12} className="transition-transform group-hover/sw:rotate-180" /> 전환
                     </button>
@@ -750,10 +750,10 @@ const SourceLauncher: React.FC<{ skill: Skill; detail: SkillDetail; onOpen: () =
     <button
       onClick={onOpen}
       title="이 스킬의 파일(SKILL.md·scripts…)을 전체 화면으로 보기"
-      className="group relative flex items-center gap-3 rounded-xl border border-border-subtle-01 bg-gradient-to-br from-layer-01 to-layer-02 pl-3 pr-3.5 py-2.5 hover:border-link-primary/60 hover:shadow-elevation-2 active:scale-[0.99] transition-all flex-shrink-0"
+      className="group relative flex items-center gap-3 rounded-xl border border-border-subtle-01 bg-layer-01 pl-3 pr-3.5 py-2.5 hover:border-border-strong-01 transition-colors flex-shrink-0"
     >
-      <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-[#0f62fe] to-[#0043ce] flex items-center justify-center flex-shrink-0 shadow-elevation-1">
-        <Icon name="terminal" size={18} className="text-white" />
+      <div className="w-9 h-9 rounded-lg bg-layer-02 border border-border-subtle-02 flex items-center justify-center flex-shrink-0 text-blue-50">
+        <Icon name="terminal" size={18} />
       </div>
       <div className="text-left">
         <div className="flex items-center gap-1 text-body-short-01 font-semibold text-text-primary">
@@ -761,7 +761,7 @@ const SourceLauncher: React.FC<{ skill: Skill; detail: SkillDetail; onOpen: () =
           <Icon
             name="arrow-up-right"
             size={13}
-            className="text-link-primary opacity-70 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform"
+            className="text-link-primary opacity-70 group-hover:opacity-100 transition-opacity"
           />
         </div>
         <div className="text-caption-01 text-text-helper">
@@ -942,10 +942,8 @@ const SkillDetailView: React.FC<{
       {/* header */}
       <div className="flex-shrink-0 px-7 pt-6 pb-5 border-b border-border-subtle-01">
         <div className="flex items-start gap-3.5">
-          <div
-            className={`w-11 h-11 flex-shrink-0 flex items-center justify-center rounded-lg ${isInjected(skillStatus(skill)) ? 'bg-blue-60' : 'bg-layer-03'}`}
-          >
-            <Icon name="skill" size={22} className="text-white" />
+          <div className="w-11 h-11 flex-shrink-0 flex items-center justify-center rounded-lg bg-layer-02 border border-border-subtle-02">
+            <Icon name="skill" size={22} className={isInjected(skillStatus(skill)) ? 'text-icon-primary' : 'text-icon-secondary'} />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
@@ -987,7 +985,7 @@ const SkillDetailView: React.FC<{
       </div>
 
       {/* scrollable body — 학습 섹션 (소스는 풀스크린 워크스페이스로 분리) */}
-      <div className="flex-1 min-w-0 overflow-y-auto px-7 pt-5 pb-8 flex flex-col gap-7">
+      <div className="flex-1 min-w-0 overflow-y-auto px-7 pt-5 pb-10 flex flex-col gap-7">
         {/* performance card — 성공률·효율·절감 한눈에 */}
         {detail.health && <HealthCard health={detail.health} uses={skill.uses} />}
 
@@ -1010,7 +1008,7 @@ const SkillDetailView: React.FC<{
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <span className="text-caption-01 font-mono text-text-helper">{i + 1}</span>
                       <span className="text-body-short-01 font-semibold text-text-primary">{st.label}</span>
-                      <span className="text-[10px] font-mono text-text-helper border border-border-subtle-01 rounded px-1 py-px">
+                      <span className="text-label-micro font-mono text-text-helper border border-border-subtle-01 rounded px-1 py-px">
                         {st.tool}
                       </span>
                     </div>
@@ -1087,7 +1085,7 @@ const SkillDetailView: React.FC<{
               <div key={v.ver} className="flex gap-3">
                 <div className="flex flex-col items-center flex-shrink-0">
                   <div
-                    className={`w-2.5 h-2.5 rounded-full mt-3.5 ${v.current ? 'bg-blue-50 ring-[3px] ring-[#001141]' : 'bg-layer-03'}`}
+                    className={`w-2.5 h-2.5 rounded-full mt-3.5 ${v.current ? 'bg-blue-50 ring-[3px] ring-blue-100' : 'bg-layer-03'}`}
                   />
                   {i < detail.versions.length - 1 && <div className="w-px flex-1 min-h-[22px] bg-border-strong-01" />}
                 </div>
@@ -1199,7 +1197,7 @@ const SkillDetailView: React.FC<{
         {/* 편집 = 이 화면의 주 액션. 채팅 매개 patch로 안전하게 버전을 올린다. */}
         <button
           onClick={() => { setEditTarget(undefined); setEditOpen(true); }}
-          className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-lg text-body-short-01 font-semibold bg-interactive text-text-on-color hover:bg-[#0353e9] transition-colors"
+          className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-lg text-body-short-01 font-semibold bg-interactive text-text-on-color hover:bg-interactive-hover transition-colors"
         >
           <Icon name="edit" size={14} />
           이 스킬 편집
@@ -1463,15 +1461,19 @@ function MySkillsScreen() {
       >
         {/* 통계 카드 + "학습 효과" proof CTA — 숫자(현황)에서 정량 증명으로 자연히 이어지는 한 덩어리 */}
         <div className="p-4">
-          <div className="relative overflow-hidden rounded-2xl gradient-skill text-white shadow-glow-blue">
-            <div className="absolute -top-8 -right-8 w-28 h-28 rounded-full bg-white/10 blur-2xl" aria-hidden="true" />
-            <div className="relative p-4">
-              <div className="text-caption-01 text-white/85 mb-1">학습한 스킬</div>
-              <div className="text-[28px] font-light leading-none">
-                {skills.length}
-                <span className="text-body-short-01 ml-1">개</span>
+          <div className="overflow-hidden rounded-xl bg-layer-01 border border-border-subtle-01">
+            <div className="p-4">
+              <div className="flex items-center gap-1.5 mb-1">
+                <span className="text-caption-01 text-text-helper">학습한 스킬</span>
+                <span className="ai-label">
+                  <span className="ai-label__text">AI</span>
+                </span>
               </div>
-              <div className="text-caption-01 text-white/85 mt-1.5 flex gap-3">
+              <div className="text-heading-03 font-semibold text-text-primary leading-none tabular-nums">
+                {skills.length}
+                <span className="text-body-short-01 font-normal text-text-helper ml-1">개</span>
+              </div>
+              <div className="text-caption-01 text-text-secondary mt-1.5 flex gap-3">
                 <span>{active} 활성</span>
                 <span>{shared} 공유됨</span>
               </div>
@@ -1480,16 +1482,18 @@ function MySkillsScreen() {
             <button
               onClick={() => setShowImpact(true)}
               aria-pressed={showImpact}
-              className={`relative w-full flex items-center gap-2 px-4 py-2.5 border-t transition-colors ${
-                showImpact ? 'bg-white/20 border-white/25' : 'bg-white/[0.07] border-white/15 hover:bg-white/15'
+              className={`w-full flex items-center gap-2 px-4 py-2.5 border-t transition-colors ${
+                showImpact
+                  ? 'bg-layer-selected-01 border-border-subtle-01'
+                  : 'bg-layer-02/50 border-border-subtle-01 hover:bg-layer-hover-01'
               }`}
             >
-              <Icon name="growth" size={15} className="text-white flex-shrink-0" />
+              <Icon name="growth" size={15} className="text-icon-primary flex-shrink-0" />
               <div className="flex-1 min-w-0 text-left">
-                <div className="text-body-short-01 font-semibold text-white">학습 효과</div>
-                <div className="text-caption-01 text-white/70">cold→warm 정량 비교</div>
+                <div className="text-body-short-01 font-semibold text-text-primary">학습 효과</div>
+                <div className="text-caption-01 text-text-helper">cold→warm 정량 비교</div>
               </div>
-              <Icon name="arrow-right" size={14} className="text-white/70 flex-shrink-0" />
+              <Icon name="arrow-right" size={14} className="text-icon-secondary flex-shrink-0" />
             </button>
           </div>
         </div>

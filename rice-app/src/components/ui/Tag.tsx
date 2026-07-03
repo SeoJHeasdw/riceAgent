@@ -30,13 +30,13 @@ export const Tag: React.FC<TagProps> = ({
 
   // Carbon g100 (dark) tag palette: dark backgrounds, light text
   const typeStyles = {
-    blue: 'bg-[#002d9c] text-[#a6c8ff]',
-    green: 'bg-[#044317] text-[#6fdc8c]',
-    purple: 'bg-[#491d8b] text-[#d4bbff]',
+    blue: 'bg-interactive-active text-blue-30',
+    green: 'bg-green-80 text-green-30',
+    purple: 'bg-purple-80 text-purple-30',
     gray: 'bg-layer-02 text-text-secondary border border-border-subtle-02',
-    teal: 'bg-[#004144] text-[#3ddbd9]',
-    red: 'bg-[#750e13] text-[#ffb3b8]',
-    yellow: 'bg-[#684e00] text-[#fddc69]',
+    teal: 'bg-teal-80 text-teal-30',
+    red: 'bg-danger-active text-red-30',
+    yellow: 'bg-yellow-60 text-yellow-20',
     outline: 'bg-transparent text-text-primary border border-border-strong-01',
   };
 

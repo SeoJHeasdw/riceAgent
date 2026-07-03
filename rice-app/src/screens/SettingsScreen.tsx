@@ -51,7 +51,7 @@ const SettingsSection: React.FC<{
   icon: React.ReactNode;
   iconClass?: string;
   children: React.ReactNode;
-}> = ({ title, description, icon, iconClass = 'bg-[#0f62fe]/15 text-[#78a9ff]', children }) => (
+}> = ({ title, description, icon, iconClass = 'bg-interactive/15 text-blue-40', children }) => (
   <section>
     <div className="flex items-center gap-2.5 mb-1">
       <div
@@ -149,8 +149,7 @@ function SettingsScreen() {
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-[720px] mx-auto px-8 py-8 space-y-8">
           {/* About — hero card */}
-          <div className="relative overflow-hidden rounded-2xl gradient-brand p-5 text-white shadow-elevation-2">
-            <div className="absolute -top-10 -right-10 w-36 h-36 rounded-full bg-white/10 blur-2xl" aria-hidden="true" />
+          <div className="relative overflow-hidden rounded-xl gradient-brand p-5 text-white">
             <div className="relative flex items-center gap-4">
               <div
                 className="
@@ -182,7 +181,7 @@ function SettingsScreen() {
           <SettingsSection
             title={t.settings.appearance.title}
             description={t.settings.appearance.description}
-            iconClass="bg-[#8a3ffc]/15 text-[#d4bbff]"
+            iconClass="bg-purple-60/15 text-purple-30"
             icon={
               <SectionIcon>
                 <circle cx="12" cy="12" r="4" />
@@ -290,7 +289,7 @@ function SettingsScreen() {
           <SettingsSection
             title={t.settings.apiRuntime.title}
             description={t.settings.apiRuntime.description}
-            iconClass="bg-[#0f62fe]/15 text-[#78a9ff]"
+            iconClass="bg-interactive/15 text-blue-40"
             icon={
               <SectionIcon>
                 <rect x="2" y="2" width="20" height="8" rx="2" />
@@ -329,7 +328,7 @@ function SettingsScreen() {
           <SettingsSection
             title={t.settings.learningPrivacy.title}
             description={t.settings.learningPrivacy.description}
-            iconClass="bg-[#42be65]/15 text-[#6fdc8c]"
+            iconClass="bg-support-success/15 text-green-30"
             icon={
               <SectionIcon>
                 <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
@@ -365,7 +364,7 @@ function SettingsScreen() {
                 ? '처음 안내를 놓쳤거나 다시 보고 싶을 때 언제든 재실행할 수 있어요.'
                 : 'Replay the first-run guidance anytime you want to revisit it.'
             }
-            iconClass="bg-[#ff832b]/15 text-[#ffb784]"
+            iconClass="bg-orange-40/15 text-orange-30"
             icon={
               <SectionIcon>
                 <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
@@ -409,7 +408,7 @@ function SettingsScreen() {
           <SettingsSection
             title={t.settings.danger.title}
             description={t.settings.danger.description}
-            iconClass="bg-[#da1e28]/15 text-[#ff8389]"
+            iconClass="bg-red-60/15 text-red-40"
             icon={
               <SectionIcon>
                 <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />

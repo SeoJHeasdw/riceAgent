@@ -118,7 +118,7 @@ const SectionStep: React.FC<{ n: number; children: React.ReactNode; noMargin?: b
   noMargin,
 }) => (
   <div className={`flex items-center gap-2 ${noMargin ? '' : 'mb-1.5'}`}>
-    <span className="flex-shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full bg-interactive text-text-on-color text-[11px] font-semibold">
+    <span className="flex-shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full bg-interactive text-text-on-color text-label-micro font-semibold">
       {n}
     </span>
     <label className="text-label-01 text-text-secondary">{children}</label>
@@ -292,7 +292,7 @@ export const McpRegisterModal: React.FC<McpRegisterModalProps> = ({ open, onClos
             등록
           </Button>
           {!canRegister && !registering && (
-            <div className="pointer-events-none absolute bottom-full right-0 mb-2 w-max max-w-[240px] px-2.5 py-1.5 rounded-md bg-text-primary text-text-inverse text-caption-01 shadow-overlay opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-150">
+            <div className="pointer-events-none absolute bottom-full right-0 mb-2 w-max max-w-[240px] px-2.5 py-1.5 rounded-md bg-text-primary text-text-inverse text-caption-01 shadow-elevation-2 opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-150">
               {rows.length === 0 ? 'MCP 서버 설정을 붙여넣거나 파일을 가져오세요' : "먼저 '연결 테스트'를 통과하세요"}
               <span className="absolute top-full right-4 -mt-px border-4 border-transparent border-t-text-primary" />
             </div>
@@ -304,12 +304,12 @@ export const McpRegisterModal: React.FC<McpRegisterModalProps> = ({ open, onClos
 
   return (
     <Modal open={open} onClose={() => { if (!busy) onClose(); }} title="로컬 MCP 서버 등록" size="md" footer={footer} compactFooter>
-      <div className="space-y-5">
+      <div className="space-y-4">
         {/* 실행 경고 — 로컬 MCP의 핵심 신뢰 모델 */}
-        <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg bg-[#da1e28]/10 border border-[#da1e28]/30">
-          <Icon name="warning" size={15} filled className="text-[#ff8389] flex-shrink-0 mt-0.5" />
+        <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg bg-red-60/10 border border-red-60/30">
+          <Icon name="warning" size={15} filled className="text-red-40 flex-shrink-0 mt-0.5" />
           <p className="text-caption-01 text-text-helper leading-relaxed">
-            로컬 MCP 서버는 <span className="text-[#ff8389] font-medium">내 컴퓨터에서 직접 코드를 실행</span>합니다.
+            로컬 MCP 서버는 <span className="text-red-40 font-medium">내 컴퓨터에서 직접 코드를 실행</span>합니다.
             신뢰할 수 있는 출처의 설정만 등록하세요.
           </p>
         </div>

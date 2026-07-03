@@ -30,7 +30,7 @@ export const MarketplaceHeader: React.FC<MarketplaceHeaderProps> = ({
   onTagToggle,
 }) => {
   return (
-    <div className="px-8 pt-7 pb-0">
+    <div className="px-8 pt-6 pb-0">
       {/* Title and subtitle */}
       <div className="flex items-end gap-4 mb-1">
         {/* 페이지 타이틀 공통 문법: heading-04(28px) + font-light — HomeScreen 히어로와 동일 */}

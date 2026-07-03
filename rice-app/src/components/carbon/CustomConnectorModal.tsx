@@ -50,7 +50,7 @@ export interface CustomConnectorModalProps {
 type DiscoverState = 'idle' | 'checking' | 'done';
 
 const inputCls =
-  'w-full h-10 px-3.5 bg-field-01 text-text-primary font-mono text-body-short-01 border border-border-strong-01 rounded-lg outline-none transition-colors focus:border-focus focus:ring-1 focus:ring-focus placeholder:text-text-placeholder placeholder:font-sans';
+  'w-full h-9 px-3 bg-field-01 text-text-primary font-mono text-body-short-01 border border-border-strong-01 rounded-lg outline-none transition-colors focus:border-focus focus:ring-1 focus:ring-focus placeholder:text-text-placeholder placeholder:font-sans';
 
 export const CustomConnectorModal: React.FC<CustomConnectorModalProps> = ({ open, onClose, onDiscover, onAdd }) => {
   const [mcpEndpoint, setMcpEndpoint] = useState('');
@@ -149,7 +149,7 @@ export const CustomConnectorModal: React.FC<CustomConnectorModalProps> = ({ open
             추가하고 연결
           </Button>
           {!canAdd && !adding && (
-            <div className="pointer-events-none absolute bottom-full right-0 mb-2 w-max max-w-[240px] px-2.5 py-1.5 rounded-md bg-text-primary text-text-inverse text-caption-01 shadow-overlay opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-150">
+            <div className="pointer-events-none absolute bottom-full right-0 mb-2 w-max max-w-[240px] px-2.5 py-1.5 rounded-md bg-text-primary text-text-inverse text-caption-01 shadow-elevation-2 opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-150">
               이름과 authorize/token 엔드포인트가 필요해요 — 검사로 자동 채우거나 직접
               입력하세요
               <span className="absolute top-full right-4 -mt-px border-4 border-transparent border-t-text-primary" />
@@ -171,7 +171,7 @@ export const CustomConnectorModal: React.FC<CustomConnectorModalProps> = ({ open
       footer={footer}
       compactFooter
     >
-      <div className="space-y-5">
+      <div className="space-y-4">
         <p className="text-caption-01 text-text-helper leading-relaxed">
           OAuth 로 인증하는 원격 MCP 서버 URL 을 입력하면, authorize/token 엔드포인트와 client
           등록 가능 여부를 자동으로 찾아봐요. 표준을 따르지 않는 서버는 아래에서 직접 입력하면
@@ -210,14 +210,14 @@ export const CustomConnectorModal: React.FC<CustomConnectorModalProps> = ({ open
             className={`flex items-start gap-2.5 px-3 py-2.5 rounded-lg border ${
               discovered?.ok
                 ? 'bg-support-success/10 border-support-success/30'
-                : 'bg-[#f1c21b]/10 border-[#f1c21b]/30'
+                : 'bg-support-warning/10 border-support-warning/30'
             }`}
           >
             <Icon
               name={discovered?.ok ? 'check-circle' : 'warning'}
               size={15}
               filled
-              className={`flex-shrink-0 mt-0.5 ${discovered?.ok ? 'text-support-success' : 'text-[#d2a106]'}`}
+              className={`flex-shrink-0 mt-0.5 ${discovered?.ok ? 'text-support-success' : 'text-yellow-40'}`}
             />
             <p className="text-caption-01 text-text-helper leading-relaxed">
               {discovered?.ok

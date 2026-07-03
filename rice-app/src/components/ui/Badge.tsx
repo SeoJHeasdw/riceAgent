@@ -28,10 +28,10 @@ export const Badge: React.FC<BadgeProps> = ({
 
   const variantStyles = {
     default: 'bg-layer-02 text-text-primary',
-    info: 'bg-[#0f62fe] text-white',
-    success: 'bg-[#24a148] text-white',
-    warning: 'bg-[#f1c21b] text-[#000000]',
-    error: 'bg-[#da1e28] text-white',
+    info: 'bg-interactive text-white',
+    success: 'bg-green-50 text-white',
+    warning: 'bg-support-warning text-black',
+    error: 'bg-red-60 text-white',
   };
 
   const sizeStyles = {

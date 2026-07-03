@@ -30,8 +30,8 @@ export const ResizeHandle: React.FC<ResizeHandleProps> = ({
     <div
       className={`
         absolute inset-y-0 left-1/2 -translate-x-1/2 w-[3px] rounded-full
-        transition-colors duration-100
-        ${isResizing ? 'bg-[#0f62fe]' : 'bg-transparent group-hover:bg-[#0f62fe]/60'}
+        transition-colors duration-150
+        ${isResizing ? 'bg-interactive' : 'bg-transparent group-hover:bg-interactive/60'}
       `}
     />
   </div>

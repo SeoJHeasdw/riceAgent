@@ -87,13 +87,13 @@ export const Modal: React.FC<ModalProps> = ({
       >
         {/* Header */}
         {title && (
-          <div className="flex items-center justify-between px-5 py-3.5 border-b border-border-subtle-01">
-            <h2 id="modal-title" className="text-heading-02 text-text-primary font-sans font-semibold">
+          <div className="flex items-center justify-between px-5 py-3 border-b border-border-subtle-01">
+            <h2 id="modal-title" className="text-heading-01 text-text-primary font-sans font-semibold">
               {title}
             </h2>
             <button
               onClick={onClose}
-              className="flex items-center justify-center w-8 h-8 rounded-lg text-icon-secondary hover:text-icon-primary hover:bg-layer-hover-01 transition-colors"
+              className="flex items-center justify-center w-7 h-7 rounded-lg text-icon-secondary hover:text-icon-primary hover:bg-layer-hover-01 transition-colors"
               aria-label="Close modal"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -104,7 +104,7 @@ export const Modal: React.FC<ModalProps> = ({
         )}
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto px-5 py-5">
+        <div className="flex-1 overflow-y-auto px-5 py-4">
           {children}
         </div>
 
