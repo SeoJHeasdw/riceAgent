@@ -206,9 +206,9 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
               {/* Slim composition summary — counts at a glance */}
               <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 mb-4.5">
                 {[
-                  { label: '스킬', value: plugin.skills?.length ?? plugin.skillCount, accent: 'text-purple-50' },
-                  { label: '커넥터', value: plugin.connectors?.length ?? 0, accent: 'text-interactive' },
-                  { label: '지식', value: plugin.knowledge?.length ?? 0, accent: 'text-support-success' },
+                  { label: '스킬', value: plugin.skills?.length ?? plugin.skillCount, accent: 'text-blue-50' },
+                  { label: '커넥터', value: plugin.connectors?.length ?? 0, accent: 'text-teal-40' },
+                  { label: '지식', value: plugin.knowledge?.length ?? 0, accent: 'text-magenta-50' },
                 ].map((s) => (
                   <span key={s.label} className="inline-flex items-baseline gap-1.5">
                     <span className={`text-heading-02 font-semibold tabular-nums ${s.accent}`}>{s.value}</span>
@@ -246,9 +246,9 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
                   <div className="flex flex-col gap-px bg-border-subtle-01 rounded-xl overflow-hidden">
                     {plugin.skills.map((s) => (
                       <div key={s.command} className="flex items-start gap-2.5 bg-background px-3.5 py-2.5">
-                        <Icon name="skill" size={16} className="flex-shrink-0 mt-1 text-purple-50" />
+                        <Icon name="skill" size={16} className="flex-shrink-0 mt-1 text-blue-50" />
                         <div className="flex-1 min-w-0">
-                          <code className="inline-block font-mono text-body-short-01 font-semibold text-purple-40 bg-purple-60/12 rounded-md px-1.5 py-0.5">
+                          <code className="inline-block font-mono text-body-short-01 font-semibold text-blue-40 bg-blue-60/12 rounded-md px-1.5 py-0.5">
                             /{s.command}
                           </code>
                           <div className="text-caption-01 text-text-helper mt-1">{s.desc}</div>
@@ -271,7 +271,7 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
                   <div className="flex flex-col gap-px bg-border-subtle-01 rounded-xl overflow-hidden">
                     {plugin.connectors.map((c) => (
                       <div key={c.name} className="flex items-start gap-2.5 bg-background px-3.5 py-2.5">
-                        <Icon name="connect" size={16} className="flex-shrink-0 mt-0.5 text-interactive" />
+                        <Icon name="connect" size={16} className="flex-shrink-0 mt-0.5 text-teal-40" />
                         <div className="flex-1 min-w-0">
                           <div className="text-body-short-01 font-semibold text-text-primary">{c.name}</div>
                           {c.desc && <div className="text-caption-01 text-text-helper mt-0.5">{c.desc}</div>}
@@ -294,7 +294,7 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
                   <div className="flex flex-col gap-px bg-border-subtle-01 rounded-xl overflow-hidden">
                     {plugin.knowledge.map((k) => (
                       <div key={k.name} className="flex items-start gap-2.5 bg-background px-3.5 py-2.5">
-                        <Icon name="document" size={16} className="flex-shrink-0 mt-0.5 text-support-success" />
+                        <Icon name="document" size={16} className="flex-shrink-0 mt-0.5 text-magenta-50" />
                         <div className="flex-1 min-w-0">
                           <div className="text-body-short-01 font-semibold text-text-primary">{k.name}</div>
                           <div className="text-caption-01 text-text-helper mt-0.5">{k.desc}</div>

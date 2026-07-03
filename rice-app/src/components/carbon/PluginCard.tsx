@@ -42,9 +42,9 @@ export const PluginCard: React.FC<PluginCardProps> = ({
   const connectorCount = connectors?.length ?? 0;
   const knowledgeCount = knowledge?.length ?? 0;
   const composition = [
-    { n: skillCount, label: '스킬', accent: 'text-purple-50' },
-    { n: connectorCount, label: '커넥터', accent: 'text-interactive' },
-    { n: knowledgeCount, label: '지식', accent: 'text-support-success' },
+    { n: skillCount, label: '스킬', accent: 'text-blue-50' },
+    { n: connectorCount, label: '커넥터', accent: 'text-teal-40' },
+    { n: knowledgeCount, label: '지식', accent: 'text-magenta-50' },
   ].filter((c, i) => i === 0 || c.n > 0); // 스킬은 항상, 커넥터·지식은 있을 때만
   return (
     <Card
