@@ -63,6 +63,11 @@ class PrefetchResult:
 class MemoryWritten:
     memory_type: Literal["fact", "preference"]
     content: str
+    # 출처/격리. status='quarantined'면 UI가 "승인 대기"로 표시하고
+    # 주입되지 않는다. memory_id로 즉시 undo(DELETE)·승인(approve)이 가능하다.
+    status: Literal["active", "quarantined"] = "active"
+    memory_id: str | None = None
+    derived_from_external: bool = False
 
 
 @dataclass(frozen=True)
@@ -91,6 +96,11 @@ class PatchProposal:
     # approval card ("N개의 잠재적 민감정보가 자동으로 제거되었습니다"). Empty when
     # the guard found nothing to flag.
     warnings: tuple[str, ...] = ()
+    # Provenance: 이 제안이 외부 콘텐츠(Gmail/웹/도구 결과)가 섞인
+    # 대화에서 나왔는지 + 근거 메시지 id들. 승인 카드가 "외부 콘텐츠 포함 대화에서
+    # 생성됨" 경고를 띄워, 학습이 마술처럼 보이지 않고 감사 가능해진다.
+    derived_from_external: bool = False
+    evidence_message_ids: tuple[str, ...] = ()
 
 
 # An effect is either an immediate notification (memory) or a proposal that the
@@ -186,7 +196,7 @@ class ILearningService(Protocol):
         """Commit (or discard) a previously proposed patch — or brand-new skill
         (`from_version=0`, no skill exists yet under `skill_id`) — after HITL.
 
-        `expected_version` (optimistic concurrency, 출품 전 P0): the skill version
+        `expected_version` (optimistic concurrency): the skill version
         the proposal was authored against (PatchProposal.from_version). If given
         and it no longer matches the on-disk version, raises ConflictError (→ 409)
         instead of silently overwriting newer content with a stale proposal.
@@ -259,7 +269,7 @@ class ILearningService(Protocol):
         ...
 
     def record_context_renders(self, session_id: str, renders: list[dict]) -> None:
-        """턴의 매 LLM 호출 컨텍스트 렌더 감사 기록 (출품 전 P0). orchestrator가
+        """턴의 매 LLM 호출 컨텍스트 렌더 감사 기록. orchestrator가
         턴 종료 시 호출 — ledger에 `context_rendered` 이벤트 1건(호출별 스탯 리스트)
         으로 영속화해 "컨텍스트가 왜 이렇게 됐는가"(omitted/dropped message·tool_call
         ids, before/after tokens)를 GET /learning/events에서 설명할 수 있게 한다.
@@ -270,7 +280,7 @@ class ILearningService(Protocol):
     async def review(
         self, session_id: str, history: list[Message], tool_calls_made: int = 0
     ) -> list[LearningEffect]:
-        """Gated LLM review (Phase A.2/A.3; 서버 소유 잡 재구성 — 출품 전 P0).
+        """Gated LLM review (Phase A.2/A.3; 서버 소유 잡 재구성).
 
         Runs against the review job `observe()` persisted at turn end
         (learning_jobs): claims it atomically, so a duplicate/retried POST is a
@@ -359,4 +369,10 @@ class ILearningService(Protocol):
         """메모리 삭제 (DELETE /memories/{id}, Self-Improvement v3). 메모리는
         HITL 없이 즉시 반영되는 유일한 학습 경로라, 사후 제거 수단이 있어야
         '한 번 잘못 들어가면 매 턴 영구 주입'이 되지 않는다."""
+        ...
+
+    def approve_memory(self, memory_id: str) -> None:
+        """격리 메모리를 active로 승인 (POST /memories/{id}/approve)
+        외부 콘텐츠(도구 결과) 유래 메모리는 격리 상태로 저장돼 주입되지 않는데,
+        이 메서드로 승인하면 이후 prefetch가 주입한다."""
         ...

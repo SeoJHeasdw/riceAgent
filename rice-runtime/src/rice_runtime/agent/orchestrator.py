@@ -60,6 +60,7 @@ from ..core.types import (
     ev_done,
     ev_error,
 )
+from ..core.tokens import TokenCalibrator
 from ..execution.interfaces import IPluginLoader
 from ..learning.interfaces import ILearningService
 from ..prompts.system import compose_system_prompt, render_skills_block
@@ -89,6 +90,7 @@ class Orchestrator:
         transcript: ITranscript,
         builtins: dict[str, BuiltinTool] | None = None,
         builtin_specs: tuple[ToolSpec, ...] = (),
+        token_calibrator: TokenCalibrator | None = None,
     ) -> None:
         # `resolve_provider` is a thunk, not a captured instance, so a runtime
         # model switch (PUT /settings) takes effect next turn (C-1). Likewise
@@ -102,28 +104,53 @@ class Orchestrator:
         self._transcript = transcript
         self._builtins = builtins
         self._builtin_specs_catalog = builtin_specs
+        # 세션 전반에 걸쳐 토큰 추정을 실측으로 보정하는 싱글턴. None이면
+        # 순수 CJK 휴리스틱만 쓴다(테스트/오프라인).
+        self._token_calibrator = token_calibrator or TokenCalibrator()
         self._aborts: dict[str, asyncio.Event] = {}
+        # 세션별 진행 중 턴 락 — 같은 세션 동시 POST /messages 차단.
+        self._active: set[str] = set()
 
     # ── IAgent.run_turn ──────────────────────────────────────────────────────
     async def run_turn(self, session_id: str, user_message: str) -> AsyncIterator[SSEEvent]:
-        # 1. PERSIST user turn, then drive the turn over the (now-updated) history.
-        self._transcript.append(session_id, Message(role="user", content=user_message))
-        async for event in self._drive_turn(session_id, user_message):
-            yield event
+        # 세션 동시 턴 방어: 이미 이 세션에서 턴이 진행 중이면 두 번째
+        # POST /messages는 히스토리를 건드리기 전에 거절한다 — 두 스트림이 같은
+        # transcript를 교차 append하면 순서가 깨진다. 단일 이벤트 루프라 set
+        # 검사-추가 사이에 await가 없어 원자적이다.
+        if session_id in self._active:
+            yield ev_error("session_busy", "이 세션에서 이미 응답을 생성하고 있습니다. 잠시 후 다시 시도하세요.")
+            yield ev_done()
+            return
+        self._active.add(session_id)
+        try:
+            # 1. PERSIST user turn, then drive the turn over the (now-updated) history.
+            self._transcript.append(session_id, Message(role="user", content=user_message))
+            async for event in self._drive_turn(session_id, user_message):
+                yield event
+        finally:
+            self._active.discard(session_id)
 
     # ── IAgent.regenerate ─────────────────────────────────────────────────────
     async def regenerate(self, session_id: str) -> AsyncIterator[SSEEvent]:
         """Re-answer the last user message. The route already dropped the stale
         assistant turn (delete_after), so history ends with that user message —
         we drive a fresh turn on it WITHOUT re-persisting a duplicate user row."""
-        history = self._transcript.history(session_id)
-        last_user = next((m for m in reversed(history) if m.role == "user"), None)
-        if last_user is None:
-            yield ev_error("no_user_message", "재생성할 사용자 메시지가 없습니다.")
+        if session_id in self._active:
+            yield ev_error("session_busy", "이 세션에서 이미 응답을 생성하고 있습니다. 잠시 후 다시 시도하세요.")
             yield ev_done()
             return
-        async for event in self._drive_turn(session_id, last_user.content):
-            yield event
+        self._active.add(session_id)
+        try:
+            history = self._transcript.history(session_id)
+            last_user = next((m for m in reversed(history) if m.role == "user"), None)
+            if last_user is None:
+                yield ev_error("no_user_message", "재생성할 사용자 메시지가 없습니다.")
+                yield ev_done()
+                return
+            async for event in self._drive_turn(session_id, last_user.content):
+                yield event
+        finally:
+            self._active.discard(session_id)
 
     async def _drive_turn(self, session_id: str, user_message: str) -> AsyncIterator[SSEEvent]:
         """Steps 2–7 of a turn (prefetch → assemble → loop → persist → observe →
@@ -183,7 +210,10 @@ class Orchestrator:
                 provider=self._resolve_provider(),
                 dispatcher=dispatcher,
                 temperature=cfg.provider.temperature,
-                context_manager=ConversationContextManager(cfg.context),
+                context_manager=ConversationContextManager(
+                    cfg.context, estimate=self._token_calibrator.estimate
+                ),
+                token_calibrator=self._token_calibrator,
             )
             result = LoopResult()
             async for event in loop.run(ctx, session_id, result, abort):
@@ -195,7 +225,7 @@ class Orchestrator:
             for msg in result.history[len(base_history):]:
                 self._transcript.append(session_id, msg)
 
-            # 5b. AUDIT context renders (출품 전 P0) — 이 턴의 매 LLM 호출에서
+            # 5b. AUDIT context renders — 이 턴의 매 LLM 호출에서
             #     컨텍스트 매니저가 뭘 생략/삭제/증류했는지 ledger에 남긴다.
             #     "모델이 정확히 뭘 못 봤는가"를 제품적으로 설명 가능하게 하는 로그.
             if result.context_renders:

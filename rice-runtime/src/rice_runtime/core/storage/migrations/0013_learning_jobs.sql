@@ -1,4 +1,4 @@
--- 출품 전 P0 (2026-07-03): post-turn learning-review의 서버 소유 작업 큐.
+-- post-turn learning-review의 서버 소유 작업 큐.
 --
 -- 지금까지 /learning-review는 프론트가 메인 턴 SSE에서 tool_call 이벤트를 세어
 -- tool_calls_made를 다시 보내는 구조였다 — 이벤트 누락, 재시도(이중 리뷰), 탭

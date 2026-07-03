@@ -53,7 +53,7 @@ class ConsolidateDecisionIn(BaseModel):
     edited_body: str | None = None
     description: str = ""
     tags: list[str] = []
-    # Optimistic concurrency (출품 전 P0 후속, 적대 리뷰 Med#3): 제안이 만들어진
+    # Optimistic concurrency: 제안이 만들어진
     # 당시 버전(PatchProposal.from_version). 프론트가 들고 있던 제안을 반송할 때
     # 함께 보내면, 그 사이 스킬이 변경된 경우 409로 거절된다. None이면 구버전
     # 클라이언트 하위호환(검사 생략).

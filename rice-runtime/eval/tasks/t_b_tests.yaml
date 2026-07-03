@@ -1,5 +1,5 @@
 # Task T-B: 프로젝트 테스트 실행 (RICE_LEARNING_EVAL §4)
-# 출품 전 P0: 결정적 script — 스킬(run-tests)이 있으면 pytest 직행(1콜),
+# 결정적 script — 스킬(run-tests)이 있으면 pytest 직행(1콜),
 # 없으면 러너 추측(npm→unittest→pytest, 3콜).
 id: "T-B"
 title: "프로젝트 테스트 실행"

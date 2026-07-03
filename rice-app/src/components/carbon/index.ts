@@ -16,6 +16,8 @@ export type { PluginCardProps } from './PluginCard';
 
 export { LearningPanel } from './LearningPanel';
 export type { LearningPanelProps } from './LearningPanel';
+export { TransparencyPanel } from './TransparencyPanel';
+export type { TransparencyPanelProps } from './TransparencyPanel';
 
 export { ChatMessage, ChatTurn } from './ChatMessage';
 export type { ChatMessageProps, ChatTurnProps } from './ChatMessage';

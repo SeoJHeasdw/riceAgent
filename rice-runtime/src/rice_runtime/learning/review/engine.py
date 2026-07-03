@@ -45,13 +45,31 @@ from .context import LearningContextManager
 
 log = logging.getLogger("rice.learning.review")
 
-_CHARS_PER_TOKEN = 4  # LEARNING_LOOP §7과 동일 추정 — 정밀도 불필요
 _REVIEW_TEMPERATURE = 0.3  # titler.py와 동일 원칙: 구조화된 산출물은 낮은 변동성이 낫다
 _MAX_KNOWN_FACTS = 20
 
+# 외부 콘텐츠로 간주하는 도구 출처(메모리 오염 방지). connector(Gmail/
+# Calendar/Drive), plugin(설치된 플러그인 도구), bridge(progressive disclosure로
+# 접힌 connector/plugin 도구) — 모두 사용자 발화 밖의 데이터를 끌어온다. builtin
+# (파일/터미널/스킬)은 로컬이라 제외.
+_EXTERNAL_TOOL_SOURCES = frozenset({"connector", "plugin", "bridge"})
+
+
+def _external_evidence(history: Sequence[Message]) -> tuple[bool, tuple[str, ...]]:
+    """대화에 외부 콘텐츠(도구 결과)가 섞였는지 + 그 근거 메시지 id들을 반환한다.
+    loop가 tool 메시지에 심은 `tool_source` 메타데이터로 판단한다. 이 판단은 반드시
+    *원본* history에서 해야 한다 — 리뷰 렌더는 순수 텍스트라 메타데이터가 없다."""
+    ids: list[str] = []
+    for m in history:
+        if m.role == "tool" and m.metadata.get("tool_source") in _EXTERNAL_TOOL_SOURCES:
+            ids.append(m.id)
+    return (bool(ids), tuple(ids))
+
 
 def _estimate_tokens(text: str) -> int:
-    return max(1, len(text) // _CHARS_PER_TOKEN)
+    from ...core.tokens import estimate_tokens  # noqa: PLC0415
+
+    return estimate_tokens(text)
 
 
 class ReviewEngine:
@@ -83,7 +101,7 @@ class ReviewEngine:
         self._mem_store = mem_store
         self._catalog_budget = skill_catalog_token_budget
         self._max_body_chars = max_body_chars
-        # 리뷰 전용 컨텍스트 렌더러 (출품 전 P0): None(기존 테스트)이면 v3와 동일하게
+        # 리뷰 전용 컨텍스트 렌더러: None(기존 테스트)이면 v3와 동일하게
         # 히스토리를 그대로 넘긴다. 실배선(composition)은 항상 렌더러를 준다.
         self._context = context
         # Self-Improvement v3: ledger가 있으면 (1) 최근 거부 목록을 프롬프트에 실어
@@ -146,10 +164,14 @@ class ReviewEngine:
             # 구조화된 제안을 만들 수 없다(에코는 입력을 그대로 반사할 뿐).
             return []
 
+        # 외부 콘텐츠(도구 결과) 근거를 *원본* history에서 계산한다 — 렌더된
+        # 히스토리는 순수 텍스트라 tool_source 메타데이터가 사라진다.
+        external, evidence_ids = _external_evidence(history)
+
         full_body_skills, compact_skills, patchable_ids = self._build_catalog()
         known_facts = self._recent_fact_strings()
         kwargs = {} if instruction is None else {"instruction": instruction}
-        # 리뷰 전용 렌더 (출품 전 P0): 긴 세션에서도 호출이 bounded가 되고, 도구
+        # 리뷰 전용 렌더: 긴 세션에서도 호출이 bounded가 되고, 도구
         # 라운드는 순수 텍스트라 wire 규칙 위반이 구조적으로 불가능해진다.
         rendered_history = self._context.render(history) if self._context is not None else history
         _, messages = build_review_messages(
@@ -177,7 +199,7 @@ class ReviewEngine:
 
         effects: list[LearningEffect] = []
         for call in calls:
-            effect = self._to_effect(session_id, call)
+            effect = self._to_effect(session_id, call, external=external, evidence_ids=evidence_ids)
             if effect is None:
                 continue
             if isinstance(effect, PatchProposal):
@@ -230,18 +252,27 @@ class ReviewEngine:
     def _recent_fact_strings(self, limit: int = _MAX_KNOWN_FACTS) -> list[str]:
         return [m.content for m in self._mem_store.list()[:limit]]
 
-    def _to_effect(self, session_id: str, call: ToolCall) -> LearningEffect | None:
+    def _to_effect(
+        self,
+        session_id: str,
+        call: ToolCall,
+        *,
+        external: bool = False,
+        evidence_ids: tuple[str, ...] = (),
+    ) -> LearningEffect | None:
         args = call.arguments if isinstance(call.arguments, dict) else {}
         if call.tool_name == "propose_skill_create":
-            return self._skill_create_effect(args)
+            return self._skill_create_effect(args, external=external, evidence_ids=evidence_ids)
         if call.tool_name == "propose_skill_patch":
-            return self._skill_patch_effect(args)
+            return self._skill_patch_effect(args, external=external, evidence_ids=evidence_ids)
         if call.tool_name == "propose_memory_write":
-            return self._memory_effect(session_id, args)
+            return self._memory_effect(session_id, args, external=external, evidence_ids=evidence_ids)
         log.warning("review engine: unknown tool call %r", call.tool_name)
         return None
 
-    def _skill_create_effect(self, args: dict) -> PatchProposal | None:
+    def _skill_create_effect(
+        self, args: dict, *, external: bool = False, evidence_ids: tuple[str, ...] = ()
+    ) -> PatchProposal | None:
         name = str(args.get("name") or "").strip()
         body = str(args.get("body") or "")
         if not name or not body.strip():
@@ -261,9 +292,13 @@ class ReviewEngine:
             tags=tuple(str(t) for t in (args.get("tags") or ())),
             trigger="T4",
             max_body_chars=self._max_body_chars,
+            derived_from_external=external,
+            evidence_message_ids=evidence_ids,
         )
 
-    def _skill_patch_effect(self, args: dict) -> PatchProposal | None:
+    def _skill_patch_effect(
+        self, args: dict, *, external: bool = False, evidence_ids: tuple[str, ...] = ()
+    ) -> PatchProposal | None:
         skill_id = str(args.get("skill_id") or "").strip()
         new_body = str(args.get("new_body") or "")
         changelog = str(args.get("changelog") or "review 제안")
@@ -284,14 +319,18 @@ class ReviewEngine:
             changelog=changelog,
             trigger=trigger,  # type: ignore[arg-type]
             max_body_chars=self._max_body_chars,
+            derived_from_external=external,
+            evidence_message_ids=evidence_ids,
         )
 
-    def _memory_effect(self, session_id: str, args: dict) -> MemoryWritten | None:
+    def _memory_effect(
+        self, session_id: str, args: dict, *, external: bool = False, evidence_ids: tuple[str, ...] = ()
+    ) -> MemoryWritten | None:
         kind = args.get("kind")
         content = str(args.get("content") or "").strip()
         if kind not in ("fact", "preference") or not content:
             return None
-        # Learning safety scanner (출품 전 P0): 메모리는 HITL 없이 매 턴 시스템
+        # Learning safety scanner: 메모리는 HITL 없이 매 턴 시스템
         # 프롬프트에 재주입되는 유일한 경로다 — 위험 플래그(주입/exfil/파괴 명령)가
         # 하나라도 있으면 카드에 물어볼 기회조차 없으므로 저장 자체를 거부한다
         # (fail-closed). 스킬 경로는 같은 스캐너 결과를 warnings로 카드에 싣는다.
@@ -306,12 +345,30 @@ class ReviewEngine:
                     detail={"kind": kind, "risks": risks, "content": content[:120]},
                 )
             return None
+        # 외부 콘텐츠(도구 결과)가 섞인 턴에서 나온 메모리는 격리(quarantined)로
+        # 저장 — "그럴듯한 거짓 사실"을 정규식은 못 잡으므로, 즉시 주입 대신 사용자
+        # 승인을 기다린다. 순수 대화 유래 메모리만 즉시 active.
         try:
-            self._mem_store.add(kind, content, source_session_id=session_id)
+            item = self._mem_store.add(
+                kind,
+                content,
+                source_session_id=session_id,
+                derived_from_external=external,
+                source_message_ids=evidence_ids,
+            )
         except Exception:
             return None
         if self._ledger is not None:
             self._ledger.record(
-                "memory_written", session_id=session_id, origin="review", detail={"kind": kind, "content": content[:120]}
+                "memory_quarantined" if item.status == "quarantined" else "memory_written",
+                session_id=session_id,
+                origin="review",
+                detail={"kind": kind, "content": content[:120], "memory_id": item.id, "status": item.status},
             )
-        return MemoryWritten(memory_type=kind, content=content)  # type: ignore[arg-type]
+        return MemoryWritten(
+            memory_type=kind,  # type: ignore[arg-type]
+            content=content,
+            status=item.status,
+            memory_id=item.id,
+            derived_from_external=external,
+        )

@@ -33,6 +33,7 @@ from ..core.errors import ProviderError
 from ..core.events import EventBus
 from ..core.paths import RicePaths
 from ..core.storage.sqlite import Database
+from ..core.tokens import TokenCalibrator
 from ..execution.interfaces import IPluginLoader
 from ..execution.service import ChildProcessSandbox, PluginLoaderService
 from ..learning.interfaces import ILearningService
@@ -62,6 +63,7 @@ class Container:
     resolve_provider: Callable[[], ILLMProvider]
     agent: IAgent
     titler: ISessionTitler
+    token_calibrator: TokenCalibrator
 
     @property
     def config(self) -> Config:
@@ -79,7 +81,7 @@ def build_container(
     paths: RicePaths | None = None,
     resolve_provider_override: Callable[[], ILLMProvider] | None = None,
 ) -> Container:
-    """`resolve_provider_override` (출품 전 P0, eval 하네스용): 주어지면 registry
+    """`resolve_provider_override` (eval 하네스용): 주어지면 registry
     대신 이 thunk가 메인 루프/learning의 provider가 된다 — eval이 결정적
     ScriptedToolProvider를 꽂아 "스킬 유무에 따라 다른 tool sequence"를 재현하는
     유일한 통로다. 프로덕션 경로에서는 절대 넘기지 않는다(titler는 영향 없음)."""
@@ -146,11 +148,16 @@ def build_container(
     # ── builtin tools (in-process; advertised to the LLM + dispatched directly) ─
     # learning을 넘겨 propose_skill(미드턴 스킬 승격, Self-Improvement v3)을 함께
     # 등록한다 — 도구는 스테이징만 하고 쓰기는 여전히 HITL 카드 승인 뒤에만 일어난다.
+    # 토큰 추정 캘리브레이터 — 메인 루프·서브에이전트가 공유하는
+    # 싱글턴. 실측 usage로 CJK 예산 추정을 세션 전반에 걸쳐 보정한다.
+    token_calibrator = TokenCalibrator()
+
     subagents = SubAgentRunner(
         resolve_provider=resolve_provider,
         transcript=sessions,
         learning_config=lambda: config_store.config.learning,
         context_config=lambda: config_store.config.context,
+        token_calibrator=token_calibrator,
     )
     builtin_specs, builtins = build_builtin_tools(paths, learning=learning, subagents=subagents)
 
@@ -196,6 +203,7 @@ def build_container(
         transcript=sessions,
         builtins=builtins,
         builtin_specs=builtin_specs,
+        token_calibrator=token_calibrator,
     )
 
     return Container(
@@ -213,4 +221,5 @@ def build_container(
         resolve_provider=resolve_provider,
         agent=agent,
         titler=titler,
+        token_calibrator=token_calibrator,
     )

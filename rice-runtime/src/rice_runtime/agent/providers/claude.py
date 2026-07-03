@@ -146,6 +146,10 @@ class ClaudeProvider(ILLMProvider):
         # Anthropic streams stop_reason on the `message_delta` event, NOT on
         # `message_stop` — capture it there and emit on stop (RUNTIME_DESIGN §6).
         final_stop_reason: str | None = None
+        # Usage: input_tokens arrives on `message_start`, output_tokens accrues on
+        # `message_delta`. Emitted on the done chunk → TokenCalibrator.
+        input_tokens: int | None = None
+        output_tokens: int | None = None
         yielded_done = False
 
         try:
@@ -159,6 +163,11 @@ class ClaudeProvider(ILLMProvider):
             ) as stream:
                 async for event in stream:
                     event_type = getattr(event, "type", None)
+                    if event_type == "message_start":
+                        usage = getattr(getattr(event, "message", None), "usage", None)
+                        if usage is not None:
+                            input_tokens = getattr(usage, "input_tokens", None)
+                            output_tokens = getattr(usage, "output_tokens", None) or output_tokens
                     if event_type == "content_block_start":
                         block = event.content_block
                         if getattr(block, "type", None) == "tool_use":
@@ -200,8 +209,16 @@ class ClaudeProvider(ILLMProvider):
                         stop_reason = getattr(getattr(event, "delta", None), "stop_reason", None)
                         if stop_reason:
                             final_stop_reason = stop_reason
+                        usage = getattr(event, "usage", None)
+                        if usage is not None and getattr(usage, "output_tokens", None):
+                            output_tokens = usage.output_tokens
                     elif event_type == "message_stop":
-                        yield ProviderChunk(kind="done", stop_reason=_map_stop_reason(final_stop_reason))
+                        yield ProviderChunk(
+                            kind="done",
+                            stop_reason=_map_stop_reason(final_stop_reason),
+                            input_tokens=input_tokens,
+                            output_tokens=output_tokens,
+                        )
                         yielded_done = True
         except ProviderError:
             raise

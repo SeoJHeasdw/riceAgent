@@ -1,4 +1,4 @@
-"""learning/review/context.py — 리뷰 전용 컨텍스트 매니저 (출품 전 P0, 2026-07-03).
+"""learning/review/context.py — 리뷰 전용 컨텍스트 매니저.
 
 WHY THIS FILE EXISTS
 --------------------
@@ -30,11 +30,13 @@ from typing import Sequence
 
 from ...core.types import Message
 
-_CHARS_PER_TOKEN = 4  # engine.py/LEARNING_LOOP §7과 동일 추정
+_CHARS_PER_TOKEN = 4  # _clip의 char 상한 환산용(추정과 무관)
 
 
 def _estimate_tokens(text: str) -> int:
-    return max(1, len(text) // _CHARS_PER_TOKEN) if text else 0
+    from ...core.tokens import estimate_tokens  # noqa: PLC0415
+
+    return estimate_tokens(text)
 
 
 def _one_line(text: str) -> str:

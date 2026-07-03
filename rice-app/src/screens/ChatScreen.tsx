@@ -10,7 +10,7 @@ import { defaultModelSettings } from '../lib/mockData';
 import { RUN_SKILL_EVENT, NEW_CHAT_EVENT } from '../lib/commandBridge';
 import { api } from '../lib/api';
 import { sseClient } from '../lib/sse';
-import type { PatchTrigger, PendingApproval, ToolApprovalRequiredData, SkillPatchProposedData, SSEEvent } from '../lib/types';
+import type { PatchTrigger, PendingApproval, ToolApprovalRequiredData, SkillPatchProposedData, MemoryWrittenEventData, SSEEvent } from '../lib/types';
 import { Icon, Kbd, ResizeHandle, ConfirmDialog, Tooltip } from '../components/ui';
 import type { IconName } from '../components/ui/Icon';
 import { FileViewerProvider } from '../lib/fileViewer/FileViewerProvider';
@@ -1009,7 +1009,21 @@ function ChatScreen() {
   // memory_written / skill_patch_proposed / skill_patched 렌더링 — 메인 턴 스트림과
   // /learning-review·/learn 스트림(Phase A) 양쪽에서 재사용한다. 어느 스트림에서
   // 왔든 렌더링 로직은 동일해야 한다(같은 SSE 이벤트 어휘를 공유).
-  const handleMemoryWritten = (d: { memory_type: 'fact' | 'preference'; content: string }) => {
+  const handleMemoryWritten = (d: {
+    memory_type: 'fact' | 'preference';
+    content: string;
+    status?: 'active' | 'quarantined';
+    derived_from_external?: boolean;
+  }) => {
+    // 외부 콘텐츠 유래 메모리는 격리(quarantined) 상태 — 즉시 주입되지
+    // 않고 승인 대기다. 토스트로 "기억됨"이라 오인시키지 않고 학습 패널로 안내한다.
+    if (d.status === 'quarantined') {
+      toast.notify({
+        message: `🔒 외부 콘텐츠 유래 메모리 격리됨 · 학습 패널에서 승인/삭제: ${d.content.slice(0, 48)}`,
+        duration: 5000,
+      });
+      return;
+    }
     const label = d.memory_type === 'fact' ? '사실 기억됨' : '선호 기억됨';
     toast.notify({ message: `💾 ${label}: ${d.content.slice(0, 60)}`, duration: 4000 });
   };
@@ -1084,7 +1098,7 @@ function ChatScreen() {
     sseClient.learnFromConversation(sid, instruction, {
       onEvent: (e: SSEEvent) => {
         if (e.type === 'memory_written') {
-          handleMemoryWritten(e.data as { memory_type: 'fact' | 'preference'; content: string });
+          handleMemoryWritten(e.data as MemoryWrittenEventData);
         } else if (e.type === 'skill_patch_proposed') {
           proposed = true;
           handleSkillPatchProposed(e.data as SkillPatchProposedData);
@@ -1158,7 +1172,7 @@ function ChatScreen() {
         finalizeThinking();
         appendAnswer(e.data as { delta?: string; content?: string });
       } else if (e.type === 'memory_written') {
-        handleMemoryWritten(e.data as { memory_type: 'fact' | 'preference'; content: string });
+        handleMemoryWritten(e.data as MemoryWrittenEventData);
       } else if (e.type === 'skill_patch_proposed') {
         handleSkillPatchProposed(e.data as SkillPatchProposedData);
       } else if (e.type === 'skill_patched') {
@@ -1180,14 +1194,14 @@ function ChatScreen() {
         }
         // Gated LLM skill/memory review (Phase A) — another separate, non-blocking
         // call right alongside the title one, same reasoning: an LLM call must
-        // never sit inline in this stream. 출품 전 P0: 서버가 턴 종료 시 영속화한
+        // never sit inline in this stream. 서버가 턴 종료 시 영속화한
         // 리뷰 잡을 exactly-once로 claim하므로 여기선 그저 트리거만 한다 — 중복
         // 호출/재시도/탭 종료 모두 안전. Fast no-op when there's no pending job
         // or the gate declines — most turns just get back a bare `done`.
         if (connected && sid) {
           sseClient.reviewLearning(sid, {
             onEvent: (re: SSEEvent) => {
-              if (re.type === 'memory_written') handleMemoryWritten(re.data as { memory_type: 'fact' | 'preference'; content: string });
+              if (re.type === 'memory_written') handleMemoryWritten(re.data as MemoryWrittenEventData);
               else if (re.type === 'skill_patch_proposed') handleSkillPatchProposed(re.data as SkillPatchProposedData);
               else if (re.type === 'skill_patched') handleSkillPatched(re.data as { skill_id: string; version: number });
             },

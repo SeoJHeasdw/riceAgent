@@ -34,9 +34,11 @@ class MemorySearch:
         Tie-break on `rowid DESC` handles in-memory tests where multiple inserts
         share the same `created_at` second (SQLite datetime resolution is 1s).
         """
+        # status='active'만 — 격리(quarantined) 메모리는 사용자 승인 전까지 절대
+        # 주입하지 않는다(외부 콘텐츠 오염 방지).
         rows = self._db.query_all(
             "SELECT id, kind, content FROM memories "
-            "WHERE kind = 'fact' "
+            "WHERE kind = 'fact' AND status = 'active' "
             "ORDER BY created_at DESC, rowid DESC LIMIT ?",
             (n,),
         )
@@ -59,7 +61,7 @@ class MemorySearch:
                 "SELECT m.id, m.kind, m.content "
                 "FROM memories_fts f "
                 "JOIN memories m ON m.rowid = f.rowid "
-                "WHERE f.content MATCH ? "
+                "WHERE f.content MATCH ? AND m.status = 'active' "  # 격리 메모리 제외 (P0)
                 "ORDER BY rank "  # FTS5 rank: lower is better
                 "LIMIT ?",
                 (query.strip(), k),

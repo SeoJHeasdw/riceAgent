@@ -252,9 +252,14 @@ class ApiClient {
   getLearningEvents(limit = 100): Promise<ApiResponse<LearningEvent[]>> {
     return this.get<LearningEvent[]>(`/learning/events?limit=${limit}`);
   }
-  /** 메모리 삭제 — 잘못 학습된 fact/preference의 사후 제거(위생) */
+  /** 메모리 삭제 — 잘못 학습된 fact/preference의 사후 제거(위생). 격리 메모리를
+   *  여기로 지우면 곧 '거부'다. */
   deleteMemory(memoryId: string): Promise<ApiResponse> {
     return this.send('DELETE', `/memories/${memoryId}`);
+  }
+  /** 격리(quarantined) 메모리 승인 — 외부 콘텐츠 유래 메모리를 active로 승격(P0). */
+  approveMemory(memoryId: string): Promise<ApiResponse> {
+    return this.send('POST', `/memories/${memoryId}/approve`, {});
   }
   getMemories(): Promise<ApiResponse<RuntimeMemory[]>> {
     return this.get<RuntimeMemory[]>('/memories');

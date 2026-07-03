@@ -446,7 +446,8 @@ class TestEffectSurfacing:
         events = await self._collect("s1", MemoryWritten(memory_type="fact", content="X uses Y"))
         assert len(events) == 1
         assert events[0].type == EventType.MEMORY_WRITTEN
-        assert events[0].data == {"memory_type": "fact", "content": "X uses Y"}
+        # status='active'는 — 순수 대화 유래 메모리는 즉시 active.
+        assert events[0].data == {"memory_type": "fact", "content": "X uses Y", "status": "active"}
 
     @pytest.mark.asyncio
     async def test_patch_proposal_approved_applies_and_emits_patched(self):
@@ -568,7 +569,7 @@ class TestLearningServiceReviewFacade:
 
     @pytest.mark.asyncio
     async def test_review_above_gate_threshold_calls_engine(self):
-        """출품 전 P0: review()는 observe()가 영속화한 서버 소유 잡을 claim해서
+        """review()는 observe()가 영속화한 서버 소유 잡을 claim해서
         실행한다 — 잡의 tool_calls_made가 게이트 입력이고, 파라미터는 무시된다."""
         cfg = LearningConfig(review_min_tool_calls=1, review_nudge_turns=100)
         call = ToolCall(
@@ -777,7 +778,7 @@ class TestGuardWiredIntoWritePaths:
         assert "AWS access key" in proposal.warnings[0]
 
 
-# ── 스트림 단절 시 제안 보존 (출품 전 P0 후속, 적대 리뷰 High#1) ────────────────
+# ── 스트림 단절 시 제안 보존 ────────────────
 
 class TestDisconnectPreservation:
     def setup_method(self):

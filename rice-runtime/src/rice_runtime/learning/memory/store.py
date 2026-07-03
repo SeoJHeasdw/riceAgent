@@ -30,12 +30,35 @@ single true chokepoint means neither caller can forget it.
 
 from __future__ import annotations
 
+import json
+
 from ...core.errors import NotFoundError, ValidationError
 from ...core.storage.sqlite import Database
 from ...core.types import MemoryItem, new_id, now_iso
 from ..skill.guard import scrub_secrets
 
 _ALLOWED_KINDS = frozenset({"fact", "preference"})
+_ALLOWED_STATUS = frozenset({"active", "quarantined"})
+
+# SELECT 컬럼 목록 — 0014에서 status/derived_from_external/source_message_ids 추가.
+_COLS = "id, kind, content, status, derived_from_external, source_session_id, source_message_ids"
+
+
+def _row_to_item(r) -> MemoryItem:
+    raw_ids = r["source_message_ids"] if "source_message_ids" in r.keys() else None
+    try:
+        ids = tuple(json.loads(raw_ids)) if raw_ids else ()
+    except (json.JSONDecodeError, TypeError):
+        ids = ()
+    return MemoryItem(
+        kind=r["kind"],
+        content=r["content"],
+        id=r["id"],
+        status=r["status"] if "status" in r.keys() and r["status"] else "active",
+        derived_from_external=bool(r["derived_from_external"]) if "derived_from_external" in r.keys() else False,
+        source_session_id=r["source_session_id"] if "source_session_id" in r.keys() else None,
+        source_message_ids=ids,
+    )
 
 
 class MemoryStore:
@@ -49,12 +72,20 @@ class MemoryStore:
         kind: str,
         content: str,
         source_session_id: str | None = None,
+        *,
+        derived_from_external: bool = False,
+        source_message_ids: tuple[str, ...] = (),
+        status: str | None = None,
     ) -> MemoryItem:
         """Insert a new memory and return the created item.
 
         Raises `ValidationError` if `kind` is not 'fact' or 'preference' — this
         is the boundary guard so downstream callers don't accidentally corrupt the
         table with free-form kinds.
+
+        외부 콘텐츠(도구 결과)에서 유도된 메모리는 기본적으로
+        **격리(quarantined)** 상태로 저장된다 — prefetch가 주입하지 않고 사용자
+        승인을 기다린다. `status`를 명시하면 그것을 따르되 화이트리스트로 막는다.
         """
         if kind not in _ALLOWED_KINDS:
             raise ValidationError(
@@ -69,14 +100,42 @@ class MemoryStore:
         # 치환만 한다. 스킬 경로는 HITL 카드가 있어 PatchProposal.warnings로
         # 노출한다(learning/service.py).
 
+        if status is None:
+            status = "quarantined" if derived_from_external else "active"
+        if status not in _ALLOWED_STATUS:
+            raise ValidationError(f"Unknown memory status {status!r}")
+
         mem_id = new_id("mem")
         created_at = now_iso()
         self._db.execute(
-            "INSERT INTO memories (id, kind, content, created_at, source_session_id) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (mem_id, kind, clean_content, created_at, source_session_id),
+            "INSERT INTO memories (id, kind, content, created_at, source_session_id, "
+            "status, derived_from_external, source_message_ids) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                mem_id, kind, clean_content, created_at, source_session_id,
+                status, 1 if derived_from_external else 0,
+                json.dumps(list(source_message_ids)) if source_message_ids else None,
+            ),
         )
-        return MemoryItem(kind=kind, content=clean_content, id=mem_id)  # type: ignore[arg-type]
+        return MemoryItem(
+            kind=kind,  # type: ignore[arg-type]
+            content=clean_content,
+            id=mem_id,
+            status=status,  # type: ignore[arg-type]
+            derived_from_external=derived_from_external,
+            source_session_id=source_session_id,
+            source_message_ids=source_message_ids,
+        )
+
+    def set_status(self, memory_id: str, status: str) -> None:
+        """격리 메모리 승인(→active)/재격리. 없으면 NotFoundError → 404."""
+        if status not in _ALLOWED_STATUS:
+            raise ValidationError(f"Unknown memory status {status!r}")
+        cur = self._db.execute(
+            "UPDATE memories SET status = ? WHERE id = ?", (status, memory_id)
+        )
+        if cur.rowcount == 0:
+            raise NotFoundError(f"memory {memory_id} not found")
 
     def delete(self, memory_id: str) -> None:
         """메모리 하나를 삭제한다. 없으면 NotFoundError → 404 (routes 관례)."""
@@ -85,12 +144,12 @@ class MemoryStore:
             raise NotFoundError(f"memory {memory_id} not found")
 
     def list(self) -> list[MemoryItem]:
-        """Return all memories, newest first.
+        """Return all memories (active + quarantined), newest first.
 
         Tie-break on `rowid DESC` handles the in-memory test case where multiple
         inserts share the same `created_at` second (SQLite datetime resolution is 1s).
         """
         rows = self._db.query_all(
-            "SELECT id, kind, content FROM memories ORDER BY created_at DESC, rowid DESC"
+            f"SELECT {_COLS} FROM memories ORDER BY created_at DESC, rowid DESC"
         )
-        return [MemoryItem(kind=r["kind"], content=r["content"], id=r["id"]) for r in rows]
+        return [_row_to_item(r) for r in rows]

@@ -124,6 +124,12 @@ class MemoryItem:
     kind: Literal["fact", "preference"]
     content: str
     id: str = field(default_factory=lambda: new_id("mem"))
+    # 출처/격리. status='quarantined'면 prefetch가 주입하지 않는다 —
+    # 외부 콘텐츠(도구 결과)가 섞인 턴에서 나온 메모리는 사용자 승인 전까지 대기.
+    status: Literal["active", "quarantined"] = "active"
+    derived_from_external: bool = False
+    source_session_id: str | None = None
+    source_message_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -251,8 +257,20 @@ def ev_message(delta: str | None = None, content: str | None = None) -> SSEEvent
     return SSEEvent(EventType.MESSAGE, data)
 
 
-def ev_memory_written(memory_type: Literal["fact", "preference"], content: str) -> SSEEvent:
-    return SSEEvent(EventType.MEMORY_WRITTEN, {"memory_type": memory_type, "content": content})
+def ev_memory_written(
+    memory_type: Literal["fact", "preference"],
+    content: str,
+    *,
+    status: str = "active",
+    memory_id: str | None = None,
+    derived_from_external: bool = False,
+) -> SSEEvent:
+    data: dict[str, Any] = {"memory_type": memory_type, "content": content, "status": status}
+    if memory_id is not None:
+        data["memory_id"] = memory_id
+    if derived_from_external:
+        data["derived_from_external"] = True
+    return SSEEvent(EventType.MEMORY_WRITTEN, data)
 
 
 def ev_skill_patched(skill_id: str, version: int) -> SSEEvent:
@@ -284,6 +302,8 @@ def ev_skill_patch_proposed(
     to_version: int | None = None,
     proposed_body: str | None = None,
     warnings: tuple[str, ...] = (),
+    derived_from_external: bool = False,
+    evidence_message_ids: tuple[str, ...] = (),
 ) -> SSEEvent:
     data: dict[str, Any] = {
         "approval_id": approval_id,
@@ -304,4 +324,9 @@ def ev_skill_patch_proposed(
         data["proposed_body"] = proposed_body
     if warnings:
         data["warnings"] = list(warnings)
+    # Provenance— 카드가 "외부 콘텐츠 유래" 배지 + 근거 개수를 표시.
+    if derived_from_external:
+        data["derived_from_external"] = True
+    if evidence_message_ids:
+        data["evidence_message_ids"] = list(evidence_message_ids)
     return SSEEvent(EventType.SKILL_PATCH_PROPOSED, data)

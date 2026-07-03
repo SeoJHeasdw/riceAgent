@@ -136,6 +136,10 @@ export interface MessageEventData {
 export interface MemoryWrittenEventData {
   memory_type: 'fact' | 'preference';
   content: string;
+  /** 'quarantined'면 승인 전까지 주입되지 않는다(외부 콘텐츠 유래). */
+  status?: 'active' | 'quarantined';
+  memory_id?: string;
+  derived_from_external?: boolean;
 }
 export interface SkillPatchedEventData {
   skill_id: string;
@@ -180,6 +184,9 @@ export interface SkillPatchProposedData {
   proposed_body?: string;
   /** Phase D guard redaction notices (secret-scrub/size-cap), empty/absent when clean */
   warnings?: string[];
+  /** 외부 콘텐츠(도구 결과) 유래 제안인지 + 근거 메시지 id들(감사). */
+  derived_from_external?: boolean;
+  evidence_message_ids?: string[];
 }
 
 // ── suggestion inbox + learning ledger (Self-Improvement v3) ──
@@ -203,6 +210,8 @@ export interface SkillSuggestion {
     tags?: string[];
     warnings?: string[];
     session_id?: string;
+    derived_from_external?: boolean;
+    evidence_message_ids?: string[];
     /** archive kind 전용 */
     reason?: string;
     absorbed_into?: string | null;
@@ -228,6 +237,11 @@ export interface RuntimeMemory {
   id: string;
   kind: 'fact' | 'preference';
   content: string;
+  /** 'quarantined'면 승인 전까지 주입 안 됨(외부 콘텐츠 유래). */
+  status?: 'active' | 'quarantined';
+  derived_from_external?: boolean;
+  source_session_id?: string | null;
+  source_message_ids?: string[];
 }
 
 export type SSEEvent =

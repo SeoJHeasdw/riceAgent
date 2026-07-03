@@ -131,7 +131,7 @@ class LearningLedger:
             out.append({"skill_id": r["skill_id"], "changelog": detail.get("changelog", "")})
         return out
 
-    # ── review jobs (server-owned post-turn review, 출품 전 P0) ───────────────
+    # ── review jobs (server-owned post-turn review) ───────────────
     def enqueue_review_job(self, session_id: str, tool_calls_made: int) -> str | None:
         """턴 종료 시 observe()가 호출 — 이 세션의 리뷰 잡을 영속화한다.
 

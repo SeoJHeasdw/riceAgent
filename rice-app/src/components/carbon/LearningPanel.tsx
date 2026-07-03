@@ -9,6 +9,7 @@ import {
   type UserSignal,
 } from '../../lib/learningData';
 import type { SkillSuggestion } from '../../lib/types';
+import { TransparencyPanel } from './TransparencyPanel';
 
 /**
  * LearningPanel - the right-side learning surface. Interactive: users can
@@ -411,6 +412,8 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ isLearning = true,
   // 제안함 결정/발굴 진행 상태 — 발굴은 LLM 1회 호출이라 느릴 수 있다.
   const [decidingId, setDecidingId] = useState<string | null>(null);
   const [discovering, setDiscovering] = useState(false);
+  // 학습 투명성 모달 — 컨텍스트 렌더·격리/차단 메모리·되돌리기.
+  const [transparencyOpen, setTransparencyOpen] = useState(false);
 
   // "나에 대한 모델" 그룹 펼침 상태 — 기본은 preview 2개 + count로 접힘
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
@@ -500,7 +503,16 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ isLearning = true,
       <div className="flex items-center gap-2 px-4 h-[52px] border-b border-border-subtle-01 flex-shrink-0">
           <Icon name="renew" size={18} className="text-icon-primary" />
           <span className="text-body-short-02 font-semibold text-text-primary">학습 루프</span>
-          <span className="ml-auto flex-shrink-0">
+          <button
+            type="button"
+            onClick={() => setTransparencyOpen(true)}
+            title="학습 투명성 — 모델이 본 것/못 본 것, 격리·차단된 메모리, 되돌릴 수 있는 변경"
+            className="ml-auto flex-shrink-0 flex items-center gap-1 h-[22px] px-2 rounded text-label-micro text-text-secondary hover:bg-layer-hover-01"
+          >
+            <Icon name="view" size={14} />
+            투명성
+          </button>
+          <span className="flex-shrink-0">
             {isLearning ? (
               // 살아있는 루프임이 느껴지도록 도트에 은은한 pulse
               <span className="inline-flex items-center gap-1.5 h-[18px] px-2 rounded-full text-label-micro font-semibold bg-support-success/12 text-support-success">
@@ -729,6 +741,7 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ isLearning = true,
           </div>
         </PanelSection>
       </div>
+      <TransparencyPanel open={transparencyOpen} onClose={() => setTransparencyOpen(false)} />
     </div>
   );
 };

@@ -89,7 +89,7 @@ class CuratorScheduler:
                 except Exception as exc:  # noqa: BLE001
                     log.warning("curator auto-run failed: %s", exc)
 
-            # 서버 소유 리뷰 잡 sweep (출품 전 P0): 탭 종료 등으로 클라이언트가 끝내
+            # 서버 소유 리뷰 잡 sweep: 탭 종료 등으로 클라이언트가 끝내
             # claim하지 않은 pending 잡을 백그라운드 실행 → 제안함 라우팅. 검사
             # 주기는 stale 임계값 자체를 쓴다(그보다 자주 볼 이유가 없다).
             if cfg.review_job_stale_seconds and 0 < cfg.review_job_stale_seconds <= self._since_review_sweep:

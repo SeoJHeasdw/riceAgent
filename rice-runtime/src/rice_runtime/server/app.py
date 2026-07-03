@@ -78,16 +78,34 @@ def create_app(container: Container):
     #    CSRF state token gates it instead.
     _PUBLIC_PATHS = frozenset({"/health", "/connectors/oauth/callback"})
 
-    # ── auth guard (CONTRACTS §1.1) ───────────────────────────────────────────
+    # 로컬 API 인접 공격 방어: localhost 바인딩 + bearer 토큰만으로는
+    # 부족하다는 적대 리뷰 지적을 반영. 브라우저에 열린 임의 웹페이지(evil.com)가
+    # 사용자의 localhost 런타임으로 요청을 보내는 시나리오를 Origin/Host 검증으로
+    # 한 겹 더 막는다. 토큰이 없는 dev 모드에서도 이 검증은 항상 작동한다.
+    def _host_is_local(value: str) -> bool:
+        host = value.split("//")[-1].split("/")[0].split(":")[0].strip().lower()
+        return host in ("localhost", "127.0.0.1", "[::1]", "::1", "")
+
+    # ── auth guard (CONTRACTS §1.1 Origin/Host 방어) ────────────
     @app.middleware("http")
     async def auth_guard(request: Request, call_next):
         token = container.args.token
-        # CORS preflight (OPTIONS) carries no Authorization header by design — let
-        # it through so CORSMiddleware can answer it; real requests still gated.
-        if token and request.method != "OPTIONS" and request.url.path not in _PUBLIC_PATHS:
-            header = request.headers.get("authorization", "")
-            if header != f"Bearer {token}":
-                return JSONResponse({"success": False, "error": "unauthorized"}, status_code=401)
+        if request.method != "OPTIONS" and request.url.path not in _PUBLIC_PATHS:
+            # (1) Origin 방어: 브라우저가 붙인 Origin이 있고 localhost가 아니면 거부
+            #     (cross-site 웹페이지의 localhost 공격 차단). Electron IPC·서버간
+            #     호출은 Origin이 없으므로 통과. 로컬 브라우저 dev(5273)는 통과.
+            origin = request.headers.get("origin")
+            if origin and not _host_is_local(origin):
+                return JSONResponse({"success": False, "error": "forbidden origin"}, status_code=403)
+            # (2) Host 방어(DNS rebinding): Host 헤더가 localhost 계열이 아니면 거부.
+            host_header = request.headers.get("host", "")
+            if host_header and not _host_is_local(host_header):
+                return JSONResponse({"success": False, "error": "forbidden host"}, status_code=403)
+            # (3) bearer token: 토큰이 설정돼 있으면 모든 경로가 동일하게 통과해야 한다.
+            if token:
+                header = request.headers.get("authorization", "")
+                if header != f"Bearer {token}":
+                    return JSONResponse({"success": False, "error": "unauthorized"}, status_code=401)
         return await call_next(request)
 
     # ── CORS (renderer-only dev) ──────────────────────────────────────────────

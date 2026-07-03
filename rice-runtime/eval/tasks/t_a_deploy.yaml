@@ -1,5 +1,5 @@
 # Task T-A: K8s 서비스 배포 (RICE_LEARNING_EVAL §4)
-# 출품 전 P0: echo 반사 대신 결정적 ScriptedToolProvider가 script를 연기한다 —
+# echo 반사 대신 결정적 ScriptedToolProvider가 script를 연기한다 —
 # 스킬(warm)이 주입되면 최소 절차 3콜, 없으면(cold) 시행착오가 섞인 6콜.
 # success는 tool 호출 시퀀스로 판정한다(키워드 반사가 아니라 실제 행동).
 id: "T-A"

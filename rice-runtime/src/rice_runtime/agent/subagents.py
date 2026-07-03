@@ -4,7 +4,7 @@ Sub-agents are exposed to the main model as a builtin tool. The main agent can
 spawn several focused workers in one tool-use round; the scheduler can run those
 workers in parallel, and the next main LLM call synthesizes their results.
 
-출품 전 P0 (2026-07-03) — provenance/한도:
+  — provenance/한도:
   - 결과는 자유 텍스트 요약이 아니라 {findings, evidence, confidence,
     open_questions}로 구조화된다. "누가 왜 그렇게 판단했는가"를 메인 모델과
     사용자가 추적할 수 있어야 멀티에이전트 결과를 신뢰할 수 있다. 모델이 JSON
@@ -25,6 +25,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from ..core.config import ContextConfig, LearningConfig
+from ..core.tokens import TokenCalibrator
 from ..core.types import Message, new_id
 from .context_manager import ConversationContextManager
 from .interfaces import ITranscript
@@ -56,7 +57,7 @@ class SubAgentResult:
     task: str
     summary: str
     truncated: bool = False
-    # ── provenance (출품 전 P0) ───────────────────────────────────────────────
+    # ── provenance ───────────────────────────────────────────────
     findings: tuple[str, ...] = ()
     evidence: tuple[str, ...] = ()
     confidence: str = "unknown"  # high|medium|low|unknown (unknown = 비구조 응답)
@@ -113,12 +114,14 @@ class SubAgentRunner:
         transcript: ITranscript,
         learning_config: LearningConfig | Callable[[], LearningConfig] | None = None,
         context_config: ContextConfig | Callable[[], ContextConfig],
+        token_calibrator: TokenCalibrator | None = None,
     ) -> None:
         self._resolve_provider = resolve_provider
         self._transcript = transcript
         # learning_config는 더 이상 쓰지 않는다(예전 timeout 차용의 잔재) — 기존
         # 호출부/테스트 호환을 위해 파라미터만 받는다. timeout/동시성은 context_config.
         self._context_config = context_config if callable(context_config) else lambda: context_config
+        self._calibrator = token_calibrator
         self._semaphore: asyncio.Semaphore | None = None
 
     def _limit(self) -> asyncio.Semaphore:
@@ -140,7 +143,8 @@ class SubAgentRunner:
         thread_id = new_id("sub")
         history = self._transcript.history(session_id)
         context_config = self._context_config()
-        rendered = ConversationContextManager(context_config).render(
+        estimate = self._calibrator.estimate if self._calibrator is not None else None
+        rendered = ConversationContextManager(context_config, estimate=estimate).render(
             "",
             history[-context_config.subagent_history_messages :],
         )

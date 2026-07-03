@@ -30,11 +30,16 @@ def _clean_changelog(text: str, fallback: str) -> str:
     return (text.strip() or fallback)[:_MAX_CHANGELOG_CHARS]
 
 
-def _build_warnings(body: str, scrubbed_labels: list[str]) -> tuple[str, ...]:
-    """승인 카드에 실을 warnings: 시크릿 마스킹 알림 + 위험 플래그(출품 전 P0,
-    learning safety scanner). 위험 플래그는 차단이 아니다 — 스킬은 HITL이 있으므로
-    카드에 보여주고 사용자가 판단한다(guard.scan_risks docstring 참고)."""
-    warnings = [f"{label} 자동 마스킹됨" for label in scrubbed_labels]
+def _build_warnings(
+    body: str, scrubbed_labels: list[str], derived_from_external: bool = False
+) -> tuple[str, ...]:
+    """승인 카드에 실을 warnings: 시크릿 마스킹 알림 + 위험 플래그(learning safety
+    scanner) + 외부 콘텐츠 유래 경고. 전부 차단이 아니라 표시다 —
+    스킬은 HITL이 있으므로 카드에 보여주고 사용자가 판단한다."""
+    warnings: list[str] = []
+    if derived_from_external:
+        warnings.append("외부 콘텐츠(도구 결과)가 포함된 대화에서 생성됨 — 본문을 특히 주의 깊게 확인하세요")
+    warnings.extend(f"{label} 자동 마스킹됨" for label in scrubbed_labels)
     warnings.extend(f"위험 플래그: {label}" for label in skill_guard.scan_risks(body))
     return tuple(warnings)
 
@@ -48,6 +53,8 @@ def make_create_proposal(
     changelog: str | None = None,
     trigger: PatchTrigger = "T4",
     max_body_chars: int = skill_guard.DEFAULT_MAX_BODY_CHARS,
+    derived_from_external: bool = False,
+    evidence_message_ids: tuple[str, ...] = (),
 ) -> PatchProposal | None:
     """신규 스킬 제안(from_version=0). 이름 규약(kebab)·크기·시크릿 가드를 여기서
     일괄 적용한다. 이름이 규약 위반이면 None — LLM/에이전트가 이상한 이름을 주는
@@ -76,7 +83,9 @@ def make_create_proposal(
         to_version=1,
         description=description,
         tags=tags,
-        warnings=_build_warnings(body, scrubbed),
+        warnings=_build_warnings(body, scrubbed, derived_from_external),
+        derived_from_external=derived_from_external,
+        evidence_message_ids=evidence_message_ids,
     )
 
 
@@ -87,6 +96,8 @@ def make_patch_proposal(
     changelog: str,
     trigger: PatchTrigger,
     max_body_chars: int = skill_guard.DEFAULT_MAX_BODY_CHARS,
+    derived_from_external: bool = False,
+    evidence_message_ids: tuple[str, ...] = (),
 ) -> PatchProposal | None:
     """기존 스킬 개선 제안. 실질 변경이 없으면(diff 빈 줄) None — 빈 제안 카드로
     사용자를 방해하지 않는다."""
@@ -109,7 +120,9 @@ def make_patch_proposal(
         proposed_body=new_body,
         from_version=current.version,
         to_version=current.version + 1,
-        warnings=_build_warnings(new_body, scrubbed),
+        warnings=_build_warnings(new_body, scrubbed, derived_from_external),
+        derived_from_external=derived_from_external,
+        evidence_message_ids=evidence_message_ids,
     )
 
 
@@ -128,4 +141,6 @@ def proposal_to_payload(p: PatchProposal) -> dict:
         "description": p.description,
         "tags": list(p.tags),
         "warnings": list(p.warnings),
+        "derived_from_external": p.derived_from_external,
+        "evidence_message_ids": list(p.evidence_message_ids),
     }

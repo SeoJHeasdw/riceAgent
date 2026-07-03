@@ -51,7 +51,13 @@ async def surface_learning_effect(
     non-approve case the skill store is untouched.
     """
     if isinstance(effect, MemoryWritten):
-        yield ev_memory_written(effect.memory_type, effect.content)
+        yield ev_memory_written(
+            effect.memory_type,
+            effect.content,
+            status=effect.status,
+            memory_id=effect.memory_id,
+            derived_from_external=effect.derived_from_external,
+        )
     elif isinstance(effect, PatchProposal):
         req = ApprovalRequest(
             kind="skill_patch",
@@ -74,6 +80,8 @@ async def surface_learning_effect(
             effect.to_version,
             proposed_body=effect.proposed_body,
             warnings=effect.warnings,
+            derived_from_external=effect.derived_from_external,
+            evidence_message_ids=effect.evidence_message_ids,
         )
         try:
             response = await approvals.request(session_id, req, timeout_s=approval_timeout_s)
@@ -97,7 +105,7 @@ async def surface_learning_effect(
                 edited_body=response.edited_body,
             )
         except ConflictError as exc:
-            # Optimistic-concurrency miss (출품 전 P0): the skill moved past the
+            # Optimistic-concurrency miss: the skill moved past the
             # proposal's base version while the card sat open. Never silently
             # overwrite — tell the user to get a fresh proposal instead.
             yield ev_error("skill_patch_conflict", str(exc))

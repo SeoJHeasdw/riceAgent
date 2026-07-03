@@ -162,6 +162,12 @@ class ToolDispatcher:
         # ── policy gate (RUNTIME_DESIGN §5.1 + 도구별 권한) ───────────────────
         # 기본 정책: requires_approval 이면 승인, 아니면 허용. connector 도구는 사용자가
         # 저장한 도구별 정책(allow/approval/block)이 이를 오버라이드한다.
+        #
+        # 불변식: 이 판정은 **호출 이유와 무관**하다 — 모델이
+        # 학습된 스킬의 지시를 따라 이 도구를 부르든, 스스로 판단하든 정책은 동일하게
+        # 적용된다. 스킬은 신뢰 경계가 아니라 입력 데이터이므로(prompts/system.py
+        # SKILL_TRUST_NOTE), 승인이 필요한 도구는 어떤 스킬이 시켜도 승인을 거친다.
+        # 여기 어디에도 "스킬이 승인했으니 통과" 같은 우회로가 없다는 것이 그 보장이다.
         policy = "approval" if spec.requires_approval else "allow"
         if spec.source == "connector" and spec.owner_id:
             perm_fn = getattr(self._connectors, "permission_for", None)

@@ -81,7 +81,7 @@ def _load_tasks(tasks_dir: Path) -> list[dict[str, Any]]:
 def _check_success(task: dict[str, Any], response_text: str, tool_names: list[str]) -> bool:
     """task의 success_check 조건을 평가한다 (EVAL §4, 결정적 판정).
 
-    두 가지 판정 방식 (출품 전 P0에서 tool_sequence 추가):
+    두 가지 판정 방식:
       - "tool_sequence": expected_tools가 실제 tool 호출 목록에 **순서를 지키며**
         (중간에 다른 호출이 끼어도) 등장했는가 — "올바른 절차가 실행됐다"의
         행동 기반 판정. ScriptedToolProvider와 짝을 이룬다.
@@ -132,7 +132,7 @@ async def _run_one(
     SSE 이벤트를 수집해 turns/tool_calls/success/skill_hit을 측정한다.
     """
     paths = RicePaths.from_env(rice_home)
-    # 출품 전 P0: task에 script가 있으면 결정적 ScriptedToolProvider를 꽂는다 —
+    # task에 script가 있으면 결정적 ScriptedToolProvider를 꽂는다 —
     # 스킬 유무(시스템 프롬프트의 skill_marker)에 따라 다른 tool sequence를 연기해
     # "진짜 학습 효과"를 행동으로 재현한다. script가 없으면 기존 echo 경로.
     args = RuntimeArgs()
@@ -289,7 +289,7 @@ def main(runs_per_task: int = 3, *, results_dir: Path | None = None) -> int:
 
     report = build_report(
         task_suite="demo-v1",
-        model="scripted",  # 출품 전 P0: 결정적 ScriptedToolProvider (script 없는 task는 echo)
+        model="scripted",  # 결정적 ScriptedToolProvider (script 없는 task는 echo)
         runs_per_task=runs_per_task,
         generated_at=generated_at,
         task_ids=[t["id"] for t in tasks],

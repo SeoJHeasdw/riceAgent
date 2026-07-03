@@ -33,9 +33,10 @@ from ..core.config import LearningConfig
 from ..core.errors import ConflictError, NotFoundError, ValidationError
 from ..core.paths import RicePaths
 from ..core.storage.sqlite import Database
+from ..core.tokens import estimate_tokens as _cjk_estimate_tokens
 from ..core.types import InjectedSkill, Message, MemoryItem, TurnOutcome, now_iso
 from ..prompts.discovery import SessionDigest
-from ..prompts.system import SKILL_GUIDANCE
+from ..prompts.system import SKILL_GUIDANCE, SKILL_TRUST_NOTE
 from .curator.consolidate import ConsolidationEngine
 from .curator.curator import Curator
 from .discovery import DiscoveryEngine
@@ -65,12 +66,10 @@ from .skill.store import SkillData, SkillStore
 from .skill.usage import UsageStore
 from .user_model.profile import UserProfile
 
-# 토큰 추정: len(text) / 4 (대략적 — 정밀도 불필요, LEARNING_LOOP §7)
-_CHARS_PER_TOKEN = 4
-
-
+# 토큰 추정: CJK 인식 휴리스틱(core.tokens) — 이전 len//4는 한국어 예산을 2~4배 과소평가했다.
+# 프리페치 스킬 예산에도 같은 추정을 쓴다.
 def _estimate_tokens(text: str) -> int:
-    return max(1, len(text) // _CHARS_PER_TOKEN)
+    return _cjk_estimate_tokens(text)
 
 
 def _render_memories(memories: list[MemoryItem]) -> str:
@@ -91,10 +90,12 @@ def _render_memories(memories: list[MemoryItem]) -> str:
 
 
 def _render_skills(skills: list[InjectedSkill]) -> str:
-    """Active 스킬 본문을 system prompt 블록으로 렌더링한다 (LEARNING_LOOP §7)."""
+    """Active 스킬 본문을 system prompt 블록으로 렌더링한다 (LEARNING_LOOP §7).
+    스킬은 신뢰 경계가 아니라 입력 데이터이므로 SKILL_TRUST_NOTE를 함께 싣는다
+    — 위험 행동은 스킬 지시와 무관하게 승인을 거친다."""
     if not skills:
         return ""
-    lines = ["## Available Skills (follow these procedures when relevant)"]
+    lines = ["## Available Skills (follow these procedures when relevant)", SKILL_TRUST_NOTE]
     for sk in skills:
         lines.append(f"\n### [{sk.name}] (v{sk.version})\n{sk.body}")
     return "\n".join(lines)
@@ -295,7 +296,7 @@ class LearningService(ILearningService):
             return effects
         effects.extend(staged)
 
-        # ③ 서버 소유 리뷰 잡 영속화 (출품 전 P0): tool_calls_made는 이제 프론트가
+        # ③ 서버 소유 리뷰 잡 영속화: tool_calls_made는 이제 프론트가
         #    세어 보내는 값이 아니라 서버가 턴 종료 시점에 직접 기록하는 값이다.
         #    /learning-review(또는 스케줄러 sweep)가 이 잡을 claim해서 실행한다.
         self._ledger.enqueue_review_job(outcome.session_id, outcome.tool_calls_made)
@@ -335,7 +336,7 @@ class LearningService(ILearningService):
         제안 본문이 반영되지 않고 버전만 올라가는 채로 방치되어 있었다. 호출부
         (orchestrator._surface_effect)가 이제 PatchProposal.proposed_body를 항상 넘긴다.
 
-        Optimistic concurrency (출품 전 P0, 2026-07-03): `expected_version`은 제안이
+        Optimistic concurrency : `expected_version`은 제안이
         만들어진 당시의 스킬 버전(PatchProposal.from_version). None이면 검사 생략
         (직접 호출 하위호환), 값이 있으면 현재 버전과 불일치 시 ConflictError(409) —
         사용자가 v1 제안 카드를 열어둔 사이 스킬이 v2가 됐을 때 오래된 제안이
@@ -506,9 +507,8 @@ class LearningService(ILearningService):
             여전히 하지 않으므로(파일 불변) safe-default는 유지된다. abort로 인한
             cancelled는 그대로 폐기한다(사용자가 턴 자체를 버렸다).
 
-        출품 전 P0 후속(2026-07-03, 적대 리뷰 High#1): **disconnected**(카드 응답
-        전 SSE 스트림 단절 — 탭 종료/새로고침)도 timeout과 동일하게 제안함으로
-        옮긴다. 단절은 의사표시가 아니고, 이전엔 이 경로에서 제안이 ledger에도
+        **disconnected**(카드 응답전 SSE 스트림 단절 — 탭 종료/새로고침)도 timeout과 동일하게
+        제안함으로 옮긴다. 단절은 의사표시가 아니고, 이전엔 이 경로에서 제안이 ledger에도
         inbox에도 남지 않고 증발했다.
         """
         base_detail = {"changelog": proposal.changelog, "trigger": proposal.trigger}
@@ -669,7 +669,7 @@ class LearningService(ILearningService):
         return self._ledger.events(limit)
 
     def record_context_renders(self, session_id: str, renders: list[dict]) -> None:
-        """컨텍스트 렌더 감사 (출품 전 P0) — 턴당 1개 ledger 이벤트로 영속화.
+        """컨텍스트 렌더 감사 — 턴당 1개 ledger 이벤트로 영속화.
         ledger.record 자체가 best-effort(fail-safe)라 여기서 추가 방어는 불필요."""
         if not renders:
             return
@@ -684,7 +684,7 @@ class LearningService(ILearningService):
             },
         )
 
-    # ── post-turn, LLM-backed (Phase A.3; 서버 소유 잡으로 재구성 — 출품 전 P0) ─
+    # ── post-turn, LLM-backed (Phase A.3; 서버 소유 잡으로 재구성) ─
     @staticmethod
     def _gate_inputs(history: list[Message]) -> tuple[str, str | None]:
         final_message = next(
@@ -699,7 +699,7 @@ class LearningService(ILearningService):
         """게이트 통과 시에만 LLM 1회 호출 — POST /sessions/{id}/learning-review 가
         메인 턴의 done 이후 논블로킹으로 호출한다(§1 아키텍처 결정).
 
-        출품 전 P0 (2026-07-03): 실행 근거가 **서버가 영속화한 리뷰 잡**으로 바뀌었다.
+        실행 근거가 **서버가 영속화한 리뷰 잡**으로 바뀌었다.
         observe()가 턴 종료 시 learning_jobs에 pending 잡(+서버가 직접 센
         tool_calls_made)을 남기고, 여기서 그 잡을 원자적으로 claim한다:
           - 잡이 없으면(이미 실행됨/중복 POST/관찰된 턴 없음) 즉시 [] — exactly-once.
@@ -980,9 +980,16 @@ class LearningService(ILearningService):
 
     def delete_memory(self, memory_id: str) -> None:
         """메모리 삭제 (DELETE /memories/{id}, Self-Improvement v3). 메모리는 HITL
-        없이 즉시 반영되는 유일한 경로라 사후 제거 수단이 위생의 핵심이다."""
+        없이 즉시 반영되는 유일한 경로라 사후 제거 수단이 위생의 핵심이다.
+        격리(quarantined) 메모리를 여기로 삭제하면 그것이 곧 '거부'다."""
         self._mem_store.delete(memory_id)  # NotFoundError 위임 → 404
         self._ledger.record("memory_deleted", detail={"memory_id": memory_id})
+
+    def approve_memory(self, memory_id: str) -> None:
+        """격리(quarantined) 메모리를 active로 승인한다 (POST /memories/{id}/approve)
+        이제부터 prefetch가 주입한다. 없으면 NotFoundError → 404."""
+        self._mem_store.set_status(memory_id, "active")
+        self._ledger.record("memory_approved", detail={"memory_id": memory_id})
 
 
 # NOTE(agent): 정규식 기반 fact/preference 추출(`_try_extract_fact`/

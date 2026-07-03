@@ -54,9 +54,10 @@ class UserProfile:
         매칭되는 키워드가 없으면 preference 내용을 그대로 나열한다.
         (LEARNING_LOOP §6, T5 데모 가시성 우선)
         """
-        # MemoryStore.list()는 all kind을 반환; preference만 필터
+        # MemoryStore.list()는 all kind/status를 반환; active preference만 필터.
+        # 격리(quarantined) 선호는 사용자 승인 전까지 주입하지 않는다.
         all_memories = self._mem_store.list()
-        preferences = [m for m in all_memories if m.kind == "preference"]
+        preferences = [m for m in all_memories if m.kind == "preference" and m.status == "active"]
         if not preferences:
             return ""
 

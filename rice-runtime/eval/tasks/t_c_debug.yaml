@@ -1,5 +1,5 @@
 # Task T-C: 에러 트러블슈팅 (RICE_LEARNING_EVAL §4)
-# 출품 전 P0: 결정적 script — 스킬 본문의 ImagePullBackOff 대응 절차(describe →
+# 결정적 script — 스킬 본문의 ImagePullBackOff 대응 절차(describe →
 # imagePullSecret)를 아는 경우 2콜, 모르면 로그부터 뒤지는 5콜.
 id: "T-C"
 title: "배포 오류 트러블슈팅"

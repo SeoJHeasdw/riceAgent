@@ -89,7 +89,13 @@
           "required": ["memory_type", "content"],
           "properties": {
             "memory_type": { "enum": ["fact", "preference"] },
-            "content": { "type": "string" }
+            "content": { "type": "string" },
+            "status": {
+              "enum": ["active", "quarantined"],
+              "description": "'quarantined'면 승인 전까지 주입되지 않는다(외부 콘텐츠 유래)."
+            },
+            "memory_id": { "type": "string" },
+            "derived_from_external": { "type": "boolean" }
           }
         }
       }
@@ -169,6 +175,15 @@
               "type": "array",
               "items": { "type": "string" },
               "description": "Guard redaction notices (secret-scrub/size-cap, LEARNING_LOOP §8), e.g. 'AWS access key 자동 마스킹됨'. Empty/absent when clean."
+            },
+            "derived_from_external": {
+              "type": "boolean",
+              "description": "이 제안이 외부 콘텐츠(도구 결과)가 섞인 대화에서 나왔는지 — 카드가 provenance 경고를 띄운다."
+            },
+            "evidence_message_ids": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "근거가 된 외부 콘텐츠 메시지 id들(감사)."
             },
             "diff": {
               "type": "object",

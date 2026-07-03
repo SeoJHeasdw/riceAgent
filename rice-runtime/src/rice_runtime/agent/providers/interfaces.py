@@ -45,6 +45,11 @@ class ProviderChunk:
     text: str | None = None
     tool_call: ToolCall | None = None
     stop_reason: Literal["end_turn", "tool_use", "max_tokens", "error"] | None = None
+    # Actual token usage, populated on the "done" chunk when the provider reports
+    # it (Claude does; echo/ollama may not). Feeds `TokenCalibrator` so the CJK
+    # budget estimate self-corrects from real numbers. None = unknown.
+    input_tokens: int | None = None
+    output_tokens: int | None = None
 
 
 @runtime_checkable

@@ -17,8 +17,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from dataclasses import dataclass, field
+from typing import Sequence
 
+from ..core.tokens import TokenCalibrator, is_context_length_error
 from ..core.types import (
     Message,
     SSEEvent,
@@ -30,10 +33,16 @@ from ..core.types import (
     ev_tool_call,
     ev_tool_result,
 )
-from .context_manager import ContextRenderStats, ConversationContextManager
+from .context_manager import (
+    ContextRenderStats,
+    ConversationContextManager,
+    estimate_context_tokens as _pure_ctx_tokens,
+)
 from .interfaces import IToolDispatcher
-from .providers.interfaces import ILLMProvider
+from .providers.interfaces import ILLMProvider, ProviderChunk
 from .tool_scheduler import ScheduledToolRequest, ToolBatchResult, ToolScheduler
+
+log = logging.getLogger("rice.agent.loop")
 
 
 @dataclass
@@ -42,7 +51,7 @@ class LoopResult:
     history: tuple[Message, ...] = ()
     tool_calls_made: int = 0
     aborted: bool = False
-    # 매 LLM 호출의 컨텍스트 렌더 감사 스탯 (출품 전 P0) — orchestrator가 턴 종료 시
+    # 매 LLM 호출의 컨텍스트 렌더 감사 스탯 — orchestrator가 턴 종료 시
     # ledger에 `context_rendered` 이벤트로 영속화한다.
     context_renders: list[ContextRenderStats] = field(default_factory=list)
 
@@ -64,11 +73,39 @@ class AgentLoop:
         dispatcher: IToolDispatcher,
         temperature: float = 0.7,
         context_manager: ConversationContextManager | None = None,
+        token_calibrator: "TokenCalibrator | None" = None,
     ) -> None:
         self._provider = provider
         self._dispatcher = dispatcher
         self._temperature = temperature
         self._context_manager = context_manager
+        # 실측 usage 피드백 + 컨텍스트 길이 초과 시 재압축 재시도용
+        self._calibrator = token_calibrator
+
+    def _render(self, ctx: TurnContext, messages: list[Message], *, budget_scale: float):
+        """이 반복에 보낼 컨텍스트를 렌더한다. budget_scale<1이면 컨텍스트 길이
+        초과 후 더 강하게 압축하는 재시도용. context_manager가 없으면 raw 그대로."""
+        if self._context_manager is None:
+            return None, ctx.system_prompt, tuple(messages)
+        cm = self._context_manager
+        if budget_scale != 1.0:
+            cm = ConversationContextManager(
+                cm.config, estimate=cm.estimate_fn, budget_scale=budget_scale
+            )
+        rendered = cm.render(ctx.system_prompt, tuple(messages))
+        return rendered, rendered.system_prompt, rendered.history
+
+    def _calibrate(self, system: str, messages: Sequence[Message], done: ProviderChunk) -> None:
+        """provider가 보고한 실제 input_tokens로 토큰 추정 비율을 보정한다.
+        보낸 컨텍스트의 *순수* 휴리스틱 추정과 실측을 비교한다.
+        best-effort — 캘리브레이션 실패가 턴을 깨선 안 된다."""
+        if self._calibrator is None or done.input_tokens is None:
+            return
+        try:
+            pure = _pure_ctx_tokens(system, messages)  # 순수 CJK 휴리스틱 (비보정)
+            self._calibrator.observe(pure, done.input_tokens)
+        except Exception:  # noqa: BLE001
+            log.debug("token calibration observe failed", exc_info=True)
 
     async def run(self, ctx: TurnContext, session_id: str, result: LoopResult, abort: asyncio.Event):
         tool_index = {t.name: t for t in ctx.tools}
@@ -86,36 +123,54 @@ class AgentLoop:
             pending_calls = []
             stop_reason = "end_turn"
 
-            rendered_context = (
-                self._context_manager.render(ctx.system_prompt, tuple(messages))
-                if self._context_manager is not None
-                else None
-            )
-            provider_system = rendered_context.system_prompt if rendered_context is not None else ctx.system_prompt
-            provider_messages = rendered_context.history if rendered_context is not None else tuple(messages)
+            # 컨텍스트 길이 초과 시 더 강한 압축으로 1회 재시도한다.
+            # 초과 에러는 요청 진입 시점에 나므로(스트림 델타 전) 한 청크도 내보내기
+            # 전에 안전하게 재렌더할 수 있다. 재시도 후에도 실패하면 상위로 전파.
+            for attempt, budget_scale in enumerate((1.0, 0.45)):
+                rendered_context, provider_system, provider_messages = self._render(
+                    ctx, messages, budget_scale=budget_scale
+                )
+                produced_any = False
+                try:
+                    async for chunk in self._provider.stream(
+                        system=provider_system,
+                        messages=provider_messages,
+                        tools=ctx.tools,
+                        temperature=self._temperature,
+                    ):
+                        produced_any = True
+                        if abort.is_set():
+                            # interrupt mid-stream, not only between iterations (C-3)
+                            result.aborted = True
+                            break
+                        if chunk.kind == "thinking" and chunk.text:
+                            thinking_parts.append(chunk.text)
+                            yield ev_thinking(chunk.text)
+                        elif chunk.kind == "text" and chunk.text:
+                            assistant_parts.append(chunk.text)
+                            yield ev_message(delta=chunk.text)
+                        elif chunk.kind == "tool_call" and chunk.tool_call is not None:
+                            pending_calls.append(chunk.tool_call)
+                        elif chunk.kind == "done":
+                            stop_reason = chunk.stop_reason or "end_turn"
+                            self._calibrate(provider_system, provider_messages, chunk)
+                    break  # stream consumed cleanly
+                except Exception as exc:  # noqa: BLE001
+                    can_retry = (
+                        attempt == 0
+                        and not produced_any
+                        and self._context_manager is not None
+                        and is_context_length_error(exc)
+                    )
+                    if not can_retry:
+                        raise
+                    log.warning("context length exceeded — retrying with tighter budget (%s)", exc)
+                    assistant_parts.clear()
+                    thinking_parts.clear()
+                    pending_calls.clear()
+
             if rendered_context is not None:
                 result.context_renders.append(rendered_context.stats)
-
-            async for chunk in self._provider.stream(
-                system=provider_system,
-                messages=provider_messages,
-                tools=ctx.tools,
-                temperature=self._temperature,
-            ):
-                if abort.is_set():
-                    # interrupt mid-stream, not only between iterations (C-3)
-                    result.aborted = True
-                    break
-                if chunk.kind == "thinking" and chunk.text:
-                    thinking_parts.append(chunk.text)
-                    yield ev_thinking(chunk.text)
-                elif chunk.kind == "text" and chunk.text:
-                    assistant_parts.append(chunk.text)
-                    yield ev_message(delta=chunk.text)
-                elif chunk.kind == "tool_call" and chunk.tool_call is not None:
-                    pending_calls.append(chunk.tool_call)
-                elif chunk.kind == "done":
-                    stop_reason = chunk.stop_reason or "end_turn"
 
             if abort.is_set():
                 break  # stop without emitting a partial answer as final
@@ -164,8 +219,15 @@ class AgentLoop:
                     yield ev
                 for req, res in zip(scheduled, batch.ordered([req.call for req in scheduled]), strict=True):
                     call = req.call
+                    # tool_source: 이 결과가 외부 콘텐츠(connector/plugin/bridge =
+                    # Gmail·웹·원격 도구)에서 왔는지 표시한다. 학습 리뷰가 메모리를
+                    # 격리할지 판단하는 근거(메모리 오염 방지).
                     messages.append(
-                        Message(role="tool", content=_render_tool_result(res), metadata={"tool_call_id": call.id})
+                        Message(
+                            role="tool",
+                            content=_render_tool_result(res),
+                            metadata={"tool_call_id": call.id, "tool_source": req.spec.source, "tool_name": call.tool_name},
+                        )
                     )
                     tool_calls_made += 1
             # loop continues: provider sees the tool results next iteration

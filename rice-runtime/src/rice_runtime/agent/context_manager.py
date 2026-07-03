@@ -19,12 +19,17 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Callable, Sequence
 
 from ..core.config import ContextConfig
+from ..core.tokens import estimate_tokens as _cjk_estimate_tokens
 from ..core.types import Message
 
 
+# 언어 인식 추정기(core.tokens)로 예산을 계산한다. 이전의 len//4는 한국어에서
+# 토큰을 2~4배 과소평가하는 "거짓 안전판"이었다.
+# _CHARS_PER_TOKEN은 _distill_text의 char 상한 환산에만 남는다(추정과 무관한
+# "얼마나 잘라낼까"의 대략치).
 _CHARS_PER_TOKEN = 4
 _MASK_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"(?i)(api[_-]?key|token|secret|password)\s*[:=]\s*['\"]?([A-Za-z0-9_\-./+=]{12,})"), r"\1=[REDACTED]"),
@@ -36,7 +41,7 @@ _MASK_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 
 @dataclass(frozen=True)
 class ContextRenderStats:
-    """Per-LLM-call render audit (출품 전 P0, 2026-07-03).
+    """Per-LLM-call render audit.
 
     카운트만으로는 "모델이 정확히 뭘 못 봤는가"를 설명할 수 없다 — 특히 wire
     repair(`_repair_tool_adjacency`)는 도구 메시지를 조용히 떨어뜨린다. id 튜플이
@@ -88,19 +93,24 @@ class RenderedContext:
     stats: ContextRenderStats
 
 
+# Module-level estimators default to the CJK-aware heuristic (core.tokens). They
+# stay as free functions for back-compat with any direct importer; the class uses
+# its injected estimator (which may be calibration-backed) instead.
 def estimate_tokens(text: str) -> int:
-    return max(1, len(text) // _CHARS_PER_TOKEN) if text else 0
+    return _cjk_estimate_tokens(text)
 
 
-def estimate_message_tokens(message: Message) -> int:
+def estimate_message_tokens(message: Message, estimate: Callable[[str], int] = _cjk_estimate_tokens) -> int:
     tool_cost = 0
     if message.tool_calls:
-        tool_cost = estimate_tokens(json.dumps([c.__dict__ for c in message.tool_calls], ensure_ascii=False, default=str))
-    return estimate_tokens(message.content) + tool_cost + 4
+        tool_cost = estimate(json.dumps([c.__dict__ for c in message.tool_calls], ensure_ascii=False, default=str))
+    return estimate(message.content) + tool_cost + 4
 
 
-def estimate_context_tokens(system_prompt: str, messages: Sequence[Message]) -> int:
-    return estimate_tokens(system_prompt) + sum(estimate_message_tokens(m) for m in messages)
+def estimate_context_tokens(
+    system_prompt: str, messages: Sequence[Message], estimate: Callable[[str], int] = _cjk_estimate_tokens
+) -> int:
+    return estimate(system_prompt) + sum(estimate_message_tokens(m, estimate) for m in messages)
 
 
 class ConversationContextManager:
@@ -109,13 +119,44 @@ class ConversationContextManager:
     The manager is stateless across calls. That keeps the durable session history
     untouched and lets the orchestrator create a fresh instance per turn from the
     live config.
+
+    `estimate`: the token estimator used for all budgeting. Defaults
+    to the CJK-aware heuristic; the orchestrator injects `TokenCalibrator.estimate`
+    so real provider usage feedback refines the budget over the session.
+    `budget_scale` (< 1.0) shrinks every token limit for the context-length-error
+    retry path — the loop re-renders tighter after a provider "prompt too long".
     """
 
-    def __init__(self, config: ContextConfig) -> None:
+    def __init__(
+        self,
+        config: ContextConfig,
+        *,
+        estimate: Callable[[str], int] | None = None,
+        budget_scale: float = 1.0,
+    ) -> None:
         self._config = config
+        self._estimate = estimate or _cjk_estimate_tokens
+        self._scale = budget_scale
+
+    @property
+    def config(self) -> ContextConfig:
+        return self._config
+
+    @property
+    def estimate_fn(self) -> Callable[[str], int]:
+        return self._estimate
+
+    def _msg_tokens(self, message: Message) -> int:
+        return estimate_message_tokens(message, self._estimate)
+
+    def _ctx_tokens(self, system_prompt: str, messages: Sequence[Message]) -> int:
+        return estimate_context_tokens(system_prompt, messages, self._estimate)
+
+    def _limit(self, base: int) -> int:
+        return max(1, int(base * self._scale))
 
     def render(self, system_prompt: str, messages: Sequence[Message]) -> RenderedContext:
-        before_tokens = estimate_context_tokens(system_prompt, messages)
+        before_tokens = self._ctx_tokens(system_prompt, messages)
         messages_before = len(messages)
 
         if not self._config.enabled:
@@ -130,21 +171,21 @@ class ConversationContextManager:
         managed, masked_ids, distilled_ids = self._manage_messages(messages)
         managed, orphan_ids = self._drop_orphaned_tool_prefix(tuple(managed))
 
-        after_manage = estimate_context_tokens(system_prompt, managed)
+        after_manage = self._ctx_tokens(system_prompt, managed)
         omitted_ids: tuple[str, ...] = ()
         dropped_msg_ids: list[str] = list(orphan_ids)
         dropped_call_ids: list[str] = []
         final_system = system_prompt
         final_history = tuple(managed)
 
-        if after_manage > self._config.max_tokens:
+        if after_manage > self._limit(self._config.max_tokens):
             final_system, final_history, omitted_ids, repair_msg_ids, repair_call_ids = (
                 self._compress_history(system_prompt, final_history)
             )
             dropped_msg_ids.extend(repair_msg_ids)
             dropped_call_ids.extend(repair_call_ids)
 
-        after_tokens = estimate_context_tokens(final_system, final_history)
+        after_tokens = self._ctx_tokens(final_system, final_history)
         stats = ContextRenderStats(
             estimated_tokens_before=before_tokens,
             estimated_tokens_after=after_tokens,
@@ -180,17 +221,17 @@ class ConversationContextManager:
                 masked_ids.append(message.id)
                 content = masked
 
-            if message.role == "tool" and estimate_tokens(content) > self._config.tool_output_threshold_tokens:
+            if message.role == "tool" and self._estimate(content) > self._limit(self._config.tool_output_threshold_tokens):
                 content = _distill_text(
                     content,
-                    max_tokens=self._config.tool_output_retained_tokens,
+                    max_tokens=self._limit(self._config.tool_output_retained_tokens),
                     label="tool output",
                 )
                 distilled_ids.append(message.id)
-            elif estimate_tokens(content) > self._config.message_threshold_tokens:
+            elif self._estimate(content) > self._limit(self._config.message_threshold_tokens):
                 content = _distill_text(
                     content,
-                    max_tokens=self._config.message_retained_tokens,
+                    max_tokens=self._limit(self._config.message_retained_tokens),
                     label=f"{message.role} message",
                 )
                 distilled_ids.append(message.id)
@@ -226,9 +267,9 @@ class ConversationContextManager:
         if not messages:
             return system_prompt, messages, (), (), ()
 
-        target = min(self._config.retained_tokens, self._config.max_tokens)
+        target = self._limit(min(self._config.retained_tokens, self._config.max_tokens))
         retained: list[Message] = []
-        retained_tokens = estimate_tokens(system_prompt)
+        retained_tokens = self._estimate(system_prompt)
 
         # Always protect a small suffix. This mirrors Gemini's recent-turn
         # protection and keeps the current tool-call adjacency intact.
@@ -236,7 +277,7 @@ class ConversationContextManager:
         protected_ids = {m.id for m in protected_suffix}
 
         for message in reversed(messages):
-            cost = estimate_message_tokens(message)
+            cost = self._msg_tokens(message)
             if message.id in protected_ids or retained_tokens + cost <= target:
                 retained.append(message)
                 retained_tokens += cost
@@ -300,7 +341,7 @@ def _repair_tool_adjacency(
     tool_calls and their tool results to remain adjacent. Wire-format repair is
     not counted as "omitted context" and is not summarized — which is exactly
     why it must be *audited*: returns (repaired, dropped message ids, dropped
-    tool_call ids) so the render log can say what silently fell out (출품 전 P0).
+    tool_call ids) so the render log can say what silently fell out.
     """
     repaired: list[Message] = []
     dropped_msg_ids: list[str] = []

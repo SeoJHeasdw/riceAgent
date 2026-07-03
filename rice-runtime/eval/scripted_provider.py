@@ -1,4 +1,4 @@
-"""eval/scripted_provider.py — 결정적 fake provider (출품 전 P0, 2026-07-03).
+"""eval/scripted_provider.py — 결정적 fake provider.
 
 WHY THIS FILE EXISTS
 --------------------

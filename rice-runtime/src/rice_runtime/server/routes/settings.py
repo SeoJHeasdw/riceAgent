@@ -178,8 +178,17 @@ async def get_memories(c: Container = Depends(get_container)):
 async def delete_memory(memory_id: str, c: Container = Depends(get_container)):
     """메모리 삭제 (Self-Improvement v3). 메모리는 HITL 없이 즉시 반영되는 유일한
     학습 경로 — 잘못 들어간 항목이 매 턴 영구 주입되지 않도록 사후 제거 수단을
-    제공한다. 없으면 NotFoundError → 404."""
+    제공한다. 격리 메모리를 여기로 지우면 곧 '거부'다. 없으면 NotFoundError → 404."""
     c.learning.delete_memory(memory_id)
+    return {"success": True}
+
+
+@router.post("/memories/{memory_id}/approve")
+async def approve_memory(memory_id: str, c: Container = Depends(get_container)):
+    """격리(quarantined) 메모리 승인. 외부 콘텐츠(도구 결과)에서 나온
+    메모리는 격리 상태로 저장돼 주입되지 않는데, 사용자가 승인하면 active가 되어
+    이후 prefetch가 주입한다. 없으면 NotFoundError → 404."""
+    c.learning.approve_memory(memory_id)
     return {"success": True}
 
 
