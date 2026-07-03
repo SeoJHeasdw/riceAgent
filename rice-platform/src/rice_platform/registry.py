@@ -143,12 +143,21 @@ def _claude_plugin_manifest(plugin_dir: Path, entry: dict[str, Any] | None = Non
     }
 
 
-def _iter_artifacts() -> list[tuple[Path, dict[str, Any]]]:
+def _catalog_id(name: str, manifest: dict[str, Any]) -> str:
+    if manifest.get("type") == "plugin":
+        plugin_name = str(manifest.get("name") or name)
+        return plugin_name if plugin_name.startswith("plugin:") else f"plugin:{plugin_name}"
+    return name
+
+
+def _iter_artifacts() -> list[tuple[str, Path, dict[str, Any]]]:
     """카탈로그 대상 (artifact_dir, manifest) 전체 — rice artifacts + Claude 플러그인.
 
-    dir 이름이 곧 artifact id. 같은 id가 양쪽에 있으면 rice artifacts 를 우선한다.
+    Skill과 plugin은 같은 upstream 이름을 가질 수 있으므로 catalog id를 타입별로
+    분리한다. skill은 `<name>`, plugin은 `plugin:<name>`를 쓴다. 이렇게 해야
+    `/artifacts/{id}` 상세/다운로드가 같은 이름의 skill과 plugin을 혼동하지 않는다.
     """
-    out: list[tuple[Path, dict[str, Any]]] = []
+    out: list[tuple[str, Path, dict[str, Any]]] = []
     seen: set[str] = set()
 
     root = _artifacts_dir()
@@ -158,22 +167,30 @@ def _iter_artifacts() -> list[tuple[Path, dict[str, Any]]]:
                 continue
             manifest = _load_manifest(d)
             if manifest is not None:
-                out.append((d, manifest))
-                seen.add(d.name)
+                artifact_id = _catalog_id(d.name, manifest)
+                out.append((artifact_id, d, manifest))
+                seen.add(artifact_id)
 
     for name, pdir, entry in _iter_claude_plugins():
-        if name in seen:
+        manifest = _claude_plugin_manifest(pdir, entry)
+        artifact_id = _catalog_id(name, manifest)
+        if artifact_id in seen:
             continue
-        out.append((pdir, _claude_plugin_manifest(pdir, entry)))
-        seen.add(name)
+        out.append((artifact_id, pdir, manifest))
+        seen.add(artifact_id)
 
     return out
 
 
 def _resolve_artifact_dir(artifact_id: str) -> Path | None:
     """artifact id → 실제 디렉토리 (rice artifacts 또는 Claude 플러그인). 파일/다운로드 공용."""
-    for d, _m in _iter_artifacts():
-        if d.name == artifact_id:
+    for catalog_id, d, manifest in _iter_artifacts():
+        if catalog_id == artifact_id:
+            return d
+        # Backward-compatible lookup for legacy plugin URLs that did not use
+        # `plugin:`. If a same-named skill exists, the skill wins because it was
+        # yielded earlier from `artifacts/`.
+        if manifest.get("type") == "plugin" and d.name == artifact_id:
             return d
     return None
 
@@ -195,7 +212,7 @@ def list_artifacts(
     sort:          popular | recent | name
     """
     results: list[dict[str, Any]] = []
-    for artifact_dir, manifest in _iter_artifacts():
+    for artifact_id, artifact_dir, manifest in _iter_artifacts():
         # type 필터
         if artifact_type and manifest.get("type") != artifact_type:
             continue
@@ -220,7 +237,7 @@ def list_artifacts(
             if ql not in searchable:
                 continue
 
-        entry = _to_catalog_entry(manifest, artifact_dir)
+        entry = _to_catalog_entry(manifest, artifact_dir, artifact_id)
         results.append(entry)
 
     # 정렬
@@ -236,9 +253,11 @@ def list_artifacts(
 
 def get_artifact(artifact_id: str) -> dict[str, Any] | None:
     """단일 artifact 상세 조회 (GET /artifacts/{id})."""
-    for artifact_dir, manifest in _iter_artifacts():
-        if artifact_dir.name == artifact_id:
-            return _to_catalog_entry(manifest, artifact_dir)
+    for catalog_id, artifact_dir, manifest in _iter_artifacts():
+        if catalog_id == artifact_id:
+            return _to_catalog_entry(manifest, artifact_dir, catalog_id)
+        if manifest.get("type") == "plugin" and artifact_dir.name == artifact_id:
+            return _to_catalog_entry(manifest, artifact_dir, catalog_id)
     return None
 
 
@@ -275,7 +294,7 @@ def build_download_package(artifact_id: str) -> tuple[bytes, str] | None:
 
 # ── 내부 헬퍼 ─────────────────────────────────────────────────────────────────
 
-def _to_catalog_entry(manifest: dict[str, Any], artifact_dir: Path) -> dict[str, Any]:
+def _to_catalog_entry(manifest: dict[str, Any], artifact_dir: Path, artifact_id: str) -> dict[str, Any]:
     """manifest dict → catalog API response dict.
 
     Anthropic skills 구조 반영 (spec §Anatomy of a Skill):
@@ -327,7 +346,7 @@ def _to_catalog_entry(manifest: dict[str, Any], artifact_dir: Path) -> dict[str,
         connectors = [{"name": c, "title": c, "description": ""} for c in req_conns]
 
     return {
-        "id": artifact_dir.name,
+        "id": artifact_id,
         "type": manifest.get("type", "skill"),
         "name": manifest.get("name", artifact_dir.name),
         "display_name": manifest.get("display_name") or manifest.get("name", ""),

@@ -113,8 +113,57 @@ def test_marketplace_skips_remote_source_objects(monkeypatch, tmp_path):
     monkeypatch.setenv("RICE_PLUGIN_MARKETPLACES", str(tmp_path))
 
     ids = {p["id"] for p in registry.list_artifacts(artifact_type="plugin")}
-    assert "local-plugin" in ids
-    assert "remote-plugin" not in ids
+    assert "plugin:local-plugin" in ids
+    assert "plugin:remote-plugin" not in ids
+
+
+def test_skill_and_plugin_same_name_can_coexist(monkeypatch, tmp_path):
+    artifacts = tmp_path / "artifacts"
+    skill = artifacts / "playwright"
+    skill.mkdir(parents=True)
+    (skill / "rice-artifact.yaml").write_text(
+        "\n".join(
+            [
+                "schema_version: 1",
+                "type: skill",
+                "name: playwright",
+                "version: 1.0.0",
+                "display_name: Playwright Skill",
+                "description: Skill version.",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (skill / "SKILL.md").write_text("# Playwright Skill\n", encoding="utf-8")
+
+    plugin = tmp_path / "plugins" / "playwright"
+    (plugin / ".claude-plugin").mkdir(parents=True)
+    (plugin / ".claude-plugin" / "plugin.json").write_text(
+        json.dumps({"name": "playwright", "version": "1.0.0", "description": "Plugin version."}),
+        encoding="utf-8",
+    )
+    (tmp_path / ".claude-plugin").mkdir()
+    (tmp_path / ".claude-plugin" / "marketplace.json").write_text(
+        json.dumps({"plugins": [{"name": "playwright", "source": "./plugins/playwright"}]}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("RICE_ARTIFACTS_DIR", str(artifacts))
+    monkeypatch.setenv("RICE_PLUGIN_MARKETPLACES", str(tmp_path))
+
+    skill_ids = {p["id"] for p in registry.list_artifacts(artifact_type="skill")}
+    plugin_ids = {p["id"] for p in registry.list_artifacts(artifact_type="plugin")}
+    assert "playwright" in skill_ids
+    assert "plugin:playwright" in plugin_ids
+
+    skill_detail = registry.get_artifact("playwright")
+    plugin_detail = registry.get_artifact("plugin:playwright")
+    assert skill_detail is not None and skill_detail["type"] == "skill"
+    assert plugin_detail is not None and plugin_detail["type"] == "plugin"
+
+    assert registry.build_download_package("playwright") is not None
+    assert registry.build_download_package("plugin:playwright") is not None
 
 
 # ── 실제 Claude 플러그인 인제스트 (claude-for-legal) ─────────────────────────
@@ -124,12 +173,12 @@ def test_claude_plugins_ingested():
     plugins = registry.list_artifacts(artifact_type="plugin")
     ids = {p["id"] for p in plugins}
     # 마켓플레이스의 핵심 플러그인들이 카탈로그에 떠야 함
-    assert {"employment-legal", "privacy-legal", "corporate-legal"} <= ids
+    assert {"plugin:employment-legal", "plugin:privacy-legal", "plugin:corporate-legal"} <= ids
 
 
 @needs_plugins
 def test_employment_legal_detail():
-    emp = registry.get_artifact("employment-legal")
+    emp = registry.get_artifact("plugin:employment-legal")
     assert emp is not None
     assert emp["type"] == "plugin"
     # 중첩 레이아웃 skills/<name>/SKILL.md
@@ -148,19 +197,19 @@ def test_employment_legal_detail():
 
 @needs_plugins
 def test_plugin_files_readable():
-    emp = registry.get_artifact("employment-legal")
+    emp = registry.get_artifact("plugin:employment-legal")
     assert emp is not None
     first = emp["skill_files"][0]
-    res = _file("employment-legal", first)
+    res = _file("plugin:employment-legal", first)
     assert res["success"] and res["data"]["content"]
     # 번들 리소스(에이전트) 파일도 읽힘
-    agent = _file("employment-legal", "agents/leave-tracker.md")
+    agent = _file("plugin:employment-legal", "agents/leave-tracker.md")
     assert agent["success"] and agent["data"]["content"]
 
 
 @needs_plugins
 def test_plugin_download_builds():
-    pkg = registry.build_download_package("employment-legal")
+    pkg = registry.build_download_package("plugin:employment-legal")
     assert pkg is not None
     data, checksum = pkg
     assert len(data) > 0 and len(checksum) == 64

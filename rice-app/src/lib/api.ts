@@ -485,7 +485,7 @@ class PlatformApiClient {
 
   /** GET /artifacts/{id} — 단일 artifact 상세 */
   getArtifact(id: string): Promise<ApiResponse<PlatformArtifact>> {
-    return this.get<PlatformArtifact>(`/artifacts/${id}`);
+    return this.get<PlatformArtifact>(`/artifacts/${encodeURIComponent(id)}`);
   }
 
   /**
@@ -524,7 +524,7 @@ class PlatformApiClient {
 
   /** POST /artifacts/{id}/sponsor — Blue Point 후원 */
   sponsorArtifact(id: string, points: number): Promise<ApiResponse<{ artifact_id: string; total_points: number }>> {
-    return this.send('POST', `/artifacts/${id}/sponsor`, { points });
+    return this.send('POST', `/artifacts/${encodeURIComponent(id)}/sponsor`, { points });
   }
 
   /**
@@ -532,7 +532,7 @@ class PlatformApiClient {
    * 실제 다운로드는 runtime 측에서 수행한다 (CONTRACTS §2.3).
    */
   downloadUrl(id: string): string {
-    return `${this.baseUrl}/artifacts/${id}/download`;
+    return `${this.baseUrl}/artifacts/${encodeURIComponent(id)}/download`;
   }
 
   /** POST /artifacts — artifact 게시(publish) */

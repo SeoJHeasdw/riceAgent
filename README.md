@@ -6,7 +6,7 @@
 ## 로컬 실행 (개발)
 
 ```bash
-./dev.sh            # 백엔드(:8080) + 프론트(:5273) 한방 실행. Ctrl-C로 함께 종료
+./dev.sh            # runtime(:8080) + platform(:7070) + 프론트(:5273) 한방 실행. Ctrl-C로 함께 종료
 ```
 
 → 브라우저에서 http://localhost:5273 열고 채팅 한 줄 보내면 end-to-end(렌더러→런타임→ollama qwen) 확인.
@@ -18,10 +18,12 @@
 # 백엔드 (런타임 :8080)
 cd rice-runtime && source .venv/bin/activate && rice-runtime --port 8080 --token ""
 
-# 마켓 플랫폼 (rice-platform :7070) — 없어도 앱 동작, 마켓 카탈로그만 빈 상태
-cd rice-platform && python3 -m rice_platform --port 7070 --artifacts-dir ./artifacts
-# venv가 있으면:
-cd rice-platform && source .venv/bin/activate && rice-platform --port 7070 --artifacts-dir ./artifacts
+# 마켓 플랫폼 (rice-platform :7070)
+# sibling ../rice-marketplace가 있으면 app.sh/dev.sh/run.sh가 자동으로 연결한다.
+cd rice-platform
+RICE_ARTIFACTS_DIR=../rice-marketplace/artifacts \
+RICE_PLUGIN_MARKETPLACES=../rice-marketplace \
+python3 -m rice_platform --port 7070 --artifacts-dir ../rice-marketplace/artifacts
 
 # 프론트 (※ npm run dev 아님 — electron 플러그인이 크래시함)
 cd rice-app && npx vite --config vite.renderer.config.ts
@@ -29,6 +31,9 @@ cd rice-app && npx vite --config vite.renderer.config.ts
 
 > 렌더러 단독 dev는 브라우저라 런타임을 **cross-origin**으로 호출 → 런타임이 localhost CORS를
 > 허용한다([server/app.py](rice-runtime/src/rice_runtime/server/app.py)). Electron 빌드는 IPC라 무관.
+> 브라우저 dev에서는 artifact 파일을 렌더러가 저장할 수 없으므로 runtime이 localhost platform
+> download URL을 직접 받아 설치한다. Electron 앱에서는 main process가 tar.gz를 임시 파일로 저장한 뒤
+> runtime에 path+checksum을 전달한다.
 
 ## 문서 구성 (읽는 순서)
 

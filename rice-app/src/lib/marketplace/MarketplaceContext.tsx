@@ -143,28 +143,25 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   const installArtifact = useCallback(async (id: string, type: 'skill' | 'plugin') => {
     setIsLoading(true);
-    // platform 스킬(id: "platform-{name}")이면 실제 설치 파이프라인 실행 (CONTRACTS §2.3):
-    //   1) Electron main이 platform에서 tar.gz를 받아 임시 경로에 저장 (+ X-Checksum)
-    //   2) artifact 상세로 manifest 구성 (checksum 포함 → runtime이 무결성 검증)
-    //   3) runtime POST /artifacts/install { path, manifest } 로 설치
-    // runtime(api.isEnabled)·Electron 브리지가 모두 있어야 실제 경로를 타고,
-    // 그 외에는 mock 지연으로 폴백한다 (렌더러-only dev / 오프라인).
+    // platform artifact(id: "platform-{name}")이면 실제 설치 파이프라인 실행:
+    //   Electron app: main이 tar.gz를 받아 temp path + X-Checksum을 runtime에 전달.
+    //   Browser dev: runtime이 localhost platform URL을 직접 다운로드해 설치.
+    // runtime이 오프라인이면 mock 지연으로 폴백한다.
     const bridge = (
       window as {
         electronAPI?: { artifact?: { download: (url: string) => Promise<{ path: string; checksum: string }> } };
       }
     ).electronAPI?.artifact;
-    if (id.startsWith('platform-') && api.isEnabled && bridge) {
+    if (id.startsWith('platform-') && api.isEnabled) {
       const artifactId = id.slice('platform-'.length);
       try {
-        const [detail, dl] = await Promise.all([
-          platform.getArtifact(artifactId),
-          bridge.download(platform.downloadUrl(artifactId)),
-        ]);
-        if (detail.success && detail.data && dl?.path) {
+        const detail = await platform.getArtifact(artifactId);
+        if (detail.success && detail.data) {
           const a = detail.data;
-          await api.installArtifact({
-            path: dl.path,
+          const url = platform.downloadUrl(artifactId);
+          const dl = bridge ? await bridge.download(url) : null;
+          const res = await api.installArtifact({
+            ...(dl?.path ? { path: dl.path } : { url }),
             manifest: {
               schema_version: 1,
               type: a.type,
@@ -175,12 +172,16 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
               category: a.category,
               tags: a.tags,
               requires: a.requires,
-              checksum: dl.checksum,
+              checksum: dl?.checksum,
             },
+            checksum: dl?.checksum,
           });
+          if (!res.success) throw new Error(res.error || 'artifact install failed');
         }
       } catch (err) {
-        console.error('platform skill install failed', err);
+        console.error('platform artifact install failed', err);
+        setIsLoading(false);
+        return;
       }
     } else {
       // mock / 오프라인: 지연 시뮬레이션

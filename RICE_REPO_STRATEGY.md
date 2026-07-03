@@ -99,7 +99,7 @@ RICE는 단순 프론트엔드 앱이 아니라 아래 3개 축의 결합이다.
 ### 4.2 rice-app / rice-runtime ↔ rice-platform (원격 REST)
 
 - 마켓 카탈로그 조회, artifact 다운로드, 설치 manifest는 일반 REST API
-- 설치 흐름: 앱이 platform에서 artifact를 받아 → 런타임의 로컬 디렉토리(skills/plugins)에 배치 → 런타임이 로드
+- 설치 흐름: 앱이 platform에서 artifact 상세/다운로드 URL을 얻고 → Electron이면 main process가 tar.gz를 받아 로컬 path를 runtime에 전달, 브라우저 dev면 runtime이 localhost platform URL을 직접 다운로드 → 런타임의 로컬 디렉토리(skills/plugins)에 배치 → 런타임이 로드
 - 데모 단계에서는 인증 없음 (제품화 시 SSO 확장 포인트)
 
 ### 4.3 공유 타입(shared-types) 전략
@@ -215,7 +215,8 @@ flowchart LR
 
     A -- "localhost HTTP+SSE (4.1)" --> B
     A -- "REST: 카탈로그/검색 (4.2)" --> C
-    B -- "REST: artifact 다운로드 (4.2)" --> C
+    A -- "Electron: artifact 다운로드 → local path" --> C
+    B -- "Browser dev fallback: localhost artifact URL 다운로드" --> C
 ```
 
 - `rice-app`이 사용자 접점이며 런타임 프로세스를 관리

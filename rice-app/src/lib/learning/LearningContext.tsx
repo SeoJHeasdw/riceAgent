@@ -232,7 +232,7 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           const catalog = cat.success && cat.data ? cat.data : [];
           const byId = new Map(catalog.map((a) => [a.id, a] as const));
           const mapped = installed.map((p): MyPlugin => {
-            const art = byId.get(p.id.replace(/^plugin:/, ''));
+            const art = byId.get(p.id) ?? byId.get(p.id.replace(/^plugin:/, ''));
             if (art) {
               // 카탈로그 매칭: 마켓 Plugin으로 풍부하게, 단 정체성·상태는 런타임 기준.
               return { ...marketPluginToMyPlugin(platformArtifactToPlugin(art)), id: p.id, enabled: p.enabled, version: p.version };

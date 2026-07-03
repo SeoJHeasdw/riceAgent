@@ -306,17 +306,25 @@ paths:
   /artifacts/install:
     post:
       tags: [plugins]
-      summary: Install a downloaded artifact (CONTRACTS §2.3)
+      summary: Install a downloaded artifact or a localhost platform artifact URL (CONTRACTS §2.3)
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [path, manifest]
+              required: [manifest]
               properties:
-                path: { type: string }
+                path:
+                  type: string
+                  description: Local tar.gz path produced by Electron main.
+                url:
+                  type: string
+                  description: Localhost platform /artifacts/{id}/download URL for browser-only dev.
                 manifest: { type: object }
+                checksum:
+                  type: string
+                  description: sha256-... from X-Checksum; overrides manifest.checksum.
       responses: { "200": { $ref: "#/components/responses/Ok" } }
   /artifacts/{id}:
     delete:

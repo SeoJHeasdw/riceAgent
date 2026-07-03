@@ -150,7 +150,9 @@ export { toLearnVer };
 
 /** 설치된 마켓 플러그인의 안정적 소유 id — runtime installed_artifacts id와 맞춘다. */
 export const installedPluginId = (marketId: string) =>
-  marketId.startsWith('platform-') ? `plugin:${marketId.slice('platform-'.length)}` : `inst-${marketId}`;
+  marketId.startsWith('platform-plugin:')
+    ? marketId.slice('platform-'.length)
+    : marketId.startsWith('platform-') ? `plugin:${marketId.slice('platform-'.length)}` : `inst-${marketId}`;
 
 // ── platform(rice-platform) artifact → 마켓 타입 변환 ────────────────────────
 // 카탈로그 응답(PlatformArtifact)을 앱 도메인(Skill·Plugin)으로. MarketplaceContext(카탈로그

@@ -9,8 +9,12 @@
 
 from __future__ import annotations
 
+import tempfile
 from typing import Any
+from pathlib import Path
+from urllib.parse import urlparse
 
+import httpx
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
@@ -26,7 +30,11 @@ class EnabledIn(BaseModel):
 
 
 class InstallIn(BaseModel):
-    path: str
+    path: str | None = None
+    # Browser-only dev cannot write a platform tarball to a local file path.
+    # When url is provided, runtime downloads the artifact itself, restricted to
+    # localhost platform URLs.
+    url: str | None = None
     manifest: dict[str, Any]
     # platform GET /artifacts/{id}/download 의 X-Checksum 헤더 값을 앱이 여기로 전달한다.
     # manifest.checksum 보다 우선한다 (CONTRACTS §2.3 무결성 검증 경로).
@@ -68,9 +76,15 @@ async def install_artifact(body: InstallIn, c: Container = Depends(get_container
     # 앱이 X-Checksum 헤더 값을 body.checksum 으로 넘기면 manifest 에 주입해 무결성
     # 검증을 강제한다 (CONTRACTS §2.3 — v1 의 'checksum 전달 경로 없음' 버그#4 교정).
     manifest = dict(body.manifest)
-    if body.checksum:
-        manifest["checksum"] = body.checksum
-    info = await c.plugins.install(path=body.path, manifest=manifest)
+    path = body.path
+    checksum = body.checksum
+    if path is None and body.url:
+        path, checksum = await _download_local_platform_artifact(body.url)
+    if path is None:
+        raise ValidationError("artifact install requires either path or url")
+    if checksum:
+        manifest["checksum"] = checksum
+    info = await c.plugins.install(path=path, manifest=manifest)
     return {"success": True, "data": info.__dict__}
 
 
@@ -78,3 +92,25 @@ async def install_artifact(body: InstallIn, c: Container = Depends(get_container
 async def remove_artifact(artifact_id: str, c: Container = Depends(get_container)):
     await c.plugins.remove(artifact_id)
     return {"success": True}
+
+
+async def _download_local_platform_artifact(url: str) -> tuple[str, str | None]:
+    """Download a platform artifact to a temp file for browser-only dev installs."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValidationError(f"unsupported artifact url scheme: {parsed.scheme}")
+    host = (parsed.hostname or "").lower()
+    if host not in ("localhost", "127.0.0.1", "::1"):
+        raise ValidationError("artifact url must point to localhost platform")
+    if not parsed.path.endswith("/download") or "/artifacts/" not in parsed.path:
+        raise ValidationError("artifact url must be a platform /artifacts/{id}/download URL")
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.get(url)
+        resp.raise_for_status()
+        checksum = resp.headers.get("x-checksum")
+        suffix = Path(parsed.path).parts[-2] if len(Path(parsed.path).parts) >= 2 else "artifact"
+        safe = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in suffix)
+        path = Path(tempfile.mkdtemp(prefix="rice-artifact-download-")) / f"{safe}.tar.gz"
+        path.write_bytes(resp.content)
+        return str(path), checksum

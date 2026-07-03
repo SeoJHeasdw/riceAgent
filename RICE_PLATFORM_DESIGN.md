@@ -8,11 +8,12 @@
 
 ## 1. 개요
 
-`rice-platform`은 **Skill Market + Plugin Market을 하나의 백엔드**로 제공하고 `artifact_type`(skill|plugin)으로 구분한다([RICE_REPO_STRATEGY.md](RICE_REPO_STRATEGY.md) 5.3). 원격 배포물이며 runtime/​app과 **진짜 분리**된다.
+`rice-platform`은 **Skill Market + Plugin Market을 하나의 백엔드**로 제공하고 `artifact_type`(skill|plugin)으로 구분한다([RICE_REPO_STRATEGY.md](RICE_REPO_STRATEGY.md) 5.3). 원격 배포물이며 runtime/​app과 **진짜 분리**된다. PoC에서는 sibling `rice-marketplace` repo를 content source로 두고, platform은 이를 읽어 catalog/download API로 서빙한다.
 
 - 배포: Docker 컨테이너(FastAPI), 클라우드(AWS/GCP), `https://platform.rice.app`
 - 데모 단계 인증 없음(향후 SSO 확장 포인트)
 - Phase 1에는 platform 없이 **로컬 mock 카탈로그**(`file://`)로 동작([RICE_CONTRACTS.md](RICE_CONTRACTS.md) 3장)
+- Phase 2 PoC 실행: `RICE_ARTIFACTS_DIR=../rice-marketplace/artifacts`, `RICE_PLUGIN_MARKETPLACES=../rice-marketplace`
 
 ---
 
@@ -73,9 +74,29 @@ manifest(CONTRACTS 2.1) 필드에 더해, registry가 artifact 디렉토리 구�
 registry는 두 종류의 소스를 함께 카탈로그로 노출한다 (artifact id = 디렉토리명):
 
 1. **rice 네이티브 artifact** — `artifacts/<name>/rice-artifact.yaml` (skill 중심)
-2. **실제 Claude Code 플러그인** — `.claude-plugin/{marketplace.json, plugin.json}` + `.mcp.json` 형식 (예: `claude-for-legal`). `RICE_PLUGIN_MARKETPLACES` 또는 레포 루트 자동 감지로 **in-place 인제스트**(복사·변환 없음). `.mcp.json`의 `mcpServers`가 `requires.connectors`로 매핑된다.
+2. **실제 Claude Code 플러그인** — `.claude-plugin/{marketplace.json, plugin.json}` + `.mcp.json` 형식. `RICE_PLUGIN_MARKETPLACES`로 지정한 marketplace root를 **in-place 인제스트**(복사·변환 없음)한다. `.mcp.json`의 `mcpServers`가 `requires.connectors`로 매핑된다. Upstream marketplace에 섞인 remote source object는 platform이 직접 fetch하지 않고 skip한다. fetch·검수·pinning은 `rice-marketplace`가 담당한다.
 
 > ★ skill ≠ plugin: skill은 단일 `SKILL.md`(선언적). plugin은 `skills/` + `agents/` + `hooks/` + MCP 커넥터 묶음 — sandbox 경계와 Connector 권한은 plugin에만 해당(CONTRACTS §2.2).
+
+### 4.0.1 실행 중 소스 연결
+
+로컬 개발 스크립트(`app.sh`, `dev.sh`, `rice-platform/run.sh`)는 sibling `../rice-marketplace`를 자동 감지한다.
+
+```
+rice-marketplace/
+├── artifacts/                 # Rice-native skill/plugin artifacts
+├── .claude-plugin/marketplace.json
+└── sources/                   # upstream submodules
+```
+
+감지되면 platform은 다음 값을 사용한다.
+
+```bash
+RICE_ARTIFACTS_DIR=../rice-marketplace/artifacts
+RICE_PLUGIN_MARKETPLACES=../rice-marketplace
+```
+
+없으면 기존처럼 `rice-platform/artifacts` seed만 사용한다.
 
 ### 4.1 버전 관리
 

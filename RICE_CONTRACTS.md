@@ -163,8 +163,9 @@ artifact.tar.gz (skill)              artifact.tar.gz (plugin)
 ### 2.3 설치 흐름
 
 ```
-앱(마켓 화면) → platform: artifact 다운로드
- → 앱 → runtime: POST /artifacts/install (파일 경로 + manifest)
+앱(마켓 화면) → platform: artifact 상세/다운로드 URL 조회
+ → Electron 앱: main process가 tar.gz 다운로드 → runtime: POST /artifacts/install (파일 경로 + manifest + checksum)
+ → 브라우저 dev: runtime: POST /artifacts/install (localhost platform download URL + manifest)
  → runtime: 체크섬 검증 → ~/.rice/{skills|plugins}/ 배치 → 로드
  → 이후 대화부터 스킬 주입 / 요구 Connector(MCP) 도구 등록 반영
 ```
@@ -261,9 +262,10 @@ requires:
 
 ### 6.3 Artifact 설치 무결성 (§2.3)
 - `POST /artifacts/install` 에 선택 필드 **`checksum`** 추가 — 앱이 platform download 응답의 `X-Checksum` 헤더 값을 그대로 전달하면 manifest.checksum 보다 우선해 검증한다(빈 값이면 dev 모드).
+- `POST /artifacts/install` 은 **`path` 또는 `url`** 을 받는다. `path`는 Electron main이 저장한 로컬 tar.gz, `url`은 브라우저 dev용 localhost platform `/artifacts/{id}/download` URL이다. 원격 URL은 거부한다.
 - manifest `version` 은 YAML 숫자(`1.0`)로 와도 문자열로 정규화(과거: ValidationError).
 - skill artifact 는 설치 시 **평면 `~/.rice/skills/<name>.md`** 로 배치되어 학습 루프 주입·lifecycle 대상이 된다.
-- plugin 의 `skills/<sub>/SKILL.md`(표준 레이아웃)도 주입 대상에 포함(과거: 평면 `*.md` 만).
+- plugin 의 `skills/<sub>/SKILL.md`(표준 레이아웃)도 주입 대상에 포함(과거: 평면 `*.md` 만). platform tarball의 최상위 `<artifact_id>/` 폴더는 runtime 설치 시 벗겨 `~/.rice/plugins/plugin:<name>/skills/...` 로 정규화한다.
 
 ### 6.4 Plugin 활성화 게이트 (§4.4 실행)
 - `PATCH /plugins/{id}/enabled` (enable): `requires.connectors` 가 **모두 연결돼 있지 않으면 422** 로 차단(과거: 무검증 → 도구 실행 시 조용히 실패).
