@@ -76,10 +76,15 @@ function PluginMarketScreen() {
       job.update({ progress: i });
     }
 
-    await installArtifact(plugin.id, 'plugin');
+    const installResult = await installArtifact(plugin.id, 'plugin');
     // 설치를 "내 플러그인"에도 즉시 반영 (스킬의 installSkillFromMarket 와 대칭).
-    installPluginFromMarket(plugin);
-    job.done('success', '설치 완료');
+    installPluginFromMarket(plugin, { enabled: installResult?.enabled ?? true });
+    if (installResult?.missingConnectors.length) {
+      job.done('success', '설치됨 · 커넥터 연결 필요');
+      showToast(`${plugin.name}을(를) 활성화하려면 커넥터를 연결하세요`, 'warning');
+    } else {
+      job.done('success', '설치 완료');
+    }
     // The toast lingers, then animates itself out automatically.
   };
 
@@ -92,7 +97,12 @@ function PluginMarketScreen() {
 
   // Handle plugin toggle
   const handleToggle = async (plugin: Plugin) => {
-    await togglePlugin(plugin.id, !plugin.enabled);
+    const next = !plugin.enabled;
+    const ok = await togglePlugin(plugin.id, next);
+    if (!ok) {
+      showToast(`${plugin.name} 활성화에 필요한 커넥터를 먼저 연결하세요`, 'warning');
+      return;
+    }
     showToast(
       plugin.enabled
         ? `${plugin.name}이(가) 일시정지되었습니다`
@@ -242,8 +252,13 @@ function PluginMarketScreen() {
           onInstall={() => handleInstall(detailModalPlugin)}
           onUninstall={() => handleUninstall(detailModalPlugin)}
           onToggle={(enabled) => {
-            togglePlugin(detailModalPlugin.id, enabled);
-            setDetailModalPlugin({ ...detailModalPlugin, enabled });
+            void togglePlugin(detailModalPlugin.id, enabled).then((ok) => {
+              if (!ok) {
+                showToast(`${detailModalPlugin.name} 활성화에 필요한 커넥터를 먼저 연결하세요`, 'warning');
+                return;
+              }
+              setDetailModalPlugin({ ...detailModalPlugin, enabled });
+            });
           }}
         />
       )}

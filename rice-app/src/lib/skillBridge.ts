@@ -188,9 +188,18 @@ export function platformArtifactToPlugin(a: PlatformArtifact): MarketPlugin {
   const skillNames = a.skill_files.map((f) =>
     f.replace(/^skills\//, '').replace(/\/SKILL\.md$/i, '').replace(/\.md$/i, ''),
   );
+  const pluginSkills = a.plugin_skills?.length
+    ? a.plugin_skills.map((s) => ({
+        command: s.command || s.name,
+        desc: s.description || '',
+      }))
+    : skillNames.map((command) => ({ command, desc: '' }));
   const connectors = a.connectors?.length
     ? a.connectors.map((c) => ({ name: c.title || c.name, desc: c.description || undefined }))
     : (a.requires?.connectors ?? []).map((c) => ({ name: c }));
+  const useCases = (a.examples && a.examples.length)
+    ? a.examples
+    : pluginSkills.slice(0, 3).map((s) => `${s.command.replace(/[-_]+/g, ' ')} 작업을 이 플러그인으로 도와줘`);
   return {
     id: `platform-${a.id}`,
     name: a.display_name || a.name,
@@ -200,10 +209,10 @@ export function platformArtifactToPlugin(a: PlatformArtifact): MarketPlugin {
     provider: a.author_team || a.author_name || 'community',
     category: a.category,
     tags: a.tags,
-    skillCount: a.skill_files.length,
+    skillCount: pluginSkills.length || a.skill_files.length,
     gains: a.tags.length ? a.tags.slice(0, 4).join(' · ') : a.category,
-    useCases: [],
-    skills: skillNames.map((command) => ({ command, desc: '' })),
+    useCases,
+    skills: pluginSkills,
     connectors,
     installed: false,
     enabled: false,

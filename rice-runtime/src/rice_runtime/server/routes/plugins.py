@@ -85,7 +85,18 @@ async def install_artifact(body: InstallIn, c: Container = Depends(get_container
     if checksum:
         manifest["checksum"] = checksum
     info = await c.plugins.install(path=path, manifest=manifest)
-    return {"success": True, "data": info.__dict__}
+    data = dict(info.__dict__)
+    missing_connectors: list[str] = []
+    if info.required_connectors:
+        connected = c.connectors.connected_types()
+        missing_connectors = [ct for ct in info.required_connectors if ct not in connected]
+        if missing_connectors:
+            # 설치는 허용하되 실행 표면 노출은 막는다. 사용자가 Connectors에서 연결한 뒤
+            # 활성화하면 set_enabled()의 동일 게이트를 다시 통과한다.
+            c.plugins.set_enabled(info.id, False)
+            data["enabled"] = False
+    data["missing_connectors"] = missing_connectors
+    return {"success": True, "data": data}
 
 
 @router.delete("/artifacts/{artifact_id}")

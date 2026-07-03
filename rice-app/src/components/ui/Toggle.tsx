@@ -12,13 +12,14 @@ export interface ToggleProps {
   disabled?: boolean;
   label?: string;
   description?: string;
-  /** Accent color when checked. 'blue' (default) or 'green'. */
-  tone?: 'blue' | 'green';
+  /** Accent color when checked. */
+  tone?: 'blue' | 'green' | 'purple';
 }
 
 const toneStyles = {
   blue: { track: 'bg-interactive', check: 'text-interactive' },
   green: { track: 'bg-support-success', check: 'text-support-success' },
+  purple: { track: 'bg-purple-60', check: 'text-purple-60' },
 } as const;
 
 export const Toggle: React.FC<ToggleProps> = ({

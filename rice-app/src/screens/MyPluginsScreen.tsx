@@ -43,7 +43,14 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
   const toggle = () => {
     const next = !plugin.enabled;
     patch((x) => ({ ...x, enabled: next }));
-    if (api.isEnabled) void api.setPluginEnabled(pluginId, next);
+    if (api.isEnabled) {
+      void api.setPluginEnabled(pluginId, next).then((res) => {
+        if (!res.success) {
+          patch((x) => ({ ...x, enabled: !next }));
+          console.error('plugin toggle failed', res.error);
+        }
+      });
+    }
   };
   const remove = () => {
     setMyPlugins((a) => a.filter((x) => x.id !== pluginId));
@@ -51,10 +58,6 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
   };
   const update = () =>
     plugin.update && patch((x) => ({ ...x, update: undefined, version: plugin.update!.version, updated: '방금' }));
-  const addPermission = () =>
-    patch((x) => ({ ...x, permissions: [...x.permissions, { name: '새 권한 — 데이터 소스를 선택하세요', mode: '읽기' }] }));
-  const removePermission = (idx: number) =>
-    patch((x) => ({ ...x, permissions: x.permissions.filter((_, i) => i !== idx) }));
 
   const meta: [string, string][] = [
     ['소스', plugin.source],
@@ -62,14 +65,20 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
     ['작성자', plugin.author],
     ['마지막 업데이트', plugin.updated],
   ];
+  const permissionsNeedingConnection = plugin.permissions.filter((p) => p.mode.includes('연결 필요'));
+  const firstConnectorTarget = (() => {
+    const first = plugin.permissions[0]?.name;
+    const cid = first ? connectorIdForScope(first) : null;
+    return cid ? `/connectors/${cid}` : '/connectors';
+  })();
 
   return (
     <div className="flex-1 min-w-0 overflow-y-auto">
       {/* header */}
       <div className="px-7 pt-6 pb-5 border-b border-border-subtle-01">
         <div className="flex items-start gap-3.5">
-          <div className="w-11 h-11 flex-shrink-0 flex items-center justify-center rounded-lg bg-layer-02 border border-border-subtle-02">
-            <Icon name={plugin.icon} size={22} className={plugin.enabled ? 'text-icon-primary' : 'text-icon-secondary'} />
+          <div className="w-11 h-11 flex-shrink-0 flex items-center justify-center rounded-lg bg-purple-60/12 border border-purple-60/25">
+            <Icon name={plugin.icon} size={22} className={plugin.enabled ? 'text-purple-40' : 'text-icon-secondary'} />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
@@ -87,7 +96,7 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             <span className="text-caption-01 text-text-helper">{plugin.enabled ? '활성' : '비활성'}</span>
-            <Toggle checked={plugin.enabled} onChange={toggle} />
+            <Toggle checked={plugin.enabled} onChange={toggle} tone="purple" />
           </div>
         </div>
 
@@ -144,7 +153,7 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
                   }`}
                 >
                   {label}
-                  {on && <span className="absolute bottom-0 left-2 right-2 h-0.5 rounded-full bg-interactive" />}
+                  {on && <span className="absolute bottom-0 left-2 right-2 h-0.5 rounded-full bg-purple-60" />}
                 </button>
               );
             })}
@@ -157,9 +166,9 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
                 모두 보기 <Icon name="arrow-up-right" size={12} />
               </button>
             )}
-            {tab === 'permissions' && (
-              <Button kind="ghost" size="sm" icon={<Icon name="add" size={14} />} onClick={addPermission}>
-                권한 추가
+            {tab === 'permissions' && permissionsNeedingConnection.length > 0 && (
+              <Button kind="tertiary" size="sm" icon={<Icon name="arrow-up-right" size={14} />} onClick={() => navigate(firstConnectorTarget)}>
+                커넥터 연결
               </Button>
             )}
           </div>
@@ -180,7 +189,7 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
                           /{s.name.replace(/\s+/g, '')}
                         </span>
                       </div>
-                      <div className="text-caption-01 text-text-helper mt-0.5">{s.desc}</div>
+                      {s.desc && <div className="text-caption-01 text-text-helper mt-0.5">{s.desc}</div>}
                     </div>
                   </div>
                 ))}
@@ -215,12 +224,13 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
               </p>
               {plugin.permissions.length === 0 ? (
                 <div className="text-caption-01 text-text-helper bg-layer-01 border border-border-subtle-01 rounded-lg px-3.5 py-3.5">
-                  부여된 권한이 없어요. <span className="text-link-primary">권한 추가</span>로 데이터 접근을 허용하세요.
+                  추가 연결 없이 사용할 수 있는 플러그인이에요.
                 </div>
               ) : (
                 <div className="flex flex-col gap-px bg-border-subtle-01 rounded-lg overflow-hidden">
                   {plugin.permissions.map((p, i) => {
                     const cid = connectorIdForScope(p.name);
+                    const needsConnection = p.mode.includes('연결 필요');
                     return (
                       <div key={i} className="flex items-center gap-2.5 bg-background px-3.5 py-2.5">
                         <button
@@ -229,23 +239,15 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
                           title={cid ? '커넥터에서 보기' : '커넥터 화면으로'}
                           className="group flex items-center gap-2.5 flex-1 min-w-0 text-left"
                         >
-                          <Icon name="lock" size={15} className="text-icon-secondary flex-shrink-0 opacity-70" />
+                          <Icon name={needsConnection ? 'connect' : 'lock'} size={15} className="text-purple-40 flex-shrink-0 opacity-80" />
                           <span className="flex-1 min-w-0 text-body-short-01 font-mono text-text-primary truncate group-hover:underline">
                             {p.name}
                           </span>
                           {cid && <Icon name="arrow-up-right" size={13} className="text-icon-secondary opacity-50 flex-shrink-0" />}
                         </button>
-                        <Tag type="gray" size="sm">
+                        <Tag type={needsConnection ? 'yellow' : 'gray'} size="sm">
                           {p.mode}
                         </Tag>
-                        <button
-                          onClick={() => removePermission(i)}
-                          title="권한 제거"
-                          aria-label="권한 제거"
-                          className="w-6 h-6 flex items-center justify-center text-icon-secondary hover:text-text-primary opacity-60 hover:opacity-100"
-                        >
-                          <Icon name="close" size={14} />
-                        </button>
                       </div>
                     );
                   })}
@@ -258,8 +260,9 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
         {/* example prompts */}
         <div>
           <SectionLabel>다음과 같이 질문해 보세요</SectionLabel>
-          <div className="flex flex-col gap-1.5">
-            {plugin.examples.map((q, i) => (
+          {plugin.examples.length > 0 ? (
+            <div className="flex flex-col gap-1.5">
+              {plugin.examples.map((q, i) => (
               <button
                 key={i}
                 onClick={() => navigate('/chat')}
@@ -272,8 +275,13 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
                 <span className="flex-1 min-w-0 text-body-short-01 text-text-primary">{q}</span>
                 <Icon name="arrow-up-right" size={13} className="text-icon-secondary opacity-0 group-hover:opacity-70 transition-opacity flex-shrink-0" />
               </button>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-caption-01 text-text-helper bg-layer-01 border border-border-subtle-01 rounded-lg px-3.5 py-3.5">
+              추천 질문이 아직 제공되지 않았어요.
+            </div>
+          )}
         </div>
 
         {/* actions */}
@@ -362,13 +370,13 @@ function MyPluginsScreen() {
                 onClick={() => setFilter(c)}
                 className={`flex items-center w-full text-left px-4 py-2.5 text-body-short-01 border-l-2 transition-colors ${
                   isActive
-                    ? 'bg-layer-selected-01 border-l-blue-50 text-text-primary font-semibold'
+                    ? 'bg-layer-selected-01 border-l-purple-50 text-text-primary font-semibold'
                     : 'bg-transparent border-l-transparent text-text-secondary hover:bg-layer-hover-01'
                 }`}
               >
                 {c}
                 {badge && (
-                  <span className="ml-auto inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 rounded-full bg-blue-60 text-white text-label-micro">
+                  <span className="ml-auto inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 rounded-full bg-purple-60 text-white text-label-micro">
                     {badge}
                   </span>
                 )}
@@ -408,11 +416,11 @@ function MyPluginsScreen() {
               key={p.id}
               onClick={() => setSel(p.id)}
               className={`flex items-start gap-2.5 w-full text-left border-b border-border-subtle-01 border-l-2 px-[18px] py-3 transition-colors ${
-                on ? 'bg-layer-selected-01 border-l-blue-50' : 'bg-transparent border-l-transparent hover:bg-layer-hover-01'
+                on ? 'bg-layer-selected-01 border-l-purple-50' : 'bg-transparent border-l-transparent hover:bg-layer-hover-01'
               } ${p.enabled ? '' : 'opacity-55'}`}
             >
               <div
-                className={`w-7 h-7 flex-shrink-0 flex items-center justify-center rounded mt-0.5 ${p.enabled ? 'bg-blue-60' : 'bg-layer-03'}`}
+                className={`w-7 h-7 flex-shrink-0 flex items-center justify-center rounded mt-0.5 ${p.enabled ? 'bg-purple-60' : 'bg-layer-03'}`}
               >
                 <Icon name={p.icon} size={16} className="text-white" />
               </div>
@@ -426,7 +434,7 @@ function MyPluginsScreen() {
                     {p.skills.length}개 스킬 · {p.updated}
                   </span>
                   {hasUpdate(p) && (
-                    <Tag type="blue" size="sm">
+                    <Tag type="purple" size="sm">
                       업데이트
                     </Tag>
                   )}

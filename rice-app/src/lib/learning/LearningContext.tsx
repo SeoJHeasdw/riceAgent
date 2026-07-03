@@ -63,7 +63,7 @@ interface LearningContextValue {
    * 마켓 플러그인을 "내 플러그인"으로 materialize 한다 — 플러그인 설치의 학습-store 측 배선.
    * marketId 기준 멱등. 소유 id(inst-…)를 돌려준다. (installSkillFromMarket 와 대칭)
    */
-  installPluginFromMarket: (market: MarketPlugin) => string;
+  installPluginFromMarket: (market: MarketPlugin, options?: { enabled?: boolean }) => string;
 
   /** Skill id currently highlighted in the panel (after a chat "jump") */
   highlightedSkill: string | null;
@@ -221,23 +221,43 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     // 영속하므로 재시작해도 남아야 한다(설치 후 사라지던 버그). platform 카탈로그와 교차참조해
     // 스킬명·커넥터 설명까지 풍부하게 복원하고, 매칭이 없으면 런타임 메타로 폴백.
     const loadPlugins = () => {
-      return Promise.all([api.getPlugins(), platform.getCatalog({ type: 'plugin' })]).then(
-        ([rt, cat]) => {
+      return Promise.all([api.getPlugins(), platform.getCatalog({ type: 'plugin' }), api.getConnectors()]).then(
+        ([rt, cat, conns]) => {
           if (!rt.success || !rt.data) return; // 런타임 오프라인 → 빈 상태 유지
           type RtPlugin = {
             id: string; name: string; version: string; enabled: boolean;
             required_connectors?: string[]; skill_count?: number; description?: string;
           };
+          type RtConnector = { connector_type: string; status: string };
           const installed = rt.data as unknown as RtPlugin[];
           const catalog = cat.success && cat.data ? cat.data : [];
+          const connectedTypes = new Set(
+            ((conns.success && conns.data ? conns.data : []) as RtConnector[])
+              .filter((c) => c.status === 'connected')
+              .map((c) => c.connector_type.toLowerCase()),
+          );
           const byId = new Map(catalog.map((a) => [a.id, a] as const));
+          const connectorKey = (name: string) => {
+            const s = name.toLowerCase();
+            if (s.includes('gmail')) return 'gmail';
+            if (s.includes('calendar') || s.includes('캘린더')) return 'calendar';
+            if (s.includes('drive') || s.includes('드라이브')) return 'drive';
+            return s;
+          };
+          const decoratePermissions = (p: MyPlugin): MyPlugin => ({
+            ...p,
+            permissions: p.permissions.map((perm) => ({
+              ...perm,
+              mode: connectedTypes.has(connectorKey(perm.name)) ? '연결됨' : perm.mode,
+            })),
+          });
           const mapped = installed.map((p): MyPlugin => {
             const art = byId.get(p.id) ?? byId.get(p.id.replace(/^plugin:/, ''));
             if (art) {
               // 카탈로그 매칭: 마켓 Plugin으로 풍부하게, 단 정체성·상태는 런타임 기준.
-              return { ...marketPluginToMyPlugin(platformArtifactToPlugin(art)), id: p.id, enabled: p.enabled, version: p.version };
+              return decoratePermissions({ ...marketPluginToMyPlugin(platformArtifactToPlugin(art)), id: p.id, enabled: p.enabled, version: p.version });
             }
-            return runtimePluginToMyPlugin(p);
+            return decoratePermissions(runtimePluginToMyPlugin(p));
           });
           setMyPlugins(mapped);
         },
@@ -303,9 +323,14 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, []);
 
   // install(plugin) = 마켓 → 내 플러그인 materialize. marketId 기준 멱등(중복 설치 방지).
-  const installPluginFromMarket = useCallback((market: MarketPlugin): string => {
+  const installPluginFromMarket = useCallback((market: MarketPlugin, options?: { enabled?: boolean }): string => {
     const id = installedPluginId(market.id);
-    const myPlugin = marketPluginToMyPlugin(market);
+    const enabled = options?.enabled ?? true;
+    const myPlugin = {
+      ...marketPluginToMyPlugin(market),
+      enabled,
+      updated: enabled ? '방금 설치' : '커넥터 연결 필요',
+    };
     setMyPlugins((prev) => (prev.some((p) => p.id === id) ? prev : [myPlugin, ...prev]));
     return id;
   }, []);

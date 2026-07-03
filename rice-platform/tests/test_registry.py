@@ -143,6 +143,24 @@ def test_skill_and_plugin_same_name_can_coexist(monkeypatch, tmp_path):
         json.dumps({"name": "playwright", "version": "1.0.0", "description": "Plugin version."}),
         encoding="utf-8",
     )
+    skill_dir = plugin / "skills" / "agent-development"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "\n".join(
+            [
+                "---",
+                "name: agent-development",
+                "description: Build and debug Claude Code agents.",
+                "version: 1",
+                "---",
+                "# Agent Development",
+                "## Examples",
+                "- Help me design a focused review agent.",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
     (tmp_path / ".claude-plugin").mkdir()
     (tmp_path / ".claude-plugin" / "marketplace.json").write_text(
         json.dumps({"plugins": [{"name": "playwright", "source": "./plugins/playwright"}]}),
@@ -164,6 +182,14 @@ def test_skill_and_plugin_same_name_can_coexist(monkeypatch, tmp_path):
 
     assert registry.build_download_package("playwright") is not None
     assert registry.build_download_package("plugin:playwright") is not None
+    assert plugin_detail["plugin_skills"] == [
+        {
+            "name": "agent-development",
+            "command": "agent-development",
+            "description": "Build and debug Claude Code agents.",
+        }
+    ]
+    assert plugin_detail["examples"] == ["Help me design a focused review agent."]
 
 
 # ── 실제 Claude 플러그인 인제스트 (claude-for-legal) ─────────────────────────
@@ -187,9 +213,9 @@ def test_employment_legal_detail():
     # plugin 리소스
     assert "agents" in emp["bundled_resources"]
     assert "hooks" in emp["bundled_resources"]
-    # .mcp.json → requires.connectors (이름)
+    # .mcp.json → requires.connectors (runtime connector_type where known)
     connectors = emp["requires"].get("connectors") or []
-    assert "Slack" in connectors and "Google Drive" in connectors
+    assert "Slack" in connectors and "drive" in connectors
     # connectors(상세): .mcp.json 의 description까지 노출
     detail = {c["name"]: c for c in emp["connectors"]}
     assert "Slack" in detail and detail["Slack"]["description"]

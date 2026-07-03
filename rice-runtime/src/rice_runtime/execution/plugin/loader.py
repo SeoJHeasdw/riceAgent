@@ -273,10 +273,12 @@ class PluginLoader:
         for r in rows:
             manifest_path = self._paths.plugins / r["id"] / "rice-artifact.json"
             required_connectors: tuple[str, ...] = ()
+            description = ""
             skill_count = 0
             if manifest_path.exists():
                 try:
                     raw = json.loads(manifest_path.read_text())
+                    description = str(raw.get("description", "") or "")
                     required_connectors = tuple(
                         str(c) for c in (raw.get("requires", {}).get("connectors", []) or [])
                     )
@@ -292,7 +294,7 @@ class PluginLoader:
                     id=r["id"],
                     name=r["name"],
                     version=r["version"],
-                    description="",
+                    description=description,
                     enabled=bool(r["enabled"]),
                     required_connectors=required_connectors,
                     skill_count=skill_count,

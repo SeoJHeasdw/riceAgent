@@ -18,6 +18,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import tarfile
 import tempfile
 from collections.abc import Iterator
@@ -106,6 +107,20 @@ def _read_json(path: Path) -> dict[str, Any]:
         return {}
 
 
+def _connector_requirement_key(name: str) -> str:
+    """Display connector names from `.mcp.json` → runtime connector_type where known."""
+    s = name.strip().lower()
+    aliases = {
+        "google drive": "drive",
+        "drive": "drive",
+        "google calendar": "calendar",
+        "calendar": "calendar",
+        "gmail": "gmail",
+        "google gmail": "gmail",
+    }
+    return aliases.get(s, name)
+
+
 def _claude_plugin_manifest(plugin_dir: Path, entry: dict[str, Any] | None = None) -> dict[str, Any]:
     """.claude-plugin/plugin.json + .mcp.json (+ marketplace entry) → rice manifest dict.
 
@@ -126,7 +141,7 @@ def _claude_plugin_manifest(plugin_dir: Path, entry: dict[str, Any] | None = Non
 
     requires: dict[str, Any] = {}
     if connectors:
-        requires["connectors"] = connectors
+        requires["connectors"] = [_connector_requirement_key(c) for c in connectors]
 
     return {
         "schema_version": 1,
@@ -294,6 +309,74 @@ def build_download_package(artifact_id: str) -> tuple[bytes, str] | None:
 
 # ── 내부 헬퍼 ─────────────────────────────────────────────────────────────────
 
+def _skill_name_from_path(rel_path: str) -> str:
+    p = Path(rel_path)
+    if p.name.lower() == "skill.md" and p.parent.name:
+        return p.parent.name
+    return p.stem
+
+
+def _frontmatter(text: str) -> tuple[dict[str, Any], str]:
+    if not text.startswith("---"):
+        return {}, text
+    parts = text.split("---", 2)
+    if len(parts) < 3:
+        return {}, text
+    try:
+        data = yaml.safe_load(parts[1]) or {}
+        return data if isinstance(data, dict) else {}, parts[2]
+    except yaml.YAMLError:
+        return {}, parts[2]
+
+
+def _prompt_examples(text: str) -> list[str]:
+    """Extract human prompt examples from explicit example/try/question sections."""
+    examples: list[str] = []
+    capture = False
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        heading = re.match(r"^#{1,6}\s+(.+)$", line)
+        if heading:
+            title = heading.group(1).lower()
+            capture = any(token in title for token in ("example", "try", "prompt", "question", "질문", "예시"))
+            continue
+        if not capture or not line:
+            continue
+        item = re.match(r"^(?:[-*]|\d+[.)])\s+(.+)$", line)
+        if not item:
+            continue
+        candidate = item.group(1).strip().strip('"').strip("'")
+        if 8 <= len(candidate) <= 160:
+            examples.append(candidate)
+    return examples[:3]
+
+
+def _plugin_skill_meta(artifact_dir: Path, rel_path: str) -> tuple[dict[str, str], list[str]]:
+    default_name = _skill_name_from_path(rel_path)
+    path = artifact_dir / rel_path
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return {"name": default_name, "command": default_name, "description": ""}, []
+    fm, _ = _frontmatter(text)
+    name = str(fm.get("name") or default_name).strip() or default_name
+    description = str(fm.get("description") or "").strip()
+    return {"name": name, "command": name, "description": description}, _prompt_examples(text)
+
+
+def _dedupe(items: list[str], limit: int) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        key = item.strip().lower()
+        if not key or key in seen:
+            continue
+        out.append(item.strip())
+        seen.add(key)
+        if len(out) >= limit:
+            break
+    return out
+
 def _to_catalog_entry(manifest: dict[str, Any], artifact_dir: Path, artifact_id: str) -> dict[str, Any]:
     """manifest dict → catalog API response dict.
 
@@ -330,6 +413,17 @@ def _to_catalog_entry(manifest: dict[str, Any], artifact_dir: Path, artifact_id:
             for sub in sorted(skills_subdir.iterdir())
             if sub.is_dir() and (sub / "SKILL.md").exists()
         )
+
+    plugin_skills: list[dict[str, str]] = []
+    examples: list[str] = []
+    if manifest.get("type") == "plugin":
+        for rel_path in skill_files:
+            meta, skill_examples = _plugin_skill_meta(artifact_dir, rel_path)
+            plugin_skills.append(meta)
+            examples.extend(skill_examples)
+        manifest_examples = manifest.get("examples") or manifest.get("use_cases") or []
+        if isinstance(manifest_examples, list):
+            examples.extend(str(e) for e in manifest_examples)
 
     # connectors(상세): plugin의 .mcp.json 에서 title·description까지 추출(프론트 커넥터 섹션용).
     # .mcp.json 이 없으면 requires.connectors 이름만으로 폴백.
@@ -368,4 +462,7 @@ def _to_catalog_entry(manifest: dict[str, Any], artifact_dir: Path, artifact_id:
         "has_bundled_resources": len(bundled_resources) > 0,
         # plugin이 요구하는 외부 연결(.mcp.json) — 이름·제목·설명
         "connectors": connectors,
+        # plugin 상세 UI용: SKILL.md frontmatter에서 추출한 명령/설명 + 예시 질문.
+        "plugin_skills": plugin_skills,
+        "examples": _dedupe(examples, 6),
     }

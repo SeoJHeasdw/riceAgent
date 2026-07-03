@@ -31,6 +31,8 @@ from typing import Any
 
 import pytest
 
+from rice_runtime import build_container
+from rice_runtime.core.config import RuntimeArgs
 from rice_runtime.core.errors import ValidationError
 from rice_runtime.core.paths import RicePaths
 from rice_runtime.core.storage.sqlite import Database
@@ -43,6 +45,7 @@ from rice_runtime.execution.sandbox.ipc import decode_response, encode_request, 
 from rice_runtime.execution.sandbox.policy import scrub_env
 from rice_runtime.execution.sandbox.runner import ChildProcessSandbox
 from rice_runtime.execution.service import NoopSandbox, PluginLoaderService
+from rice_runtime.server.app import create_app
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -557,3 +560,45 @@ class TestPluginLoaderService:
         result = await self._svc.invoke(call)
         # NoopSandbox always returns ok=False — proves sandbox path is taken.
         assert result.ok is False
+
+
+class TestPluginInstallRoute:
+    def test_missing_required_connector_installs_disabled(self):
+        from fastapi.testclient import TestClient
+
+        paths = _fresh_paths()
+        c = build_container(RuntimeArgs(token="test-token"), paths=paths)
+        src = Path(tempfile.mkdtemp(prefix="rice-plugin-src-"))
+        try:
+            (src / ".claude-plugin").mkdir()
+            (src / ".claude-plugin" / "plugin.json").write_text(
+                json.dumps({"name": "needs-gmail", "version": "1.0.0"}),
+                encoding="utf-8",
+            )
+
+            client = TestClient(create_app(c))
+            res = client.post(
+                "/artifacts/install",
+                headers={"authorization": "Bearer test-token", "host": "localhost"},
+                json={
+                    "path": str(src),
+                    "manifest": {
+                        "schema_version": 1,
+                        "type": "plugin",
+                        "name": "needs-gmail",
+                        "version": "1.0.0",
+                        "requires": {"connectors": ["gmail"]},
+                    },
+                },
+            )
+            assert res.status_code == 200
+            body = res.json()
+            assert body["success"] is True
+            assert body["data"]["enabled"] is False
+            assert body["data"]["missing_connectors"] == ["gmail"]
+            assert c.plugins.get_plugin("plugin:needs-gmail").enabled is False
+        finally:
+            import shutil
+
+            shutil.rmtree(src, ignore_errors=True)
+            c.shutdown()

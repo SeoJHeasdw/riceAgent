@@ -307,6 +307,10 @@ paths:
     post:
       tags: [plugins]
       summary: Install a downloaded artifact or a localhost platform artifact URL (CONTRACTS §2.3)
+      description: >
+        Installation may succeed with enabled=false when a plugin requires connectors
+        that are not connected yet. In that case data.missing_connectors lists the
+        connector_type values the app should route the user to connect before enabling.
       requestBody:
         required: true
         content:

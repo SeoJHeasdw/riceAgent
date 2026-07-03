@@ -1,5 +1,5 @@
 import React from 'react';
-import { Card, Tag, Toggle } from '../ui';
+import { Card, Icon, Tag, Toggle } from '../ui';
 
 /**
  * PluginCard - Plugin marketplace card with install/enable toggle
@@ -49,16 +49,23 @@ export const PluginCard: React.FC<PluginCardProps> = ({
   return (
     <Card
       padding="md"
-      className="group relative flex flex-col min-h-[176px] cursor-pointer overflow-hidden border-border-subtle-01 transition-colors duration-150 hover:border-border-strong-01"
+      className={`group relative flex flex-col min-h-[176px] cursor-pointer overflow-hidden transition-colors duration-150 ${
+        installed
+          ? 'border-purple-60/40 bg-purple-60/[0.035] hover:border-purple-50/70'
+          : 'border-border-subtle-01 hover:border-purple-50/50 hover:bg-purple-60/[0.025]'
+      }`}
       onClick={onOpenDetails}
     >
+      <span
+        aria-hidden="true"
+        className={`absolute left-0 top-0 h-full w-0.5 bg-purple-60 transition-opacity ${
+          installed ? 'opacity-100' : 'opacity-0 group-hover:opacity-70'
+        }`}
+      />
       {/* Header */}
       <div className="relative flex items-start gap-3 mb-3">
-        <div className="flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-lg bg-layer-02 border border-border-subtle-02 text-purple-50">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="9" />
-            <circle cx="12" cy="12" r="3.5" />
-          </svg>
+        <div className="flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-lg bg-purple-60/12 border border-purple-60/25 text-purple-40">
+          <Icon name="plug" size={20} />
         </div>
         <div className="flex-1 min-w-0">
           <h3 className="text-heading-02 font-semibold text-text-primary leading-tight">
@@ -129,7 +136,7 @@ export const PluginCard: React.FC<PluginCardProps> = ({
       {/* Installed footer — 사용 상태 토글 (카드 자체가 상세로 연결되므로 별도 링크 없음) */}
       {installed && (
         <div className="relative flex items-center gap-2.5 pt-3 mt-2 border-t border-border-subtle-01" onClick={(e) => e.stopPropagation()}>
-          <Toggle checked={enabled} onChange={onToggle} tone="green" />
+          <Toggle checked={enabled} onChange={onToggle} tone="purple" />
           <span className="flex items-center gap-1.5 flex-1 min-w-0">
             <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${enabled ? 'bg-support-success' : 'bg-text-helper'}`} />
             <span className="text-caption-01 text-text-secondary truncate">

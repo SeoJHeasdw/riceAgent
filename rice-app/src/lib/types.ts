@@ -383,6 +383,10 @@ export interface PlatformArtifact {
   has_bundled_resources: boolean;
   /** plugin이 요구하는 외부 연결 (.mcp.json mcpServers) — 이름·제목·설명 */
   connectors: { name: string; title?: string; description?: string }[];
+  /** plugin이 제공하는 SKILL.md frontmatter 기반 스킬 메타 */
+  plugin_skills?: { name: string; command?: string; description?: string }[];
+  /** marketplace/detail에서 보여줄 추천 질문 */
+  examples?: string[];
 }
 
 export interface PlatformFileResponse {

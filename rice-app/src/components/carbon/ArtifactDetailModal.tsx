@@ -251,7 +251,7 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
                           <code className="inline-block font-mono text-body-short-01 font-semibold text-blue-40 bg-blue-60/12 rounded-md px-1.5 py-0.5">
                             /{s.command}
                           </code>
-                          <div className="text-caption-01 text-text-helper mt-1">{s.desc}</div>
+                          {s.desc && <div className="text-caption-01 text-text-helper mt-1">{s.desc}</div>}
                         </div>
                       </div>
                     ))}
@@ -337,7 +337,7 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
               {/* Plugin toggle */}
               {!isSkill && onToggle && (
                 <>
-                  <Toggle checked={artifact.enabled} onChange={onToggle} tone="green" />
+                  <Toggle checked={artifact.enabled} onChange={onToggle} tone="purple" />
                   <span className="flex items-center gap-1.5 flex-1 min-w-0">
                     <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${artifact.enabled ? 'bg-support-success' : 'bg-text-helper'}`} />
                     <span className="text-body-short-01 text-text-secondary truncate">
