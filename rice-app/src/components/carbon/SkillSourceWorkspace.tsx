@@ -253,7 +253,7 @@ export const SkillSourceWorkspace: React.FC<{
             {!active ? (
               <div className="h-full flex items-center justify-center text-body-short-01 text-text-helper">파일이 없어요.</div>
             ) : showRaw ? (
-              <pre className="px-6 py-5 text-[0.8125rem] font-mono leading-[1.55] text-text-primary whitespace-pre-wrap break-words">
+              <pre className="px-6 py-5 text-code-02 font-mono leading-5 text-text-primary whitespace-pre-wrap break-words">
                 {active.content}
               </pre>
             ) : (

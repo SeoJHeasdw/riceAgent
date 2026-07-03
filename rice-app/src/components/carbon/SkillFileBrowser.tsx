@@ -138,7 +138,7 @@ export const SkillFileBrowser: React.FC<{ files: SkillFile[] }> = ({ files }) =>
         <div className="flex-1 overflow-y-auto p-4 max-h-[360px]">
           {active &&
             (showRaw ? (
-              <pre className="text-[0.8125rem] font-mono leading-5 text-text-primary whitespace-pre-wrap break-words">
+              <pre className="text-code-02 font-mono leading-5 text-text-primary whitespace-pre-wrap break-words">
                 {active.content}
               </pre>
             ) : (

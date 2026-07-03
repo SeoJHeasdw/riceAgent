@@ -29,7 +29,7 @@ const AILabel: React.FC = () => (
 const Rich: React.FC<{ text: string }> = ({ text }) => {
   const { openFile } = useFileViewer();
   const chipCls =
-    'font-mono text-[0.86em] bg-layer-02 text-blue-40 border border-border-subtle-01 rounded px-1 py-px';
+    'font-mono text-code-02 bg-layer-02 text-blue-40 border border-border-subtle-01 rounded px-1 py-px';
   return (
     <>
       {text.split(/(`[^`]+`)/g).map((part, i) => {

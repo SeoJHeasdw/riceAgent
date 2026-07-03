@@ -278,7 +278,7 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
                       key={r.modelId}
                       onClick={() => setDraftModel(r.modelId)}
                       aria-pressed={isSelected}
-                      className={`group flex items-center gap-2.5 px-3 py-2 text-left rounded-lg border transition-all duration-150 w-full ${
+                      className={`group flex items-center gap-2.5 px-3 py-2 text-left rounded-lg border transition-colors duration-150 w-full ${
                         isSelected
                           ? 'border-interactive bg-layer-selected-01'
                           : 'border-border-subtle-01 bg-background hover:bg-layer-hover-01 hover:border-border-strong-01'
@@ -297,7 +297,7 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
                         tabIndex={0}
                         onClick={(e) => { e.stopPropagation(); removeRegisteredModel(r.modelId); }}
                         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); removeRegisteredModel(r.modelId); } }}
-                        className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-1 rounded-md text-icon-secondary hover:text-support-error hover:bg-support-error/10 transition-all cursor-pointer flex-shrink-0"
+                        className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-1 rounded-md text-icon-secondary hover:text-support-error hover:bg-support-error/10 transition-colors duration-150 cursor-pointer flex-shrink-0"
                         title="등록 해제"
                       >
                         <Icon name="trash" size={14} />
@@ -417,7 +417,7 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
                         key={m.name}
                         onClick={() => setDraftModel(m.name)}
                         aria-pressed={isSelected}
-                        className={`flex items-center gap-2.5 px-3 py-2 text-left rounded-lg border transition-all duration-150 w-full ${
+                        className={`flex items-center gap-2.5 px-3 py-2 text-left rounded-lg border transition-colors duration-150 w-full ${
                           isSelected
                             ? 'border-interactive bg-layer-selected-01'
                             : 'border-border-subtle-01 bg-background hover:bg-layer-hover-01 hover:border-border-strong-01'
@@ -460,9 +460,6 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
       />
 
       <style>{`
-        @keyframes spin { to { transform: rotate(360deg); } }
-        .animate-spin { animation: spin 1s linear infinite; }
-
         /* rice-slider — 커스텀 thumb (트랙 fill은 인라인 gradient) */
         .rice-slider::-webkit-slider-thumb {
           -webkit-appearance: none;
@@ -470,26 +467,22 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
           width: 14px;
           height: 14px;
           border-radius: 9999px;
-          background: #fff;
+          background: var(--cds-text-primary);
           border: 2px solid var(--cds-interactive);
-          box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
-          transition: transform 120ms ease, box-shadow 120ms ease;
+          transition: background-color 150ms ease, border-color 150ms ease;
         }
         .rice-slider::-webkit-slider-thumb:hover {
-          transform: scale(1.2);
-          box-shadow: 0 0 0 4px rgb(var(--cds-interactive-rgb) / 0.25);
+          border-color: var(--cds-link-primary);
         }
         .rice-slider:active::-webkit-slider-thumb {
-          transform: scale(1.1);
-          box-shadow: 0 0 0 6px rgb(var(--cds-interactive-rgb) / 0.2);
+          border-color: var(--cds-border-interactive);
         }
         .rice-slider::-moz-range-thumb {
           width: 14px;
           height: 14px;
           border-radius: 9999px;
-          background: #fff;
+          background: var(--cds-text-primary);
           border: 2px solid var(--cds-interactive);
-          box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
         }
       `}</style>
     </div>

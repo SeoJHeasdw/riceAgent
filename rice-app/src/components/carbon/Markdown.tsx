@@ -19,7 +19,7 @@ const renderInline = (text: string, keyBase: string, onFileClick?: (path: string
   codeSplit.forEach((seg, i) => {
     if (seg.startsWith('`') && seg.endsWith('`')) {
       const inner = seg.slice(1, -1);
-      const codeCls = 'font-mono text-[0.8125rem] bg-layer-02 text-link-primary rounded px-1.5 py-0.5';
+      const codeCls = 'font-mono text-code-02 bg-layer-02 text-link-primary rounded px-1.5 py-0.5';
       if (onFileClick && FILE_CHIP_RE.test(inner.trim())) {
         parts.push(
           <button
@@ -112,7 +112,7 @@ export const Markdown: React.FC<{ source: string; onFileClick?: (path: string) =
       blocks.push(
         <pre
           key={`code-${key++}`}
-          className="mb-4 overflow-x-auto rounded-lg bg-layer-02 border border-border-subtle-01 p-3 text-[0.8125rem] font-mono text-text-primary leading-5"
+          className="mb-4 overflow-x-auto rounded-lg bg-layer-02 border border-border-subtle-01 p-3 text-code-02 font-mono text-text-primary leading-5"
         >
           {code.join('\n')}
         </pre>

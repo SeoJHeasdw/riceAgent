@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- Onboarding steps intentionally colocate small render helpers with the exported step builder. These helpers are presentation-only and splitting them would make the one-off onboarding scene harder to review. */
 import React, { useEffect, useRef, useState } from 'react';
 import { ModelPicker } from '../ModelPicker';
 import { LineIcon, PencilCircle, PencilUnderline, PencilDoubleUnderline } from './primitives';

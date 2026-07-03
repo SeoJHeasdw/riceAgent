@@ -113,6 +113,7 @@ blue(`interactive`)는 **primary action과 current selection에만**.
 
 | 예외 | 허용 위치 | 근거 |
 | --- | --- | --- |
+| titlebar `R` 로고의 brand gradient | `Layout` shell logo | 앱 프레임 안의 영구 브랜드 표식 |
 | `gradient-skill` 등 도메인 그라디언트 | 채팅 스타터 아이콘, 슬래시 커맨드 chip 타일, 전송 버튼 | 스킬/AI 순간의 identity 표식 |
 | `gradient-brand` + `rounded-2xl` 로고 타일 | Settings About 카드 | brand 표면 |
 | `rounded-2xl rounded-br-sm` | 채팅/드로어/온보딩 사용자 말풍선 | 말풍선 형태 문법 |

@@ -203,12 +203,12 @@ function SettingsScreen() {
                       disabled={!enabled}
                       onClick={() => update('theme', value)}
                       aria-pressed={isActive}
-                      className={`flex items-center justify-center gap-1.5 py-2 text-body-short-01 font-semibold rounded-lg transition-all duration-150 ${
+                      className={`flex items-center justify-center gap-1.5 py-2 text-body-short-01 font-semibold rounded-lg border transition-colors duration-150 ${
                         isActive
-                          ? 'bg-interactive text-white shadow-elevation-1'
+                          ? 'bg-layer-selected-01 text-text-primary border-interactive'
                           : enabled
-                          ? 'bg-transparent text-text-secondary hover:bg-layer-hover-01'
-                          : 'bg-transparent text-text-placeholder cursor-not-allowed'
+                          ? 'bg-transparent text-text-secondary border-transparent hover:bg-layer-hover-01'
+                          : 'bg-transparent text-text-placeholder border-transparent cursor-not-allowed'
                       }`}
                     >
                       {value === 'dark' ? (
@@ -243,10 +243,10 @@ function SettingsScreen() {
                       key={value}
                       onClick={() => update('language', value)}
                       aria-pressed={isActive}
-                      className={`py-2 text-body-short-01 font-semibold rounded-lg transition-all duration-150 ${
+                      className={`py-2 text-body-short-01 font-semibold rounded-lg border transition-colors duration-150 ${
                         isActive
-                          ? 'bg-interactive text-white shadow-elevation-1'
-                          : 'bg-transparent text-text-secondary hover:bg-layer-hover-01'
+                          ? 'bg-layer-selected-01 text-text-primary border-interactive'
+                          : 'bg-transparent text-text-secondary border-transparent hover:bg-layer-hover-01'
                       }`}
                     >
                       {label}
@@ -271,10 +271,10 @@ function SettingsScreen() {
                       key={value}
                       onClick={() => update('font', value)}
                       aria-pressed={isActive}
-                      className={`py-2 text-body-short-01 font-semibold rounded-lg transition-all duration-150 ${
+                      className={`py-2 text-body-short-01 font-semibold rounded-lg border transition-colors duration-150 ${
                         isActive
-                          ? 'bg-interactive text-white shadow-elevation-1'
-                          : 'bg-transparent text-text-secondary hover:bg-layer-hover-01'
+                          ? 'bg-layer-selected-01 text-text-primary border-interactive'
+                          : 'bg-transparent text-text-secondary border-transparent hover:bg-layer-hover-01'
                       }`}
                     >
                       {label}

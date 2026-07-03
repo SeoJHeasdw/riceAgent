@@ -16,15 +16,6 @@
     @apply antialiased;
   }
 
-  /* 키보드 포커스 전역 기본값 — 모든 interactive 요소가 개별 클래스 없이도
-     포커스 링을 얻는다. 마우스 클릭(:focus)에는 나타나지 않고 키보드 탐색
-     (:focus-visible)에만 나타난다. 컴포지트 표면(부모가 focus-within으로
-     표시하는 내장 input 등)만 utilities의 outline-none으로 개별 억제한다. */
-  :focus-visible {
-    outline: 2px solid var(--cds-focus);
-    outline-offset: 2px;
-  }
-
   /* Scrollbar styles */
   ::-webkit-scrollbar {
     width: 8px;
