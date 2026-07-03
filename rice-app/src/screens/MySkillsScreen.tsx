@@ -1461,19 +1461,19 @@ function MySkillsScreen() {
       >
         {/* 통계 카드 + "학습 효과" proof CTA — 숫자(현황)에서 정량 증명으로 자연히 이어지는 한 덩어리 */}
         <div className="p-4">
-          <div className="overflow-hidden rounded-xl bg-layer-01 border border-border-subtle-01">
+          <div className="overflow-hidden rounded-xl gradient-skill text-white">
             <div className="p-4">
               <div className="flex items-center gap-1.5 mb-1">
-                <span className="text-caption-01 text-text-helper">학습한 스킬</span>
+                <span className="text-caption-01 text-white/70">학습한 스킬</span>
                 <span className="ai-label">
                   <span className="ai-label__text">AI</span>
                 </span>
               </div>
-              <div className="text-heading-03 font-semibold text-text-primary leading-none tabular-nums">
+              <div className="text-heading-03 font-semibold text-white leading-none tabular-nums">
                 {skills.length}
-                <span className="text-body-short-01 font-normal text-text-helper ml-1">개</span>
+                <span className="text-body-short-01 font-normal text-white/70 ml-1">개</span>
               </div>
-              <div className="text-caption-01 text-text-secondary mt-1.5 flex gap-3">
+              <div className="text-caption-01 text-white/80 mt-1.5 flex gap-3">
                 <span>{active} 활성</span>
                 <span>{shared} 공유됨</span>
               </div>
@@ -1484,16 +1484,16 @@ function MySkillsScreen() {
               aria-pressed={showImpact}
               className={`w-full flex items-center gap-2 px-4 py-2.5 border-t transition-colors ${
                 showImpact
-                  ? 'bg-layer-selected-01 border-border-subtle-01'
-                  : 'bg-layer-02/50 border-border-subtle-01 hover:bg-layer-hover-01'
+                  ? 'bg-white/20 border-white/25'
+                  : 'bg-white/10 border-white/20 hover:bg-white/15'
               }`}
             >
-              <Icon name="growth" size={15} className="text-icon-primary flex-shrink-0" />
+              <Icon name="growth" size={15} className="text-white flex-shrink-0" />
               <div className="flex-1 min-w-0 text-left">
-                <div className="text-body-short-01 font-semibold text-text-primary">학습 효과</div>
-                <div className="text-caption-01 text-text-helper">cold→warm 정량 비교</div>
+                <div className="text-body-short-01 font-semibold text-white">학습 효과</div>
+                <div className="text-caption-01 text-white/70">cold→warm 정량 비교</div>
               </div>
-              <Icon name="arrow-right" size={14} className="text-icon-secondary flex-shrink-0" />
+              <Icon name="arrow-right" size={14} className="text-white/70 flex-shrink-0" />
             </button>
           </div>
         </div>

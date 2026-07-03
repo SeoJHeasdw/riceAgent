@@ -1217,18 +1217,18 @@ function ConnectorsScreen() {
         </div>
 
         <div className="p-4">
-          <div className="rounded-xl bg-layer-01 border border-border-subtle-01 p-4">
-            <div className="text-caption-01 text-text-helper mb-1">
+          <div className="rounded-xl gradient-connector p-4 text-white">
+            <div className="text-caption-01 text-white/70 mb-1">
               {isLocal ? '실행 중인 MCP 서버' : '연결된 커넥터'}
             </div>
-            <div className="text-heading-03 font-semibold text-text-primary leading-none tabular-nums">
+            <div className="text-heading-03 font-semibold text-white leading-none tabular-nums">
               {connectedCount}
-              <span className="text-body-short-01 font-normal text-text-helper ml-1">개</span>
+              <span className="text-body-short-01 font-normal text-white/70 ml-1">개</span>
             </div>
             {(needsCount > 0 || updateCount > 0) && (
-              <div className="text-caption-01 text-text-secondary mt-1.5 flex items-center gap-1.5">
+              <div className="text-caption-01 text-white/80 mt-1.5 flex items-center gap-1.5">
                 {needsCount > 0 && <span>{needsCount} {isLocal ? '중지됨' : '연결 필요'}</span>}
-                {needsCount > 0 && updateCount > 0 && <span className="text-text-helper/50">·</span>}
+                {needsCount > 0 && updateCount > 0 && <span className="text-white/40">·</span>}
                 {updateCount > 0 && <span>{updateCount} 업데이트</span>}
               </div>
             )}

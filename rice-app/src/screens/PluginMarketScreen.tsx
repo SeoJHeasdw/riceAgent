@@ -122,19 +122,19 @@ function PluginMarketScreen() {
       >
         {/* Installed Summary */}
         <div className="p-3">
-          <div className="rounded-xl bg-layer-01 border border-border-subtle-01 p-4">
-            <div className="flex items-center gap-1.5 text-caption-01 text-text-helper mb-2">
+          <div className="rounded-xl gradient-plugin p-4 text-white">
+            <div className="flex items-center gap-1.5 text-caption-01 text-white/70 mb-2">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
                 <circle cx="12" cy="12" r="9" />
                 <circle cx="12" cy="12" r="3.5" />
               </svg>
               내 전문가
             </div>
-            <div className="text-heading-03 font-semibold text-text-primary leading-none tracking-tight tabular-nums">
+            <div className="text-heading-03 font-semibold text-white leading-none tracking-tight tabular-nums">
               {installedCount}
-              <span className="text-body-short-01 font-normal text-text-helper ml-1.5">설치됨</span>
+              <span className="text-body-short-01 font-normal text-white/70 ml-1.5">설치됨</span>
             </div>
-            <div className="inline-flex items-center gap-1.5 mt-3 px-2 py-0.5 rounded-full bg-layer-02 text-caption-01 text-text-secondary">
+            <div className="inline-flex items-center gap-1.5 mt-3 px-2 py-0.5 rounded-full bg-white/15 text-caption-01 text-white">
               <span className="w-1.5 h-1.5 rounded-full bg-support-success" />
               {activeCount} 활성
             </div>

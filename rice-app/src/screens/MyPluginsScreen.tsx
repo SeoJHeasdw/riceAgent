@@ -338,13 +338,13 @@ function MyPluginsScreen() {
         style={{ width: railPanel.width }}
       >
         <div className="p-4">
-          <div className="rounded-xl bg-layer-01 border border-border-subtle-01 p-4">
-            <div className="text-caption-01 text-text-helper mb-1">설치된 플러그인</div>
-            <div className="text-heading-03 font-semibold text-text-primary leading-none tabular-nums">
+          <div className="rounded-xl gradient-plugin p-4 text-white">
+            <div className="text-caption-01 text-white/70 mb-1">설치된 플러그인</div>
+            <div className="text-heading-03 font-semibold text-white leading-none tabular-nums">
               {myPlugins.length}
-              <span className="text-body-short-01 font-normal text-text-helper ml-1">개</span>
+              <span className="text-body-short-01 font-normal text-white/70 ml-1">개</span>
             </div>
-            <div className="text-caption-01 text-text-secondary mt-1.5 flex gap-3">
+            <div className="text-caption-01 text-white/80 mt-1.5 flex gap-3">
               <span>{active} 활성</span>
               {updateCount > 0 && <span>{updateCount} 업데이트</span>}
             </div>

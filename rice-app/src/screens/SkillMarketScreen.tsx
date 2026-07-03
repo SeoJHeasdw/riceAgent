@@ -147,20 +147,20 @@ function SkillMarketScreen() {
         className="flex-shrink-0 bg-layer-01 border-r border-border-subtle-01 flex flex-col min-w-0 overflow-hidden"
         style={{ width: railPanel.width }}
       >
-        {/* Blue Point Balance — 보조 정보라 neutral account panel로 (배너 아님) */}
+        {/* Blue Point Balance — Skill Market 전광판, gradient-skill로 3대 요소 색 언어 통일 */}
         <div className="p-3">
-          <div className="rounded-xl bg-layer-01 border border-border-subtle-01 p-4">
-            <div className="flex items-center gap-1.5 text-caption-01 text-text-helper mb-2">
+          <div className="rounded-xl gradient-skill p-4 text-white">
+            <div className="flex items-center gap-1.5 text-caption-01 text-white/70 mb-2">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M12 2l2.4 7.2H22l-6 4.8 2.4 7.2-6.4-4.8L5.6 21.2 8 14 2 9.2h7.6z" />
               </svg>
               내 IBM 블루 포인트
             </div>
-            <div className="text-heading-03 font-semibold text-text-primary leading-none tracking-tight tabular-nums">
+            <div className="text-heading-03 font-semibold text-white leading-none tracking-tight tabular-nums">
               {bluePointBalance.toLocaleString()}
-              <span className="text-body-short-01 font-normal text-text-helper ml-1.5">BP</span>
+              <span className="text-body-short-01 font-normal text-white/70 ml-1.5">BP</span>
             </div>
-            <div className="inline-flex items-center gap-1 mt-3 px-2 py-0.5 rounded-full bg-layer-02 text-caption-01 text-text-secondary">
+            <div className="inline-flex items-center gap-1 mt-3 px-2 py-0.5 rounded-full bg-white/15 text-caption-01 text-white">
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 19V5M5 12l7-7 7 7" />
               </svg>
