@@ -63,6 +63,7 @@ from ..core.types import (
 from ..execution.interfaces import IPluginLoader
 from ..learning.interfaces import ILearningService
 from ..prompts.system import compose_system_prompt, render_skills_block
+from .context_manager import ConversationContextManager
 from .effect_surfacing import surface_learning_effect
 from .interfaces import IApprovalGate, ITranscript
 from .loop import AgentLoop, LoopResult
@@ -182,6 +183,7 @@ class Orchestrator:
                 provider=self._resolve_provider(),
                 dispatcher=dispatcher,
                 temperature=cfg.provider.temperature,
+                context_manager=ConversationContextManager(cfg.context),
             )
             result = LoopResult()
             async for event in loop.run(ctx, session_id, result, abort):

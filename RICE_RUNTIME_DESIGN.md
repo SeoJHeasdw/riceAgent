@@ -1,17 +1,17 @@
 # RICE Runtime Design
 
-> 작성일: 2026-06-12 (개정: 2026-06-26) · 상태: **확정 (결정 완료)**
+> 작성일: 2026-06-12 (개정: 2026-07-03) · 상태: **확정 (결정 완료)**
 > 범위: `rice-runtime`의 핵심 설계 + 패키징 + 보안 베이스라인
 > 해소 대상(전건 확정): [RICE_REPO_STRATEGY.md](RICE_REPO_STRATEGY.md) 9장 #1, #3, #5, #6, #7
 > 아키텍처 참조: [RICE_RUNTIME_DIRECTORY.md](RICE_RUNTIME_DIRECTORY.md)(모듈 구조 정본)
 
 ---
 
-## 1. Hermes 차용 결정표
+## 1. 벤치마크 차용 결정표
 
-> Hermes 분석([HERMES_LEARNING_LOOP_REFERENCE.md](HERMES_LEARNING_LOOP_REFERENCE.md) · [HERMES_TOOL_SYSTEM_REFERENCE.md](HERMES_TOOL_SYSTEM_REFERENCE.md)) 기준, 컴포넌트별로 차용/단순화/제외를 결정한다. 이 표가 runtime의 전체 스코프를 정의한다.
+> Hermes 분석([HERMES_LEARNING_LOOP_REFERENCE.md](HERMES_LEARNING_LOOP_REFERENCE.md) · [HERMES_TOOL_SYSTEM_REFERENCE.md](HERMES_TOOL_SYSTEM_REFERENCE.md))과 Gemini CLI agentic architecture 분석(`context/ARCHITECTURE*.md`) 기준, 컴포넌트별로 차용/단순화/제외를 결정한다. 이 표가 runtime의 전체 스코프를 정의한다.
 
-| Hermes 컴포넌트 | 결정 | 근거 |
+| 벤치마크 컴포넌트 | 결정 | 근거 |
 |----------------|------|------|
 | 대화 루프 (`run_conversation`) | ★ **차용** (구조만, 재구현) | learning loop의 뼈대. 12k줄 전체가 아니라 패턴만 |
 | Skill Lifecycle (`skill_usage`) | ★ **차용** | RICE의 핵심 차별점. use/view/patch 카운터 + 상태 전이 |
@@ -26,10 +26,13 @@
 | FTS5 세션 검색 | ★ **차용** | 세션 간 컨텍스트 유지 데모에 직접 기여, SQLite 내장이라 비용 낮음 |
 | Tool registry + 조건부 노출 (`check_fn`) | ★ **차용** (단순화) | built-in/plugin/connector tool을 한 곳에서 모아 LLM 스키마로 조립하고 **연결 안 된 Connector tool은 스키마에서 제외**. Hermes의 30s TTL 캐시는 생략(단일 세션, 연결 상태 직접 조회) — 2.1장 |
 | Toolset (플랫폼별 묶음) | ★ **제외** | 데스크톱 단일 접점이라 telegram/discord류 플랫폼 toolset 불필요 |
-| Tool Search (progressive disclosure) | ★ **연기 (Phase 2)** | MCP tool이 토큰 예산 초과 시 `tool_search/describe/call`로 접기. MVP는 Connector 1개라 미발생 — 11장 |
+| Tool Search (progressive disclosure) | ★ **차용** (구현됨) | MCP/plugin tool 스키마가 예산 초과 시 `tool_search`/`tool_describe`/`tool_call` 3개 bridge 뒤로 접는다 — 2.1장 |
 | Webhook-safe toolset (인젝션 방어) | ★ **차용 (재해석)** | RICE엔 webhook 없으나 **Gmail 본문 = 신뢰불가 외부 콘텐츠** → 동일 방어 적용 — 10장 |
+| Gemini CLI ContextManager | ★ **차용 (RICE식 단순화)** | durable transcript는 보존하고 LLM 요청 직전에 provider-facing context만 렌더링/압축/마스킹한다 — 2.2장 |
+| Gemini CLI Scheduler | ★ **차용 (RICE식 단순화)** | HITL/권한은 기존 dispatcher가 유지하고, 안전한 독립 tool call만 병렬 batch로 실행한다 — 2.3장 |
+| Sub-agent delegation | ★ **차용** | main agent가 `delegate_subagent` builtin으로 독립 분석/리서치/검토를 위임하고 다음 루프에서 결과를 종합한다 — 2.4장 |
 
-위 차용표가 runtime 전체 스코프의 정본이다 — Honcho **제외**(외부 SaaS), Curator **수동 트리거** 포함, `execute_code` **포함**(repo 단위 코드 실행 도구, sandbox 경계는 5장). Hermes를 기준으로 가깝게 벤치마킹하며, 추후 개선·확장은 본 표를 갱신하는 방식으로 추적한다.
+위 차용표가 runtime 전체 스코프의 정본이다 — Honcho **제외**(외부 SaaS), Curator **수동 트리거** 포함, `execute_code` **포함**(repo 단위 코드 실행 도구, sandbox 경계는 5장). Hermes와 Gemini CLI를 기준으로 가깝게 벤치마킹하며, 추후 개선·확장은 본 표를 갱신하는 방식으로 추적한다.
 
 ---
 
@@ -39,13 +42,17 @@
 요청 수신 (로컬 API, CONTRACTS 문서의 계약)
  → memory prefetch (관련 메모리/스킬 컨텍스트 로드)
  → 시스템 프롬프트 구성 (활성 스킬 주입 + 스킬 생성 가이드)
+ → 컨텍스트 렌더링 (히스토리 압축/요약/마스킹, 최근 턴 보호)
  → LLM 호출 루프 (tool_calls 처리, max_iterations 제한)
+ → ToolScheduler (안전한 독립 tool 병렬화, 승인/파괴적 tool 순차)
  → 스트리밍 응답 (SSE/WS로 앱에 전달)
  → 턴 종료: memory sync + skill usage 텔레메트리
 ```
 
 - ★ max_iterations 기본값: 25 (Hermes는 사실상 무제한이나 데모 앱은 폭주 방지 필요)
 - ★ 스킬 주입: Hermes처럼 시스템 프롬프트에 활성 스킬 전체 주입 + prefix caching 의존 (Hermes 검증 #6: 명시적 무효화 없이 자연 재캐시로 충분)
+- ★ 컨텍스트 관리는 **저장된 세션 히스토리 원본을 바꾸지 않는다**. `ConversationContextManager`가 매 LLM 호출 직전에만 provider-facing view를 만든다.
+- ★ 스킬 생성/개선은 계속 HITL 경로만 탄다. `propose_skill`은 스테이징만 하고, 실제 저장은 `skill_patch_proposed` 승인 뒤에만 일어난다.
 
 동시 세션은 **1개**(단일 활성 대화, 프로토타입)로 한다.
 
@@ -61,7 +68,44 @@
   - Hermes의 30s TTL 캐시는 **생략** — RICE는 단일 활성 세션이라 턴 시작에 연결 상태를 직접 조회하면 충분.
 - **노출 ≠ 실행**: 이 게이팅은 *노출*(스키마 포함 여부)이다. 9.4장 Permission 검증·5장 실행 승인(HITL)은 *실행*(호출 직전) 단계로, 서로 **별개의 방어선**이다.
 - **플랫폼별 toolset은 제외**: Hermes의 `hermes-telegram`류 묶음은 데스크톱 단일 접점인 RICE엔 불필요.
-- **예산 초과 대응은 Phase 2**: MCP tool이 토큰 예산을 넘으면 progressive disclosure로 접는다(11장). MVP는 Connector 1개라 미발생.
+- **예산 초과 대응 구현됨**: MCP/plugin tool 스키마가 토큰 예산을 넘으면 core builtin은 그대로 노출하고, non-core tool은 `tool_search`/`tool_describe`/`tool_call` bridge로 접는다. 노출 방식이 접혀도 실제 실행 시 권한/HITL은 그대로 적용된다.
+
+### 2.2 Agentic Context Management
+
+> 출처: Gemini CLI `ContextManager`/`PipelineOrchestrator`의 핵심 아이디어를 RICE 런타임에 맞게 재구현한다. 전체 graph pipeline을 복제하지 않고, 로컬 데스크톱 agent에 필요한 provider-facing 렌더링 계층만 둔다.
+
+**책임 모듈**: `agent/context_manager.py` (`ConversationContextManager`)
+
+- **source of truth는 세션 transcript**다. `SessionManager.history()`의 원본 메시지는 유지하고, LLM 호출 직전에만 렌더링된 사본을 만든다.
+- **긴 히스토리 압축**: `ContextConfig.max_tokens`/`retained_tokens`를 넘으면 오래된 메시지를 system prompt의 `Compressed Conversation Context` 요약으로 접고 최근 메시지는 보호한다.
+- **tool output distillation**: 큰 tool 결과는 모델에 다시 보낼 때 요약/절단한다. 단, DB에 저장된 tool result 원본은 유지한다.
+- **시크릿 마스킹**: token/API key/password류 문자열은 provider-facing context에서 `[REDACTED]` 처리한다.
+- **provider wire 안전성**: 렌더링 결과가 tool message로 시작하지 않게 정리해 Claude/OpenAI/Ollama의 tool_result adjacency 제약을 깨지 않도록 한다.
+- **설정**: `core/config.py::ContextConfig`가 `enabled`, `max_tokens`, `retained_tokens`, `recent_messages`, `subagent_history_messages`, tool/message distillation threshold를 가진다. `/settings`는 `context` 섹션을 조회/갱신한다.
+
+이 계층은 learning loop와 분리된다. 컨텍스트 압축은 "모델에게 이번 호출에 무엇을 보여줄지"의 문제이고, 스킬/메모리 생성은 `learning` 모듈의 승인 기반 자기개선 문제다.
+
+### 2.3 ToolScheduler
+
+**책임 모듈**: `agent/tool_scheduler.py`
+
+Gemini CLI Scheduler의 상태 머신 전체를 옮기지는 않는다. RICE는 이미 `ToolDispatcher`가 tool lookup, connector/plugin routing, permission, HITL parking을 담당하므로, Scheduler는 다음 조율만 맡는다.
+
+- 한 assistant tool-use round 안에서 **독립적이고 승인 불필요한 tool call**은 병렬 batch로 실행한다.
+- `requires_approval`, `wait_for_previous=true`, `terminal`, `write_file`, `propose_skill` 같은 순서/효과가 중요한 tool은 순차 실행한다.
+- SSE `tool_call`/`tool_result` 이벤트는 실행 중 그대로 흘려보내고, LLM history에는 원래 tool call 순서대로 result를 붙인다.
+- abort 신호가 오면 대기/실행 중인 batch를 취소하고 safe error result를 남긴다.
+
+### 2.4 Sub-agent Delegation
+
+**책임 모듈**: `agent/subagents.py`, `agent/builtins/subagent_tools.py`
+
+`delegate_subagent`는 main agent가 독립적인 분석/리서치/검토 작업을 하위 agent에게 맡길 수 있게 하는 builtin tool이다.
+
+- sub-agent는 같은 provider를 사용하지만 tool은 받지 않는다. 외부 효과는 main agent의 기존 tool/HITL 경로로만 수행한다.
+- sub-agent는 최근 대화 컨텍스트를 렌더링된 view로 받고, `{thread_id, task, summary, truncated}` 구조화 결과를 반환한다.
+- main agent가 여러 `delegate_subagent` 호출을 한 round에 내면 ToolScheduler가 안전하게 병렬화하고, 다음 LLM iteration에서 main agent가 결과를 종합한다.
+- 이 기능은 learning loop를 우회하지 않는다. sub-agent 결과가 스킬화될 가치가 있으면 main agent가 기존 `propose_skill` → `skill_patch_proposed` 승인 경로를 사용한다.
 
 ---
 
@@ -311,7 +355,7 @@ def check_plugin_permission(plugin_id: str, connector_type: str) -> bool:
 - **Connector 제공 도구 가시화**: 연결된 Connector(MCP)가 노출하는 원자적 tool 목록을 ConnectorsScreen에서 확인
 - **artifact 디지털 서명**: 10장 Phase 2 분석 항목
 - **세션 검색·관리 보강**: FTS5 기반 세션 검색 UI, 이름변경/보관
-- **Tool Search (progressive disclosure)**: 설치 plugin/Connector가 늘어 MCP tool 스키마가 토큰 예산([RICE_LEARNING_LOOP_DESIGN.md](RICE_LEARNING_LOOP_DESIGN.md) 7장 MCP ~15K)을 넘으면, core tool은 유지하고 비-core tool을 `tool_search`/`tool_describe`/`tool_call` 3개 브릿지 도구로 접는다([HERMES_TOOL_SYSTEM_REFERENCE.md](HERMES_TOOL_SYSTEM_REFERENCE.md) §6.4). MVP는 Connector 1개라 미발생 — Phase 2 솔기.
+- **Tool Search UI/가시화 보강**: runtime은 이미 plugin/Connector tool schema 예산 초과 시 `tool_search`/`tool_describe`/`tool_call` bridge로 접는다. 향후 UI에서 "접힌 도구 카탈로그"와 검색 결과를 개발자/고급 사용자에게 보여줄 수 있다.
 - **MCP 동적 갱신 (Phase 2)**: MCP 어댑터 구현 시, 서버가 `notifications/tools/list_changed`를 보내면 해당 서버 tool을 전부 deregister 후 재등록(nuke-and-repave, [HERMES_TOOL_SYSTEM_REFERENCE.md](HERMES_TOOL_SYSTEM_REFERENCE.md) §7.3).
 - **외부 콘텐츠 주도 턴의 restricted toolset**: 10장-5의 (c) — 신뢰불가 외부 콘텐츠가 주도하는 턴에서 위험 tool 노출을 축소.
 

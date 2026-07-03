@@ -28,8 +28,10 @@ from ..core.types import (
     ev_message,
     ev_thinking,
 )
+from .context_manager import ConversationContextManager
 from .interfaces import IToolDispatcher
 from .providers.interfaces import ILLMProvider
+from .tool_scheduler import ScheduledToolRequest, ToolBatchResult, ToolScheduler
 
 
 @dataclass
@@ -50,10 +52,18 @@ class AgentLoop:
     """Implements the #1 conversation loop. Stateless across turns: all per-turn
     state lives in locals + the injected `LoopResult`."""
 
-    def __init__(self, *, provider: ILLMProvider, dispatcher: IToolDispatcher, temperature: float = 0.7) -> None:
+    def __init__(
+        self,
+        *,
+        provider: ILLMProvider,
+        dispatcher: IToolDispatcher,
+        temperature: float = 0.7,
+        context_manager: ConversationContextManager | None = None,
+    ) -> None:
         self._provider = provider
         self._dispatcher = dispatcher
         self._temperature = temperature
+        self._context_manager = context_manager
 
     async def run(self, ctx: TurnContext, session_id: str, result: LoopResult, abort: asyncio.Event):
         tool_index = {t.name: t for t in ctx.tools}
@@ -71,9 +81,17 @@ class AgentLoop:
             pending_calls = []
             stop_reason = "end_turn"
 
+            rendered_context = (
+                self._context_manager.render(ctx.system_prompt, tuple(messages))
+                if self._context_manager is not None
+                else None
+            )
+            provider_system = rendered_context.system_prompt if rendered_context is not None else ctx.system_prompt
+            provider_messages = rendered_context.history if rendered_context is not None else tuple(messages)
+
             async for chunk in self._provider.stream(
-                system=ctx.system_prompt,
-                messages=messages,
+                system=provider_system,
+                messages=provider_messages,
                 tools=ctx.tools,
                 temperature=self._temperature,
             ):
@@ -111,7 +129,10 @@ class AgentLoop:
                 yield ev_message(content=assistant_text)
                 break
 
-            # Dispatch each requested tool, feed results back into the history.
+            # Dispatch requested tools through the scheduler. Safe independent
+            # calls can run in parallel; destructive/approval-gated calls remain
+            # ordered. Results are appended in model-call order.
+            scheduled: list[ScheduledToolRequest] = []
             for call in pending_calls:
                 spec = tool_index.get(call.tool_name)
                 if spec is None:
@@ -119,13 +140,19 @@ class AgentLoop:
                     messages.append(Message(role="tool", content=_render_tool_result(res)))
                     tool_calls_made += 1
                     continue
-                async for ev in self._dispatcher.dispatch(session_id, call, spec):
+                scheduled.append(ScheduledToolRequest(call=call, spec=spec))
+
+            if scheduled:
+                batch = ToolBatchResult()
+                scheduler = ToolScheduler(self._dispatcher)
+                async for ev in scheduler.schedule(session_id, scheduled, batch, abort):
                     yield ev
-                res = await self._dispatcher.result_for(call)
-                messages.append(
-                    Message(role="tool", content=_render_tool_result(res), metadata={"tool_call_id": call.id})
-                )
-                tool_calls_made += 1
+                for req, res in zip(scheduled, batch.ordered([req.call for req in scheduled]), strict=True):
+                    call = req.call
+                    messages.append(
+                        Message(role="tool", content=_render_tool_result(res), metadata={"tool_call_id": call.id})
+                    )
+                    tool_calls_made += 1
             # loop continues: provider sees the tool results next iteration
         else:
             # max_iterations exhausted without a clean stop

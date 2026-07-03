@@ -1,6 +1,6 @@
 # RICE Contracts (레포 간 계약)
 
-> 작성일: 2026-06-12 (개정: 2026-06-26) · 상태: **확정 (결정 완료)**
+> 작성일: 2026-06-12 (개정: 2026-07-03) · 상태: **확정 (결정 완료)**
 > 범위: app↔runtime 로컬 API + 마켓 artifact 스펙 + platform API(개요)
 > 해소 대상(전건 확정): [RICE_REPO_STRATEGY.md](RICE_REPO_STRATEGY.md) 9장 #2, #4 (+#5 일부)
 
@@ -78,8 +78,8 @@ Electron main process
 | GET | `/memories` | 메모리 목록 (개인화 가시화용) |
 | **DELETE** | **`/memories/{id}`** | **메모리 삭제(Self-Improvement v3 위생) — 메모리는 HITL 없이 즉시 반영되는 유일한 학습 경로라 사후 제거 수단이 필수. LEARNING_LOOP §6** |
 | GET | `/models` | 사용 가능 모델 목록 |
-| GET | `/settings` | 설정 조회 (모델·언어·테마·글꼴) |
-| PUT | `/settings` | 설정 갱신 (provider/model/temperature, api_key→키체인, language, theme, **font**) |
+| GET | `/settings` | 설정 조회 (provider·learning·context·ui + registered_models) |
+| PUT | `/settings` | 설정 갱신 (provider/model/temperature, context 렌더링 예산/threshold, api_key→키체인, language, theme, **font**) |
 | POST | `/artifacts/install` | platform에서 받은 artifact 설치 (2장 manifest 전달) |
 | DELETE | `/artifacts/{id}` | 제거 |
 

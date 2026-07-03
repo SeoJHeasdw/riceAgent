@@ -1,6 +1,6 @@
 # RICE Runtime Directory (rice-runtime 내부 모듈 레이아웃)
 
-> 작성일: 2026-06-12 (개정: 2026-06-18) · 상태: ✅ 정본
+> 작성일: 2026-06-12 (개정: 2026-07-03) · 상태: ✅ 정본
 > 목적: `rice-runtime`의 내부 모듈 구조와 디렉토리 레이아웃, 모듈↔책임↔화면 매핑, 핵심 불변식을 정의한다.
 > 이 문서는 **모듈 구조의 단일 출처(source of truth)**다. 다른 문서는 여기를 링크로 참조한다.
 > 선행 문서: [RICE_REPO_STRATEGY.md](RICE_REPO_STRATEGY.md)(레포 분리 전략), [RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md)(런타임 설계)
@@ -54,14 +54,18 @@ rice-runtime/                                # 배포물 ② : 로컬 단일 프
 │   │       ├── session_manager.py
 │   │       └── tests/
 │   │
-│   ├── agent/                               # ▣ #1 대화 루프  + #2 tool dispatch
+│   ├── agent/                               # ▣ #1 대화 루프  + #2 tool dispatch/scheduling + sub-agent
 │   │   ├── interfaces.py                    #   IAgent / ILLMProvider (Protocol)
-│   │   ├── loop.py                          # ▣ #1 conversation/agent 루프 (max_iterations)
+│   │   ├── loop.py                          # ▣ #1 conversation/agent 루프 (max_iterations, context render, scheduler 호출)
+│   │   ├── context_manager.py               #   provider-facing context 렌더링/압축/마스킹 (원본 transcript 불변)
+│   │   ├── tool_scheduler.py                #   tool call batch 조율: 안전한 독립 tool 병렬화, 승인/파괴적 tool 순차
 │   │   ├── tool_dispatch.py                 # ▣ #2 스키마 조립·가용성 필터(check_fn식)·라우팅·결과 수집
 │   │   │                                    #     연결 안 된 Connector tool 제외 (RUNTIME_DESIGN 2.1)
 │   │   ├── orchestrator.py                  #   얇은 조율: learning/connector/execution 호출
 │   │   ├── effect_surfacing.py              #   ★ 신규(2026-07-02) — LearningEffect→SSE(+HITL), 메인 턴과 /learning-review·/learn이 공유
+│   │   ├── subagents.py                     #   focused sub-agent runner (delegate_subagent builtin의 실행체)
 │   │   ├── titler.py                        #   세션 제목 생성 (post-turn, 논블로킹 — /learning-review·/learn과 같은 트리거 지점 패턴)
+│   │   ├── builtins/                        #   read/write/search/terminal/vision/propose_skill/delegate_subagent
 │   │   ├── providers/                       #   모델 교체 지점 (Claude SaaS ↔ Ollama on-prem)
 │   │   │   ├── interfaces.py                #     ILLMProvider (tool_use·streaming·caching 정규화)
 │   │   │   ├── claude.py                    #     SaaS (Anthropic API)
@@ -140,12 +144,13 @@ rice-runtime/                                # 배포물 ② : 로컬 단일 프
 
 | # | 책임 | 위치 |
 |---|------|------|
-| #1 | 대화 루프 | `agent/loop.py` |
-| #2 | tool dispatch (스키마 조립·가용성 필터·라우팅) | `agent/tool_dispatch.py` |
+| #1 | 대화 루프 + provider-facing context 관리 | `agent/loop.py`, `agent/context_manager.py` |
+| #2 | tool dispatch/scheduling (스키마 조립·가용성 필터·라우팅·병렬 batch) | `agent/tool_dispatch.py`, `agent/tool_scheduler.py` |
+| #2a | sub-agent delegation | `agent/subagents.py`, `agent/builtins/subagent_tools.py` |
 | #3 | memory manager | `learning/memory/` |
 | #4 | skill lifecycle (생성·상태전이·개선patch) | `learning/skill/` |
 | #5 | curator | `learning/curator/` |
-| #6 | learning loop | `learning/loop.py` |
+| #6 | learning loop | `learning/service.py` |
 | #7 | plugin loading | `execution/plugin/` |
 | #8 | tool execution sandbox | `execution/sandbox/` (★ 향후 별도 프로세스) |
 | #9 | session / user modeling | `server/session/` (세션) + `learning/user_model/` (유저) |
@@ -163,11 +168,11 @@ rice-runtime/                                # 배포물 ② : 로컬 단일 프
 
 | UI 화면 | 백엔드 | 주요 모듈 |
 |---------|--------|-----------|
-| ChatScreen | rice-runtime | `agent/`, `server/session/` |
+| ChatScreen | rice-runtime | `agent/`(context/tool scheduling/sub-agent), `server/session/` |
 | MySkillsScreen | rice-runtime | `learning/skill/`, `learning/curator/` |
 | MyPluginsScreen | rice-runtime | `execution/plugin/`, `connector/permission/` |
 | ConnectorsScreen | rice-runtime | `connector/` |
-| SettingsScreen | rice-runtime | `core/config.py`, `agent/providers/` |
+| SettingsScreen | rice-runtime | `core/config.py`(provider/learning/context/ui), `agent/providers/` |
 | SkillMarketScreen | rice-platform | `catalog/`, `artifacts/` (설치는 runtime `execution/plugin/`) |
 | PluginMarketScreen | rice-platform | `catalog/`, `artifacts/` (설치는 runtime `execution/plugin/`) |
 

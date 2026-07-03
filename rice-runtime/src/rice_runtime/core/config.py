@@ -94,6 +94,28 @@ class LearningConfig:
 
 
 @dataclass(frozen=True)
+class ContextConfig:
+    """Provider-facing context rendering knobs.
+
+    Inspired by Gemini CLI's context manager, but intentionally deterministic for
+    RICE's local runtime: no extra model calls are required just to fit a turn.
+    Durable session history stays full; these limits only affect what is rendered
+    into each LLM request.
+    """
+
+    enabled: bool = True
+    max_tokens: int = 96_000
+    retained_tokens: int = 64_000
+    recent_messages: int = 8
+    subagent_history_messages: int = 24
+    summary_tokens: int = 1_600
+    tool_output_threshold_tokens: int = 4_000
+    tool_output_retained_tokens: int = 1_200
+    message_threshold_tokens: int = 12_000
+    message_retained_tokens: int = 3_000
+
+
+@dataclass(frozen=True)
 class UIConfig:
     language: str = "ko"
     theme: str = "system"  # light | dark | system
@@ -104,6 +126,7 @@ class UIConfig:
 class Config:
     provider: ProviderConfig = field(default_factory=ProviderConfig)
     learning: LearningConfig = field(default_factory=LearningConfig)
+    context: ContextConfig = field(default_factory=ContextConfig)
     ui: UIConfig = field(default_factory=UIConfig)
 
     def to_dict(self) -> dict:
@@ -158,9 +181,11 @@ def _merge(base: Config, raw: dict) -> Config:
     """Shallow-merge a parsed dict onto defaults, section by section."""
     prov = {**asdict(base.provider), **(raw.get("provider") or {})}
     learn = {**asdict(base.learning), **(raw.get("learning") or {})}
+    context = {**asdict(base.context), **(raw.get("context") or {})}
     ui = {**asdict(base.ui), **(raw.get("ui") or {})}
     return Config(
         provider=ProviderConfig(**prov),
         learning=LearningConfig(**learn),
+        context=ContextConfig(**context),
         ui=UIConfig(**ui),
     )

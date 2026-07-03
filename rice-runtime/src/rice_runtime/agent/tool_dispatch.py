@@ -27,7 +27,8 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import Protocol, cast
 
 from ..connector.interfaces import IConnectorService
 from ..core.types import (
@@ -45,8 +46,19 @@ from .interfaces import IApprovalGate
 
 log = logging.getLogger("rice.agent.dispatch")
 
-# A builtin tool is a plain async callable: arguments dict → result value.
-BuiltinTool = Callable[[dict], Awaitable[object]]
+class SessionBuiltinTool(Protocol):
+    """Builtin callable that needs the current session id.
+
+    Most builtins are plain `async (args) -> object`; session-scoped tools opt in
+    by setting `needs_session = True` on the handler.
+    """
+
+    needs_session: bool
+
+    def __call__(self, args: dict, *, session_id: str) -> Awaitable[object]: ...
+
+
+BuiltinTool = Callable[[dict], Awaitable[object]] | SessionBuiltinTool
 
 
 # ── progressive disclosure (RUNTIME_DESIGN §2.1/§11) ────────────────────────────
@@ -194,9 +206,9 @@ class ToolDispatcher:
                 # `needs_session` 마커로 opt-in한다 — 시그니처를 전 빌트인에 강제로
                 # 넓히는 대신 필요한 도구만 명시적으로 받는다.
                 if getattr(fn, "needs_session", False):
-                    value = await fn(call.arguments, session_id=session_id)
+                    value = await cast(SessionBuiltinTool, fn)(call.arguments, session_id=session_id)
                 else:
-                    value = await fn(call.arguments)
+                    value = await cast(Callable[[dict], Awaitable[object]], fn)(call.arguments)
                 res = ToolResult(call.id, ok=True, result=value)
             elif spec.source == "connector":
                 res = await self._connectors.invoke(call)
