@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button, Icon, Tag, ResizeHandle, Toggle } from '../components/ui';
+import { ConnectorRequiredModal } from '../components/carbon/ConnectorRequiredModal';
 import { useResizable } from '../hooks/useResizable';
 import { useLearning } from '../lib/learning/LearningContext';
 import { api } from '../lib/api';
@@ -31,6 +32,7 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
   const navigate = useNavigate();
   const { myPlugins, setMyPlugins } = useLearning();
   const [tab, setTab] = useState<PluginTab>('skills');
+  const [connectorDialogOpen, setConnectorDialogOpen] = useState(false);
   const plugin = myPlugins.find((p) => p.id === pluginId);
 
   if (!plugin || !pluginId) {
@@ -38,15 +40,27 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
   }
 
   const patch = (fn: (p: MyPlugin) => MyPlugin) => setMyPlugins((a) => a.map((x) => (x.id === pluginId ? fn(x) : x)));
+  const permissionsNeedingConnection = plugin.permissions.filter((p) => p.mode.includes('연결 필요'));
+  const missingConnectorNames = permissionsNeedingConnection.map((p) => p.name);
+  const firstConnectorTarget = (() => {
+    const first = permissionsNeedingConnection[0]?.name ?? plugin.permissions[0]?.name;
+    const cid = first ? connectorIdForScope(first) : null;
+    return cid ? `/connectors/${cid}` : '/connectors';
+  })();
   // 토글·삭제는 로컬 상태 + 런타임에도 반영해 재시작 후에도 일관되게 유지한다.
   // (런타임 오프라인이거나 mock/낙관적 항목이면 api.isEnabled 가드로 no-op.)
   const toggle = () => {
     const next = !plugin.enabled;
+    if (next && permissionsNeedingConnection.length > 0) {
+      setConnectorDialogOpen(true);
+      return;
+    }
     patch((x) => ({ ...x, enabled: next }));
     if (api.isEnabled) {
       void api.setPluginEnabled(pluginId, next).then((res) => {
         if (!res.success) {
           patch((x) => ({ ...x, enabled: !next }));
+          setConnectorDialogOpen(true);
           console.error('plugin toggle failed', res.error);
         }
       });
@@ -65,14 +79,9 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
     ['작성자', plugin.author],
     ['마지막 업데이트', plugin.updated],
   ];
-  const permissionsNeedingConnection = plugin.permissions.filter((p) => p.mode.includes('연결 필요'));
-  const firstConnectorTarget = (() => {
-    const first = plugin.permissions[0]?.name;
-    const cid = first ? connectorIdForScope(first) : null;
-    return cid ? `/connectors/${cid}` : '/connectors';
-  })();
 
   return (
+    <>
     <div className="flex-1 min-w-0 overflow-y-auto">
       {/* header */}
       <div className="px-7 pt-6 pb-5 border-b border-border-subtle-01">
@@ -300,6 +309,17 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
         </div>
       </div>
     </div>
+    <ConnectorRequiredModal
+      open={connectorDialogOpen}
+      pluginName={plugin.name}
+      connectors={missingConnectorNames}
+      onClose={() => setConnectorDialogOpen(false)}
+      onConnect={() => {
+        setConnectorDialogOpen(false);
+        navigate(firstConnectorTarget);
+      }}
+    />
+    </>
   );
 };
 

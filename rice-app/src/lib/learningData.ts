@@ -871,6 +871,7 @@ export const CONNECTORS: Connector[] = [
 export function connectorIdForScope(scope: string): string | null {
   const s = scope.toLowerCase();
   if (s.includes('gmail') || s.includes('메일 보내기') || s.includes('받은 편지함')) return 'gmail';
+  if (s.includes('calendar') || s.includes('캘린더')) return 'calendar';
   if (s.startsWith('db2')) return 'db2';
   if (s.includes('orchestrate') || s.includes('워크플로')) return 'orchestrate';
   if (s.startsWith('#') || s.includes('slack') || s.includes('멘션')) return 'slack';

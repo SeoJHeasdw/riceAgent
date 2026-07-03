@@ -1,13 +1,16 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { TwoColumnLayout } from '../components/TwoColumnLayout';
 import { PluginCard } from '../components/carbon/PluginCard';
 import { MarketplaceHeader } from '../components/carbon/MarketplaceHeader';
 import { ArtifactDetailModal } from '../components/carbon/ArtifactDetailModal';
+import { ConnectorRequiredModal } from '../components/carbon/ConnectorRequiredModal';
 import { CardSkeletonGrid } from '../components/carbon/MarketSkeleton';
 import { NotificationVariant } from '../components/carbon/NotificationToast';
 import { useToast } from '../lib/toast/ToastContext';
 import { useMarketplace } from '../hooks/useMarketplace';
 import { useLearning } from '../lib/learning/LearningContext';
+import { connectorIdForScope } from '../lib/learningData';
 import { useResizable } from '../hooks/useResizable';
 import { Icon, ResizeHandle } from '../components/ui';
 import { pluginCategories } from '../lib/mockData';
@@ -18,6 +21,7 @@ import { Plugin } from '../lib/types';
  */
 
 function PluginMarketScreen() {
+  const navigate = useNavigate();
   const {
     filteredPlugins,
     catalogLoading,
@@ -33,6 +37,7 @@ function PluginMarketScreen() {
 
   const [selectedCategory, setSelectedCategory] = useState('전체');
   const [detailModalPlugin, setDetailModalPlugin] = useState<Plugin | null>(null);
+  const [connectorPromptPlugin, setConnectorPromptPlugin] = useState<Plugin | null>(null);
   const toast = useToast();
 
   // Resizable left rail
@@ -100,7 +105,7 @@ function PluginMarketScreen() {
     const next = !plugin.enabled;
     const ok = await togglePlugin(plugin.id, next);
     if (!ok) {
-      showToast(`${plugin.name} 활성화에 필요한 커넥터를 먼저 연결하세요`, 'warning');
+      setConnectorPromptPlugin(plugin);
       return;
     }
     showToast(
@@ -114,6 +119,15 @@ function PluginMarketScreen() {
   // Show toast notification — the toast owns its own dismiss timing/animation.
   const showToast = (message: string, variant: NotificationVariant = 'success') => {
     toast.notify({ message, variant });
+  };
+
+  const requiredConnectors = (plugin: Plugin | null) =>
+    plugin?.connectors?.map((c) => c.name).filter(Boolean) ?? [];
+
+  const connectorTarget = (plugin: Plugin | null) => {
+    const first = requiredConnectors(plugin)[0];
+    const cid = first ? connectorIdForScope(first) : null;
+    return cid ? `/connectors/${cid}` : '/connectors';
   };
 
   // Installed plugins count
@@ -254,11 +268,25 @@ function PluginMarketScreen() {
           onToggle={(enabled) => {
             void togglePlugin(detailModalPlugin.id, enabled).then((ok) => {
               if (!ok) {
-                showToast(`${detailModalPlugin.name} 활성화에 필요한 커넥터를 먼저 연결하세요`, 'warning');
+                setConnectorPromptPlugin(detailModalPlugin);
                 return;
               }
               setDetailModalPlugin({ ...detailModalPlugin, enabled });
             });
+          }}
+        />
+      )}
+      {connectorPromptPlugin && (
+        <ConnectorRequiredModal
+          open={true}
+          pluginName={connectorPromptPlugin.name}
+          connectors={requiredConnectors(connectorPromptPlugin)}
+          onClose={() => setConnectorPromptPlugin(null)}
+          onConnect={() => {
+            const target = connectorTarget(connectorPromptPlugin);
+            setConnectorPromptPlugin(null);
+            setDetailModalPlugin(null);
+            navigate(target);
           }}
         />
       )}
