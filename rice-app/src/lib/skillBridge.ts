@@ -13,8 +13,13 @@ import { getSkillFiles } from './skillFiles';
  * 또 소유 스킬의 "소스 뷰"가 항상 보여줄 파일을 제공한다(ownedSkillFiles).
  */
 
-/** 설치된 마켓 스킬의 안정적 소유 id — marketId 기준이라 재설치해도 중복되지 않는다. */
-export const installedSkillId = (marketId: string) => `inst-${marketId}`;
+/**
+ * 설치된 마켓 스킬의 안정적 소유 id.
+ * platform artifact는 runtime에 `<artifact-name>.md`로 설치되어 GET /skills의 id도
+ * artifact name이 된다. 같은 id를 쓰면 설치 직후 UI와 runtime hydrate가 갈라지지 않는다.
+ */
+export const installedSkillId = (marketId: string) =>
+  marketId.startsWith('platform-') ? marketId.slice('platform-'.length) : `inst-${marketId}`;
 
 /** 마켓 semver("3.0.1") → 학습 버전 표기("v3"). 메이저만 취한다. */
 const toLearnVer = (v: string): string => {
@@ -143,8 +148,9 @@ export { toLearnVer };
 // 스킬의 marketSkillToOwned 와 대칭. 설치 시 마켓 Plugin을 "내 플러그인"(MyPlugin)으로
 // materialize 해 MyPluginsScreen에 즉시 뜨게 한다. marketId 기준 멱등.
 
-/** 설치된 마켓 플러그인의 안정적 소유 id. */
-export const installedPluginId = (marketId: string) => `inst-${marketId}`;
+/** 설치된 마켓 플러그인의 안정적 소유 id — runtime installed_artifacts id와 맞춘다. */
+export const installedPluginId = (marketId: string) =>
+  marketId.startsWith('platform-') ? `plugin:${marketId.slice('platform-'.length)}` : `inst-${marketId}`;
 
 // ── platform(rice-platform) artifact → 마켓 타입 변환 ────────────────────────
 // 카탈로그 응답(PlatformArtifact)을 앱 도메인(Skill·Plugin)으로. MarketplaceContext(카탈로그

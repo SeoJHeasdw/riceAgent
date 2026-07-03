@@ -377,6 +377,7 @@ class PluginLoader:
         dest = self._paths.plugins / f"plugin:{parsed.name}"
         dest.mkdir(parents=True, exist_ok=True)
         await self._unpack(path, dest)
+        self._flatten_single_package_root(dest, parsed.name)
         (dest / "rice-artifact.json").write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
         )
@@ -467,6 +468,39 @@ class PluginLoader:
         else:
             # Single file — treat as SKILL.md for skill type
             shutil.copy2(str(src), str(dest / src.name))
+
+    @staticmethod
+    def _flatten_single_package_root(dest: Path, artifact_name: str) -> None:
+        """Normalize archives that contain one top-level package directory.
+
+        rice-platform download packages are reproducible tarballs rooted at
+        `<artifact_id>/...`. Runtime installs plugins under
+        `~/.rice/plugins/plugin:<name>/` and expects plugin payload directories
+        such as `skills/`, `commands/`, `.claude-plugin/`, and `.mcp.json`
+        directly there. Without this flattening, a marketplace plugin installs
+        as `plugin:<name>/<name>/skills/...`, so injected_skills() sees nothing.
+        Directory-based dev installs already copy contents directly, so this is
+        only a tar/package normalization step.
+        """
+        entries = [p for p in dest.iterdir() if p.name != "rice-artifact.json"]
+        if len(entries) != 1 or not entries[0].is_dir():
+            return
+
+        package_root = entries[0]
+        looks_like_plugin = (
+            package_root.name == artifact_name
+            or (package_root / ".claude-plugin").exists()
+            or (package_root / "skills").exists()
+            or (package_root / "commands").exists()
+            or (package_root / "agents").exists()
+            or (package_root / "hooks").exists()
+        )
+        if not looks_like_plugin:
+            return
+
+        for child in package_root.iterdir():
+            shutil.move(str(child), str(dest / child.name))
+        package_root.rmdir()
 
     def _list_enabled_plugin_infos(self) -> list[PluginInfo]:
         """Internal: enabled plugins only, light read."""

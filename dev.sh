@@ -16,6 +16,7 @@ APP_DIR="$ROOT/rice-app"
 PORT="${RICE_PORT:-8080}"
 PLATFORM_PORT="${RICE_PLATFORM_PORT:-7070}"
 PLATFORM_DIR="$ROOT/rice-platform"
+MARKETPLACE_DIR="${RICE_MARKETPLACE_DIR:-$ROOT/../rice-marketplace}"
 
 # 이 스크립트의 프로세스 그룹 전체를 SIGKILL — 손자 프로세스(uvicorn worker 등)까지 포함.
 cleanup() {
@@ -55,10 +56,16 @@ if [ -d "$PLATFORM_DIR" ]; then
   echo "▶ 플랫폼: rice-platform --port $PLATFORM_PORT"
   (
     cd "$PLATFORM_DIR"
+    if [ -d "$MARKETPLACE_DIR/artifacts" ]; then
+      export RICE_ARTIFACTS_DIR="$MARKETPLACE_DIR/artifacts"
+    fi
+    if [ -f "$MARKETPLACE_DIR/.claude-plugin/marketplace.json" ]; then
+      export RICE_PLUGIN_MARKETPLACES="$MARKETPLACE_DIR"
+    fi
     if [ -x ".venv/bin/rice-platform" ]; then
-      exec .venv/bin/rice-platform --port "$PLATFORM_PORT" --artifacts-dir ./artifacts
+      exec .venv/bin/rice-platform --port "$PLATFORM_PORT" --artifacts-dir "${RICE_ARTIFACTS_DIR:-./artifacts}"
     else
-      exec python3 -m rice_platform --port "$PLATFORM_PORT" --artifacts-dir ./artifacts
+      exec python3 -m rice_platform --port "$PLATFORM_PORT" --artifacts-dir "${RICE_ARTIFACTS_DIR:-./artifacts}"
     fi
   ) &
   

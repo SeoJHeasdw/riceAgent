@@ -24,6 +24,7 @@ import hashlib
 import json
 import os
 import sys
+import tarfile
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -444,6 +445,51 @@ tags: [plugin, test]
         db = _fresh_db()
         loader = PluginLoader(db=db, sandbox=NoopSandbox(), paths=paths)
         assert loader.injected_skills() == []
+
+    @pytest.mark.asyncio
+    async def test_install_flattens_platform_tar_root_for_plugin_skills(self):
+        """platform download tarballs are rooted at <artifact_id>/...; plugin install must flatten."""
+        paths = _fresh_paths()
+        db = _fresh_db()
+        loader = PluginLoader(db=db, sandbox=NoopSandbox(), paths=paths)
+
+        src = Path(tempfile.mkdtemp(prefix="rice-plugin-pkg-"))
+        archive = Path(tempfile.mktemp(suffix=".tar.gz"))
+        try:
+            root = src / "bundle"
+            skill_dir = root / "skills" / "ship"
+            skill_dir.mkdir(parents=True)
+            (root / ".claude-plugin").mkdir()
+            (root / ".claude-plugin" / "plugin.json").write_text(
+                json.dumps({"name": "bundle", "version": "1.0.0"}),
+                encoding="utf-8",
+            )
+            (skill_dir / "SKILL.md").write_text(
+                "---\nname: ship-it\nversion: 1\ndescription: d\nstate: active\n---\nbody",
+                encoding="utf-8",
+            )
+            with tarfile.open(archive, "w:gz") as tf:
+                tf.add(root, arcname="bundle")
+
+            info = await loader.install(
+                path=str(archive),
+                manifest={
+                    "schema_version": 1,
+                    "type": "plugin",
+                    "name": "bundle",
+                    "version": "1.0.0",
+                },
+            )
+
+            assert info.id == "plugin:bundle"
+            assert (paths.plugins / "plugin:bundle" / "skills" / "ship" / "SKILL.md").exists()
+            assert not (paths.plugins / "plugin:bundle" / "bundle" / "skills").exists()
+            assert {s.name for s in loader.injected_skills()} == {"ship-it"}
+        finally:
+            import shutil
+
+            shutil.rmtree(src, ignore_errors=True)
+            archive.unlink(missing_ok=True)
 
 
 # ── registry (set_enabled, list_plugins) ─────────────────────────────────────

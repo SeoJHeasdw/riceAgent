@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 from fastapi import HTTPException
@@ -84,6 +85,36 @@ def test_download_checksum_is_deterministic():
 def test_unknown_artifact_returns_none():
     assert registry.get_artifact("does-not-exist") is None
     assert registry.build_download_package("does-not-exist") is None
+
+
+def test_marketplace_skips_remote_source_objects(monkeypatch, tmp_path):
+    """Upstream Claude marketplaces mix local string sources and remote source objects."""
+    local = tmp_path / "plugins" / "local-plugin"
+    (local / ".claude-plugin").mkdir(parents=True)
+    (local / ".claude-plugin" / "plugin.json").write_text(
+        json.dumps({"name": "local-plugin", "version": "1.0.0", "description": "local"}),
+        encoding="utf-8",
+    )
+    (tmp_path / ".claude-plugin").mkdir()
+    (tmp_path / ".claude-plugin" / "marketplace.json").write_text(
+        json.dumps(
+            {
+                "plugins": [
+                    {
+                        "name": "remote-plugin",
+                        "source": {"source": "url", "url": "https://example.invalid/plugin.git"},
+                    },
+                    {"name": "local-plugin", "source": "./plugins/local-plugin"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("RICE_PLUGIN_MARKETPLACES", str(tmp_path))
+
+    ids = {p["id"] for p in registry.list_artifacts(artifact_type="plugin")}
+    assert "local-plugin" in ids
+    assert "remote-plugin" not in ids
 
 
 # ── 실제 Claude 플러그인 인제스트 (claude-for-legal) ─────────────────────────

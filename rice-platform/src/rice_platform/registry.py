@@ -87,7 +87,11 @@ def _iter_claude_plugins() -> Iterator[tuple[str, Path, dict[str, Any]]]:
         for entry in data.get("plugins", []):
             name = entry.get("name", "")
             source = entry.get("source", "")
-            if not name or not source:
+            # Rice only ingests local marketplace entries here. Upstream Claude
+            # marketplaces may also include remote source objects; those need a
+            # separate fetch/verification step and must not break local catalog
+            # loading.
+            if not name or not isinstance(source, str):
                 continue
             plugin_dir = (mkt / source).resolve()
             if plugin_dir.is_dir():
