@@ -1,8 +1,17 @@
-"""Conversation loop (#1) — the LLM call/tool-dispatch cycle (RUNTIME_DESIGN §2).
+"""Conversation loop (#1) — plan-and-execute × ReAct (RICE_AGENT_EXECUTION.md §3).
 
-Structure borrowed from Hermes' `run_conversation` (pattern only, re-implemented).
-One iteration = one LLM stream; if it asks for tools, dispatch them, append results,
-loop again — capped at `ctx.max_iterations` (default 25) to prevent runaway turns.
+Structure borrowed from Hermes' `run_conversation` (pattern only, re-implemented),
+then extended with an explicit planning phase:
+
+  PLAN     복합 질의면 TurnPlanner가 의도(goal)+단계 계획을 세운다(LLM 1회).
+           단순 질의면 계획 없이 곧장 실행 — 이전과 동일한 순수 ReAct 루프.
+  EXECUTE  one iteration = one LLM stream; if it asks for tools, dispatch them,
+           append results, loop again. 계획이 있으면 매 반복 시스템 프롬프트에
+           살아있는 계획 상태를 다시 렌더하고(스냅샷 프롬프팅 — 로컬 LLM이 긴
+           작업에서 길을 잃지 않게), 모델은 `update_plan`(루프가 가로채는 가상
+           빌트인)으로 단계 전이·계획 수정을 보고한다(ReAct의 관찰→재평가).
+           N라운드 무보고면 drift guard가 재평가를 강제하고, 전 단계 종결 시
+           propose_skill 유도가 켜진다. 반복 상한은 계획 크기에 맞춰 늘어난다.
 
 The loop is provider- and storage-agnostic: it consumes a `TurnContext` and an
 `ILLMProvider`, dispatches via an `IToolDispatcher`, and yields `SSEEvent`s. It owns
@@ -21,6 +30,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Sequence
 
+from ..core.config import AgentConfig
 from ..core.tokens import TokenCalibrator, is_context_length_error
 from ..core.types import (
     Message,
@@ -29,20 +39,27 @@ from ..core.types import (
     TurnContext,
     ev_error,
     ev_message,
+    ev_plan_updated,
     ev_thinking,
     ev_tool_call,
     ev_tool_result,
 )
+from ..prompts.planning import render_plan_block
 from .context_manager import (
     ContextRenderStats,
     ConversationContextManager,
     estimate_context_tokens as _pure_ctx_tokens,
 )
 from .interfaces import IToolDispatcher
+from .planner import UPDATE_PLAN_SPEC, PlanOutcome, PlanState, TurnPlanner
 from .providers.interfaces import ILLMProvider, ProviderChunk
 from .tool_scheduler import ScheduledToolRequest, ToolBatchResult, ToolScheduler
 
 log = logging.getLogger("rice.agent.loop")
+
+# 전 단계 종결 후 스킬 승격을 유도하는 최소 도구 호출 수 — 이보다 적으면 절차랄
+# 것이 없다(LearningConfig.review_min_tool_calls와 같은 기본값).
+_SKILL_NUDGE_MIN_TOOL_CALLS = 3
 
 
 @dataclass
@@ -74,6 +91,8 @@ class AgentLoop:
         temperature: float = 0.7,
         context_manager: ConversationContextManager | None = None,
         token_calibrator: "TokenCalibrator | None" = None,
+        planner: TurnPlanner | None = None,
+        agent_config: AgentConfig | None = None,
     ) -> None:
         self._provider = provider
         self._dispatcher = dispatcher
@@ -81,18 +100,21 @@ class AgentLoop:
         self._context_manager = context_manager
         # 실측 usage 피드백 + 컨텍스트 길이 초과 시 재압축 재시도용
         self._calibrator = token_calibrator
+        # None이면 계획 단계 없이 순수 ReAct(기존 동작·테스트 그대로).
+        self._planner = planner
+        self._agent_config = agent_config or AgentConfig()
 
-    def _render(self, ctx: TurnContext, messages: list[Message], *, budget_scale: float):
+    def _render(self, system_prompt: str, messages: list[Message], *, budget_scale: float):
         """이 반복에 보낼 컨텍스트를 렌더한다. budget_scale<1이면 컨텍스트 길이
         초과 후 더 강하게 압축하는 재시도용. context_manager가 없으면 raw 그대로."""
         if self._context_manager is None:
-            return None, ctx.system_prompt, tuple(messages)
+            return None, system_prompt, tuple(messages)
         cm = self._context_manager
         if budget_scale != 1.0:
             cm = ConversationContextManager(
                 cm.config, estimate=cm.estimate_fn, budget_scale=budget_scale
             )
-        rendered = cm.render(ctx.system_prompt, tuple(messages))
+        rendered = cm.render(system_prompt, tuple(messages))
         return rendered, rendered.system_prompt, rendered.history
 
     def _calibrate(self, system: str, messages: Sequence[Message], done: ProviderChunk) -> None:
@@ -107,35 +129,95 @@ class AgentLoop:
         except Exception:  # noqa: BLE001
             log.debug("token calibration observe failed", exc_info=True)
 
+    # ── plan phase helpers ───────────────────────────────────────────────────
+
+    def _effective_max_iterations(self, ctx: TurnContext, plan_state: PlanState | None) -> int:
+        """계획이 있으면 반복 예산을 계획 크기에 맞춘다: 단계당 ~6라운드 + 여유.
+        상한은 agent.plan_max_iterations — "일을 잘하는" 쪽으로 늘리되 bounded.
+        add_steps로 계획이 자라면 예산도 함께 자란다(매 반복 재계산)."""
+        if plan_state is None:
+            return ctx.max_iterations
+        plan_budget = 12 + 6 * len(plan_state.plan.steps)
+        return max(ctx.max_iterations, min(plan_budget, self._agent_config.plan_max_iterations))
+
+    def _system_prompt_for(self, ctx: TurnContext, plan_state: PlanState | None, tool_calls_made: int) -> str:
+        """계획이 있으면 시스템 프롬프트 뒤에 살아있는 계획 블록을 덧붙인다 —
+        매 반복 전체 상태를 다시 싣는다(토큰 절약보다 수행 품질, AgentConfig 참고)."""
+        if plan_state is None:
+            return ctx.system_prompt
+        block = render_plan_block(
+            plan_state.plan,
+            rounds_without_update=plan_state.rounds_without_update,
+            drift_guard_rounds=self._agent_config.plan_drift_guard_rounds,
+            nudge_skill_capture=(
+                plan_state.all_terminal and tool_calls_made >= _SKILL_NUDGE_MIN_TOOL_CALLS
+            ),
+        )
+        return f"{ctx.system_prompt}\n\n{block}"
+
     async def run(self, ctx: TurnContext, session_id: str, result: LoopResult, abort: asyncio.Event):
         tool_index = {t.name: t for t in ctx.tools}
         messages: list[Message] = list(ctx.history)
         tool_calls_made = 0
         final_text = ""
 
-        for _iteration in range(ctx.max_iterations):
+        # ── PLAN: 의도 파악 + 필요 시 계획 수립 (fail-soft — 실패해도 턴 진행) ──
+        plan_state: PlanState | None = None
+        # 계획 생성 스냅샷은 이 턴의 첫 어시스턴트 메시지 metadata에 실어 영속화한다
+        # (합성 assistant 메시지를 히스토리에 끼우면 프로바이더 wire가 오염된다 —
+        # trailing-assistant는 prefill로 해석하는 API가 있다).
+        pending_plan_meta: dict | None = None
+        if self._planner is not None and ctx.tools and not abort.is_set():
+            user_message = next((m.content for m in reversed(messages) if m.role == "user"), "")
+            if user_message.strip():
+                outcome = PlanOutcome()
+                async for ev in self._planner.run(ctx, user_message, outcome, abort):
+                    yield ev
+                if outcome.plan is not None and not abort.is_set():
+                    plan_state = PlanState(outcome.plan)
+                    pending_plan_meta = {"plan": plan_state.plan.to_dict()}
+                    yield ev_plan_updated(plan_state.plan)
+                    log.info(
+                        "turn planned: %d steps (session %s) — %s",
+                        len(plan_state.plan.steps), session_id, plan_state.plan.goal,
+                    )
+
+        # ── EXECUTE: ReAct 루프 (계획이 있으면 계획을 작업하며) ─────────────────
+        iteration = 0
+        while True:
+            if iteration >= self._effective_max_iterations(ctx, plan_state):
+                # budget exhausted without a clean stop
+                yield ev_error(
+                    "max_iterations",
+                    f"turn exceeded {self._effective_max_iterations(ctx, plan_state)} iterations",
+                )
+                break
+            iteration += 1
             if abort.is_set():
                 result.aborted = True
                 break
 
+            # update_plan은 계획이 있는 동안만 광고한다(계획 없는 턴에 노이즈 금지).
+            iteration_tools = ctx.tools + (UPDATE_PLAN_SPEC,) if plan_state is not None else ctx.tools
+            iteration_system = self._system_prompt_for(ctx, plan_state, tool_calls_made)
+
             assistant_parts: list[str] = []
             thinking_parts: list[str] = []
             pending_calls = []
-            stop_reason = "end_turn"
 
             # 컨텍스트 길이 초과 시 더 강한 압축으로 1회 재시도한다.
             # 초과 에러는 요청 진입 시점에 나므로(스트림 델타 전) 한 청크도 내보내기
             # 전에 안전하게 재렌더할 수 있다. 재시도 후에도 실패하면 상위로 전파.
             for attempt, budget_scale in enumerate((1.0, 0.45)):
                 rendered_context, provider_system, provider_messages = self._render(
-                    ctx, messages, budget_scale=budget_scale
+                    iteration_system, messages, budget_scale=budget_scale
                 )
                 produced_any = False
                 try:
                     async for chunk in self._provider.stream(
                         system=provider_system,
                         messages=provider_messages,
-                        tools=ctx.tools,
+                        tools=iteration_tools,
                         temperature=self._temperature,
                     ):
                         produced_any = True
@@ -152,7 +234,6 @@ class AgentLoop:
                         elif chunk.kind == "tool_call" and chunk.tool_call is not None:
                             pending_calls.append(chunk.tool_call)
                         elif chunk.kind == "done":
-                            stop_reason = chunk.stop_reason or "end_turn"
                             self._calibrate(provider_system, provider_messages, chunk)
                     break  # stream consumed cleanly
                 except Exception as exc:  # noqa: BLE001
@@ -180,7 +261,11 @@ class AgentLoop:
             # for trace reconstruction on reload. Providers ignore metadata when
             # assembling history, so the model never re-sees stale thinking.
             thinking_text = "".join(thinking_parts)
-            metadata = {"thinking": thinking_text} if thinking_text else {}
+            metadata: dict = {"thinking": thinking_text} if thinking_text else {}
+            if pending_plan_meta is not None:
+                # 계획 생성 스냅샷은 턴의 첫 어시스턴트 메시지에 1회 부착(리로드 복원용).
+                metadata.update(pending_plan_meta)
+                pending_plan_meta = None
             messages.append(
                 Message(role="assistant", content=assistant_text, tool_calls=tuple(pending_calls), metadata=metadata)
             )
@@ -196,6 +281,30 @@ class AgentLoop:
             # ordered. Results are appended in model-call order.
             scheduled: list[ScheduledToolRequest] = []
             for call in pending_calls:
+                # ── update_plan 인터셉트: 계획 상태는 턴-로컬이다 — dispatcher를
+                # 태우지 않고 여기서 적용한다(외부 실행·승인·영속 부작용 없음).
+                # 갱신마다 전체 스냅샷을 SSE로 흘리고, tool 메시지 metadata에도 실어
+                # 리로드가 같은 카드를 복원하게 한다.
+                if plan_state is not None and call.tool_name == UPDATE_PLAN_SPEC.name:
+                    yield ev_tool_call(call)
+                    payload = plan_state.apply(call.arguments)
+                    yield ev_plan_updated(plan_state.plan)
+                    res = ToolResult(call.id, ok=True, result=payload)
+                    yield ev_tool_result(res)
+                    messages.append(
+                        Message(
+                            role="tool",
+                            content=_render_tool_result(res),
+                            metadata={
+                                "tool_call_id": call.id,
+                                "tool_source": "builtin",  # 내부 상태 갱신 — 외부 콘텐츠 아님
+                                "tool_name": call.tool_name,
+                                "plan": plan_state.plan.to_dict(),
+                            },
+                        )
+                    )
+                    tool_calls_made += 1
+                    continue
                 spec = tool_index.get(call.tool_name)
                 if spec is None:
                     # 미지의 도구도 SSE로 서피싱한다(이전엔 모델만 에러를 보고 UI/
@@ -230,10 +339,12 @@ class AgentLoop:
                         )
                     )
                     tool_calls_made += 1
+
+            # ── ReAct drift guard 카운터: 실제 도구 라운드가 계획 보고 없이
+            # 지나가면 누적 — 임계 도달 시 다음 반복 프롬프트가 재평가를 강제한다.
+            if plan_state is not None and not any(c.tool_name == UPDATE_PLAN_SPEC.name for c in pending_calls):
+                plan_state.note_tool_round()
             # loop continues: provider sees the tool results next iteration
-        else:
-            # max_iterations exhausted without a clean stop
-            yield ev_error("max_iterations", f"turn exceeded {ctx.max_iterations} iterations")
 
         result.final_message = final_text
         result.history = tuple(messages)

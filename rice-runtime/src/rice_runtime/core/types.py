@@ -106,6 +106,62 @@ class ToolResult:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Turn plan — plan-and-execute × ReAct (RICE_AGENT_EXECUTION.md)
+#
+# 복합 질의는 실행 전에 명시적 계획으로 승격된다: 플래너가 의도(goal)와 단계를
+# 세우고, 루프는 매 반복 이 상태를 시스템 프롬프트에 렌더하며, 모델은
+# `update_plan`으로 단계 완료/실패/수정을 보고한다(ReAct의 관찰→재평가를 계획
+# 수준으로 끌어올린 것). 로컬 LLM이 메인 모델일 때 긴 멀티스텝 작업에서 길을
+# 잃지 않게 하는 뼈대다 — 토큰 절약보다 수행 품질이 우선이라는 제품 결정.
+# ─────────────────────────────────────────────────────────────────────────────
+PlanStepStatus = Literal["pending", "in_progress", "done", "failed", "skipped"]
+PlanStatus = Literal["active", "completed", "abandoned"]
+
+
+@dataclass(frozen=True)
+class PlanStep:
+    """One unit of intended work. `id`(s1, s2, …)는 모델이 update_plan에서
+    참조하는 안정 키; `note`는 진행하며 채워지는 결과 한 줄."""
+
+    id: str
+    title: str
+    detail: str = ""
+    status: PlanStepStatus = "pending"
+    note: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "detail": self.detail,
+            "status": self.status,
+            "note": self.note,
+        }
+
+
+@dataclass(frozen=True)
+class TurnPlan:
+    """의도 해석(goal) + 단계들의 스냅샷. 불변 — 갱신은 PlanState(agent/planner.py)가
+    새 revision의 TurnPlan을 만들어 교체한다. 스냅샷 전체가 plan_updated SSE와
+    메시지 metadata("plan")로 실려 프론트 카드/리로드 복원이 같은 그림을 본다."""
+
+    goal: str
+    steps: tuple[PlanStep, ...]
+    plan_id: str = field(default_factory=lambda: new_id("plan"))
+    revision: int = 1
+    status: PlanStatus = "active"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "plan_id": self.plan_id,
+            "goal": self.goal,
+            "status": self.status,
+            "revision": self.revision,
+            "steps": [s.to_dict() for s in self.steps],
+        }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Turn context — what learning prefetch produces and the agent loop consumes
 # ─────────────────────────────────────────────────────────────────────────────
 @dataclass(frozen=True)
@@ -187,8 +243,9 @@ class ApprovalResponse:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SSE events — the 8 stream events + 2 control events (RICE_CONTRACTS §1.3).
+# SSE events — the 9 stream events + 2 control events (RICE_CONTRACTS §1.3).
 # `type` strings + `data` shapes mirror rice-app/src/lib/types.ts exactly.
+# `plan_updated` (2026-07-04): plan-and-execute × ReAct의 계획 스냅샷 스트림.
 # Emitting is done via server/sse/emitter.py; the orchestrator yields these.
 #
 # NOTE(agent): `skill_created`/`SKILL_CREATED` was retired 2026-07-02 (Phase A.1,
@@ -200,6 +257,7 @@ class ApprovalResponse:
 class EventType(str, Enum):
     # stream events
     THINKING = "thinking"
+    PLAN_UPDATED = "plan_updated"
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
     MESSAGE = "message"
@@ -232,6 +290,12 @@ class SSEEvent:
 # could drift from the schema. Each mirrors the matching *EventData in types.ts.
 def ev_thinking(text: str) -> SSEEvent:
     return SSEEvent(EventType.THINKING, {"text": text})
+
+
+def ev_plan_updated(plan: TurnPlan) -> SSEEvent:
+    """계획 생성·단계 전이·수정 때마다 전체 스냅샷을 흘린다 — 프론트는 델타 조립
+    없이 plan_id로 카드를 통째로 교체한다(단순함이 정확성)."""
+    return SSEEvent(EventType.PLAN_UPDATED, plan.to_dict())
 
 
 def ev_tool_call(call: ToolCall) -> SSEEvent:

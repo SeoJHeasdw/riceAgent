@@ -97,8 +97,10 @@ paths:
         "200":
           description: >
             text/event-stream of SSE events. Each frame's `data` validates against
-            contracts/sse-events.schema.json (8 stream + 2 control events;
-            `skill_created` removed 2026-07-02 — see LEARNING_LOOP §4).
+            contracts/sse-events.schema.json (9 stream + 2 control events;
+            `skill_created` removed 2026-07-02 — see LEARNING_LOOP §4;
+            `plan_updated` added 2026-07-04 — plan-and-execute × ReAct,
+            RICE_AGENT_EXECUTION.md §3).
           content:
             text/event-stream:
               schema: { type: string }

@@ -56,7 +56,8 @@ rice-runtime/                                # 배포물 ② : 로컬 단일 프
 │   │
 │   ├── agent/                               # ▣ #1 대화 루프  + #2 tool dispatch/scheduling + sub-agent
 │   │   ├── interfaces.py                    #   IAgent / ILLMProvider (Protocol)
-│   │   ├── loop.py                          # ▣ #1 conversation/agent 루프 (max_iterations, context render, scheduler 호출)
+│   │   ├── loop.py                          # ▣ #1 conversation/agent 루프 — plan-and-execute × ReAct (max_iterations, context render, scheduler 호출)
+│   │   ├── planner.py                       #   ★ 신규(2026-07-04) — TurnPlanner(의도 파악·계획 수립 LLM 1회) + PlanState(update_plan 상태 기계) — AGENT_EXECUTION §3
 │   │   ├── context_manager.py               #   provider-facing context 렌더링/압축/마스킹 (원본 transcript 불변)
 │   │   ├── tool_scheduler.py                #   tool call batch 조율: 안전한 독립 tool 병렬화, 승인/파괴적 tool 순차
 │   │   ├── tool_dispatch.py                 # ▣ #2 스키마 조립·가용성 필터(check_fn식)·라우팅·결과 수집

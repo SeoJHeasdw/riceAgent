@@ -43,7 +43,7 @@ Electron main process
 | POST | `/sessions` | 세션 생성 |
 | GET | `/sessions` / `/sessions/{id}` | 목록/상세 (히스토리 UI) |
 | POST | `/sessions/{id}/attachments` | **첨부 선업로드 (multipart, xlsx·png만) → `{attachment_id, kind}` 반환** |
-| POST | `/sessions/{id}/messages` | 메시지 전송(본문 + `attachment_ids[]` 참조) → **SSE 스트림 응답** (8종 이벤트, 2026-07-02 정정 — 아래) |
+| POST | `/sessions/{id}/messages` | 메시지 전송(본문 + `attachment_ids[]` 참조) → **SSE 스트림 응답** (9종 이벤트, 2026-07-04 정정 — 아래) |
 | POST | `/sessions/{id}/title` | 세션 제목 생성(post-turn, 논블로킹) — 첫 턴 `done` 후 호출 |
 | **POST** | **`/sessions/{id}/learning-review`** | **게이트된 LLM 스킬/메모리 리뷰(post-turn, 논블로킹) → SSE 스트림(메인 턴과 동일 이벤트 어휘) — LEARNING_LOOP §4. body: `{tool_calls_made}`. 게이트 미통과 시 즉시 `done`만.** |
 | **POST** | **`/sessions/{id}/learn`** | **명시적 "이 대화를 스킬로 저장" — 게이트 없이 항상 시도 → SSE 스트림 — LEARNING_LOOP §5.3. body: `{instruction?}`.** |
@@ -83,15 +83,16 @@ Electron main process
 | POST | `/artifacts/install` | platform에서 받은 artifact 설치 (2장 manifest 전달) |
 | DELETE | `/artifacts/{id}` | 제거 |
 
-**SSE 이벤트 8종** (Learning Loop 가시화, **2026-07-02: `skill_created` 제거** — 아래 참고):
+**SSE 이벤트 9종** (Learning Loop 가시화, **2026-07-02: `skill_created` 제거**, **2026-07-04: `plan_updated` 추가** — 아래 참고):
 1. `thinking` - LLM 사고 과정 스트리밍
-2. `tool_call` - Tool 호출 시작 (tool_name, arguments)
-3. `tool_result` - Tool 실행 결과
-4. `message` - 최종 응답 메시지 (delta 또는 complete)
-5. `memory_written` - 메모리 저장됨 (memory_type, content)
-6. `skill_patched` - 스킬 개선 **또는 신규 생성** 적용됨 (skill_id, version) — LEARNING_LOOP 5.2·§4. `version === 1`이면 신규 생성이었다는 뜻 — 클라이언트는 로컬 목록에 해당 skill_id가 없으면 갱신이 아니라 **추가**해야 한다.
-7. `done` - 응답 완료
-8. `error` - 오류 발생 (error_code, message)
+2. `plan_updated` - 턴 계획 생성/전이/수정 (plan-and-execute × ReAct, AGENT_EXECUTION §3). 항상 **전체 스냅샷**(plan_id, goal, status, revision, steps[]) — 클라이언트는 같은 plan_id 카드를 통째로 교체한다. 같은 스냅샷이 메시지 metadata(`plan`)로 영속화되어 리로드가 카드를 복원한다.
+3. `tool_call` - Tool 호출 시작 (tool_name, arguments)
+4. `tool_result` - Tool 실행 결과
+5. `message` - 최종 응답 메시지 (delta 또는 complete)
+6. `memory_written` - 메모리 저장됨 (memory_type, content)
+7. `skill_patched` - 스킬 개선 **또는 신규 생성** 적용됨 (skill_id, version) — LEARNING_LOOP 5.2·§4. `version === 1`이면 신규 생성이었다는 뜻 — 클라이언트는 로컬 목록에 해당 skill_id가 없으면 갱신이 아니라 **추가**해야 한다.
+8. `done` - 응답 완료
+9. `error` - 오류 발생 (error_code, message)
 
 > ~~`skill_created`(skill_id, title, version)~~ — **2026-07-02 제거.** 스킬 생성이 HITL 승인 없이 즉시 저장+사후 통지되던 경로였는데, LEARNING_LOOP §4가 요구하는 "스킬은 항상 사용자 확인 후 저장"과 어긋나는 채로 방치돼 있었다(설계 문서와 구현의 불일치). 생성을 `skill_patch_proposed`(`from_version=0`)로 통일해 패치와 동일한 승인 게이트를 거치게 하면서 이 이벤트가 도달 불가능한 죽은 코드가 됐다 — 삭제. `POST /sessions/{id}/learning-review`·`/learn`(아래)도 이 8종과 동일 이벤트 어휘만 방출한다.
 >

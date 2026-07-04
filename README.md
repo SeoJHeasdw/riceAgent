@@ -43,6 +43,7 @@ cd rice-app && npx vite --config vite.renderer.config.ts
 | 2 | [RICE_REPO_STRATEGY.md](RICE_REPO_STRATEGY.md) | 레포 구조 + 레포 간 계약 원칙 | ✅ 안정 |
 | 3 | [RICE_RUNTIME_DIRECTORY.md](RICE_RUNTIME_DIRECTORY.md) | rice-runtime 모듈 구조 (정본) | ✅ 안정 |
 | 4 | [RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md) | 런타임 설계 + 패키징 + 보안 | ✅ 확정 |
+| 4.5 | [RICE_AGENT_EXECUTION.md](RICE_AGENT_EXECUTION.md) | 실행 모델 정본 — 의도 파악·plan-and-execute × ReAct·컨텍스트 관리·도구 이식/사용·서브에이전트 | ✅ 확정 (2026-07-04) |
 | 5 | [RICE_LEARNING_LOOP_DESIGN.md](RICE_LEARNING_LOOP_DESIGN.md) | learning loop 자체 스펙 (SKILL.md·usage·생성·개선patch·curator·memory) | ✅ 확정 |
 | 6 | [RICE_LEARNING_EVAL.md](RICE_LEARNING_EVAL.md) | 학습 측정·증명 (cold/warm ablation·eval harness·Learning Impact 패널) | ✅ 확정 |
 | 7 | [RICE_CONTRACTS.md](RICE_CONTRACTS.md) | app↔runtime API + artifact + platform API | ✅ 확정 |

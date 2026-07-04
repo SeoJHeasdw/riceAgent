@@ -10,7 +10,7 @@ import { defaultModelSettings } from '../lib/mockData';
 import { RUN_SKILL_EVENT, NEW_CHAT_EVENT } from '../lib/commandBridge';
 import { api } from '../lib/api';
 import { sseClient } from '../lib/sse';
-import type { PatchTrigger, PendingApproval, ToolApprovalRequiredData, SkillPatchProposedData, MemoryWrittenEventData, SSEEvent } from '../lib/types';
+import type { PatchTrigger, PendingApproval, PlanUpdatedEventData, ToolApprovalRequiredData, SkillPatchProposedData, MemoryWrittenEventData, SSEEvent } from '../lib/types';
 import { Icon, Kbd, ResizeHandle, ConfirmDialog, Tooltip } from '../components/ui';
 import type { IconName } from '../components/ui/Icon';
 import { FileViewerProvider } from '../lib/fileViewer/FileViewerProvider';
@@ -46,7 +46,9 @@ type RawMessage = {
   role: string;
   content: string;
   tool_calls?: RawToolCall[];
-  metadata?: { thinking?: string; tool_call_id?: string } | null;
+  // plan: plan-and-execute 스냅샷 (plan_updated와 같은 형태) — 계획 생성 시 첫
+  // 어시스턴트 메시지에, 이후 갱신마다 update_plan tool 메시지에 실린다.
+  metadata?: { thinking?: string; tool_call_id?: string; plan?: PlanUpdatedEventData } | null;
 };
 
 // Human-readable, per-tool copy for the HITL approval card — derived client-side
@@ -82,21 +84,52 @@ const toSession = (s: RawSession): Session => ({
   messageCount: 0, // list endpoint doesn't return a count; not shown for live sessions
 });
 
+// plan_updated 스냅샷 → 스레드 블록. 라이브 스트림과 리로드 복원이 같은 매핑을 쓴다.
+const planToBlock = (d: PlanUpdatedEventData): Extract<ThreadMessage, { kind: 'plan' }> => ({
+  kind: 'plan',
+  planId: d.plan_id,
+  goal: d.goal,
+  status: d.status,
+  revision: d.revision,
+  steps: d.steps,
+});
+
+// 같은 planId의 계획 카드는 하나 — 있으면 그 자리에서 스냅샷으로 교체, 없으면 append.
+const upsertPlanBlock = (blocks: ThreadMessage[], d: PlanUpdatedEventData): ThreadMessage[] => {
+  const idx = blocks.findIndex((b) => b.kind === 'plan' && b.planId === d.plan_id);
+  if (idx >= 0) {
+    const copy = [...blocks];
+    copy[idx] = planToBlock(d);
+    return copy;
+  }
+  return [...blocks, planToBlock(d)];
+};
+
 // Reconstruct the full agentic trace from persisted messages so a reloaded
 // conversation looks like the live turn: reasoning (assistant `metadata.thinking`)
-// → tool call cards (assistant `tool_calls`) → results (role='tool', matched by
-// `metadata.tool_call_id`) → answer (assistant `content`).
+// → plan card (metadata `plan`, 마지막 스냅샷 승리) → tool call cards (assistant
+// `tool_calls`) → results (role='tool', matched by `metadata.tool_call_id`) →
+// answer (assistant `content`).
 const toThread = (msgs: RawMessage[]): ThreadMessage[] => {
-  const out: ThreadMessage[] = [];
+  let out: ThreadMessage[] = [];
   for (const m of msgs) {
     if (m.role === 'user') {
       if (m.content) out.push({ kind: 'user', text: m.content });
     } else if (m.role === 'assistant') {
       if (m.metadata?.thinking) out.push({ kind: 'thinking', duration: '', text: m.metadata.thinking, streaming: false });
-      for (const tc of m.tool_calls ?? [])
+      if (m.metadata?.plan) out = upsertPlanBlock(out, m.metadata.plan);
+      for (const tc of m.tool_calls ?? []) {
+        // update_plan의 화면 표면은 계획 카드다 — 별도 도구 카드는 노이즈.
+        if (tc.tool_name === 'update_plan') continue;
         out.push({ kind: 'toolcall', callId: tc.id, tool: tc.tool_name, args: tc.arguments ?? {}, status: 'done' });
+      }
       if (m.content) out.push({ kind: 'agent', text: m.content });
     } else if (m.role === 'tool') {
+      // update_plan 결과 메시지가 실은 최신 계획 스냅샷 → 카드 갱신.
+      if (m.metadata?.plan) {
+        out = upsertPlanBlock(out, m.metadata.plan);
+        continue;
+      }
       // attach this result to its tool call card (by id, else the latest open one)
       const callId = m.metadata?.tool_call_id;
       for (let i = out.length - 1; i >= 0; i--) {
@@ -989,6 +1022,9 @@ function ChatScreen() {
       return copy;
     });
 
+  // plan_updated: 같은 planId 카드를 스냅샷으로 통째 교체 (없으면 이 지점에 생성).
+  const upsertPlan = (d: PlanUpdatedEventData) => setThread((p) => upsertPlanBlock(p, d));
+
   // Append to / create the streaming answer bubble.
   const appendAnswer = (d: { delta?: string; content?: string }) =>
     setThread((p) => {
@@ -1124,10 +1160,16 @@ function ChatScreen() {
       if (e.type === 'thinking') {
         const d = e.data as { text?: string };
         if (typeof d.text === 'string') appendThinking(d.text);
+      } else if (e.type === 'plan_updated') {
+        // 계획 생성/전이/수정 — 플래너의 생각 블록을 닫고 계획 카드를 업서트.
+        finalizeThinking();
+        upsertPlan(e.data as PlanUpdatedEventData);
       } else if (e.type === 'tool_call') {
         // a tool round begins → close the reasoning block, push a running trace card
         finalizeThinking();
         const d = e.data as { tool_call_id: string; tool_name: string; arguments?: Record<string, unknown> };
+        // update_plan의 화면 표면은 계획 카드(plan_updated) — 도구 카드는 만들지 않는다.
+        if (d.tool_name === 'update_plan') return;
         setThread((p) => [
           ...p,
           { kind: 'toolcall', callId: d.tool_call_id, tool: d.tool_name, args: d.arguments ?? {}, status: 'running' },

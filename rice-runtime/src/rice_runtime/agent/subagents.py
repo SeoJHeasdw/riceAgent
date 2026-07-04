@@ -19,12 +19,11 @@ workers in parallel, and the next main LLM call synthesizes their results.
 from __future__ import annotations
 
 import asyncio
-import json
-import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from ..core.config import ContextConfig, LearningConfig
+from ..core.model_json import extract_json_object
 from ..core.tokens import TokenCalibrator
 from ..core.types import Message, new_id
 from .context_manager import ConversationContextManager
@@ -78,24 +77,6 @@ class SubAgentResult:
             "recommended_next_action": self.recommended_next_action,
             "structured": self.structured,
         }
-
-
-def _parse_structured(raw: str) -> dict | None:
-    """모델 출력에서 JSON 객체를 최선 노력으로 파싱한다. 코드펜스/앞뒤 잡담 허용."""
-    text = raw.strip()
-    fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
-    if fence:
-        text = fence.group(1)
-    elif not text.startswith("{"):
-        brace = re.search(r"\{.*\}", text, re.DOTALL)
-        if brace is None:
-            return None
-        text = brace.group(0)
-    try:
-        data = json.loads(text)
-    except (json.JSONDecodeError, ValueError):
-        return None
-    return data if isinstance(data, dict) else None
 
 
 def _str_tuple(value: object) -> tuple[str, ...]:
@@ -192,7 +173,7 @@ class SubAgentRunner:
             raw = raw[:max_chars].rstrip() + "\n[truncated]"
             truncated = True
 
-        data = None if truncated else _parse_structured(raw)
+        data = None if truncated else extract_json_object(raw)
         if data is None:
             # 비구조 응답 — 원문을 summary로 강등하고 그 사실을 표시한다(fail-soft).
             return SubAgentResult(

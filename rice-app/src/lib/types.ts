@@ -116,6 +116,28 @@ export interface ApiResponse<T = unknown> {
 export interface ThinkingEventData {
   text: string;
 }
+
+// ── plan-and-execute × ReAct (RICE_AGENT_EXECUTION.md §3) ──
+// 복합 질의에서 플래너가 세운 턴 계획. plan_updated는 생성·단계 전이·수정 때마다
+// FULL 스냅샷으로 온다 — 클라이언트는 plan_id로 카드를 통째로 교체한다(델타 없음).
+// 같은 스냅샷이 메시지 metadata.plan으로도 영속화되어 리로드가 카드를 복원한다.
+export type PlanStepStatus = 'pending' | 'in_progress' | 'done' | 'failed' | 'skipped';
+export interface PlanStepData {
+  id: string;
+  title: string;
+  detail?: string;
+  status: PlanStepStatus;
+  note?: string;
+}
+export interface PlanUpdatedEventData {
+  plan_id: string;
+  /** 해석된 사용자 의도 한 문장 (대화 언어) */
+  goal: string;
+  status: 'active' | 'completed' | 'abandoned';
+  revision: number;
+  steps: PlanStepData[];
+}
+
 export interface ToolCallEventData {
   tool_call_id: string;
   tool_name: string;
@@ -246,6 +268,7 @@ export interface RuntimeMemory {
 
 export type SSEEvent =
   | { type: 'thinking'; data: ThinkingEventData }
+  | { type: 'plan_updated'; data: PlanUpdatedEventData }
   | { type: 'tool_call'; data: ToolCallEventData }
   | { type: 'tool_result'; data: ToolResultEventData }
   | { type: 'message'; data: MessageEventData }

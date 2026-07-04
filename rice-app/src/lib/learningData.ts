@@ -1,5 +1,5 @@
 import type { IconName } from '../components/ui/Icon';
-import type { ImpactReport, PatchTrigger, SkillFile } from './types';
+import type { ImpactReport, PatchTrigger, PlanStepData, SkillFile } from './types';
 
 /**
  * learningData — mock content for the learning-loop surfaces (chat thread,
@@ -267,6 +267,18 @@ export type ThreadMessage =
       streaming?: boolean;
       /** epoch ms when this block started — used to stamp `duration` on finalize */
       startedAt?: number;
+    }
+  | {
+      // plan-and-execute × ReAct 턴 계획 카드 (RICE_AGENT_EXECUTION.md §3).
+      // SSE plan_updated가 올 때마다 planId가 같은 카드를 스냅샷으로 통째 교체하고,
+      // 리로드 시엔 메시지 metadata.plan(마지막 스냅샷 승리)으로 복원한다.
+      kind: 'plan';
+      planId: string;
+      /** 해석된 사용자 의도 한 문장 (대화 언어) */
+      goal: string;
+      status: 'active' | 'completed' | 'abandoned';
+      revision: number;
+      steps: PlanStepData[];
     }
   | {
       // generic builtin/connector tool call trace (live SSE: tool_call → tool_result)

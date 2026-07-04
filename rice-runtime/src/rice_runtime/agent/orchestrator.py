@@ -5,7 +5,7 @@ exactly one place: here, and only through its `interfaces.py` Protocol. The
 orchestrator is deliberately **thin** ("얇은 조율" — RUNTIME_DIRECTORY): it owns
 *sequencing*, not behavior. Each step's logic lives in the owning module.
 
-THE TURN, AS A CONTRACT (RUNTIME_DESIGN §2, LEARNING_LOOP §1)
+THE TURN, AS A CONTRACT (RUNTIME_DESIGN §2, AGENT_EXECUTION §2, LEARNING_LOOP §1)
 ------------------------------------------------------------
     run_turn(session_id, user_message) → stream of SSEEvent:
 
@@ -16,7 +16,13 @@ THE TURN, AS A CONTRACT (RUNTIME_DESIGN §2, LEARNING_LOOP §1)
                     브릿지로 접힌다 — §2.1/§11 progressive disclosure, tool_dispatch.py)
                     system_prompt = base ⊕ prefetch additions
                     → TurnContext
-      4. RUN        AgentLoop.run(ctx)                 → thinking/message/tool_* events
+      4. RUN        AgentLoop.run(ctx)                 → plan-and-execute × ReAct
+                    (AGENT_EXECUTION §3, agent/planner.py):
+                      4a. PLAN     복합 질의면 TurnPlanner가 의도+단계 계획 수립
+                                   → plan_updated 이벤트(단순 질의면 계획 없음)
+                      4b. EXECUTE  thinking/message/tool_* events; 계획이 있으면 매
+                                   반복 계획 상태를 프롬프트에 렌더 + update_plan
+                                   인터셉트로 단계 전이/수정 → plan_updated
                     (tool dispatch + HITL approval handled inside the loop/dispatcher)
       5. PERSIST    transcript.append(every message the loop produced this turn)
       6. OBSERVE    learning.observe(outcome)          → cheap effects (memory only —
@@ -68,6 +74,7 @@ from .context_manager import ConversationContextManager
 from .effect_surfacing import surface_learning_effect
 from .interfaces import IApprovalGate, ITranscript
 from .loop import AgentLoop, LoopResult
+from .planner import TurnPlanner
 from .providers.interfaces import ILLMProvider
 from .tool_dispatch import BuiltinTool, ToolDispatcher, fold_tools_for_budget
 
@@ -206,14 +213,24 @@ class Orchestrator:
                 builtins=self._builtins,
                 folded_catalog={t.name: t for t in foldable_tools},
             )
+            # 플래너와 실행 루프는 같은 provider 인스턴스를 쓴다(로컬 LLM 하나가
+            # 겸임). planning_enabled=False면 플래너 없이 순수 ReAct — 기존 동작.
+            provider = self._resolve_provider()
+            planner = (
+                TurnPlanner(provider=provider, config=cfg.agent)
+                if cfg.agent.planning_enabled
+                else None
+            )
             loop = AgentLoop(
-                provider=self._resolve_provider(),
+                provider=provider,
                 dispatcher=dispatcher,
                 temperature=cfg.provider.temperature,
                 context_manager=ConversationContextManager(
                     cfg.context, estimate=self._token_calibrator.estimate
                 ),
                 token_calibrator=self._token_calibrator,
+                planner=planner,
+                agent_config=cfg.agent,
             )
             result = LoopResult()
             async for event in loop.run(ctx, session_id, result, abort):

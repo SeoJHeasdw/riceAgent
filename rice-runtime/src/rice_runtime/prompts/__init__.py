@@ -18,6 +18,12 @@ local user. Just named templates + a small `compose_system_prompt` synthesis fn.
 from __future__ import annotations
 
 from .curator import CURATOR_REVIEW_PROMPT, build_curator_messages, build_curator_tool_specs
+from .planning import (
+    PLANNING_TEMPERATURE,
+    build_planning_messages,
+    plan_to_markdown,
+    render_plan_block,
+)
 from .review import (
     LEARN_SYSTEM_PROMPT,
     REVIEW_SYSTEM_PROMPT,
@@ -32,6 +38,10 @@ __all__ = [
     "BASE_SYSTEM_PROMPT",
     "SKILL_GUIDANCE",
     "compose_system_prompt",
+    "PLANNING_TEMPERATURE",
+    "build_planning_messages",
+    "render_plan_block",
+    "plan_to_markdown",
     "TITLE_MAX_CHARS",
     "build_title_messages",
     "clean_title",

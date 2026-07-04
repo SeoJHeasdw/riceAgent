@@ -136,6 +136,31 @@ class ContextConfig:
 
 
 @dataclass(frozen=True)
+class AgentConfig:
+    """Plan-and-execute × ReAct 노브 (RICE_AGENT_EXECUTION.md §3).
+
+    로컬 LLM이 메인 모델인 배포에서 "토큰 절약"이 아니라 "수행 품질"을 사는
+    지점들이다: 계획 수립에 한 번 더 LLM을 부르고, 매 반복 계획 상태를 프롬프트에
+    다시 실으며, 계획이 크면 반복 상한을 늘린다."""
+
+    # 턴 시작 시 플래너 호출 여부. False면 이전과 동일한 순수 ReAct 루프.
+    planning_enabled: bool = True
+    # 플래너에게 보여줄 최근 대화 메시지 수(의도 파악용 문맥).
+    planner_recent_messages: int = 12
+    # 플래너 1회 호출 타임아웃(초) — 로컬 LLM의 긴 프리필을 감안해 넉넉하게.
+    # 초과 시 계획 없이 진행한다(fail-soft).
+    planner_timeout_seconds: int = 120
+    # 플래너가 세울 수 있는 단계 수 상한(프롬프트 지시 + 코드 클램프).
+    plan_max_steps: int = 8
+    # 계획이 있는 턴의 반복 상한 — max(learning.max_iterations, 12 + 6×단계수)를
+    # 이 값으로 캡한다. 계획이 없으면 기존 max_iterations 그대로.
+    plan_max_iterations: int = 60
+    # 이만큼 연속 도구 라운드 동안 update_plan이 없으면 시스템 프롬프트에
+    # 재평가(ReAct reflection) 지시를 주입한다.
+    plan_drift_guard_rounds: int = 4
+
+
+@dataclass(frozen=True)
 class UIConfig:
     language: str = "ko"
     theme: str = "system"  # light | dark | system
@@ -147,6 +172,7 @@ class Config:
     provider: ProviderConfig = field(default_factory=ProviderConfig)
     learning: LearningConfig = field(default_factory=LearningConfig)
     context: ContextConfig = field(default_factory=ContextConfig)
+    agent: AgentConfig = field(default_factory=AgentConfig)
     ui: UIConfig = field(default_factory=UIConfig)
 
     def to_dict(self) -> dict:
@@ -202,10 +228,12 @@ def _merge(base: Config, raw: dict) -> Config:
     prov = {**asdict(base.provider), **(raw.get("provider") or {})}
     learn = {**asdict(base.learning), **(raw.get("learning") or {})}
     context = {**asdict(base.context), **(raw.get("context") or {})}
+    agent = {**asdict(base.agent), **(raw.get("agent") or {})}
     ui = {**asdict(base.ui), **(raw.get("ui") or {})}
     return Config(
         provider=ProviderConfig(**prov),
         learning=LearningConfig(**learn),
         context=ContextConfig(**context),
+        agent=AgentConfig(**agent),
         ui=UIConfig(**ui),
     )

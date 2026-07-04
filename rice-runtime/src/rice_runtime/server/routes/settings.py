@@ -16,7 +16,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from ...core.config import Config, ContextConfig, ProviderConfig, UIConfig, save_config
+from ...core.config import AgentConfig, Config, ContextConfig, ProviderConfig, UIConfig, save_config
 from ..composition_root import Container
 from .deps import get_container
 
@@ -26,6 +26,7 @@ router = APIRouter(tags=["settings"])
 class SettingsIn(BaseModel):
     provider: dict[str, Any] | None = None
     context: dict[str, Any] | None = None
+    agent: dict[str, Any] | None = None  # plan-and-execute × ReAct 노브 (AgentConfig)
     ui: dict[str, Any] | None = None
     # api_key is handled out-of-band → OS keychain (never persisted in config.yaml)
     api_key: str | None = None
@@ -67,8 +68,9 @@ async def update_settings(body: SettingsIn, c: Container = Depends(get_container
     cfg = c.config
     provider = ProviderConfig(**{**cfg.provider.__dict__, **(body.provider or {})})
     context = ContextConfig(**{**cfg.context.__dict__, **(body.context or {})})
+    agent = AgentConfig(**{**cfg.agent.__dict__, **(body.agent or {})})
     ui = UIConfig(**{**cfg.ui.__dict__, **(body.ui or {})})
-    new_cfg = Config(provider=provider, learning=cfg.learning, context=context, ui=ui)
+    new_cfg = Config(provider=provider, learning=cfg.learning, context=context, agent=agent, ui=ui)
     save_config(c.paths, new_cfg)
     c.config_store.update(new_cfg)  # live: provider/orchestrator observe this next turn (C-1)
 

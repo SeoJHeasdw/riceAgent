@@ -17,6 +17,7 @@ import type { SSEEvent, SSEEventType } from './types';
 
 const STREAM_EVENT_TYPES: ReadonlySet<string> = new Set<SSEEventType>([
   'thinking',
+  'plan_updated',
   'tool_call',
   'tool_result',
   'message',

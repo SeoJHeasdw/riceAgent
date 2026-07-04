@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button, Icon, Tag } from '../ui';
 import { connectorIdForScope, type ThreadMessage, type ToolCall, type SkillRef, type EditDiffRow } from '../../lib/learningData';
+import type { PlanStepData } from '../../lib/types';
 import { useFileViewer } from '../../lib/fileViewer/FileViewerContext';
 import { Markdown } from './Markdown';
 
@@ -605,6 +606,84 @@ const ThinkingBlock: React.FC<{ m: Extract<ThreadMessage, { kind: 'thinking' }> 
   );
 };
 
+// ── plan-and-execute × ReAct 계획 카드 (RICE_AGENT_EXECUTION.md §3) ─────────
+// 턴 계획의 살아있는 상태 — plan_updated 스냅샷마다 통째로 교체된다. 에이전트
+// "작업 구조"의 문법(도구 카드와 같은 층)이지 AI 제안 순간이 아니다 → ai-tile 금지.
+const PlanStepMarker: React.FC<{ status: PlanStepData['status'] }> = ({ status }) => {
+  if (status === 'done') return <Icon name="check" size={13} className="text-support-success flex-shrink-0" />;
+  if (status === 'failed') return <Icon name="close" size={13} className="text-support-error flex-shrink-0" />;
+  return (
+    <span className="w-[13px] h-[13px] flex items-center justify-center flex-shrink-0">
+      {status === 'in_progress' ? (
+        <span className="w-2 h-2 rounded-full bg-blue-40 animate-pulse" />
+      ) : status === 'skipped' ? (
+        <span className="w-1.5 h-px bg-text-helper" />
+      ) : (
+        <span className="w-2 h-2 rounded-full border border-border-strong-01" />
+      )}
+    </span>
+  );
+};
+
+const PlanCard: React.FC<{ m: Extract<ThreadMessage, { kind: 'plan' }> }> = ({ m }) => {
+  const doneCount = m.steps.filter((s) => s.status === 'done' || s.status === 'skipped').length;
+  const failed = m.steps.some((s) => s.status === 'failed');
+  const completed = m.status === 'completed';
+  return (
+    <div className="my-1.5 max-w-[640px]">
+      <div className="rounded-xl border border-border-subtle-01 border-l-2 border-l-blue-40 bg-layer-01 px-4 py-3">
+        <div className="flex items-center gap-2">
+          <Icon name="flow" size={15} className="text-blue-40 flex-shrink-0" />
+          <span className="text-body-short-01 font-semibold text-text-primary">실행 계획</span>
+          {m.revision > 1 && (
+            <span className="text-label-micro text-text-helper border border-border-subtle-01 rounded px-1 py-px">
+              수정 {m.revision - 1}회
+            </span>
+          )}
+          <span
+            className={`ml-auto text-caption-01 flex-shrink-0 ${
+              completed ? 'text-support-success' : failed ? 'text-support-error' : 'text-text-helper'
+            }`}
+          >
+            {completed ? '완료' : `${doneCount}/${m.steps.length}`}
+          </span>
+        </div>
+        <div className="mt-1 text-caption-01 text-text-secondary">{m.goal}</div>
+        <div className="mt-2.5 flex flex-col gap-1.5">
+          {m.steps.map((s) => {
+            const secondary = s.note || (s.status === 'in_progress' || s.status === 'pending' ? s.detail : '');
+            return (
+              <div key={s.id} className="flex items-start gap-2 min-w-0">
+                <span className="mt-[3px]">
+                  <PlanStepMarker status={s.status} />
+                </span>
+                <div className="min-w-0">
+                  <span
+                    className={`text-caption-01 ${
+                      s.status === 'in_progress'
+                        ? 'text-text-primary font-medium'
+                        : s.status === 'done'
+                          ? 'text-text-secondary'
+                          : s.status === 'skipped'
+                            ? 'text-text-helper line-through'
+                            : s.status === 'failed'
+                              ? 'text-support-error'
+                              : 'text-text-secondary'
+                    }`}
+                  >
+                    {s.title}
+                  </span>
+                  {secondary ? <div className="text-label-micro text-text-helper truncate">{secondary}</div> : null}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // ── generic builtin/connector tool call trace ───────────────
 // One card per live tool call: shows the tool + args while running, then the
 // result/error once the runtime sends tool_result.
@@ -1074,6 +1153,7 @@ const AssistantBlock: React.FC<{
       </>
     );
 
+  if (m.kind === 'plan') return <PlanCard m={m} />;
   if (m.kind === 'toolcall') return <BuiltinToolCard m={m} />;
   if (m.kind === 'tool_bash') return <BashCard m={m} />;
   if (m.kind === 'tool_read') return <ReadCard m={m} />;

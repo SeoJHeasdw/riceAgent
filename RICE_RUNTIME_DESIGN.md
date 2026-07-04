@@ -42,14 +42,19 @@
 요청 수신 (로컬 API, CONTRACTS 문서의 계약)
  → memory prefetch (관련 메모리/스킬 컨텍스트 로드)
  → 시스템 프롬프트 구성 (활성 스킬 주입 + 스킬 생성 가이드)
+ → 의도 파악·계획 수립 (TurnPlanner LLM 1회 — 복합 질의만 TurnPlan,
+    단순 질의는 계획 없이 통과; plan_updated SSE) … 2026-07-04, AGENT_EXECUTION §3
  → 컨텍스트 렌더링 (히스토리 압축/요약/마스킹, 최근 턴 보호)
- → LLM 호출 루프 (tool_calls 처리, max_iterations 제한)
+ → LLM 호출 루프 (tool_calls 처리, max_iterations 제한
+    — 계획이 있으면 매 반복 계획 상태를 프롬프트에 렌더 + update_plan
+      인터셉트로 단계 전이/수정(ReAct 재평가) + drift guard + 완료 시
+      propose_skill 유도)
  → ToolScheduler (안전한 독립 tool 병렬화, 승인/파괴적 tool 순차)
  → 스트리밍 응답 (SSE/WS로 앱에 전달)
  → 턴 종료: memory sync + skill usage 텔레메트리
 ```
 
-- ★ max_iterations 기본값: 25 (Hermes는 사실상 무제한이나 데모 앱은 폭주 방지 필요)
+- ★ max_iterations 기본값: 25 (Hermes는 사실상 무제한이나 데모 앱은 폭주 방지 필요). 계획이 있는 턴은 단계 수에 비례해 `agent.plan_max_iterations`(기본 60)까지 늘어난다 — 로컬 LLM 메인 배포에서 토큰 절약보다 수행 품질 우선이라는 제품 결정. 계획 실행의 정본은 [RICE_AGENT_EXECUTION.md](RICE_AGENT_EXECUTION.md).
 - ★ 스킬 주입: Hermes처럼 시스템 프롬프트에 활성 스킬 전체 주입 + prefix caching 의존 (Hermes 검증 #6: 명시적 무효화 없이 자연 재캐시로 충분)
 - ★ 컨텍스트 관리는 **저장된 세션 히스토리 원본을 바꾸지 않는다**. `ConversationContextManager`가 매 LLM 호출 직전에만 provider-facing view를 만든다.
 - ★ 스킬 생성/개선은 계속 HITL 경로만 탄다. `propose_skill`은 스테이징만 하고, 실제 저장은 `skill_patch_proposed` 승인 뒤에만 일어난다.
