@@ -557,4 +557,22 @@ button,
   -webkit-app-region: no-drag;
 }
 
+/* Skill market card states.
+   Keep these outside Tailwind arbitrary opacity utilities because the Electron
+   Vite path can miss classes such as bg-blue-60/[0.025] while renderer-only dev
+   generates them correctly. */
+.skill-card--installed {
+  border-color: rgba(15, 98, 254, 0.55);
+  background-color: rgba(15, 98, 254, 0.025);
+}
+
+.skill-card--installed:hover {
+  border-color: rgba(69, 137, 255, 0.7);
+}
+
+.skill-card--idle:hover {
+  border-color: rgba(69, 137, 255, 0.45);
+  background-color: rgba(15, 98, 254, 0.025);
+}
+
 /* Made with Bob */
