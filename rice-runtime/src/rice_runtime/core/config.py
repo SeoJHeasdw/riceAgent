@@ -149,7 +149,7 @@ class AgentConfig:
     planner_recent_messages: int = 12
     # 플래너 1회 호출 타임아웃(초) — 로컬 LLM의 긴 프리필을 감안해 넉넉하게.
     # 초과 시 계획 없이 진행한다(fail-soft).
-    planner_timeout_seconds: int = 120
+    planner_timeout_seconds: int = 240
     # 플래너가 세울 수 있는 단계 수 상한(프롬프트 지시 + 코드 클램프).
     plan_max_steps: int = 8
     # 계획이 있는 턴의 반복 상한 — max(learning.max_iterations, 12 + 6×단계수)를
