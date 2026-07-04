@@ -11,7 +11,7 @@ import { useToast } from '../lib/toast/ToastContext';
 import { useMarketplace } from '../hooks/useMarketplace';
 import { useResizable } from '../hooks/useResizable';
 import { useLearning } from '../lib/learning/LearningContext';
-import { ResizeHandle } from '../components/ui';
+import { Icon, ResizeHandle } from '../components/ui';
 import { skillCategories } from '../lib/mockData';
 import { Skill } from '../lib/types';
 
@@ -149,7 +149,7 @@ function SkillMarketScreen() {
       >
         {/* Blue Point Balance — Skill Market 전광판, gradient-skill로 3대 요소 색 언어 통일 */}
         <div className="p-3">
-          <div className="rounded-xl gradient-skill p-4 text-white">
+          <div className="rounded-xl gradient-skill p-4 text-white border border-blue-50/20 shadow-elevation-1">
             <div className="flex items-center gap-1.5 text-caption-01 text-white/70 mb-2">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M12 2l2.4 7.2H22l-6 4.8 2.4 7.2-6.4-4.8L5.6 21.2 8 14 2 9.2h7.6z" />
@@ -180,13 +180,13 @@ function SkillMarketScreen() {
               <button
                 key={category}
                 onClick={() => setSelectedCategory(category)}
-                className={`block w-full text-left border-none px-2.5 py-2 text-body-short-01 rounded-lg transition-colors truncate ${
+                className={`flex w-full items-center text-left border-none px-2.5 py-2 text-body-short-01 rounded-lg transition-colors truncate ${
                   isActive
-                    ? 'bg-layer-selected-01 text-text-primary font-semibold'
-                    : 'bg-transparent text-text-secondary hover:bg-layer-hover-01 hover:text-text-primary'
+                    ? 'bg-blue-60/12 text-blue-30 font-semibold ring-1 ring-inset ring-blue-50/25'
+                    : 'bg-transparent text-text-secondary hover:bg-blue-60/[0.06] hover:text-text-primary'
                 }`}
               >
-                {category}
+                <span className="truncate">{category}</span>
               </button>
             );
           })}
@@ -200,7 +200,7 @@ function SkillMarketScreen() {
               w-full flex items-center justify-center gap-2 py-2 rounded-lg
               border border-dashed border-border-strong-01 text-text-secondary
               text-body-short-01 font-semibold transition-colors
-              hover:border-border-strong-02 hover:text-text-primary hover:bg-layer-hover-01
+              hover:border-blue-50/45 hover:text-blue-30 hover:bg-blue-60/10
             "
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -233,7 +233,7 @@ function SkillMarketScreen() {
         />
 
         {/* Skills Grid */}
-        <div className="px-8 py-3 pb-10">
+        <div className="px-8 py-5 pb-10">
           {catalogLoading && categoryFilteredSkills.length === 0 ? (
             <CardSkeletonGrid />
           ) : categoryFilteredSkills.length > 0 ? (
@@ -262,7 +262,9 @@ function SkillMarketScreen() {
             </div>
           ) : (
             <div className="text-center py-16 text-text-helper">
-              <div className="text-heading-06 mb-4">🔍</div>
+              <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl border border-blue-50/20 bg-blue-60/10 text-blue-30">
+                <Icon name="search" size={22} />
+              </div>
               <div className="text-body-long-01">스킬을 찾지 못했습니다</div>
               <div className="text-caption-01 mt-1">검색어나 필터를 조정해보세요</div>
             </div>

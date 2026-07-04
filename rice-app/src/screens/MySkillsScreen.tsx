@@ -265,9 +265,10 @@ const DeltaBadge: React.FC<{ delta: number }> = ({ delta }) => {
 const HealthCard: React.FC<{ health: SkillHealth; uses: number }> = ({ health, uses }) => {
   const ratingTotal = health.rating ? health.rating.up + health.rating.down : 0;
   return (
-    <div className="rounded-xl border border-border-subtle-01 bg-layer-01 p-4">
+    <div className="relative overflow-hidden rounded-xl border border-border-subtle-01 bg-layer-01 p-4">
+      <span aria-hidden="true" className="absolute left-0 top-0 h-full w-0.5 bg-blue-60" />
       <div className="flex items-center mb-3">
-        <span className="text-caption-01 font-semibold uppercase tracking-wider text-text-secondary">성과</span>
+        <span className="text-caption-01 font-semibold uppercase tracking-wider text-blue-30">성과</span>
         {health.spark && (
           <span className="ml-auto flex items-center gap-1.5">
             <span className="text-caption-01 text-text-helper">처리 추세</span>
@@ -741,8 +742,8 @@ const downloadSkillBundle = (skill: Skill, detail: SkillDetail) => {
   URL.revokeObjectURL(url);
 };
 
-// 소스 보기 런처 — 풀스크린 IDE 워크스페이스로 진입. 전체화면 전환이라 일반 버튼보다
-// 임팩트 있게: 번들 규모(파일·폴더 수)를 보여주는 카드형 + 그라데이션 아이콘 + 확장 화살표.
+// 소스 보기 런처 — 아이콘만 남기면 의미 발견성이 떨어진다.
+// 스킬의 차별점(소스 열람·편집 가능)을 텍스트로 드러내되, 플러그인 헤더보다 무겁지 않게 유지한다.
 const SourceLauncher: React.FC<{ skill: Skill; detail: SkillDetail; onOpen: () => void }> = ({ skill, detail, onOpen }) => {
   const { files } = ownedSkillFiles(skill, detail);
   const folders = new Set(files.filter((f) => f.path.includes('/')).map((f) => f.path.slice(0, f.path.indexOf('/'))));
@@ -750,22 +751,18 @@ const SourceLauncher: React.FC<{ skill: Skill; detail: SkillDetail; onOpen: () =
     <button
       onClick={onOpen}
       title="이 스킬의 파일(SKILL.md·scripts…)을 전체 화면으로 보기"
-      className="group relative flex items-center gap-3 rounded-xl border border-border-subtle-01 bg-layer-01 pl-3 pr-3.5 py-2.5 hover:border-border-strong-01 transition-colors flex-shrink-0"
+      className="group relative flex items-center gap-3 rounded-xl border border-border-subtle-01 bg-layer-01 pl-3 pr-3.5 py-2.5 hover:border-blue-50/45 hover:bg-layer-hover-01 transition-colors flex-shrink-0"
     >
-      <div className="w-9 h-9 rounded-lg bg-layer-02 border border-border-subtle-02 flex items-center justify-center flex-shrink-0 text-blue-50">
+      <div className="w-9 h-9 rounded-lg bg-blue-60 border border-blue-50/45 flex items-center justify-center flex-shrink-0 text-white">
         <Icon name="terminal" size={18} />
       </div>
       <div className="text-left">
-        <div className="flex items-center gap-1 text-body-short-01 font-semibold text-text-primary">
+        <div className="flex items-center gap-1.5 text-body-short-01 font-semibold text-text-primary">
           소스 보기
-          <Icon
-            name="arrow-up-right"
-            size={13}
-            className="text-link-primary opacity-70 group-hover:opacity-100 transition-opacity"
-          />
+          <Icon name="side-panel-open" size={14} className="text-blue-30 opacity-80 group-hover:opacity-100 transition-opacity" />
         </div>
         <div className="text-caption-01 text-text-helper">
-          {files.length} 파일{folders.size > 0 ? ` · ${folders.size} 폴더` : ''} · 전체화면
+          {files.length} 파일{folders.size > 0 ? ` · ${folders.size} 폴더` : ''} · 편집 가능
         </div>
       </div>
     </button>
@@ -782,6 +779,7 @@ const SkillDetailView: React.FC<{
   const [snapVer, setSnapVer] = useState<string | null>(null);
   // 풀스크린 소스 워크스페이스(IDE) 열림 여부
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [summaryOpen, setSummaryOpen] = useState(false);
   // 채팅 매개 편집 드로어 열림 여부 (Phase 4)
   const [editOpen, setEditOpen] = useState(false);
   // 편집 대상 파일 — 워크스페이스에서 연 파일. undefined면 SKILL.md(지침).
@@ -806,6 +804,7 @@ const SkillDetailView: React.FC<{
     setConfirmRestore(null);
     setRuleSaved(false);
     setWorkspaceOpen(false);
+    setSummaryOpen(false);
     setEditOpen(false);
     setEditTarget(undefined);
     setPublishOpen(false);
@@ -823,6 +822,7 @@ const SkillDetailView: React.FC<{
 
   const patch = (fn: (d: SkillDetail) => SkillDetail) => setDetails((d) => ({ ...d, [skillId]: fn(d[skillId]) }));
   const appliedRules = detail.rules.filter((r) => r.on).length;
+  const summaryExpandable = detail.summary.length > 170;
 
   // restore a past version: save it as a new current version (history kept)
   const restore = (version: SkillVersion) => {
@@ -942,8 +942,12 @@ const SkillDetailView: React.FC<{
       {/* header */}
       <div className="flex-shrink-0 px-7 pt-6 pb-5 border-b border-border-subtle-01">
         <div className="flex items-start gap-3.5">
-          <div className="w-11 h-11 flex-shrink-0 flex items-center justify-center rounded-lg bg-layer-02 border border-border-subtle-02">
-            <Icon name="skill" size={22} className={isInjected(skillStatus(skill)) ? 'text-icon-primary' : 'text-icon-secondary'} />
+          <div className={`w-11 h-11 flex-shrink-0 flex items-center justify-center rounded-lg border ${
+            isInjected(skillStatus(skill))
+              ? 'bg-blue-60 border-blue-50/45 text-white'
+              : 'bg-layer-03 border-border-subtle-02 text-white/70'
+          }`}>
+            <Icon name="skill" size={22} />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
@@ -962,18 +966,32 @@ const SkillDetailView: React.FC<{
               {/* 단일 상태 컨트롤 — 활성/Stale/보관/비활성 (주입 여부 포함) */}
               <StatusControl skill={skill} onSet={(next) => onSetStatus(skill.id, next)} />
             </div>
-            <p className="mt-1.5 text-body-short-01 leading-5 text-text-secondary">{detail.summary}</p>
-            <div className="flex gap-4 mt-3 flex-wrap">
+            <div className="mt-1.5 max-w-[780px]">
+              <p className={`text-body-short-01 leading-5 text-text-secondary ${summaryExpandable && !summaryOpen ? 'line-clamp-3' : ''}`}>
+                {detail.summary}
+              </p>
+              {summaryExpandable && (
+                <button
+                  onClick={() => setSummaryOpen((open) => !open)}
+                  className="mt-1 inline-flex items-center gap-1 text-caption-01 font-semibold text-link-primary hover:underline"
+                  aria-expanded={summaryOpen}
+                >
+                  {summaryOpen ? '접기' : '더 보기'}
+                  <Icon name={summaryOpen ? 'chevron-up' : 'chevron-down'} size={12} />
+                </button>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-3 text-caption-01">
               {([
                 ['사용', `${skill.uses}회`],
                 ['개선', `${skill.patches ?? 0}회`],
                 ['생성', detail.createdFrom],
                 ['최근 사용', detail.lastUsed],
               ] as const).map(([k, v]) => (
-                <div key={k}>
-                  <div className="text-caption-01 text-text-helper">{k}</div>
-                  <div className="text-body-short-01 text-text-primary">{v}</div>
-                </div>
+                <span key={k} className="inline-flex items-baseline gap-1.5 text-text-helper">
+                  <span>{k}</span>
+                  <span className="text-text-secondary">{v}</span>
+                </span>
               ))}
             </div>
             {/* 출처 스트립 — 설치형/제작형일 때 원본·발산·업데이트를 표시 (학습형은 생략) */}
@@ -1197,10 +1215,11 @@ const SkillDetailView: React.FC<{
         {/* 편집 = 이 화면의 주 액션. 채팅 매개 patch로 안전하게 버전을 올린다. */}
         <button
           onClick={() => { setEditTarget(undefined); setEditOpen(true); }}
+          title="대화로 변경 요청을 작성하고 새 버전으로 저장합니다"
           className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-lg text-body-short-01 font-semibold bg-interactive text-text-on-color hover:bg-interactive-hover transition-colors"
         >
           <Icon name="edit" size={14} />
-          이 스킬 편집
+          AI로 편집
         </button>
         {/* 공유됨이면 마켓 게시 상태를 인라인으로 알려준다 (메뉴 안에 숨지 않게) */}
         {skill.shared && (
@@ -1462,7 +1481,7 @@ function MySkillsScreen() {
       >
         {/* 통계 카드 + "학습 효과" proof CTA — 숫자(현황)에서 정량 증명으로 자연히 이어지는 한 덩어리 */}
         <div className="p-4">
-          <div className="overflow-hidden rounded-xl gradient-skill text-white">
+          <div className="overflow-hidden rounded-xl gradient-skill text-white border border-blue-50/20 shadow-elevation-1">
             <div className="p-4">
               <div className="flex items-center gap-1.5 mb-1">
                 <span className="text-caption-01 text-white/70">학습한 스킬</span>
@@ -1632,7 +1651,17 @@ function MySkillsScreen() {
                 on && !showImpact ? 'bg-layer-selected-01 border-l-blue-50' : 'bg-transparent border-l-transparent hover:bg-layer-hover-01'
               } ${skillStatus(s) === 'archived' ? 'opacity-60' : !isInjected(skillStatus(s)) ? 'opacity-70' : ''}`}
             >
-              <Icon name="skill" size={16} className="text-icon-secondary mt-0.5 flex-shrink-0" />
+              <div
+                className={`mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg border ${
+                  on && !showImpact
+                    ? 'border-blue-50/45 bg-blue-60 text-white'
+                    : isInjected(skillStatus(s))
+                      ? 'border-blue-50/35 bg-blue-70 text-white'
+                      : 'border-border-subtle-02 bg-layer-03 text-white/70'
+                }`}
+              >
+                <Icon name="skill" size={15} />
+              </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5">
                   <span className="text-body-short-01 font-semibold text-text-primary truncate">{s.name}</span>

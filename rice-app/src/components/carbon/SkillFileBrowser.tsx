@@ -72,9 +72,9 @@ export const SkillFileBrowser: React.FC<{ files: SkillFile[] }> = ({ files }) =>
   };
 
   return (
-    <div className="flex rounded-xl border border-border-subtle-01 overflow-hidden bg-background min-h-[300px]">
+    <div className="flex rounded-xl border border-border-subtle-01 overflow-hidden bg-background min-h-[260px]">
       {/* File tree */}
-      <div className="w-[200px] flex-shrink-0 border-r border-border-subtle-01 bg-layer-01 p-2 overflow-y-auto">
+      <div className="w-[188px] flex-shrink-0 border-r border-border-subtle-01 bg-layer-01 p-2 overflow-y-auto">
         <div className="px-2 py-1 text-caption-01 font-semibold uppercase tracking-wider text-text-helper">
           Files
         </div>
@@ -135,7 +135,7 @@ export const SkillFileBrowser: React.FC<{ files: SkillFile[] }> = ({ files }) =>
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto p-4 max-h-[360px]">
+        <div className="flex-1 overflow-y-auto p-4 max-h-[300px]">
           {active &&
             (showRaw ? (
               <pre className="text-code-02 font-mono leading-5 text-text-primary whitespace-pre-wrap break-words">

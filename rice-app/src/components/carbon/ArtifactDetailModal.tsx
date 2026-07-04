@@ -77,12 +77,20 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
       <div onClick={onClose} className={dialogBackdropCls} />
 
       {/* Modal */}
-      <div className={`relative ${isSkill ? 'w-[860px]' : 'w-[680px]'} max-w-full max-h-[85vh] bg-layer-01 border border-border-subtle-01 rounded-xl z-[61] shadow-elevation-3 animate-scale-in overflow-hidden flex flex-col`}>
+      <div className={`relative ${isSkill ? 'w-[820px]' : 'w-[680px]'} max-w-full max-h-[82vh] bg-layer-01 border border-border-subtle-01 rounded-xl z-[61] shadow-elevation-3 animate-scale-in overflow-hidden flex flex-col`}>
+        <span
+          aria-hidden="true"
+          className={`absolute left-0 right-0 top-0 h-0.5 ${isSkill ? 'bg-blue-60' : 'bg-purple-60'}`}
+        />
         {/* Header */}
-        <div className="flex items-start gap-3.5 px-5 py-4 border-b border-border-subtle-01 flex-shrink-0">
+        <div className={`flex items-start gap-3.5 px-5 py-4 border-b border-border-subtle-01 flex-shrink-0 ${
+          isSkill ? 'bg-blue-60/[0.035]' : 'bg-purple-60/[0.035]'
+        }`}>
           <div
-            className={`flex-shrink-0 w-11 h-11 flex items-center justify-center rounded-lg bg-layer-02 border border-border-subtle-02 ${
-              isSkill ? 'text-blue-50' : 'text-purple-50'
+            className={`flex-shrink-0 w-11 h-11 flex items-center justify-center rounded-lg border ${
+              isSkill
+                ? 'bg-blue-60/12 border-blue-50/25 text-blue-30'
+                : 'bg-purple-60/12 border-purple-50/25 text-purple-40'
             }`}
           >
             {isSkill ? (
@@ -96,7 +104,7 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1">
-              <span className="text-heading-04 font-semibold text-text-primary">
+              <span className={`${isSkill ? 'text-heading-03' : 'text-heading-04'} font-semibold text-text-primary`}>
                 {artifact.name}
               </span>
               {!isSkill && (
@@ -121,7 +129,7 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="w-8 h-8 flex items-center justify-center hover:bg-layer-hover-01 transition-colors flex-shrink-0"
+            className="w-8 h-8 flex items-center justify-center rounded-lg text-icon-secondary hover:text-icon-primary hover:bg-layer-hover-01 transition-colors flex-shrink-0"
             aria-label="Close"
           >
             <Icon name="close" size={16} />
@@ -129,8 +137,8 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-5">
-          <p className="text-body-long-01 text-text-secondary mb-4.5 leading-relaxed">
+        <div className="flex-1 overflow-y-auto px-5 py-4">
+          <p className="text-body-long-01 text-text-secondary mb-4 leading-relaxed">
             {artifact.description}
           </p>
 
@@ -138,31 +146,48 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
           {isSkill && skill && (
             <>
               {/* Stats */}
-              <div className="flex items-center gap-4 mb-4 text-body-short-01 text-text-secondary">
-                <span className="flex items-center gap-1.5">
-                  <Icon name="download" size={15} />
-                  {skill.downloads.toLocaleString()} 다운로드
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 2.5l2.9 5.9 6.5.95-4.7 4.6 1.1 6.5L12 17.4l-5.8 3.05 1.1-6.5-4.7-4.6 6.5-.95L12 2.5z" />
-                  </svg>
-                  {skill.rating} 평점
-                </span>
-                <span className="flex items-center gap-1.5 text-interactive font-mono">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />
-                  </svg>
-                  {skill.points.toLocaleString()} BP
-                </span>
+              <div className="grid grid-cols-3 gap-2 mb-4">
+                {[
+                  { label: '다운로드', value: skill.downloads.toLocaleString(), icon: <Icon name="download" size={15} />, tone: 'text-text-primary' },
+                  {
+                    label: '평점',
+                    value: skill.rating > 0 ? skill.rating : '신규',
+                    icon: (
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 2.5l2.9 5.9 6.5.95-4.7 4.6 1.1 6.5L12 17.4l-5.8 3.05 1.1-6.5-4.7-4.6 6.5-.95L12 2.5z" />
+                      </svg>
+                    ),
+                    tone: 'text-text-primary',
+                  },
+                  {
+                    label: '리워드',
+                    value: `${skill.points.toLocaleString()} BP`,
+                    icon: (
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />
+                      </svg>
+                    ),
+                    tone: 'text-blue-30',
+                  },
+                ].map((stat) => (
+                  <div key={stat.label} className="rounded-lg border border-border-subtle-01 bg-background px-3 py-2">
+                    <div className="flex items-center gap-1.5 text-caption-01 text-text-helper">
+                      {stat.icon}
+                      {stat.label}
+                    </div>
+                    <div className={`mt-1 text-body-short-01 font-semibold tabular-nums ${stat.tone}`}>
+                      {stat.value}
+                    </div>
+                  </div>
+                ))}
               </div>
 
               {/* Tags */}
-              <div className="mb-5">
+              <div className="mb-4">
                 <div className="text-label-01 text-text-secondary mb-2">태그</div>
                 <div className="flex flex-wrap gap-2">
                   {skill.tags.map((tag) => (
-                    <Tag key={tag} type="gray" size="md">
+                    <Tag key={tag} type="blue" size="sm" className="bg-blue-60/12 text-blue-30 border border-blue-50/20">
                       {tag}
                     </Tag>
                   ))}
@@ -182,8 +207,11 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
               )}
 
               {/* Bundled files (README / SKILL.md / scripts …) */}
-              <div className="mb-5">
-                <div className="text-label-01 text-text-secondary mb-2">파일</div>
+              <div className="mb-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="text-label-01 text-text-secondary">파일</div>
+                  <span className="text-caption-01 text-text-helper">SKILL.md와 번들 리소스</span>
+                </div>
                 {isPlatformSkill ? (
                   platformFiles === null ? (
                     <div className="px-1 py-3 text-caption-01 text-text-helper">파일 불러오는 중…</div>
@@ -347,8 +375,21 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
                 </>
               )}
 
+              {isSkill && (
+                <span className="flex items-center gap-1.5 text-body-short-01 text-text-secondary">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-50" />
+                  설치됨 · 내 스킬에서 관리
+                </span>
+              )}
+
               {/* Uninstall button */}
-              <Button kind="danger" size="sm" onClick={onUninstall} className="ml-auto" icon={<Icon name="trash" size={14} />}>
+              <Button
+                kind="secondary"
+                size="sm"
+                onClick={onUninstall}
+                className="ml-auto border-support-error/35 bg-transparent text-text-error hover:bg-support-error/10 hover:border-support-error/70"
+                icon={<Icon name="trash" size={14} />}
+              >
                 제거
               </Button>
             </div>

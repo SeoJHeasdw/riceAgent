@@ -25,35 +25,6 @@ export interface SkillCardProps {
   onSponsor: () => void;
 }
 
-/**
- * 카테고리별 아이콘 틴트 — 모든 카드가 똑같은 파란 사각형으로 보이는
- * 단조로움을 깬다. 타일 자체는 중립(layer-02 + border)이고 아이콘 색만 다르다.
- * 첫 매칭 태그의 계열을 따르고, 못 찾으면 이름 해시로 고정 배정
- * (같은 스킬은 항상 같은 색).
- */
-const TILE_ACCENTS = [
-  { tint: 'text-blue-50' }, // blue — 데이터·개발
-  { tint: 'text-teal-40' }, // teal — 자동화·연동
-  { tint: 'text-purple-50' }, // purple — 커뮤니케이션·창작
-  { tint: 'text-magenta-50' }, // magenta — 생산성·기타
-] as const;
-
-const TILE_KEYWORDS: [RegExp, number][] = [
-  [/data|analysis|csv|excel|statistic|dev|code|git|vcs/i, 0],
-  [/automation|workflow|integration|tool/i, 1],
-  [/communication|writing|brevity|art|creative|visualization/i, 2],
-  [/productivity|token/i, 3],
-];
-
-const tileAccentFor = (tags: string[], name: string) => {
-  for (const t of tags) {
-    const hit = TILE_KEYWORDS.find(([re]) => re.test(t));
-    if (hit) return TILE_ACCENTS[hit[1]];
-  }
-  const hash = [...name].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) | 0, 0);
-  return TILE_ACCENTS[Math.abs(hash) % TILE_ACCENTS.length];
-};
-
 const nf = (n: number) => n.toLocaleString();
 
 /** 카드 푸터 스탯용 12px 스트로크 아이콘 (공용 Icon 세트에 없는 글리프) */
@@ -90,16 +61,30 @@ export const SkillCard: React.FC<SkillCardProps> = ({
   onInstall,
   onSponsor,
 }) => {
-  const accent = tileAccentFor(tags, name);
-
   return (
     <Card
       padding="md"
-      className="group relative flex flex-col min-h-[164px] cursor-pointer overflow-hidden border-border-subtle-01 transition-colors duration-150 hover:border-border-strong-01"
+      className={`group relative flex flex-col min-h-[176px] cursor-pointer overflow-hidden transition-colors duration-150 ${
+        installed
+          ? 'border-blue-60/55 bg-blue-60/[0.05] hover:border-blue-50/70'
+          : 'border-border-subtle-01 hover:border-blue-50/45 hover:bg-blue-60/[0.025]'
+      }`}
     >
+      <span
+        aria-hidden="true"
+        className={`absolute left-0 top-0 h-full w-0.5 bg-blue-60 transition-opacity ${
+          installed ? 'opacity-100' : 'opacity-0 group-hover:opacity-70'
+        }`}
+      />
       {/* Header — 아이콘 · 이름/출처 · 받기 pill */}
       <div className="relative flex items-start gap-3">
-        <div className={`flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-lg bg-layer-02 border border-border-subtle-02 ${accent.tint}`}>
+        <div
+          className={`flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-lg border ${
+            installed
+              ? 'bg-blue-60 border-blue-30/50 text-white'
+              : 'bg-blue-60/12 border-blue-50/25 text-blue-40'
+          }`}
+        >
           <Icon name="skill" size={20} />
         </div>
         <div className="flex-1 min-w-0 pt-0.5">
@@ -118,8 +103,8 @@ export const SkillCard: React.FC<SkillCardProps> = ({
           disabled={installed}
           className={`flex-shrink-0 inline-flex items-center gap-1 h-7 rounded-full text-caption-01 font-semibold transition-colors ${
             installed
-              ? 'px-3 bg-layer-02 text-text-helper ring-1 ring-inset ring-border-subtle-02 cursor-default'
-              : 'px-3 bg-transparent text-text-secondary ring-1 ring-inset ring-border-strong-01 hover:bg-layer-hover-01 hover:text-text-primary cursor-pointer'
+              ? 'px-3 bg-blue-60/12 text-blue-30 ring-1 ring-inset ring-blue-50/25 cursor-default'
+              : 'px-3 bg-transparent text-text-secondary ring-1 ring-inset ring-border-strong-01 hover:bg-blue-60/10 hover:text-blue-30 hover:ring-blue-50/35 cursor-pointer'
           }`}
         >
           {installed && <Icon name="check" size={12} />}
@@ -128,14 +113,14 @@ export const SkillCard: React.FC<SkillCardProps> = ({
       </div>
 
       {/* Description — 2줄 고정 클램프(전문은 상세 모달에서) */}
-      <p className="relative text-body-short-01 text-text-secondary line-clamp-2 min-h-[2.25rem] mt-3">
+      <p className="relative text-body-short-01 text-text-secondary line-clamp-2 min-h-[2.25rem] mt-3 leading-5">
         {description}
       </p>
 
       <div className="flex-1" />
 
       {/* Footer — 스탯 · 태그 · 후원 (0값 스탯은 숨겨 깨져 보이지 않게) */}
-      <div className="relative flex items-center gap-3 mt-3 text-caption-01 text-text-helper">
+      <div className="relative flex items-center gap-2 mt-3 text-caption-01 text-text-helper">
         <span className="flex items-center gap-1 flex-shrink-0">
           <Icon name="download" size={12} />
           {nf(downloads)}
@@ -147,22 +132,34 @@ export const SkillCard: React.FC<SkillCardProps> = ({
           </span>
         )}
         {points !== undefined && points > 0 && (
-          <span className="flex items-center gap-1 flex-shrink-0 text-link-primary font-mono">
+          <span className="flex items-center gap-1 flex-shrink-0 text-blue-30 font-mono">
             <StatIcon>{ZAP}</StatIcon>
             {nf(points)} BP
           </span>
         )}
-        <span className="flex-1 min-w-0 truncate text-text-placeholder">
-          {tags.slice(0, 2).map((t) => `#${t}`).join(' ')}
-          {tags.length > 2 && `  +${tags.length - 2}`}
-        </span>
+      </div>
+
+      <div className="relative flex items-center gap-1.5 mt-2 min-w-0">
+        <div className="flex items-center gap-1.5 min-w-0 flex-1 overflow-hidden">
+          {tags.slice(0, 2).map((t) => (
+            <span
+              key={t}
+              className="min-w-0 truncate rounded-full border border-border-subtle-01 bg-layer-02/65 px-2 py-0.5 text-caption-01 text-text-secondary"
+            >
+              #{t}
+            </span>
+          ))}
+          {tags.length > 2 && (
+            <span className="flex-shrink-0 text-caption-01 text-text-helper">+{tags.length - 2}</span>
+          )}
+        </div>
         <button
           onClick={(e) => {
             e.stopPropagation();
             onSponsor();
           }}
           title="블루 포인트로 후원하기"
-          className="flex-shrink-0 inline-flex items-center gap-1 h-6 px-2 -mr-1 rounded-full text-caption-01 font-medium text-text-helper hover:text-text-primary hover:bg-layer-hover-01 transition-colors"
+          className="flex-shrink-0 inline-flex items-center gap-1 h-6 px-2 -mr-1 rounded-full text-caption-01 font-medium text-text-helper hover:text-blue-30 hover:bg-blue-60/10 transition-colors"
         >
           <StatIcon>{ZAP}</StatIcon>
           후원
