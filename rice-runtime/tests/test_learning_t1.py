@@ -172,7 +172,8 @@ class TestLearningServiceT1:
     def test_prefetch_no_memories_returns_empty_tuple(self):
         result = self._svc.prefetch("sess_1", "hello")
         assert result.memories == ()
-        assert result.skills == ()
+        # 빌트인 스킬은 항상 주입 후보다 — 사용자 스킬이 없음을 확인한다.
+        assert all(s.skill_id == "business-planning" for s in result.skills)
 
     def test_prefetch_includes_facts_after_add(self):
         MemoryStore(self._db).add("fact", "Project uses pytest")

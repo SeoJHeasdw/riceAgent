@@ -31,7 +31,11 @@ rice-runtime = "rice_runtime.__main__:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-rice_runtime = ["core/storage/migrations/*.sql", "py.typed"]
+rice_runtime = [
+  "core/storage/migrations/*.sql",
+  "py.typed",
+  "learning/skill/builtin_skills/*.md",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

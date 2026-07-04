@@ -13,7 +13,9 @@ the Orchestrator + ToolDispatcher.
 
 Registered builtin modules (add new ones here — one place):
   file_tools    — read_file, write_file, edit_file, list_dir, search_files
-                  (+ xlsx/docx/ipynb extraction)
+                  (+ xlsx/docx/ipynb/pptx extraction)
+  office        — create_presentation (.pptx 생성) + create_workbook (.xlsx 생성,
+                  수식 로컬 평가 포함); 둘 다 requires_approval=True
   terminal_tool — terminal (shell command execution; requires_approval=True)
   web_tools     — fetch_url (public web page → readable text; SSRF-guarded)
   vision_tools  — vision_analyze (image download + base64; requires vision provider)
@@ -33,7 +35,7 @@ from typing import TYPE_CHECKING
 from ...core.paths import RicePaths
 from ...core.types import ToolSpec
 from ..tool_dispatch import BuiltinTool
-from . import file_tools, skill_tools, subagent_tools, terminal_tool, vision_tools, web_tools
+from . import file_tools, office, skill_tools, subagent_tools, terminal_tool, vision_tools, web_tools
 
 if TYPE_CHECKING:
     from ...learning.interfaces import ILearningService
@@ -53,7 +55,7 @@ def build_builtin_tools(
     테스트/독립 사용) 그 도구만 빠지고 나머지는 동일하다."""
     specs: list[ToolSpec] = []
     handlers: dict[str, BuiltinTool] = {}
-    for module in (file_tools, terminal_tool, vision_tools):
+    for module in (file_tools, office, terminal_tool, vision_tools):
         for spec, handler in module.tools(paths):
             specs.append(spec)
             handlers[spec.name] = handler

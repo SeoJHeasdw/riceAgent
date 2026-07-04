@@ -224,7 +224,7 @@ ReAct의 "관찰→추론" halves를 프롬프트 선의에 맡기지 않고 결
 
 | source | 무엇 | 이식 방법 |
 |---|---|---|
-| `builtin` | 프로세스 내 도구: read/write/search_files, terminal, vision_analyze, delegate_subagent, propose_skill | `agent/builtins/`에 모듈 추가 → `build_builtin_tools()`에 등록(한 곳). 핸들러는 `async (dict) -> object`, 위험하면 `requires_approval=True`, 세션 문맥이 필요하면 `needs_session=True` 마커 |
+| `builtin` | 프로세스 내 도구: read/write/search_files, terminal, vision_analyze, delegate_subagent, propose_skill, create_presentation/create_workbook (office — stdlib OOXML 생성 + 수식 로컬 평가, `agent/builtins/office/`) | `agent/builtins/`에 모듈 추가 → `build_builtin_tools()`에 등록(한 곳). 핸들러는 `async (dict) -> object`, 위험하면 `requires_approval=True`, 세션 문맥이 필요하면 `needs_session=True` 마커 |
 | `connector` | 외부 SaaS/로컬 MCP: Gmail/Calendar/Drive + 사용자가 등록한 로컬 MCP/원격 커넥터 | connector 모듈이 `list_tools()`로 광고 — **연결된 커넥터의 도구만** 노출된다(미연결 도구는 스키마에서 제외). 도구별 정책(allow/approval/block)은 사용자가 저장 |
 | `plugin` | 설치된 플러그인이 제공하는 도구(+ SKILL.md 주입) | manifest 기반 `IPluginLoader` — 샌드박스에서 실행 |
 | `bridge` | `tool_search`/`tool_describe`/`tool_call` 3종 | 직접 이식 대상이 아님 — 아래 폴딩의 산물 |

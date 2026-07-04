@@ -196,6 +196,10 @@ class ApiClient {
   setSkillState(id: string, state: 'active' | 'stale' | 'archived'): Promise<ApiResponse> {
     return this.send('PATCH', `/skills/${id}/state`, { state });
   }
+  /** 스킬 영구 삭제 — 본문·usage·히스토리 사이드카까지 제거된다. 빌트인은 422. */
+  deleteSkill(id: string): Promise<ApiResponse> {
+    return this.send('DELETE', `/skills/${id}`);
+  }
   /** respond to a skill_patch_proposed control event (approve/reject/edited) */
   respondSkillPatch(id: string, decision: SkillPatchDecision): Promise<ApiResponse> {
     return this.send('POST', `/skills/${id}/patch`, decision);

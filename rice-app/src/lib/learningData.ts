@@ -21,8 +21,10 @@ export interface UserSignal {
  * learned   — 내 대화/작업에서 자라난 스킬 (default)
  * installed — Skill Market에서 다운로드 (upstream으로 원본 추적)
  * authored  — 내가 직접 작성/제작
+ * builtin   — 앱과 함께 제공되는 기본 내장 스킬 (읽기 전용 — 활성/비활성만 가능,
+ *             삭제·수정·마켓 공유 불가; 런타임 source='builtin'에서 옴)
  */
-export type SkillOrigin = 'learned' | 'installed' | 'authored';
+export type SkillOrigin = 'learned' | 'installed' | 'authored' | 'builtin';
 
 /**
  * 설치형(또는 fork된) 스킬의 원본 추적 — git fork의 upstream에 해당.

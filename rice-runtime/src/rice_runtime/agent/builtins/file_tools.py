@@ -20,6 +20,7 @@ from ...core.paths import RicePaths
 from ...core.types import ToolSpec
 from ..tool_dispatch import BuiltinTool
 from .read_extract import ExtractionError, extract_document_text, is_extractable_document
+from .workspace import resolve_workspace_path as _resolve
 
 # Caps so a tool result can't blow the context window or the disk.
 _MAX_READ_BYTES = 256 * 1024
@@ -27,17 +28,6 @@ _MAX_WRITE_BYTES = 1024 * 1024
 _MAX_MATCHES = 200
 _MAX_LIST_ENTRIES = 500
 _MAX_LIST_DEPTH = 6
-
-
-def _resolve(root: Path, rel: str) -> Path:
-    """Resolve `rel` under `root`, rejecting any escape from the sandbox."""
-    if not rel or not isinstance(rel, str):
-        raise ValueError("path is required")
-    # reject absolute paths outright; resolve the rest and re-check containment.
-    candidate = (root / rel).resolve()
-    if candidate != root and root not in candidate.parents:
-        raise ValueError(f"path escapes workspace: {rel}")
-    return candidate
 
 
 def _make_read(root: Path) -> BuiltinTool:

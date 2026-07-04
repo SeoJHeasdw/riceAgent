@@ -1,24 +1,27 @@
 """Stdlib document-to-text extraction for ``read_file``.
 
-Supports Jupyter notebooks, DOCX, and XLSX without adding hard dependencies.
-Malformed documents raise :class:`ExtractionError`; callers can then fall back to
-normal text/binary handling.
+Supports Jupyter notebooks, DOCX, XLSX, and PPTX without adding hard
+dependencies. Malformed documents raise :class:`ExtractionError`; callers can
+then fall back to normal text/binary handling.
 
 Source: copy/tools/read_extract.py from Hermes tool system.
-Adapted for RICE: no changes to core logic; only placed under the builtins package.
+Adapted for RICE: PPTX support added (slide text + speaker notes) so the agent
+can QA decks produced by the `create_presentation` builtin without leaving the
+workspace; otherwise unchanged.
 """
 
 from __future__ import annotations
 
 import json
 import posixpath
+import re
 import zipfile
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
 __all__ = ["EXTRACTABLE_EXTENSIONS", "ExtractionError", "extract_document_text", "is_extractable_document"]
 
-EXTRACTABLE_EXTENSIONS = frozenset({".ipynb", ".docx", ".xlsx"})
+EXTRACTABLE_EXTENSIONS = frozenset({".ipynb", ".docx", ".xlsx", ".pptx"})
 MAX_XLSX_BYTES = 50 * 1024 * 1024
 _MAX_XLSX_ROWS_PER_SHEET = 5000
 _MAX_XLSX_COLS = 256
@@ -50,6 +53,8 @@ def extract_document_text(path: str) -> str:
         return _extract_docx(path)
     if ext == ".xlsx":
         return _extract_xlsx(path)
+    if ext == ".pptx":
+        return _extract_pptx(path)
     raise ExtractionError(f"Unsupported document type: {path!r}")
 
 
@@ -131,6 +136,81 @@ def _extract_docx(path: str) -> str:
     if not any(line.strip() for line in lines):
         raise ExtractionError("DOCX contains no extractable text")
     return "\n".join(lines).rstrip("\n") + "\n"
+
+
+_NS_A = "http://schemas.openxmlformats.org/drawingml/2006/main"
+_PPTX_PART = re.compile(r"^ppt/(slides/slide|notesSlides/notesSlide)(\d+)\.xml$")
+
+
+def _pptx_part_text(root: ET.Element) -> list[str]:
+    """One paragraph per <a:p>, runs joined; empty paragraphs dropped."""
+    a = f"{{{_NS_A}}}"
+    out: list[str] = []
+    for para in root.iter(f"{a}p"):
+        text = "".join(t.text or "" for t in para.iter(f"{a}t"))
+        if text.strip():
+            out.append(text)
+    return out
+
+
+def _slide_notes_map(zf: zipfile.ZipFile, names: set[str], slide_nums: list[int]) -> dict[int, int]:
+    """slide number → notesSlide number, resolved through each slide's rels
+    (notesSlide numbering is independent of slide numbering when only some
+    slides carry notes)."""
+    rel_tag = f"{{{_NS_PKG_REL}}}Relationship"
+    note_ref = re.compile(r"notesSlide(\d+)\.xml$")
+    mapping: dict[int, int] = {}
+    for n in slide_nums:
+        rels_name = f"ppt/slides/_rels/slide{n}.xml.rels"
+        if rels_name not in names:
+            continue
+        try:
+            root = ET.fromstring(zf.read(rels_name))
+        except ET.ParseError:
+            continue
+        for rel in root.iter(rel_tag):
+            m = note_ref.search(rel.get("Target", ""))
+            if m and rel.get("Type", "").endswith("/notesSlide"):
+                mapping[n] = int(m.group(1))
+                break
+    return mapping
+
+
+def _extract_pptx(path: str) -> str:
+    """Slide-ordered text plus speaker notes — the QA loop for generated decks."""
+    slides: dict[int, list[str]] = {}
+    notes: dict[int, list[str]] = {}
+    try:
+        with zipfile.ZipFile(path) as zf:
+            names = set(zf.namelist())
+            for name in names:
+                m = _PPTX_PART.match(name)
+                if not m:
+                    continue
+                try:
+                    root = ET.fromstring(zf.read(name))
+                except ET.ParseError:
+                    continue
+                bucket = slides if m.group(1) == "slides/slide" else notes
+                bucket[int(m.group(2))] = _pptx_part_text(root)
+            notes_of = _slide_notes_map(zf, names, sorted(slides))
+    except zipfile.BadZipFile as exc:
+        raise ExtractionError(f"Not a valid PPTX: {exc}") from exc
+    except OSError as exc:
+        raise ExtractionError(str(exc)) from exc
+
+    if not slides:
+        raise ExtractionError("PPTX contains no slides")
+    out: list[str] = []
+    for n in sorted(slides):
+        out.append(f"# ── Slide {n} ──")
+        out.extend(slides[n] or ["(no text)"])
+        note_lines = notes.get(notes_of.get(n, -1))
+        if note_lines:
+            out.append("[speaker notes]")
+            out.extend(note_lines)
+        out.append("")
+    return "\n".join(out).rstrip("\n") + "\n"
 
 
 def _extract_xlsx(path: str) -> str:

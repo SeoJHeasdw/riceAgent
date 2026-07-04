@@ -35,8 +35,9 @@ export const SkillSourceWorkspace: React.FC<{
   skill: Skill;
   detail: SkillDetail;
   onClose: () => void;
-  /** 편집 = 통합 chat-patch 드로어 열기 (현재 보고 있는 파일을 대상으로) */
-  onEdit: (path: string) => void;
+  /** 편집 = 통합 chat-patch 드로어 열기 (현재 보고 있는 파일을 대상으로).
+   *  생략하면 읽기 전용 — 빌트인 스킬처럼 편집이 허용되지 않는 소스 뷰. */
+  onEdit?: (path: string) => void;
 }> = ({ open, skill, detail, onClose, onEdit }) => {
   const { files, synthesized } = useMemo(() => ownedSkillFiles(skill, detail), [skill, detail]);
 
@@ -148,16 +149,27 @@ export const SkillSourceWorkspace: React.FC<{
           <span className="text-caption-01 text-text-helper flex-shrink-0">소스</span>
         </div>
         <div className="flex-1" />
-        {/* 편집 = 지금 보고 있는 파일 대상. 어느 파일인지 라벨에 드러낸다. */}
-        <button
-          onClick={() => active && onEdit(active.path)}
-          disabled={!active}
-          title={active ? `${active.path.split('/').pop()} 편집` : '편집'}
-          className="electron-no-drag inline-flex items-center gap-1.5 h-8 pl-2.5 pr-3 rounded-lg text-body-short-01 font-semibold bg-interactive text-text-on-color hover:bg-interactive-hover transition-colors flex-shrink-0 disabled:opacity-40 max-w-[260px]"
-        >
-          <Icon name="edit" size={14} className="flex-shrink-0" />
-          <span className="truncate">{active ? `${active.path.split('/').pop()} 편집` : '편집'}</span>
-        </button>
+        {/* 편집 = 지금 보고 있는 파일 대상. 어느 파일인지 라벨에 드러낸다.
+            onEdit 미제공(빌트인 등) 시 읽기 전용 배지로 대체한다. */}
+        {onEdit ? (
+          <button
+            onClick={() => active && onEdit(active.path)}
+            disabled={!active}
+            title={active ? `${active.path.split('/').pop()} 편집` : '편집'}
+            className="electron-no-drag inline-flex items-center gap-1.5 h-8 pl-2.5 pr-3 rounded-lg text-body-short-01 font-semibold bg-interactive text-text-on-color hover:bg-interactive-hover transition-colors flex-shrink-0 disabled:opacity-40 max-w-[260px]"
+          >
+            <Icon name="edit" size={14} className="flex-shrink-0" />
+            <span className="truncate">{active ? `${active.path.split('/').pop()} 편집` : '편집'}</span>
+          </button>
+        ) : (
+          <span
+            title="기본 내장 스킬은 수정할 수 없어요 — 사본이 필요하면 목록 하단의 내보내기를 쓰세요"
+            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-caption-01 font-semibold text-text-helper bg-layer-02 border border-border-subtle-01 flex-shrink-0"
+          >
+            <Icon name="lock" size={13} />
+            읽기 전용
+          </span>
+        )}
         </div>
       </div>
 

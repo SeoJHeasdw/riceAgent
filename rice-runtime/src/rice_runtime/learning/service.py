@@ -61,6 +61,7 @@ from .review.context import LearningContextManager, ReviewContextConfig
 from .review.engine import ReviewEngine
 from .review.gate import ReviewGate
 from .skill import guard as skill_guard
+from .skill.builtin import BuiltinSkillCatalog
 from .skill.lifecycle import SkillLifecycle
 from .skill.store import SkillData, SkillStore
 from .skill.usage import UsageStore
@@ -130,6 +131,10 @@ class LearningService(ILearningService):
         self._mem_store = MemoryStore(db)
         self._mem_search = MemorySearch(db)
         self._skill_store = SkillStore(self._paths)
+        # 앱과 함께 배포되는 읽기 전용 빌트인 스킬 (skill/builtin.py). 사용자 스킬과
+        # 이름공간을 공유하되(주입·usage 동일 경로) 쓰기 계열은 전부 거부된다 —
+        # 아래 _ensure_not_builtin이 그 단일 관문이다.
+        self._builtin_skills = BuiltinSkillCatalog(self._paths)
         self._usage_store = UsageStore(self._paths)
         self._lifecycle = SkillLifecycle(self._skill_store, self._paths)
         self._curator = Curator(self._skill_store, self._lifecycle, config, self._usage_store)
@@ -204,8 +209,16 @@ class LearningService(ILearningService):
           - Skill-creation guidance string
           - User preferences (T5)
         """
-        # ── 스킬 수집 (active 전체, budget 내) ──────────────────────────────
-        all_active = [s for s in self._skill_store.list() if s.state == "active"]
+        # ── 스킬 수집 (빌트인 + 사용자, active 전체, budget 내) ─────────────
+        builtin_names = self._builtin_skills.names()
+        all_active = [s for s in self._builtin_skills.list() if s.state == "active"]
+        all_active += [
+            s
+            for s in self._skill_store.list()
+            # 빌트인 이름은 예약 — 과거에 만들어진 동명 사용자 파일이 있어도
+            # 빌트인이 이긴다 (list_skills와 동일 규칙).
+            if s.state == "active" and s.name not in builtin_names
+        ]
 
         injected_skills: list[InjectedSkill] = []
         remaining_budget = self._config.skill_inject_token_budget
@@ -344,6 +357,10 @@ class LearningService(ILearningService):
         """
         if not approved:
             return None
+        # 리뷰/발굴 LLM이 빌트인과 같은 이름을 제안했을 수 있다 — 승인 시점에 최종
+        # 차단한다(빌트인은 patch 불가·이름 예약, stage_proposal은 이미 걸렀지만
+        # 제안함/리뷰 경로는 여기로 직행한다).
+        self._ensure_not_builtin(skill_id, "패치/생성")
 
         try:
             current = self._skill_store.read(skill_id)
@@ -435,6 +452,12 @@ class LearningService(ILearningService):
         if len(queue) >= 3:
             # 카드 스팸 방어 — 한 턴에 제안 3개면 이미 과하다.
             return {"status": "dropped", "message": "이 턴에 이미 3개의 제안이 대기 중입니다. 답변을 마치세요."}
+
+        if self._builtin_skills.is_builtin(name.strip()):
+            return {
+                "status": "dropped",
+                "message": f"'{name}'은(는) 빌트인 스킬이라 수정/재정의할 수 없습니다. 다른 이름으로 새 스킬을 제안하세요.",
+            }
 
         proposal: PatchProposal | None
         try:
@@ -796,10 +819,27 @@ class LearningService(ILearningService):
         return await self._review_engine.learn(session_id, history, instruction)
 
     # ── management ────────────────────────────────────────────────────────────
+    def _ensure_not_builtin(self, skill_id: str, action: str) -> None:
+        """빌트인 스킬 쓰기 계열의 단일 관문 — 이름이 예약이면 ValidationError(400).
+
+        빌트인은 활성/비활성 전환(set_state)만 가능하고 편집·삭제·패치·롤백·동명
+        생성은 전부 여기서 거부된다. 라우트에 흩뿌리지 않고 서비스 경계 한 곳에
+        두는 이유: 새 호출 경로(제안함, 큐레이터, 향후 API)가 생겨도 이 규칙을
+        우회할 수 없다."""
+        if self._builtin_skills.is_builtin(skill_id):
+            raise ValidationError(
+                f"'{skill_id}'은(는) 빌트인 스킬입니다 — {action}할 수 없고 활성/비활성 전환만 가능합니다."
+            )
+
     def list_skills(self) -> list[SkillSummary]:
-        """~/.rice/skills/*.md 전체를 SkillSummary DTO 목록으로 반환한다."""
+        """빌트인 + ~/.rice/skills/*.md 전체를 SkillSummary DTO 목록으로 반환한다."""
+        builtin_names = self._builtin_skills.names()
+        skills = self._builtin_skills.list() + [
+            # 빌트인 이름은 예약 — 혹시 남아 있는 동명 사용자 파일은 숨긴다(중복 id 방지).
+            s for s in self._skill_store.list() if s.name not in builtin_names
+        ]
         result = []
-        for skill in self._skill_store.list():
+        for skill in skills:
             usage = self._usage_store.read(skill.name)
             result.append(
                 SkillSummary(
@@ -820,10 +860,12 @@ class LearningService(ILearningService):
 
     def get_skill(self, skill_id: str) -> SkillDetail | None:
         """스킬 상세 조회. view 카운터를 올린다 (LEARNING_LOOP §3)."""
-        try:
-            skill = self._skill_store.read(skill_id)
-        except Exception:
-            return None
+        skill = self._builtin_skills.get(skill_id)
+        if skill is None:
+            try:
+                skill = self._skill_store.read(skill_id)
+            except Exception:
+                return None
         self._usage_store.increment_view(skill_id)
         usage = self._usage_store.read(skill_id)
         return self._detail_from(skill, usage)
@@ -858,6 +900,7 @@ class LearningService(ILearningService):
             raise ValidationError(
                 f"스킬 이름은 kebab-case(소문자/숫자/하이픈, 2~64자)여야 합니다: {name!r}"
             )
+        self._ensure_not_builtin(name, "같은 이름으로 생성")
         try:
             self._skill_store.read(name)
             raise ValidationError(f"이미 존재하는 스킬입니다: {name!r}")
@@ -896,6 +939,7 @@ class LearningService(ILearningService):
         state: SkillState | None = None,
     ) -> SkillDetail:
         """스킬 직접 편집 (PUT /skills/{id}). 본문 변경 시 history 보관 + version+1."""
+        self._ensure_not_builtin(skill_id, "편집")
         current = self._skill_store.read(skill_id)  # NotFoundError 위임
 
         if state is not None and state not in ("active", "stale", "archived"):
@@ -926,6 +970,7 @@ class LearningService(ILearningService):
 
     def delete_skill(self, skill_id: str) -> None:
         """스킬 삭제 (DELETE /skills/{id}). 본문/usage/history 사이드카 모두 제거."""
+        self._ensure_not_builtin(skill_id, "삭제")
         self._skill_store.read(skill_id)  # 없으면 NotFoundError → 404
         self._skill_store.delete(skill_id)
         self._usage_store.delete(skill_id)
@@ -951,6 +996,10 @@ class LearningService(ILearningService):
         """ArchiveProposal 승인/거부. 승인 시 archived 전이 + absorbed_into 기록."""
         if not approved:
             return False
+        if self._builtin_skills.is_builtin(skill_id):
+            # 통합(consolidation)은 SkillStore만 스캔하므로 정상 경로로는 도달하지
+            # 않는다 — 방어적으로 no-op 처리(absorbed_into는 빌트인에 무의미).
+            return False
         try:
             self._lifecycle.archive_with_absorption(skill_id, absorbed_into)
         except NotFoundError:
@@ -958,11 +1007,17 @@ class LearningService(ILearningService):
         return True
 
     def set_state(self, skill_id: str, state: SkillState) -> None:
-        """스킬 상태를 수동으로 변경한다."""
+        """스킬 상태를 수동으로 변경한다. 빌트인은 active/archived(=활성/비활성)만."""
+        if self._builtin_skills.is_builtin(skill_id):
+            self._builtin_skills.set_state(skill_id, state)
+            return
         self._lifecycle.set_state(skill_id, state)
 
     def history(self, skill_id: str) -> list[SkillVersion]:
-        """스킬 히스토리 버전 목록을 반환한다 (LEARNING_LOOP §5.2.4)."""
+        """스킬 히스토리 버전 목록을 반환한다 (LEARNING_LOOP §5.2.4).
+        빌트인은 히스토리가 없다(본문 불변) — 빈 목록."""
+        if self._builtin_skills.is_builtin(skill_id):
+            return []
         entries = self._skill_store.read_history(skill_id)
         result = []
         for version, updated_at, body in entries:
@@ -971,6 +1026,7 @@ class LearningService(ILearningService):
 
     def rollback(self, skill_id: str, version: int) -> int:
         """히스토리 버전을 현재로 복원한다. 새 version 번호 반환."""
+        self._ensure_not_builtin(skill_id, "롤백")
         return self._lifecycle.rollback(skill_id, version)
 
     # ── memory ────────────────────────────────────────────────────────────────

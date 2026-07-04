@@ -9,6 +9,7 @@ import {
   type UserSignal,
 } from '../../lib/learningData';
 import type { SkillSuggestion } from '../../lib/types';
+import { api } from '../../lib/api';
 import { TransparencyPanel } from './TransparencyPanel';
 
 /**
@@ -692,6 +693,20 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ isLearning = true,
           <div className="flex flex-col gap-2">
             {skills.map((s) => {
               const hot = highlightedSkill === s.id;
+              // 빌트인: 토글은 서버 상태(active/archived)로 영속하고 삭제 항목은 아예
+              // 제공하지 않는다(백엔드도 422로 거부 — UI가 먼저 어포던스를 지운다).
+              const builtin = s.origin === 'builtin';
+              const toggleSkill = () => {
+                const next = !s.enabled;
+                setSkills((arr) =>
+                  arr.map((x) =>
+                    x.id === s.id
+                      ? { ...x, enabled: next, ...(builtin ? { state: next ? ('active' as const) : ('archived' as const) } : {}) }
+                      : x,
+                  ),
+                );
+                if (builtin) void api.setSkillState(s.id, next ? 'active' : 'archived');
+              };
               return (
                 <div
                   key={s.id}
@@ -704,6 +719,11 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ isLearning = true,
                 >
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
+                      {builtin && (
+                        <span title="기본 내장 스킬 — 활성/비활성만 가능" className="flex-shrink-0">
+                          <Icon name="sparkle" size={11} className="text-teal-40 opacity-80" />
+                        </span>
+                      )}
                       <span className={`text-body-short-01 text-text-primary truncate ${s.enabled ? '' : 'line-through'}`}>
                         {s.name} <span className="text-text-helper font-mono">{s.ver}</span>
                       </span>
@@ -722,14 +742,18 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ isLearning = true,
                       {
                         icon: s.enabled ? 'view-off' : 'view',
                         label: s.enabled ? '비활성화' : '활성화',
-                        onClick: () => setSkills((arr) => arr.map((x) => (x.id === s.id ? { ...x, enabled: !x.enabled } : x))),
+                        onClick: toggleSkill,
                       },
-                      {
-                        icon: 'trash',
-                        label: '삭제',
-                        danger: true,
-                        onClick: () => setSkills((arr) => arr.filter((x) => x.id !== s.id)),
-                      },
+                      ...(builtin
+                        ? []
+                        : [
+                            {
+                              icon: 'trash' as IconName,
+                              label: '삭제',
+                              danger: true,
+                              onClick: () => setSkills((arr) => arr.filter((x) => x.id !== s.id)),
+                            },
+                          ]),
                     ]}
                   />
                 </div>

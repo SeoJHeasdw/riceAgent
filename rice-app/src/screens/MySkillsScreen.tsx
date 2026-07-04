@@ -26,6 +26,7 @@ import type { ConsolidateProposal } from '../lib/types';
 // 출처가 새 직교 축이라, 한 줄로 평평히 두지 않고 섹션 라벨로 묶는다.
 type Filter =
   | '전체'
+  | '기본 내장'
   | '직접 제작'
   | '설치됨'
   | '학습됨'
@@ -39,7 +40,7 @@ type Filter =
 
 const FILTER_GROUPS: { label: string | null; items: Filter[] }[] = [
   { label: null, items: ['전체'] },
-  { label: '출처', items: ['직접 제작', '설치됨', '학습됨'] },
+  { label: '출처', items: ['기본 내장', '직접 제작', '설치됨', '학습됨'] },
   { label: '상태', items: ['stale', '보관됨'] },
   { label: '사용성', items: ['자주 사용', '최근 학습', '초안', '공유됨', '비활성'] },
 ];
@@ -61,24 +62,29 @@ const STATUS_META: Record<SkillStatus, { label: string; tag: 'gray' | 'yellow'; 
 const skillState = (s: Skill): NonNullable<Skill['state']> => s.state ?? 'active';
 
 /** 통합 표현 상태 — state(생명주기) + enabled(주입)을 하나로 투영.
- *  archived(자동 중단) > inactive(수동 중단) > stale/active(주입 중) 순으로 결정. */
+ *  archived(자동 중단) > inactive(수동 중단) > stale/active(주입 중) 순으로 결정.
+ *  빌트인은 서버 상태가 active|archived 두 값뿐이고 archived가 곧 "수동으로 껐다"는
+ *  뜻이라 '보관'이 아닌 '비활성'으로 투영한다. */
 const skillStatus = (s: Skill): SkillStatus => {
   const st = skillState(s);
-  if (st === 'archived') return 'archived';
+  if (st === 'archived') return s.origin === 'builtin' ? 'inactive' : 'archived';
   if (!s.enabled) return 'inactive';
   return st; // active | stale (둘 다 주입 중)
 };
 /** 이 상태가 "주입 중"을 의미하는가 */
 const isInjected = (st: SkillStatus) => st === 'active' || st === 'stale';
 
-// ── 출처(provenance) — 내가 만든 것 vs 다운받은 것 (git fork 모델) ──────
+// ── 출처(provenance) — 내가 만든 것 vs 다운받은 것 vs 앱 내장 (git fork 모델) ──
 const ORIGIN_META: Record<SkillOrigin, { label: string; icon: IconName; cls: string }> = {
   learned: { label: '학습됨', icon: 'idea', cls: 'text-icon-primary' },
   installed: { label: '설치됨', icon: 'download', cls: 'text-link-primary' },
   authored: { label: '직접 제작', icon: 'user', cls: 'text-purple-60' },
+  builtin: { label: '기본 내장', icon: 'sparkle', cls: 'text-teal-40' },
 };
 /** 현재 출처 반환 (미설정 = learned) */
 const skillOrigin = (s: Skill): SkillOrigin => s.origin ?? 'learned';
+/** 기본 내장 스킬 — 읽기 전용: 활성/비활성 토글만 가능, 편집·삭제·공유·복원 UI를 숨긴다 */
+const isBuiltinSkill = (s: Skill): boolean => skillOrigin(s) === 'builtin';
 
 // 버전 표기에서 정수만 ("v4" → 4) — upstream 발산/업데이트 판단용
 const verNum = (v: string): number => {
@@ -202,6 +208,26 @@ const StatusControl: React.FC<{
         </div>
       )}
     </div>
+  );
+};
+
+// 빌트인 스킬의 단일 컨트롤 — 활성/비활성 토글 하나뿐이다(요구사항: 그 외 전이·편집 불가).
+// 서버 상태는 active|archived 두 값으로 영속되고, UI 표현은 활성/비활성으로 통일한다.
+const BuiltinStatusToggle: React.FC<{
+  skill: Skill;
+  onSet: (next: SkillStatus) => void;
+}> = ({ skill, onSet }) => {
+  const on = skillState(skill) === 'active';
+  return (
+    <span
+      className="inline-flex items-center gap-2 border border-border-subtle-01 rounded-md pl-2.5 pr-1.5 py-1"
+      title={on ? '대화에 주입 중 — 끄면 주입이 중단돼요' : '주입 꺼짐 — 켜면 다시 대화에 주입돼요'}
+    >
+      <span className={`text-caption-01 font-semibold ${on ? 'text-support-success' : 'text-text-helper'}`}>
+        {on ? '활성' : '비활성'}
+      </span>
+      <Toggle checked={on} onChange={() => onSet(on ? 'archived' : 'active')} />
+    </span>
   );
 };
 
@@ -663,6 +689,22 @@ const ProvenanceStrip: React.FC<{
 }> = ({ skill, detail, onOpenMarket }) => {
   const origin = skillOrigin(skill);
 
+  if (origin === 'builtin') {
+    return (
+      <div className="mt-3 rounded-lg border border-teal-70/40 bg-teal-70/10 px-3 py-2.5">
+        <div className="flex items-start gap-2 text-caption-01">
+          <Icon name="sparkle" size={14} className="text-teal-40 flex-shrink-0 mt-px" />
+          <span className="text-text-secondary leading-4">
+            <span className="text-text-primary font-semibold">RICE 기본 내장 스킬</span> — 앱과 함께
+            제공되고 업데이트돼요. 활성/비활성만 전환할 수 있고{' '}
+            <span className="text-text-primary">삭제·수정·마켓 공유는 지원하지 않아요.</span>{' '}
+            소스 보기로 SKILL.md 작성법을 참고해 나만의 스킬을 만들어 보세요.
+          </span>
+        </div>
+      </div>
+    );
+  }
+
   if (origin === 'authored') {
     return (
       <div className="mt-3 inline-flex items-center gap-2 rounded-lg border border-border-subtle-01 bg-layer-01 px-3 py-2 text-caption-01">
@@ -747,10 +789,15 @@ const downloadSkillBundle = (skill: Skill, detail: SkillDetail) => {
 const SourceLauncher: React.FC<{ skill: Skill; detail: SkillDetail; onOpen: () => void }> = ({ skill, detail, onOpen }) => {
   const { files } = ownedSkillFiles(skill, detail);
   const folders = new Set(files.filter((f) => f.path.includes('/')).map((f) => f.path.slice(0, f.path.indexOf('/'))));
+  const readOnly = isBuiltinSkill(skill);
   return (
     <button
       onClick={onOpen}
-      title="이 스킬의 파일(SKILL.md·scripts…)을 전체 화면으로 보기"
+      title={
+        readOnly
+          ? '기본 내장 SKILL.md를 전체 화면으로 보기 (읽기 전용) — 스킬 작성법 참고용'
+          : '이 스킬의 파일(SKILL.md·scripts…)을 전체 화면으로 보기'
+      }
       className="group relative flex items-center gap-3 rounded-xl border border-border-subtle-01 bg-layer-01 pl-3 pr-3.5 py-2.5 hover:border-blue-50/45 hover:bg-layer-hover-01 transition-colors flex-shrink-0"
     >
       <div className="w-9 h-9 rounded-lg bg-blue-60 border border-blue-50/45 flex items-center justify-center flex-shrink-0 text-white">
@@ -762,7 +809,7 @@ const SourceLauncher: React.FC<{ skill: Skill; detail: SkillDetail; onOpen: () =
           <Icon name="side-panel-open" size={14} className="text-blue-30 opacity-80 group-hover:opacity-100 transition-opacity" />
         </div>
         <div className="text-caption-01 text-text-helper">
-          {files.length} 파일{folders.size > 0 ? ` · ${folders.size} 폴더` : ''} · 편집 가능
+          {files.length} 파일{folders.size > 0 ? ` · ${folders.size} 폴더` : ''} · {readOnly ? '읽기 전용' : '편집 가능'}
         </div>
       </div>
     </button>
@@ -813,6 +860,46 @@ const SkillDetailView: React.FC<{
   }, [skillId]);
   useEffect(() => () => clearTimeout(savedTimer.current), []);
 
+  // 런타임 스킬의 실제 SKILL.md 본문 lazy load — 목록 API(GET /skills)는 본문을
+  // 내려주지 않으므로 상세를 처음 열 때 GET /skills/{id}로 채운다. 빌트인 스킬의
+  // "소스 보기"가 진짜 본문(교보재)을 보여주는 경로이자, 학습 스킬도 합성 대신
+  // 실제 SKILL.md를 보게 되는 공통 개선. 런타임 오프라인/목데이터면 조용히 유지.
+  useEffect(() => {
+    if (!skillId) return;
+    const current = details[skillId];
+    if (!current || (current.files && current.files.length)) return;
+    let cancelled = false;
+    void api.getSkill(skillId).then((res) => {
+      if (cancelled || !res.success || !res.data) return;
+      const data = res.data as {
+        name: string; version: number; description: string;
+        body?: string; tags?: string[]; source?: string | null;
+      };
+      if (!data.body) return;
+      const fm = [
+        `name: ${data.name}`,
+        `version: ${data.version}`,
+        `description: ${data.description}`,
+        ...(data.tags?.length ? [`tags: [${data.tags.join(', ')}]`] : []),
+        ...(data.source ? [`source: ${data.source}`] : []),
+      ].join('\n');
+      const md = `---\n${fm}\n---\n\n${data.body}`;
+      setDetails((prev) => {
+        const cur = prev[skillId];
+        if (!cur || (cur.files && cur.files.length)) return prev;
+        return {
+          ...prev,
+          [skillId]: {
+            ...cur,
+            summary: data.description || cur.summary,
+            files: [{ path: 'SKILL.md', language: languageFromPath('SKILL.md'), content: md }],
+          },
+        };
+      });
+    });
+    return () => { cancelled = true; };
+  }, [skillId, details, setDetails]);
+
   const skill = skills.find((s) => s.id === skillId);
   const detail = skillId ? details[skillId] : undefined;
 
@@ -820,6 +907,7 @@ const SkillDetailView: React.FC<{
     return <div className="flex-1 flex items-center justify-center text-body-short-02 text-text-helper">스킬을 선택하세요.</div>;
   }
 
+  const builtin = isBuiltinSkill(skill);
   const patch = (fn: (d: SkillDetail) => SkillDetail) => setDetails((d) => ({ ...d, [skillId]: fn(d[skillId]) }));
   const appliedRules = detail.rules.filter((r) => r.on).length;
   const summaryExpandable = detail.summary.length > 170;
@@ -952,19 +1040,35 @@ const SkillDetailView: React.FC<{
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <h2 className="text-heading-03 font-semibold text-text-primary">{skill.name}</h2>
-              <VersionChipMenu
-                versions={detail.versions}
-                currentVer={skill.ver}
-                onView={(ver) => setSnapVer(ver)}
-                onSwitch={(v) => setConfirmRestore(v)}
-              />
+              {builtin ? (
+                // 빌트인은 버전 히스토리/복원이 없다(본문 불변) — 정적 버전 표기
+                <span className="text-caption-01 font-mono text-text-secondary bg-layer-02 border border-border-subtle-01 rounded px-1.5 py-px">
+                  {skill.ver}
+                </span>
+              ) : (
+                <VersionChipMenu
+                  versions={detail.versions}
+                  currentVer={skill.ver}
+                  onView={(ver) => setSnapVer(ver)}
+                  onSwitch={(v) => setConfirmRestore(v)}
+                />
+              )}
+              {builtin && (
+                <Tag type="teal" size="sm">
+                  기본 내장
+                </Tag>
+              )}
               {skill.shared && (
                 <Tag type="purple" size="sm">
                   공유됨
                 </Tag>
               )}
-              {/* 단일 상태 컨트롤 — 활성/Stale/보관/비활성 (주입 여부 포함) */}
-              <StatusControl skill={skill} onSet={(next) => onSetStatus(skill.id, next)} />
+              {/* 상태 컨트롤 — 빌트인은 활성/비활성 토글 하나, 그 외는 활성/Stale/보관/비활성 */}
+              {builtin ? (
+                <BuiltinStatusToggle skill={skill} onSet={(next) => onSetStatus(skill.id, next)} />
+              ) : (
+                <StatusControl skill={skill} onSet={(next) => onSetStatus(skill.id, next)} />
+              )}
             </div>
             <div className="mt-1.5 max-w-[780px]">
               <p className={`text-body-short-01 leading-5 text-text-secondary ${summaryExpandable && !summaryOpen ? 'line-clamp-3' : ''}`}>
@@ -1038,7 +1142,8 @@ const SkillDetailView: React.FC<{
           </div>
         )}
 
-        {/* learned rules */}
+        {/* learned rules — 빌트인은 규칙 학습 대상이 아니다(본문 불변) → 섹션 자체를 숨김 */}
+        {!builtin && (
         <div>
           <SectionLabel
             right={
@@ -1092,8 +1197,10 @@ const SkillDetailView: React.FC<{
             )}
           </div>
         </div>
+        )}
 
-        {/* version history */}
+        {/* version history — 빌트인은 본문 불변이라 히스토리·복원이 없다 */}
+        {!builtin && (
         <div>
           <SectionLabel right={<span className="text-caption-01 text-text-helper normal-case">항목을 눌러 버전 내용 보기 · 복원</span>}>
             버전 히스토리 · {detail.versions.length}
@@ -1141,6 +1248,7 @@ const SkillDetailView: React.FC<{
             ))}
           </div>
         </div>
+        )}
 
         {/* recent activity — "살아있는" 데이터 질감 */}
         {detail.activity && detail.activity.length > 0 && (
@@ -1161,7 +1269,8 @@ const SkillDetailView: React.FC<{
           </div>
         )}
 
-        {/* where used */}
+        {/* where used — 빌트인은 사용처 추적 데이터가 없으면 빈 섹션을 숨긴다 */}
+        {!(builtin && detail.usage.length === 0) && (
         <div>
           <SectionLabel>사용처 · {detail.usage.length}</SectionLabel>
           <div className="flex flex-col gap-px bg-border-subtle-01 rounded-lg overflow-hidden">
@@ -1176,6 +1285,7 @@ const SkillDetailView: React.FC<{
             ))}
           </div>
         </div>
+        )}
 
         {/* data permissions */}
         <div>
@@ -1210,36 +1320,58 @@ const SkillDetailView: React.FC<{
 
       </div>
 
-      {/* actions — 주 액션(편집)만 또렷이 노출하고, 보조·위험 액션은 ••• 메뉴로 접는다. */}
+      {/* actions — 주 액션(편집)만 또렷이 노출하고, 보조·위험 액션은 ••• 메뉴로 접는다.
+          빌트인은 편집·공유·삭제가 원천 차단(백엔드 422)이라 액션 자체를 노출하지 않고,
+          허용되는 내보내기(사본 다운로드)만 남긴다 — 스킬 작성 교보재로 쓰라는 의도. */}
       <div className="flex-shrink-0 flex gap-2 border-t border-border-subtle-01 bg-background px-7 py-2 items-center">
-        {/* 편집 = 이 화면의 주 액션. 채팅 매개 patch로 안전하게 버전을 올린다. */}
-        <button
-          onClick={() => { setEditTarget(undefined); setEditOpen(true); }}
-          title="대화로 변경 요청을 작성하고 새 버전으로 저장합니다"
-          className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-lg text-body-short-01 font-semibold bg-interactive text-text-on-color hover:bg-interactive-hover transition-colors"
-        >
-          <Icon name="edit" size={14} />
-          AI로 편집
-        </button>
-        {/* 공유됨이면 마켓 게시 상태를 인라인으로 알려준다 (메뉴 안에 숨지 않게) */}
-        {skill.shared && (
-          <span className="inline-flex items-center gap-1 text-caption-01 text-purple-60" title="Skill Market에 공개됨">
-            <Icon name="share" size={13} /> 마켓에 공개됨
-          </span>
+        {builtin ? (
+          <>
+            <span className="inline-flex items-center gap-1.5 text-caption-01 text-text-helper">
+              <Icon name="sparkle" size={13} className="text-teal-40" />
+              기본 내장 스킬 — 활성/비활성만 전환할 수 있어요
+            </span>
+            <div className="flex-1" />
+            <Button
+              kind="ghost"
+              size="sm"
+              icon={<Icon name="export" size={14} />}
+              onClick={() => downloadSkillBundle(skill, detail)}
+            >
+              내보내기
+            </Button>
+          </>
+        ) : (
+          <>
+            {/* 편집 = 이 화면의 주 액션. 채팅 매개 patch로 안전하게 버전을 올린다. */}
+            <button
+              onClick={() => { setEditTarget(undefined); setEditOpen(true); }}
+              title="대화로 변경 요청을 작성하고 새 버전으로 저장합니다"
+              className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-lg text-body-short-01 font-semibold bg-interactive text-text-on-color hover:bg-interactive-hover transition-colors"
+            >
+              <Icon name="edit" size={14} />
+              AI로 편집
+            </button>
+            {/* 공유됨이면 마켓 게시 상태를 인라인으로 알려준다 (메뉴 안에 숨지 않게) */}
+            {skill.shared && (
+              <span className="inline-flex items-center gap-1 text-caption-01 text-purple-60" title="Skill Market에 공개됨">
+                <Icon name="share" size={13} /> 마켓에 공개됨
+              </span>
+            )}
+            <div className="flex-1" />
+            {/* 공유·내보내기·삭제 — 의도적 단계로 접어둔다. 삭제는 danger 항목(명확한 hover). */}
+            <OverflowMenu
+              align="right"
+              direction="up"
+              items={[
+                skill.shared
+                  ? { label: '마켓에서 내리기', icon: 'share', onClick: () => setConfirmUnshare(true) }
+                  : { label: 'Skill Market에 공유', icon: 'share', onClick: () => setPublishOpen(true) },
+                { label: '내보내기', icon: 'export', onClick: () => downloadSkillBundle(skill, detail) },
+                { label: '삭제', icon: 'trash', tone: 'danger', onClick: () => setConfirmDelete(true) },
+              ]}
+            />
+          </>
         )}
-        <div className="flex-1" />
-        {/* 공유·내보내기·삭제 — 의도적 단계로 접어둔다. 삭제는 danger 항목(명확한 hover). */}
-        <OverflowMenu
-          align="right"
-          direction="up"
-          items={[
-            skill.shared
-              ? { label: '마켓에서 내리기', icon: 'share', onClick: () => setConfirmUnshare(true) }
-              : { label: 'Skill Market에 공유', icon: 'share', onClick: () => setPublishOpen(true) },
-            { label: '내보내기', icon: 'export', onClick: () => downloadSkillBundle(skill, detail) },
-            { label: '삭제', icon: 'trash', tone: 'danger', onClick: () => setConfirmDelete(true) },
-          ]}
-        />
       </div>
 
       <ConfirmDialog
@@ -1251,6 +1383,9 @@ const SkillDetailView: React.FC<{
         onClose={() => setConfirmDelete(false)}
         onConfirm={() => {
           setSkills((a) => a.filter((x) => x.id !== skillId));
+          // 런타임에도 반영 — 로컬만 지우면 새로고침 때 부활한다. 런타임이 모르는
+          // 스킬(목/로컬 전용)이면 404가 돌아올 뿐이라 무해하다.
+          void api.deleteSkill(skillId);
           setConfirmDelete(false);
         }}
         description="삭제하면 학습한 규칙과 버전 히스토리가 모두 사라지며 되돌릴 수 없어요."
@@ -1291,17 +1426,19 @@ const SkillDetailView: React.FC<{
         skill={skill}
         detail={detail}
         onClose={() => setWorkspaceOpen(false)}
-        onEdit={(path) => { setEditTarget(path); setEditOpen(true); }}
+        onEdit={builtin ? undefined : (path) => { setEditTarget(path); setEditOpen(true); }}
       />
 
-      <SkillEditDrawer
-        open={editOpen}
-        skill={skill}
-        detail={detail}
-        targetPath={editTarget}
-        onClose={() => setEditOpen(false)}
-        onApply={applyEditPatch}
-      />
+      {!builtin && (
+        <SkillEditDrawer
+          open={editOpen}
+          skill={skill}
+          detail={detail}
+          targetPath={editTarget}
+          onClose={() => setEditOpen(false)}
+          onApply={applyEditPatch}
+        />
+      )}
 
       {confirmModal}
     </div>
@@ -1342,6 +1479,7 @@ function MySkillsScreen() {
 
   const match = (s: (typeof skills)[number]) =>
     filter === '전체' ||
+    (filter === '기본 내장' && skillOrigin(s) === 'builtin') ||
     (filter === '직접 제작' && skillOrigin(s) === 'authored') ||
     (filter === '설치됨' && skillOrigin(s) === 'installed') ||
     (filter === '학습됨' && skillOrigin(s) === 'learned') ||

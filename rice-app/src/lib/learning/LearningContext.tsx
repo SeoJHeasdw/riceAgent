@@ -76,6 +76,14 @@ interface LearningContextValue {
 
 const LearningCtx = createContext<LearningContextValue | null>(null);
 
+/** 런타임 source 문자열 → 프론트 출처(origin). builtin/user만 확정적이고
+ *  나머지(session:*, discovery, plugin:* …)는 학습형으로 표시한다. */
+function originFromSource(source: string | null | undefined): Skill['origin'] {
+  if (source === 'builtin') return 'builtin';
+  if (source === 'user') return 'authored';
+  return undefined; // = learned (skillOrigin 헬퍼의 기본값)
+}
+
 /**
  * runtime GET /skills 응답(SkillSummary.__dict__) → learningData.Skill 변환.
  *
@@ -92,6 +100,7 @@ function runtimeSkillToLearning(s: {
   use: number;
   patch: number;
   last_used_at: string | null;
+  source?: string | null;
 }): Skill {
   const idleDays = (() => {
     if (!s.last_used_at) return undefined;
@@ -120,6 +129,7 @@ function runtimeSkillToLearning(s: {
     state: s.state,
     idleDays,
     shared: false,
+    origin: originFromSource(s.source),
   };
 }
 
@@ -137,9 +147,11 @@ function runtimeSkillToDetail(s: {
   source: string | null;
   last_used_at: string | null;
 }): SkillDetail {
+  const createdFrom =
+    s.source === 'builtin' ? 'RICE 기본 내장' : s.source ? `${s.source}` : '대화에서 자동 생성';
   return {
     summary: s.description,
-    createdFrom: s.source ? `${s.source}` : '대화에서 자동 생성',
+    createdFrom,
     lastUsed: s.last_used_at ? new Date(s.last_used_at).toLocaleDateString('ko-KR') : '아직 없음',
     shared: false,
     rules: [],

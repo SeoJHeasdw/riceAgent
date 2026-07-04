@@ -338,12 +338,17 @@ class TestLearningServiceT2:
         skill = _make_skill(name, state)
         SkillStore(self._paths).write(skill)
 
+    @staticmethod
+    def _user_skills(skills):
+        """빌트인(source='builtin')은 항상 존재한다 — 사용자 스킬만 남긴다."""
+        return [s for s in skills if s.source != "builtin"]
+
     def test_list_skills_empty_initially(self):
-        assert self._svc.list_skills() == []
+        assert self._user_skills(self._svc.list_skills()) == []
 
     def test_write_then_list_skills(self):
         self._write_skill("alpha")
-        skills = self._svc.list_skills()
+        skills = self._user_skills(self._svc.list_skills())
         assert len(skills) == 1
         assert skills[0].id == "alpha"
 
@@ -427,13 +432,14 @@ class TestLearningServiceT2:
     def test_prefetch_injects_active_skills(self):
         self._write_skill("active-sk", "active")
         result = self._svc.prefetch("sess1", "hello")
-        assert len(result.skills) == 1
-        assert result.skills[0].skill_id == "active-sk"
+        injected = [s.skill_id for s in result.skills]
+        assert "active-sk" in injected
+        assert "business-planning" in injected  # 빌트인도 active면 함께 주입
 
     def test_prefetch_does_not_inject_archived_skills(self):
         self._write_skill("arch-sk", "archived")
         result = self._svc.prefetch("sess1", "hello")
-        assert len(result.skills) == 0
+        assert "arch-sk" not in [s.skill_id for s in result.skills]
 
     def test_prefetch_includes_skill_guidance(self):
         result = self._svc.prefetch("sess1", "hello")
