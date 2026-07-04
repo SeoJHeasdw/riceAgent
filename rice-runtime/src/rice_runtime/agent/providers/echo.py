@@ -31,6 +31,9 @@ class EchoProvider(ILLMProvider):
         messages: Sequence[Message],
         tools: Sequence[ToolSpec] = (),
         temperature: float = 0.7,
+        response_schema: dict | None = None,  # noqa: ARG002 — skeleton ignores per-call knobs
+        think: bool | None = None,  # noqa: ARG002
+        max_tokens: int | None = None,  # noqa: ARG002
     ) -> AsyncIterator[ProviderChunk]:
         last_user = next((m.content for m in reversed(messages) if m.role == "user"), "")
         yield ProviderChunk(kind="thinking", text="(echo) composing a reply…")

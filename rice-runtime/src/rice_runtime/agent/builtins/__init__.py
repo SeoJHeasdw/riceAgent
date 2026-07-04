@@ -12,12 +12,18 @@ and the name→handler map (`BuiltinTool`), which the composition root injects i
 the Orchestrator + ToolDispatcher.
 
 Registered builtin modules (add new ones here — one place):
-  file_tools    — read_file, write_file, search_files (+ xlsx/docx/ipynb extraction)
+  file_tools    — read_file, write_file, edit_file, list_dir, search_files
+                  (+ xlsx/docx/ipynb extraction)
   terminal_tool — terminal (shell command execution; requires_approval=True)
+  web_tools     — fetch_url (public web page → readable text; SSRF-guarded)
   vision_tools  — vision_analyze (image download + base64; requires vision provider)
   subagent_tools — delegate_subagent (parallel focused worker threads)
   skill_tools   — propose_skill (미드턴 스킬 승격 제안, Self-Improvement v3 —
                   learning 서비스가 주입됐을 때만 등록된다)
+
+`build_subagent_toolset(paths)`는 sub-agent 워커에게 주는 read-only 부분집합
+(read_file/list_dir/search_files/fetch_url)이다 — 쓰기·셸·재위임은 뺀다:
+워커는 승인 게이트 밖에서 돌므로 부작용 없는 도구만 갖는다.
 """
 
 from __future__ import annotations
@@ -27,11 +33,13 @@ from typing import TYPE_CHECKING
 from ...core.paths import RicePaths
 from ...core.types import ToolSpec
 from ..tool_dispatch import BuiltinTool
-from . import file_tools, skill_tools, subagent_tools, terminal_tool, vision_tools
+from . import file_tools, skill_tools, subagent_tools, terminal_tool, vision_tools, web_tools
 
 if TYPE_CHECKING:
     from ...learning.interfaces import ILearningService
     from ..subagents import SubAgentRunner
+
+_SUBAGENT_TOOL_NAMES = ("read_file", "list_dir", "search_files", "fetch_url")
 
 
 def build_builtin_tools(
@@ -49,6 +57,9 @@ def build_builtin_tools(
         for spec, handler in module.tools(paths):
             specs.append(spec)
             handlers[spec.name] = handler
+    for spec, handler in web_tools.tools():
+        specs.append(spec)
+        handlers[spec.name] = handler
     if subagents is not None:
         for spec, handler in subagent_tools.tools(subagents):
             specs.append(spec)
@@ -58,3 +69,10 @@ def build_builtin_tools(
             specs.append(spec)
             handlers[spec.name] = handler
     return tuple(specs), handlers
+
+
+def build_subagent_toolset(paths: RicePaths) -> tuple[tuple[ToolSpec, BuiltinTool], ...]:
+    """Sub-agent 워커의 read-only 도구 목록 — 메인 카탈로그와 같은 핸들러 구현을
+    재사용하되 부작용 있는 도구(write/edit/terminal/…)와 재위임은 제외한다."""
+    candidates = list(file_tools.tools(paths)) + list(web_tools.tools())
+    return tuple((spec, handler) for spec, handler in candidates if spec.name in _SUBAGENT_TOOL_NAMES)

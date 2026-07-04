@@ -27,12 +27,14 @@ def tools(runner: "SubAgentRunner") -> list[tuple[ToolSpec, BuiltinTool]]:
     spec = ToolSpec(
         name="delegate_subagent",
         description=(
-            "Delegate a focused research, analysis, review, or synthesis task to a "
-            "parallel sub-agent. Use multiple calls in one round when independent "
-            "workstreams can run concurrently; then synthesize their tool results "
-            "in your next answer. The result is structured: findings, evidence, "
-            "confidence (high/medium/low), open_questions — weigh low-confidence "
-            "findings accordingly and surface open questions to the user."
+            "Delegate a focused research or analysis task to a parallel sub-agent. "
+            "The sub-agent can read workspace files, list directories, search file "
+            "contents, and fetch web pages on its own — delegate file/source/document "
+            "analysis instead of reading many files yourself, and keep your own context "
+            "clean. Use multiple calls in one round for independent workstreams; then "
+            "synthesize the structured results (findings, evidence, confidence, "
+            "open_questions) in your next answer, weighing low-confidence findings "
+            "accordingly."
         ),
         parameters={
             "type": "object",

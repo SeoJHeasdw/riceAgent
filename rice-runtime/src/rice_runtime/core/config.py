@@ -126,8 +126,14 @@ class ContextConfig:
     # 이전엔 timeout이 approval_timeout_seconds를 빌려 썼다(무관한 커플링) —
     # 전용 노브로 분리. max_concurrent는 한 라운드에 병렬 스폰되는 sub-agent
     # 폭주(토큰/비용)를 막는 세마포어 상한이다.
-    subagent_timeout_seconds: int = 90
+    # timeout 300: sub-agent가 read-only 도구로 파일을 실제로 읽게 된 뒤로는
+    # (agent/subagents.py 미니 ReAct 루프) 90초가 자주 모자란다 — "30분짜리
+    # 작업도 OK"가 제품 방향이므로 심부름꾼의 시간도 그에 맞춘다.
+    subagent_timeout_seconds: int = 300
     subagent_max_concurrent: int = 3
+    # sub-agent 미니 루프의 도구 라운드 상한 — 라운드당 여러 도구를 병렬로
+    # 부를 수 있으므로 6이면 수십 파일 분석까지 커버된다.
+    subagent_max_tool_rounds: int = 6
     summary_tokens: int = 1_600
     tool_output_threshold_tokens: int = 4_000
     tool_output_retained_tokens: int = 1_200
@@ -147,9 +153,11 @@ class AgentConfig:
     planning_enabled: bool = True
     # 플래너에게 보여줄 최근 대화 메시지 수(의도 파악용 문맥).
     planner_recent_messages: int = 12
-    # 플래너 1회 호출 타임아웃(초) — 로컬 LLM의 긴 프리필을 감안해 넉넉하게.
-    # 초과 시 계획 없이 진행한다(fail-soft).
-    planner_timeout_seconds: int = 240
+    # 플래너 1회 호출 타임아웃(초). 초과 시 계획 없이 진행한다(fail-soft).
+    # think=False + 디코딩 수준 토큰 상한이 걸린 뒤로는(planner.py) 정상 호출이
+    # 이 근처에 갈 일이 없다 — 240은 무한 thinking 루프에 시간을 2배 더 주던
+    # 증상 치료였고, 원인(루프)을 디코딩에서 끊었으므로 90으로 되돌린다.
+    planner_timeout_seconds: int = 90
     # 플래너가 세울 수 있는 단계 수 상한(프롬프트 지시 + 코드 클램프).
     plan_max_steps: int = 8
     # 계획이 있는 턴의 반복 상한 — max(learning.max_iterations, 12 + 6×단계수)를

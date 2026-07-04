@@ -55,9 +55,9 @@ class _ScriptedProvider:
     def capabilities(self):
         return ProviderCapabilities(native_tool_calling=True)
 
-    async def stream(self, *, system, messages, tools=(), temperature=0.7):
+    async def stream(self, *, system, messages, tools=(), temperature=0.7, **knobs):
         self.calls.append(
-            {"system": system, "messages": tuple(messages), "tools": tuple(tools), "temperature": temperature}
+            {"system": system, "messages": tuple(messages), "tools": tuple(tools), "temperature": temperature, **knobs}
         )
         assert self._rounds, "provider called more times than scripted"
         for chunk in self._rounds.pop(0):
@@ -131,9 +131,13 @@ async def test_planner_builds_plan_for_complex_query():
     assert plan.goal == "테스트 목표"
     assert [s.id for s in plan.steps] == ["s1", "s2"]
     assert plan.steps[0].detail == "use echo"
-    assert events == []  # thinking 없음 → 이벤트 없음
-    # 플래너 호출은 도구 없이 나간다 (계획만 세운다)
+    # think=False라 모델 thinking은 없지만, "계획 중" breadcrumb 하나는 흐른다.
+    assert [e.type for e in events] == [EventType.THINKING]
+    # 플래너 호출은 도구 없이, thinking 억제 + 스키마 제약으로 나간다
     assert provider.calls[0]["tools"] == ()
+    assert provider.calls[0]["think"] is False
+    assert provider.calls[0]["response_schema"]["required"] == ["plan_needed"]
+    assert provider.calls[0]["max_tokens"] is not None
     # 도구 카탈로그·요청이 프롬프트에 실린다
     assert "echo" in provider.calls[0]["messages"][0].content
     assert "복잡한 작업 해줘" in provider.calls[0]["messages"][0].content
@@ -169,7 +173,8 @@ async def test_planner_provider_error_fails_soft():
             yield  # pragma: no cover
 
     plan, events = await _run_planner(_Boom(), _ctx((_spec("echo"),)))
-    assert plan is None and events == []
+    assert plan is None
+    assert [e.type for e in events] == [EventType.THINKING]  # breadcrumb만
 
 
 # ── plan state machine ───────────────────────────────────────────────────────

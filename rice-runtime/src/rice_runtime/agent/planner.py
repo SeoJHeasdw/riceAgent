@@ -36,7 +36,7 @@ from ..core.types import (
     TurnPlan,
     ev_thinking,
 )
-from ..prompts.planning import PLANNING_TEMPERATURE, build_planning_messages
+from ..prompts.planning import PLANNING_TEMPERATURE, build_planning_messages, plan_response_schema
 from .providers.interfaces import ILLMProvider
 
 log = logging.getLogger("rice.agent.planner")
@@ -46,6 +46,13 @@ log = logging.getLogger("rice.agent.planner")
 _HARD_MAX_STEPS = 12
 # 플래너 출력 수집 상한(자) — JSON 계획 하나에 충분하고도 남는다.
 _MAX_PLAN_CHARS = 8_000
+# 플래너 출력 토큰 상한 — provider의 디코딩 수준 가드(ollama num_predict).
+# CJK 8단계 계획도 여유 있게 담긴다; 폭주 생성은 벽시계가 아니라 샘플러가 자른다.
+_MAX_PLAN_TOKENS = 1_600
+# thinking 수집 상한(자) — 플래너는 think=False로 부르지만, per-call think를
+# 표현할 수 없는 provider가 thinking을 흘리면 여기서 끊는다. 소형 모델의
+# "Wait, I need to check..." 무한 루프가 타임아웃까지 도는 것을 막는 fast-fail.
+_MAX_THINK_CHARS = 6_000
 
 _VALID_STEP_STATUS = ("pending", "in_progress", "done", "failed", "skipped")
 _TERMINAL = ("done", "failed", "skipped")
@@ -117,8 +124,11 @@ class TurnPlanner:
     async def run(
         self, ctx: TurnContext, user_message: str, outcome: PlanOutcome, abort: asyncio.Event
     ) -> AsyncIterator[SSEEvent]:
-        """플래너 호출을 스트리밍한다: thinking 델타는 SSE로 그대로 통과(사용자가
-        '계획 중'을 본다), 텍스트는 모아 JSON 파싱. 어떤 실패든 outcome.plan=None."""
+        """플래너 호출을 스트리밍한다. think=False + response_schema(디코딩 제약)로
+        부른다: 소형 모델의 무한 thinking 루프(2026-07-04, qwen 9b 실측)는 저온 ×
+        thinking의 조합에서 왔고, JSON 준수는 프롬프트 지시가 아니라 grammar가
+        보증한다. thinking을 표현 못 하는 provider가 여전히 흘리면 SSE로 통과시키되
+        상한에서 끊는다. 어떤 실패든 outcome.plan=None(fail-soft)."""
         # echo(모델 미설정 스켈레톤)는 프롬프트를 되돌려줄 뿐 계획을 세울 수 없다
         # — titler와 같은 스킵(agent/titler.py 참조).
         if getattr(self._provider, "name", "") == "echo":
@@ -134,16 +144,35 @@ class TurnPlanner:
             skill_names=[s.name for s in ctx.injected_skills],
             max_steps=self._config.plan_max_steps,
         )
+        # think=False면 계획이 나올 때까지 화면에 아무것도 없다 — 짧은 breadcrumb
+        # 하나로 "지금 계획 중"을 보이게 한다(로컬 모델 prefill 수십 초 대비).
+        yield ev_thinking("(planning…)\n")
         chunks: list[str] = []
+        think_chars = 0
         try:
             async with asyncio.timeout(max(10, self._config.planner_timeout_seconds)):
                 async for chunk in self._provider.stream(
-                    system=system, messages=messages, tools=(), temperature=PLANNING_TEMPERATURE
+                    system=system,
+                    messages=messages,
+                    tools=(),
+                    temperature=PLANNING_TEMPERATURE,
+                    response_schema=plan_response_schema(),
+                    think=False,
+                    max_tokens=_MAX_PLAN_TOKENS,
                 ):
                     if abort.is_set():
                         return
                     if chunk.kind == "thinking" and chunk.text:
+                        think_chars += len(chunk.text)
                         yield ev_thinking(chunk.text)
+                        if think_chars > _MAX_THINK_CHARS:
+                            # 추론 폭주(반복 루프) — 타임아웃까지 태우지 않고 즉시
+                            # 계획 없이 진행한다. 모인 텍스트가 있으면 파싱은 시도.
+                            log.warning(
+                                "planner thinking exceeded %d chars — aborting plan call early",
+                                _MAX_THINK_CHARS,
+                            )
+                            break
                     elif chunk.kind == "text" and chunk.text:
                         chunks.append(chunk.text)
                         if sum(len(c) for c in chunks) > _MAX_PLAN_CHARS:

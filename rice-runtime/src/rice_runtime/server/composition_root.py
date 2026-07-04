@@ -19,7 +19,7 @@ import logging
 from dataclasses import dataclass
 from typing import Callable
 
-from ..agent.builtins import build_builtin_tools
+from ..agent.builtins import build_builtin_tools, build_subagent_toolset
 from ..agent.interfaces import IAgent, IApprovalGate, ISessionTitler
 from ..agent.orchestrator import Orchestrator
 from ..agent.subagents import SubAgentRunner
@@ -158,6 +158,9 @@ def build_container(
         learning_config=lambda: config_store.config.learning,
         context_config=lambda: config_store.config.context,
         token_calibrator=token_calibrator,
+        # read-only 워커 도구 — 워커가 직접 읽게 해 메인 컨텍스트를 원문으로
+        # 오염시키지 않는다(agent/subagents.py 모듈 docstring 참조).
+        tools=build_subagent_toolset(paths),
     )
     builtin_specs, builtins = build_builtin_tools(paths, learning=learning, subagents=subagents)
 

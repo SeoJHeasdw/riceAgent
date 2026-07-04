@@ -138,6 +138,9 @@ class ClaudeProvider(ILLMProvider):
         messages: Sequence[Message],
         tools: Sequence[ToolSpec] = (),
         temperature: float = 0.7,
+        response_schema: dict | None = None,  # noqa: ARG002 — no constrained decoding; callers keep the shape in the prompt
+        think: bool | None = None,  # noqa: ARG002 — extended thinking is not enabled on this wire
+        max_tokens: int | None = None,
     ) -> AsyncIterator[ProviderChunk]:
         from anthropic import AsyncAnthropic  # noqa: PLC0415 - optional dependency by design
 
@@ -155,7 +158,7 @@ class ClaudeProvider(ILLMProvider):
         try:
             async with client.messages.stream(
                 model=self._cfg.model,
-                max_tokens=4096,
+                max_tokens=max_tokens or 4096,
                 system=_claude_system_blocks(system),
                 messages=_to_claude_messages(messages),
                 tools=_to_claude_tools(tools),

@@ -124,6 +124,9 @@ class OllamaProvider(ILLMProvider):
         messages: Sequence[Message],
         tools: Sequence[ToolSpec] = (),
         temperature: float = 0.7,
+        response_schema: dict | None = None,
+        think: bool | None = None,
+        max_tokens: int | None = None,
     ) -> AsyncIterator[ProviderChunk]:
         if not self._think:
             # ── non-streaming path (titler) ───────────────────────────────────
@@ -137,9 +140,11 @@ class OllamaProvider(ILLMProvider):
                 "messages": ([{"role": "system", "content": system}] if system else []) + _to_ollama_messages(messages),
                 "stream": False,
                 "think": False,
-                "options": {"temperature": 0.0, "num_predict": 20},
+                "options": {"temperature": 0.0, "num_predict": max_tokens or 20},
                 "keep_alive": "5m",
             }
+            if response_schema is not None:
+                payload["format"] = response_schema
             try:
                 item = await self._post_chat(payload)
             except Exception as exc:
@@ -151,6 +156,11 @@ class OllamaProvider(ILLMProvider):
             return
 
         # ── streaming path (normal chat) ──────────────────────────────────────
+        options: dict[str, Any] = {"temperature": temperature}
+        if max_tokens is not None:
+            # decode-level runaway guard — a looping generation is cut by the
+            # sampler, not by burning the caller's wall-clock timeout.
+            options["num_predict"] = max_tokens
         payload = {
             "model": self._cfg.model,
             "messages": ([{"role": "system", "content": system}] if system else []) + _to_ollama_messages(messages),
@@ -159,10 +169,16 @@ class OllamaProvider(ILLMProvider):
             # (qwen3.x etc. support this) so the agent loop can emit `thinking`
             # events — the trace the ChatScreen renders. Non-thinking models simply
             # return no `thinking` field; the chunk below is then never yielded.
-            "think": True,
-            "options": {"temperature": temperature},
+            # Per-call think=False (planner 등 구조화 1회 호출) overrides this.
+            "think": self._think if think is None else think,
+            "options": options,
             "keep_alive": "5m",
         }
+        if response_schema is not None:
+            # grammar-constrained decoding: the model physically cannot emit
+            # prose/code fences around the JSON — prompt-level "ONLY JSON" rules
+            # (소형 모델 검증-루프의 연료) become unnecessary.
+            payload["format"] = response_schema
         if tools:
             payload["tools"] = _to_ollama_tools(tools)
 

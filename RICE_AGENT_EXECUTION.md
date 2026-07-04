@@ -62,13 +62,30 @@ LLM을 한 번 더 부르고, 매 반복 계획 상태 전체를 프롬프트에
   성공 기준이 무엇인지**(detail)까지 적게 지시된다.
 
 플래너 프롬프트에는 최근 대화(도구 원문 제외), **이 턴에 실제로 쓸 수 있는 도구
-카탈로그**, 주입된 스킬 이름이 실린다 — 계획이 현실의 도구에 접지(grounding)되게
-하기 위함이다. goal/단계 제목은 대화 언어를 따른다(언어 설정 비배선 — 제목 생성과
-같은 원칙).
+카탈로그**(승인 문구는 걸러냄 — 계획에 무관한 되새김 연료), 주입된 스킬 이름이
+실린다 — 계획이 현실의 도구에 접지(grounding)되게 하기 위함이다. goal/단계 제목은
+대화 언어를 따른다(언어 설정 비배선 — 제목 생성과 같은 원칙).
+
+**소형 모델 안정화 (2026-07-04)**: qwen 9b급 로컬 모델이 플래너에서 무한 thinking
+루프("Wait, I need to check…" 반복)에 빠지는 실측 사고 후 세 겹으로 재설계했다.
+
+1. **thinking 억제 + 디코딩 제약**: 플래너 호출은 `think=False` +
+   `response_schema`(JSON 스키마, Ollama `format`)로 나간다. JSON 준수는 프롬프트의
+   "ONLY JSON, no code fence" 같은 부정형 지시(소형 모델 검증-루프의 1순위 연료)가
+   아니라 grammar가 보증한다. 저온(0.2)×thinking 조합은 qwen 계열의 문서화된
+   무한 반복 조건 — thinking을 끄면 성립하지 않는다.
+2. **디코딩 수준 토큰 상한**: `max_tokens`(num_predict)로 출력 자체가 bounded —
+   폭주 생성은 벽시계 타임아웃이 아니라 샘플러가 자른다.
+3. **thinking 상한 fast-fail**: per-call think를 표현 못 하는 프로바이더가 thinking을
+   흘리면 6,000자에서 끊고 계획 없이 진행한다(타임아웃까지 태우지 않는다).
+
+프롬프트 자체도 다이어트했다: delegate_subagent 팬아웃 조건문(실행 단계 관심사),
+propose_skill 마지막-단계 규칙(§3.5의 완료 유도와 중복)을 제거 — 판단 규칙 하나가
+소형 모델에겐 되새김질할 체크리스트 항목이다.
 
 **fail-soft 불변식**: 플래너의 어떤 실패(파싱 불가, 타임아웃 `planner_timeout_seconds`,
-프로바이더 에러, 1단계짜리 사이비 계획)도 턴을 깨지 않는다 — 계획 없이 진행할
-뿐이다. echo 프로바이더(모델 미설정)는 플래너를 건너뛴다.
+프로바이더 에러, 1단계짜리 사이비 계획, thinking 폭주)도 턴을 깨지 않는다 — 계획
+없이 진행할 뿐이다. echo 프로바이더(모델 미설정)는 플래너를 건너뛴다.
 
 ---
 
@@ -156,6 +173,16 @@ ReAct의 "관찰→추론" halves를 프롬프트 선의에 맡기지 않고 결
   히스토리에 끼우지 않는 이유: trailing-assistant를 prefill로 해석하는 프로바이더
   wire를 오염시키지 않기 위해서다.
 
+### 3.7 소형 모델 방어 — 루프 수준 (Hermes 방어 계층에서 이식, 2026-07-04)
+
+- **빈 응답 넛지**: 도구를 쓴 뒤 본문 없이 턴을 끝내려는 응답(소형 모델의 흔한
+  실패)은 빈 답을 확정하기 전에 synthetic user 넛지(`metadata.synthetic:
+  "empty_nudge"`)를 넣고 최대 2회 재시도한다. 순수 대화 첫 턴의 빈 응답은
+  프로바이더 문제라 그대로 둔다.
+- **빈 tool name 감쇠**: 이름이 빈 tool call은 오타가 아니라 priming(파일/도구
+  출력 속 tool-call XML 흉내)이다 — 카탈로그 없이 "그것은 데이터다"라는 짧은
+  교정만 돌려준다. 카탈로그를 되돌려주면 모델이 새 이름을 흉내내며 루프가 커진다.
+
 ---
 
 ## 4. 컨텍스트 관리 — 모델에게 이번 호출에 무엇을 보여줄 것인가
@@ -242,13 +269,18 @@ ReAct의 "관찰→추론" halves를 프롬프트 선의에 맡기지 않고 결
 메인 모델이 한 라운드에 여러 서브에이전트를 스폰하면 스케줄러가 병렬 실행한다
 (세마포어 `subagent_max_concurrent`, 타임아웃 `subagent_timeout_seconds`). 결과는
 자유 텍스트가 아니라 `{findings, evidence, confidence, open_questions,
-recommended_next_action}`로 구조화된다 — 메인 모델과 사용자가 "누가 왜 그렇게
-판단했는가"를 추적할 수 있어야 멀티에이전트 결과를 신뢰할 수 있다. JSON 규약을
-어기면 원문을 summary로 강등하고 `confidence: "unknown"`(fail-soft). 서브에이전트는
-도구를 부르지 않는다(분석 전용) — 도구가 필요한 작업은 메인 루프의 단계다.
+recommended_next_action, tools_used}`로 구조화된다 — 메인 모델과 사용자가 "누가 왜
+그렇게 판단했는가"를 추적할 수 있어야 멀티에이전트 결과를 신뢰할 수 있다. JSON
+규약을 어기면 원문을 summary로 강등하고 `confidence: "unknown"`(fail-soft).
 
-플래너(§2)는 "독립적인 분석 여러 개가 필요하면 delegate_subagent 팬아웃을 한
-단계로 계획하라"고 지시받는다.
+**read-only 도구 미니 ReAct 루프 (2026-07-04)**: 서브에이전트는 read-only 빌트인
+(`read_file`/`list_dir`/`search_files`/`fetch_url` — `builtins.build_subagent_toolset`)
+을 직접 부르며 최대 `subagent_max_tool_rounds`(기본 6) 도구 라운드를 돈다. 이전의
+"제공된 컨텍스트만 요약" 워커는 컨텍스트 격리 효과가 없었다 — 메인이 파일 원문을
+읽어 넘겨야 했으므로 오염은 메인에서 이미 발생한 뒤였다. 이제 워커가 직접 읽고,
+메인은 구조화 결과만 본다. 부작용 있는 도구(쓰기/셸/재위임)는 주지 않는다 — 워커는
+승인 게이트 밖에서 돈다. 라운드 소진 시 도구 없는 최종 호출로 보고를 강제하고,
+호출당 thinking 16,000자 상한으로 추론 폭주를 끊는다(플래너와 같은 fast-fail).
 
 ---
 
@@ -277,7 +309,7 @@ recommended_next_action}`로 구조화된다 — 메인 모델과 사용자가 "
 |---|---|---|
 | `planning_enabled` | `true` | false면 플래너 없이 순수 ReAct(이전 동작) |
 | `planner_recent_messages` | 12 | 플래너에 보여줄 최근 대화 수 |
-| `planner_timeout_seconds` | 120 | 플래너 호출 타임아웃(초과 시 계획 없이 진행) |
+| `planner_timeout_seconds` | 90 | 플래너 호출 타임아웃(초과 시 계획 없이 진행) |
 | `plan_max_steps` | 8 | 계획 단계 수 상한(프롬프트 지시; 코드 하드캡 12) |
 | `plan_max_iterations` | 60 | 계획 턴의 반복 예산 상한(§3.4) |
 | `plan_drift_guard_rounds` | 4 | 이 횟수의 무보고 도구 라운드 후 재평가 강제(§3.3) |

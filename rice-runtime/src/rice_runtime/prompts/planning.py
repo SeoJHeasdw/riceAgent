@@ -24,50 +24,70 @@ from typing import Sequence
 
 from ..core.types import Message, PlanStep, ToolSpec, TurnPlan
 
-# 플래너 출력은 계획 하나 — 낮은 온도로 구조 준수를 우선한다.
+# 플래너 출력은 계획 하나 — 낮은 온도로 구조 준수를 우선한다. thinking은 끄고
+# 부르므로(planner.py) qwen 계열의 "저온+thinking = 무한 반복" 조합은 성립하지 않는다.
 PLANNING_TEMPERATURE = 0.2
 
+# 프롬프트는 짧고 긍정형으로 유지한다. 2026-07-04 다이어트: 소형(9b) 모델이 실제로
+# 검증-루프에 빠졌던 세 가지 — "no code fence" 부정형 규칙(→ 디코딩 제약으로 대체),
+# delegate_subagent fan-out 조건문(→ 실행 단계 관심사), propose_skill 마지막-단계
+# 규칙(→ render_plan_block의 nudge_skill_capture와 중복) — 을 제거했다. 판단 규칙
+# 하나하나가 소형 모델에겐 되새김질할 체크리스트 항목이다: 계획에 필요한 것만 남긴다.
 _PLANNER_SYSTEM = """You are the planning stage of RICE, a personal agent. \
-Decide whether the user's latest request needs an explicit multi-step plan, and if so, write one.
+Decide whether the user's latest request needs a multi-step plan, and if so, write one.
 
-Respond with ONLY a JSON object (no prose, no code fence).
+Output a single JSON object, one of:
 
-Not every request needs a plan. Output {"plan_needed": false} when the request is:
-- casual conversation, a greeting, or a quick factual question
-- a single-step action (one lookup, one file read, one short edit, one message)
-- a clarification or follow-up the previous answer already covers
+{"plan_needed": false}
+  — for conversation, quick questions, or anything doable in a single action.
 
-Output a plan when the request involves several distinct actions that build on each \
-other — e.g. gather/analyze across multiple files or sources, synthesize results, then \
-deliver them somewhere (mail, calendar, document), or any task you would naturally do in \
-3+ stages. When in doubt for a multi-tool task, prefer planning: an explicit plan is how \
-you stay reliable over a long task.
+{"plan_needed": true, "goal": "...", "steps": [{"title": "...", "detail": "..."}, ...]}
+  — for tasks with several distinct actions that build on each other \
+(gather → analyze → produce → deliver).
 
-Plan JSON shape:
-{
-  "plan_needed": true,
-  "goal": "one sentence stating the user's intent as you understood it",
-  "steps": [
-    {"title": "short imperative step name", "detail": "how: which tools, what input, what output; success criteria"}
-  ]
-}
-
-Planning rules:
-- Write goal and step titles in the same language the user is writing in.
-- 2 to %(max_steps)d steps. Each step = one verifiable unit of work, ordered by dependency.
-- Plan against the ACTUAL tools listed below — name the tool(s) in each step's detail. \
-If several independent analyses are needed, plan one step that fans them out in parallel \
-with delegate_subagent.
-- If the goal produces something reusable (a repeatable procedure), make the LAST step \
-"propose this procedure as a skill (propose_skill)".
-- Steps must cover verification/delivery, not just production (e.g. "send it" is a step).
-- Do NOT execute anything now. Do NOT call tools. Output the JSON only."""
+Rules:
+- goal: one sentence stating the user's intent, in the user's language. Step titles too.
+- steps: 2 to %(max_steps)d, ordered by dependency. Each step is one verifiable unit of work.
+- detail: which tool(s) the step uses and what it produces.
+- Include the delivery/verification step (save it, send it, show it) — not just production."""
 
 
-def _catalog_lines(tools: Sequence[ToolSpec], *, max_desc_chars: int = 160) -> str:
+def plan_response_schema() -> dict:
+    """플래너 출력의 JSON 스키마 — provider의 constrained decoding(`response_schema`)
+    에 그대로 실린다. 프롬프트의 shape 서술과 같은 모양을 유지할 것. 단계 수 상한은
+    스키마가 아니라 코드(_HARD_MAX_STEPS)로 자른다 — maxItems 등 스키마 확장 키워드는
+    로컬 grammar 변환기 호환성이 제각각이라 기본 구문만 쓴다."""
+    return {
+        "type": "object",
+        "properties": {
+            "plan_needed": {"type": "boolean"},
+            "goal": {"type": "string"},
+            "steps": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string"},
+                        "detail": {"type": "string"},
+                    },
+                    "required": ["title"],
+                },
+            },
+        },
+        "required": ["plan_needed"],
+    }
+
+
+def _catalog_lines(tools: Sequence[ToolSpec], *, max_desc_chars: int = 100) -> str:
+    """플래너용 도구 카탈로그 — 이름 + 짧은 설명. 승인 관련 문구는 걸러낸다:
+    계획 수립에 무관한데 소형 모델이 계획 단계에서 승인 걱정을 되새김질하는
+    연료가 된다(실측: write_file의 "Requires user approval"에 반복 고착)."""
     lines = []
     for t in tools:
-        desc = " ".join(t.description.split())
+        desc = " ".join(
+            s for s in t.description.split(". ") if "approval" not in s.lower()
+        )
+        desc = " ".join(desc.split())
         if len(desc) > max_desc_chars:
             desc = desc[: max_desc_chars - 1].rstrip() + "…"
         lines.append(f"- {t.name}: {desc}")

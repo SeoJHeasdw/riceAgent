@@ -59,6 +59,9 @@ class OpenAIProvider(ILLMProvider):
         messages: Sequence[Message],
         tools: Sequence[ToolSpec] = (),
         temperature: float = 0.7,
+        response_schema: dict | None = None,
+        think: bool | None = None,  # noqa: ARG002 — no portable wire knob across OpenAI-compatible servers
+        max_tokens: int | None = None,
     ) -> AsyncIterator[ProviderChunk]:
         payload: dict[str, Any] = {
             "model": self._cfg.model,
@@ -66,6 +69,13 @@ class OpenAIProvider(ILLMProvider):
             "stream": True,
             "temperature": temperature,
         }
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
+        if response_schema is not None:
+            payload["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {"name": "response", "schema": response_schema},
+            }
         if tools:
             payload["tools"] = oai.to_oai_tools(tools)
 

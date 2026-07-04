@@ -97,6 +97,9 @@ class WatsonxProvider(ILLMProvider):
         messages: Sequence[Message],
         tools: Sequence[ToolSpec] = (),
         temperature: float = 0.7,
+        response_schema: dict | None = None,  # noqa: ARG002 — watsonx chat has no schema-constrained decoding
+        think: bool | None = None,  # noqa: ARG002
+        max_tokens: int | None = None,
     ) -> AsyncIterator[ProviderChunk]:
         payload: dict[str, Any] = {
             "model_id": self._cfg.model,
@@ -104,6 +107,8 @@ class WatsonxProvider(ILLMProvider):
             "messages": oai.to_oai_messages(system, messages),
             "temperature": temperature,
         }
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
         if tools:
             payload["tools"] = oai.to_oai_tools(tools)
 

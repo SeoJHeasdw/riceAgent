@@ -50,7 +50,7 @@ type RawMessage = {
   ts?: number;
   // plan: plan-and-execute 스냅샷 (plan_updated와 같은 형태) — 계획 생성 시 첫
   // 어시스턴트 메시지에, 이후 갱신마다 update_plan tool 메시지에 실린다.
-  metadata?: { thinking?: string; tool_call_id?: string; plan?: PlanUpdatedEventData } | null;
+  metadata?: { thinking?: string; tool_call_id?: string; plan?: PlanUpdatedEventData; synthetic?: string } | null;
 };
 
 // Human-readable, per-tool copy for the HITL approval card — derived client-side
@@ -116,7 +116,8 @@ const toThread = (msgs: RawMessage[]): ThreadMessage[] => {
   let out: ThreadMessage[] = [];
   for (const m of msgs) {
     if (m.role === 'user') {
-      if (m.content) out.push({ kind: 'user', text: m.content, sentAt: m.ts });
+      // 루프가 주입한 합성 메시지(빈 응답 넛지 등)는 사용자가 친 말이 아니다 — 숨긴다.
+      if (m.content && !m.metadata?.synthetic) out.push({ kind: 'user', text: m.content, sentAt: m.ts });
     } else if (m.role === 'assistant') {
       if (m.metadata?.thinking) out.push({ kind: 'thinking', duration: '', text: m.metadata.thinking, streaming: false });
       if (m.metadata?.plan) out = upsertPlanBlock(out, m.metadata.plan);
