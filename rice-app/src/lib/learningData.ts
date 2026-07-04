@@ -255,7 +255,7 @@ export interface EditDiffRow {
 }
 
 export type ThreadMessage =
-  | { kind: 'user'; text: string }
+  | { kind: 'user'; text: string; sentAt?: number }
   | {
       kind: 'thinking';
       duration: string;
@@ -299,6 +299,8 @@ export type ThreadMessage =
       bullets?: string[];
       usedSkill?: SkillRef;
       action?: { label: string; icon: IconName };
+      /** epoch ms — stamped when the answer first arrives (live) or restored from DB */
+      sentAt?: number;
     }
   | {
       kind: 'skill';

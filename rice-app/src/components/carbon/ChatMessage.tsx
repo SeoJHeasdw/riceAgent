@@ -11,6 +11,23 @@ import { Markdown } from './Markdown';
 // extensions so command/identifier chips (`db2.query`) stay plain.
 const FILE_CHIP_RE = /^\.?\/?[\w.-]+\.(txt|md|markdown|json|jsonl|csv|tsv|log|ya?ml|py|js|ts|tsx|jsx|sh|bash|html?|css|scss|sql|toml|ini|env|xml|svg)$/i;
 
+// epoch ms → 시간 라벨 — undefined/0은 빈 문자열로 조용히 처리.
+// 오늘: "HH:MM" / 올해 다른 날: "M월 D일 HH:MM" / 작년 이전: "YYYY년 M월 D일 HH:MM"
+const formatTime = (ms?: number): string => {
+  if (!ms) return '';
+  const d = new Date(ms);
+  const now = new Date();
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  const sameYear = d.getFullYear() === now.getFullYear();
+  const time = d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
+  if (sameDay) return time;
+  if (sameYear) return `${d.getMonth() + 1}월 ${d.getDate()}일 ${time}`;
+  return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일 ${time}`;
+};
+
 /**
  * ChatMessage — renders one thread message. Handles the new learning-loop
  * message kinds: multi-step tool-call cards, the memory-written indicator,
@@ -393,7 +410,9 @@ const MessageActions: React.FC<{
   onRegenerate?: () => void;
   onCorrect?: (text: string) => void;
   copyText?: string;
-}> = ({ onRegenerate, onCorrect, copyText }) => {
+  /** epoch ms — 있으면 교정 버튼 옆에 발신 시각을 표시한다 */
+  sentAt?: number;
+}> = ({ onRegenerate, onCorrect, copyText, sentAt }) => {
   const [vote, setVote] = useState<'up' | 'down' | null>(null);
   const [copied, setCopied] = useState(false);
   const [correcting, setCorrecting] = useState(false);
@@ -413,9 +432,9 @@ const MessageActions: React.FC<{
         onClick={onClick}
         aria-label={label}
         style={{ ['--tint' as string]: tint } as React.CSSProperties}
-        className={`action-btn w-7 h-7 flex items-center justify-center rounded-md ${active ? 'is-active' : ''}`}
+        className={`action-btn w-6 h-6 flex items-center justify-center rounded-md ${active ? 'is-active' : ''}`}
       >
-        <Icon name={icon} size={16} />
+        <Icon name={icon} size={14} />
       </button>
       <span className="action-tip">{label}</span>
       {overlay}
@@ -436,9 +455,11 @@ const MessageActions: React.FC<{
     onCorrect?.(t);
   };
 
+  const timeLabel = formatTime(sentAt);
+
   return (
-    <div className="mt-2">
-      <div className="flex items-center gap-0.5">
+    <div className="mt-1.5">
+      <div className="flex items-center gap-px -ml-2">
         <Btn
           icon={copied ? 'check' : 'copy'}
           label="답변 복사하기"
@@ -476,6 +497,12 @@ const MessageActions: React.FC<{
             if (!correcting) setVote('down');
           }}
         />
+        {timeLabel && (
+          <>
+            <div className="w-px h-3.5 bg-border-subtle-01 mx-1.5" />
+            <span className="text-caption-01 text-text-helper select-none">{timeLabel}</span>
+          </>
+        )}
       </div>
 
       {correcting && (
@@ -1106,7 +1133,9 @@ const AssistantBlock: React.FC<{
   onRespondApproval?: (m: Extract<ThreadMessage, { kind: 'approval' }>, decision: 'approve' | 'reject') => void;
   showActions?: boolean;
   actionsCopyText?: string;
-}> = ({ m, onCorrect, onJumpSkill, onRegenerate, onSaveSkill, onApprovePatch, onRejectPatch, onRespondApproval, showActions, actionsCopyText }) => {
+  /** epoch ms for the action bar timestamp */
+  actionsSentAt?: number;
+}> = ({ m, onCorrect, onJumpSkill, onRegenerate, onSaveSkill, onApprovePatch, onRejectPatch, onRespondApproval, showActions, actionsCopyText, actionsSentAt }) => {
   const { openFile } = useFileViewer();
   if (m.kind === 'thinking') return <ThinkingBlock m={m} />;
   if (m.kind === 'toolrun') return <ToolCallCard m={m} onJumpSkill={onJumpSkill} />;
@@ -1115,7 +1144,7 @@ const AssistantBlock: React.FC<{
       <>
         <MemoryIndicator m={m} onJumpSkill={onJumpSkill} />
         {showActions && (
-          <MessageActions onRegenerate={onRegenerate} onCorrect={onCorrect} copyText={actionsCopyText} />
+          <MessageActions onRegenerate={onRegenerate} onCorrect={onCorrect} copyText={actionsCopyText} sentAt={actionsSentAt} />
         )}
       </>
     );
@@ -1127,7 +1156,7 @@ const AssistantBlock: React.FC<{
       <div className="my-1 max-w-[620px]">
         <SkillProposalCard m={skillMsg} onJumpSkill={onJumpSkill} onSave={() => onSaveSkill?.(skillMsg)} />
         {showActions && (
-          <MessageActions onRegenerate={onRegenerate} onCorrect={onCorrect} copyText={actionsCopyText} />
+          <MessageActions onRegenerate={onRegenerate} onCorrect={onCorrect} copyText={actionsCopyText} sentAt={actionsSentAt} />
         )}
       </div>
     );
@@ -1138,7 +1167,7 @@ const AssistantBlock: React.FC<{
       <>
         <ApprovalCard m={m} onRespond={(d) => onRespondApproval?.(m, d)} />
         {showActions && (
-          <MessageActions onRegenerate={onRegenerate} onCorrect={onCorrect} copyText={actionsCopyText} />
+          <MessageActions onRegenerate={onRegenerate} onCorrect={onCorrect} copyText={actionsCopyText} sentAt={actionsSentAt} />
         )}
       </>
     );
@@ -1148,7 +1177,7 @@ const AssistantBlock: React.FC<{
       <>
         <PatchProposalCard m={m} onApprove={(b) => onApprovePatch?.(m, b)} onReject={() => onRejectPatch?.(m)} onJumpSkill={onJumpSkill} />
         {showActions && (
-          <MessageActions onRegenerate={onRegenerate} onCorrect={onCorrect} copyText={actionsCopyText} />
+          <MessageActions onRegenerate={onRegenerate} onCorrect={onCorrect} copyText={actionsCopyText} sentAt={actionsSentAt} />
         )}
       </>
     );
@@ -1192,7 +1221,7 @@ const AssistantBlock: React.FC<{
         </div>
       )}
       {showActions && (
-        <MessageActions onRegenerate={onRegenerate} onCorrect={onCorrect} copyText={actionsCopyText ?? m.text} />
+        <MessageActions onRegenerate={onRegenerate} onCorrect={onCorrect} copyText={actionsCopyText ?? m.text} sentAt={actionsSentAt} />
       )}
     </div>
   );
@@ -1216,6 +1245,8 @@ export interface ChatTurnProps {
   highlightIndex?: number | null;
   /** index → originating answer text; renders the action bar at that index */
   actionsCopyAt?: Record<number, string>;
+  /** index → epoch ms of the agent answer that owns that action bar */
+  actionsTimeAt?: Record<number, number>;
 }
 
 export const ChatTurn: React.FC<ChatTurnProps> = ({
@@ -1229,16 +1260,21 @@ export const ChatTurn: React.FC<ChatTurnProps> = ({
   onRespondApproval,
   highlightIndex,
   actionsCopyAt = {},
+  actionsTimeAt = {},
 }) => {
   const first = items[0].m;
 
   // user turn — a right-aligned bubble, no avatar/label (normal chat convention)
   if (first.kind === 'user') {
+    const timeLabel = formatTime(first.sentAt);
     return (
-      <div className="flex justify-end py-2.5" data-msg-index={items[0].index}>
+      <div className="flex flex-col items-end gap-1 py-2.5" data-msg-index={items[0].index}>
         <div className="max-w-[80%] bg-layer-02 rounded-2xl px-4 py-2.5 text-body-short-02 text-text-primary leading-relaxed break-words whitespace-pre-wrap">
           {first.text}
         </div>
+        {timeLabel && (
+          <span className="text-caption-01 text-text-helper select-none pr-1">{timeLabel}</span>
+        )}
       </div>
     );
   }
@@ -1270,6 +1306,7 @@ export const ChatTurn: React.FC<ChatTurnProps> = ({
                 onRespondApproval={onRespondApproval}
                 showActions={index in actionsCopyAt}
                 actionsCopyText={actionsCopyAt[index]}
+                actionsSentAt={actionsTimeAt[index]}
               />
             </div>
           ))}

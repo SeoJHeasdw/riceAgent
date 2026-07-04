@@ -46,6 +46,8 @@ type RawMessage = {
   role: string;
   content: string;
   tool_calls?: RawToolCall[];
+  /** epoch ms (server Message.ts field) — used to stamp sentAt on user bubbles */
+  ts?: number;
   // plan: plan-and-execute 스냅샷 (plan_updated와 같은 형태) — 계획 생성 시 첫
   // 어시스턴트 메시지에, 이후 갱신마다 update_plan tool 메시지에 실린다.
   metadata?: { thinking?: string; tool_call_id?: string; plan?: PlanUpdatedEventData } | null;
@@ -114,7 +116,7 @@ const toThread = (msgs: RawMessage[]): ThreadMessage[] => {
   let out: ThreadMessage[] = [];
   for (const m of msgs) {
     if (m.role === 'user') {
-      if (m.content) out.push({ kind: 'user', text: m.content });
+      if (m.content) out.push({ kind: 'user', text: m.content, sentAt: m.ts });
     } else if (m.role === 'assistant') {
       if (m.metadata?.thinking) out.push({ kind: 'thinking', duration: '', text: m.metadata.thinking, streaming: false });
       if (m.metadata?.plan) out = upsertPlanBlock(out, m.metadata.plan);
@@ -123,7 +125,7 @@ const toThread = (msgs: RawMessage[]): ThreadMessage[] => {
         if (tc.tool_name === 'update_plan') continue;
         out.push({ kind: 'toolcall', callId: tc.id, tool: tc.tool_name, args: tc.arguments ?? {}, status: 'done' });
       }
-      if (m.content) out.push({ kind: 'agent', text: m.content });
+      if (m.content) out.push({ kind: 'agent', text: m.content, sentAt: m.ts });
     } else if (m.role === 'tool') {
       // update_plan 결과 메시지가 실은 최신 계획 스냅샷 → 카드 갱신.
       if (m.metadata?.plan) {
@@ -1026,6 +1028,7 @@ function ChatScreen() {
   const upsertPlan = (d: PlanUpdatedEventData) => setThread((p) => upsertPlanBlock(p, d));
 
   // Append to / create the streaming answer bubble.
+  // sentAt is stamped once when the bubble is first created (first token arrival).
   const appendAnswer = (d: { delta?: string; content?: string }) =>
     setThread((p) => {
       const copy = [...p];
@@ -1035,7 +1038,7 @@ function ChatScreen() {
         const next = text ?? (last.text ?? '') + (d.delta ?? '');
         copy[copy.length - 1] = { ...last, text: next };
       } else {
-        copy.push({ kind: 'agent', text: text ?? d.delta ?? '' });
+        copy.push({ kind: 'agent', text: text ?? d.delta ?? '', sentAt: Date.now() });
       }
       return copy;
     });
@@ -1376,7 +1379,7 @@ function ChatScreen() {
     setBusy(true);
     setThread((p) => [
       ...p,
-      { kind: 'user', text: q },
+      { kind: 'user', text: q, sentAt: Date.now() },
       { kind: 'thinking', duration: '', text: '', streaming: true, startedAt: Date.now() },
     ]);
     void sendLive(q);
@@ -1401,7 +1404,7 @@ function ChatScreen() {
 
     // Offline (design demo) → scripted mock turn.
     const runId = 'r' + Date.now();
-    setThread((p) => [...p, { kind: 'user', text: q }]);
+    setThread((p) => [...p, { kind: 'user', text: q, sentAt: Date.now() }]);
 
     // thinking trace
     setTimeout(() => {
@@ -1602,6 +1605,8 @@ function ChatScreen() {
   // message), then push the bar below any trailing skill/memory tiles it produced
   // (e.g. "새 스킬을 학습했어요") so it sits at the very bottom.
   const actionsCopyAt: Record<number, string> = {};
+  // index → epoch ms of the agent message that owns the action bar
+  const actionsTimeAt: Record<number, number> = {};
   thread.forEach((m, i) => {
     if (m.kind !== 'agent') return;
     // skip intermediate narration: another agent message follows in this same turn
@@ -1612,6 +1617,7 @@ function ChatScreen() {
     let end = i;
     while (end + 1 < thread.length && (thread[end + 1].kind === 'skill' || thread[end + 1].kind === 'memory' || thread[end + 1].kind === 'patch' || thread[end + 1].kind === 'approval')) end++;
     actionsCopyAt[end] = m.text;
+    if (m.sentAt) actionsTimeAt[end] = m.sentAt;
   });
 
   // group consecutive non-user messages into one assistant turn; each user
@@ -1726,6 +1732,7 @@ function ChatScreen() {
                       onRespondApproval={handleToolApproval}
                       highlightIndex={highlightMsg}
                       actionsCopyAt={actionsCopyAt}
+                      actionsTimeAt={actionsTimeAt}
                     />
                   ))
                 )}
