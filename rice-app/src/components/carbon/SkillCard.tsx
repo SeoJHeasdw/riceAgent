@@ -66,7 +66,7 @@ export const SkillCard: React.FC<SkillCardProps> = ({
       padding="md"
       className={`group relative flex flex-col min-h-[176px] cursor-pointer overflow-hidden transition-colors duration-150 ${
         installed
-          ? 'border-blue-60/55 bg-blue-60/[0.05] hover:border-blue-50/70'
+          ? 'border-blue-60/55 bg-blue-60/[0.025] hover:border-blue-50/70'
           : 'border-border-subtle-01 hover:border-blue-50/45 hover:bg-blue-60/[0.025]'
       }`}
     >
