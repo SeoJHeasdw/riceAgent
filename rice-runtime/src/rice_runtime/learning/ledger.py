@@ -222,6 +222,24 @@ class LearningLedger:
             for r in rows
         ]
 
+    def requeue_orphan_running_jobs(self) -> int:
+        """부팅 시 1회 호출 — 이전 프로세스가 crash 하며 'running' 으로 남긴 리뷰
+        잡을 pending 으로 되돌린다. 단일 프로세스 런타임이므로 **부팅 시점**의
+        running 은 전부 고아라 판별이 정확하다(별도 lease/heartbeat 불필요).
+        재실행돼도 제안함(add_suggestion)이 skill_id+kind 로 멱등이라 이중 리뷰의
+        해가 유계다. 반환: 되돌린 잡 수."""
+        try:
+            cur = self._db.execute(
+                "UPDATE learning_jobs SET status = 'pending', claimed_at = NULL "
+                "WHERE status = 'running' AND kind = 'review'"
+            )
+            if cur.rowcount:
+                log.info("requeued %d orphan running review job(s) from previous process", cur.rowcount)
+            return cur.rowcount
+        except Exception:  # noqa: BLE001
+            log.warning("requeue_orphan_running_jobs failed", exc_info=True)
+            return 0
+
     def claim_job_by_id(self, job_id: str) -> bool:
         """sweep 경로의 claim — id 지정 pending → running 원자 전이."""
         try:

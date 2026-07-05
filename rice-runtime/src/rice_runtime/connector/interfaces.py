@@ -58,9 +58,14 @@ class IConnectorService(Protocol):
         """Tools exposed by all currently-connected connectors (source=connector)."""
         ...
 
-    async def invoke(self, call: ToolCall) -> ToolResult:
+    async def invoke(self, call: ToolCall, owner_id: str | None = None) -> ToolResult:
         """Execute a connector tool. Assumes permission + HITL approval already
-        passed (the dispatcher enforces those before calling)."""
+        passed (the dispatcher enforces those before calling).
+
+        `owner_id`(= 그 도구 ToolSpec의 owner_id, connector_id)가 주어지면 **그
+        커넥터로만** 라우팅한다 — 두 계정/서버가 같은 도구명을 노출할 때 이름
+        기반 재탐색이 임의의 첫 커넥터로 보내 계정을 오염시키는 사고 방지.
+        None이면 이름으로 소유자를 탐색한다(하위호환)."""
         ...
 
     def check_permission(self, plugin_id: str, connector_type: str) -> bool:

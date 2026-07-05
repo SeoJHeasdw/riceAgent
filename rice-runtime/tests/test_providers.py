@@ -345,6 +345,20 @@ async def test_settings_registered_models_round_trip():
         assert "projectId" not in models["gpt-x"]
         assert models["granite"]["projectId"] == "p"
         assert models["granite"]["baseUrl"].endswith("ibm.com")
-        assert models["granite"]["apiKey"] == "k"
+        # 적대 리뷰 P1#9: GET /settings 는 평문 키를 되돌려주지 않는다 — 마스크 +
+        # hasKey 만 노출한다. 실제 저장 여부는 DB 로 확인한다.
+        assert models["granite"]["apiKey"].startswith("••••")
+        assert "k" not in models["granite"]["apiKey"]
+        assert models["granite"]["hasKey"] is True
+        row = c.db.query_one("SELECT api_key FROM provider_models WHERE model_id='granite'")
+        assert row["api_key"] == "k"
+
+        # 마스크값을 그대로 되돌려 보내는 PUT(프론트의 일반 저장 경로)은 키를
+        # 지우지 않고 보존해야 한다.
+        await update_settings(
+            SettingsIn(registered_models=res["data"]["registered_models"]), c
+        )
+        row = c.db.query_one("SELECT api_key FROM provider_models WHERE model_id='gpt-x'")
+        assert row["api_key"] == "sk-x"
     finally:
         c.shutdown()

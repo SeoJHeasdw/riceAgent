@@ -81,6 +81,32 @@ from .tool_dispatch import BuiltinTool, ToolDispatcher, fold_tools_for_budget
 log = logging.getLogger("rice.agent.orchestrator")
 
 
+def _dedupe_tool_names(
+    builtin: tuple[ToolSpec, ...], foldable: tuple[ToolSpec, ...]
+) -> tuple[ToolSpec, ...]:
+    """connector/plugin 도구 중 이름이 겹치는 것을 카탈로그 조립 시점에 걸러낸다.
+
+    같은 이름이 둘이면 (a) 프로바이더 API 가 중복 tool 스키마를 거부하거나
+    (b) loop 의 name→spec 인덱스와 실행 라우팅이 서로 다른 쪽을 고를 수 있다.
+    빌트인과 겹치는 connector 도구(예: 로컬 MCP 가 노출한 "read_file")는 빌트인
+    새도잉이므로 역시 제외한다. 먼저 등장한 스펙이 이긴다(로컬 MCP → 원격 커넥터
+    → 플러그인 순). 제외는 경고 로그로 가시화한다 — 조용한 오배송보다 낫다.
+    """
+    taken = {t.name for t in builtin}
+    kept: list[ToolSpec] = []
+    for spec in foldable:
+        if spec.name in taken:
+            log.warning(
+                "duplicate tool name %r (owner=%s) dropped from catalog — "
+                "shadowed by a builtin or an earlier connector/plugin tool",
+                spec.name, spec.owner_id,
+            )
+            continue
+        taken.add(spec.name)
+        kept.append(spec)
+    return tuple(kept)
+
+
 class Orchestrator:
     """Implements `agent.interfaces.IAgent`. Constructed once by the composition
     root with every collaborator injected as a Protocol."""
@@ -115,8 +141,10 @@ class Orchestrator:
         # 순수 CJK 휴리스틱만 쓴다(테스트/오프라인).
         self._token_calibrator = token_calibrator or TokenCalibrator()
         self._aborts: dict[str, asyncio.Event] = {}
-        # 세션별 진행 중 턴 락 — 같은 세션 동시 POST /messages 차단.
-        self._active: set[str] = set()
+        # 세션별 진행 중 턴 락 — 같은 세션 동시 POST /messages 차단. 값은 "턴 종료"
+        # 이벤트로, abort_and_drain 이 진행 중 턴이 실제로 끝날 때까지 기다리는 데
+        # 쓴다(DELETE /sessions 등 mutation 이 스트리밍 중 transcript 를 찢지 않게).
+        self._active: dict[str, asyncio.Event] = {}
 
     # ── IAgent.run_turn ──────────────────────────────────────────────────────
     async def run_turn(self, session_id: str, user_message: str) -> AsyncIterator[SSEEvent]:
@@ -128,14 +156,16 @@ class Orchestrator:
             yield ev_error("session_busy", "이 세션에서 이미 응답을 생성하고 있습니다. 잠시 후 다시 시도하세요.")
             yield ev_done()
             return
-        self._active.add(session_id)
+        self._active[session_id] = asyncio.Event()
         try:
             # 1. PERSIST user turn, then drive the turn over the (now-updated) history.
             self._transcript.append(session_id, Message(role="user", content=user_message))
             async for event in self._drive_turn(session_id, user_message):
                 yield event
         finally:
-            self._active.discard(session_id)
+            done = self._active.pop(session_id, None)
+            if done is not None:
+                done.set()
 
     # ── IAgent.regenerate ─────────────────────────────────────────────────────
     async def regenerate(self, session_id: str) -> AsyncIterator[SSEEvent]:
@@ -146,7 +176,7 @@ class Orchestrator:
             yield ev_error("session_busy", "이 세션에서 이미 응답을 생성하고 있습니다. 잠시 후 다시 시도하세요.")
             yield ev_done()
             return
-        self._active.add(session_id)
+        self._active[session_id] = asyncio.Event()
         try:
             history = self._transcript.history(session_id)
             last_user = next((m for m in reversed(history) if m.role == "user"), None)
@@ -157,7 +187,9 @@ class Orchestrator:
             async for event in self._drive_turn(session_id, last_user.content):
                 yield event
         finally:
-            self._active.discard(session_id)
+            done = self._active.pop(session_id, None)
+            if done is not None:
+                done.set()
 
     async def _drive_turn(self, session_id: str, user_message: str) -> AsyncIterator[SSEEvent]:
         """Steps 2–7 of a turn (prefetch → assemble → loop → persist → observe →
@@ -185,7 +217,10 @@ class Orchestrator:
             # them behind 3 bridge tools (tool_search/describe/call — §2.1/§11) instead of
             # sending every schema every turn. The dispatcher gets the full foldable
             # catalog regardless, so tool_call can resolve a folded tool by name.
-            foldable_tools = tuple(self._connectors.list_tools()) + tuple(self._plugins.list_tools())
+            foldable_tools = _dedupe_tool_names(
+                self._builtin_specs(),
+                tuple(self._connectors.list_tools()) + tuple(self._plugins.list_tools()),
+            )
             tools = fold_tools_for_budget(self._builtin_specs(), foldable_tools)
             # The model reads ctx.system_prompt only (the loop ignores injected_skills,
             # which is telemetry) → plugin skills must be rendered INTO the prompt.
@@ -294,6 +329,41 @@ class Orchestrator:
             self._aborts[session_id].set()
         # cancel any parked approvals for this session (RUNTIME_DESIGN §5.1)
         self._approvals.cancel_session(session_id)
+
+    # ── IAgent.is_active / abort_and_drain ──────────────────────────────────
+    def is_active(self, session_id: str) -> bool:
+        """이 세션에서 턴이 스트리밍 중인가 — 라우트가 transcript mutation
+        (delete/regenerate)을 하기 전에 반드시 확인해야 하는 게이트."""
+        return session_id in self._active
+
+    async def abort_and_drain(self, session_id: str, timeout_s: float = 10.0) -> bool:
+        """진행 중 턴을 abort 하고 실제로 **끝날 때까지** 기다린다 (DELETE /sessions 용).
+
+        abort 플래그만 세우고 바로 지우면 턴 후반의 append/observe 가 삭제된
+        세션에 쓰다 FK 오류로 죽는다 — drain 이 끝난 뒤에야 mutation 이 안전하다.
+        반환: True = 턴 없음/정상 종료, False = timeout 내 안 끝남(호출자는
+        진행하되 턴 꼬리의 실패 이벤트를 감수한다 — 로그로 남긴다)."""
+        done = self._active.get(session_id)
+        if done is None:
+            return True
+        await self.abort(session_id)
+        try:
+            await asyncio.wait_for(done.wait(), timeout=timeout_s)
+            return True
+        except asyncio.TimeoutError:
+            log.warning("abort_and_drain: turn for %s did not finish within %.1fs", session_id, timeout_s)
+            return False
+
+    def abort_all(self) -> None:
+        """모든 활성 턴 abort + 파킹된 승인 취소 (shutdown 용, best-effort sync).
+
+        drain 은 하지 않는다 — shutdown 경로는 sync 라 기다릴 수 없고, 직후
+        supervisor 가 프로세스를 내리므로 '새 작업 차단 + 대기 해제'가 목표다."""
+        for session_id in list(self._active):
+            abort = self._aborts.get(session_id)
+            if abort is not None:
+                abort.set()
+            self._approvals.cancel_session(session_id)
 
     # ── builtin tool catalog (override/extend in composition root) ───────────
     def _builtin_specs(self):

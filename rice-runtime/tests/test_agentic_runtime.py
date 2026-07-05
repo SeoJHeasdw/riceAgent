@@ -20,7 +20,7 @@ from rice_runtime.server.approval import ApprovalRegistry
 
 
 class _NoopService:
-    async def invoke(self, call):
+    async def invoke(self, call, owner_id=None):
         raise AssertionError(f"unexpected invoke: {call}")
 
 

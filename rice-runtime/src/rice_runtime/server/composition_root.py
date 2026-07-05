@@ -71,7 +71,16 @@ class Container:
         return self.config_store.config
 
     def shutdown(self) -> None:
-        """Graceful teardown (POST /shutdown). Cancel parked approvals, close DB."""
+        """Graceful teardown (POST /shutdown): 활성 턴 abort + 파킹된 승인 취소
+        → DB close. 이전엔 DB만 닫아서, 파킹된 HITL 승인이 스트림을 계속 물고
+        있었고 진행 중 턴은 닫힌 DB를 만졌다. abort_all 은 sync best-effort 다 —
+        drain 까지는 하지 않는다(직후 supervisor 가 프로세스를 내린다)."""
+        abort_all = getattr(self.agent, "abort_all", None)
+        if abort_all is not None:
+            try:
+                abort_all()
+            except Exception:  # noqa: BLE001 — teardown 은 어떤 경우에도 진행돼야 한다
+                log.warning("abort_all during shutdown failed", exc_info=True)
         self.db.close()
 
 
@@ -141,9 +150,15 @@ def build_container(
     # think-disabled variant like the titler's) — review requires the same
     # reasoning quality as the conversation itself, and it's already off the hot
     # path (gated + its own endpoint), so there's no latency reason to downgrade it.
-    learning: ILearningService = LearningService(
+    learning_impl = LearningService(
         db, config_store.config.learning, paths, resolve_provider=resolve_provider
     )
+    # crash 복구: 이전 프로세스가 'running' 으로 남긴 리뷰 잡을 pending 으로 —
+    # 안 하면 그 잡은 영구히 재수확되지 않는다(단일 프로세스라 부팅 시점 running 은
+    # 전부 고아라는 판별이 정확한 지점이 여기다). 콘크리트 전용 부팅 메서드라
+    # ILearningService seam 에는 올리지 않는다(여기는 콘크리트가 허용되는 유일한 곳).
+    learning_impl.recover_boot_state()
+    learning: ILearningService = learning_impl
 
     # ── builtin tools (in-process; advertised to the LLM + dispatched directly) ─
     # learning을 넘겨 propose_skill(미드턴 스킬 승격, Self-Improvement v3)을 함께

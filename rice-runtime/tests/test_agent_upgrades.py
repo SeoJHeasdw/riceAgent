@@ -255,7 +255,7 @@ async def test_subagent_loop_executes_read_only_tools_then_reports(tmp_path):
 
 
 class _NoopService:
-    async def invoke(self, call):
+    async def invoke(self, call, owner_id=None):
         raise AssertionError(f"unexpected invoke: {call}")
 
 

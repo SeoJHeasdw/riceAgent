@@ -30,6 +30,7 @@ frontmatter 파싱에 PyYAML을 사용한다. PyYAML이 없으면 최소 파서(
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 from dataclasses import dataclass
@@ -252,11 +253,19 @@ class SkillStore:
 
     # ── 쓰기 ─────────────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _atomic_write_text(path: Path, text: str) -> None:
+        """temp write → rename. 쓰기 도중 크래시가 나도 파일은 이전 전체본 아니면
+        새 전체본이다 — write_text 는 truncate 후 쓰므로 반쪽 SKILL.md 를 남길 수
+        있고, 그 반쪽은 다음 read()에서 파싱 오류(= 승인 적용 실패)가 된다."""
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+
     def write(self, skill: SkillData) -> None:
-        """스킬을 파일시스템에 직렬화한다. 디렉토리가 없으면 생성한다."""
+        """스킬을 파일시스템에 원자적으로 직렬화한다. 디렉토리가 없으면 생성한다."""
         self._paths.skills.mkdir(parents=True, exist_ok=True)
-        path = self._skill_path(skill.name)
-        path.write_text(serialize_skill_md(skill), encoding="utf-8")
+        self._atomic_write_text(self._skill_path(skill.name), serialize_skill_md(skill))
 
     def delete(self, name: str) -> None:
         """스킬 본문 파일과 히스토리 디렉토리를 삭제한다 (DELETE /skills/{id}).
@@ -274,5 +283,4 @@ class SkillStore:
         frontmatter가 없으면 복원/조회가 깨진다. 모든 호출부가 전체 텍스트를 넘긴다."""
         hist_dir = self._history_dir(name)
         hist_dir.mkdir(parents=True, exist_ok=True)
-        dest = hist_dir / f"v{version}.md"
-        dest.write_text(full_text, encoding="utf-8")
+        self._atomic_write_text(hist_dir / f"v{version}.md", full_text)

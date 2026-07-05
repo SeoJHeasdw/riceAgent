@@ -14,6 +14,7 @@ extracts them as text via `read_extract` (stdlib only — no extra dependencies)
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from ...core.paths import RicePaths
@@ -121,6 +122,10 @@ def _make_list(root: Path) -> BuiltinTool:
                 if len(entries) >= _MAX_LIST_ENTRIES:
                     truncated = True
                     return
+                if child.is_symlink():
+                    # symlink 는 워크스페이스 밖(예: ~/.ssh)을 가리킬 수 있다 —
+                    # read_file 의 resolve 검증과 달리 여기선 따라가지 않고 스킵한다.
+                    continue
                 entry = {"path": child.relative_to(root).as_posix(), "type": "dir" if child.is_dir() else "file"}
                 if child.is_file():
                     try:
@@ -143,18 +148,32 @@ def _make_search(root: Path) -> BuiltinTool:
         if not query:
             raise ValueError("query is required")
         matches: list[dict] = []
-        for f in sorted(root.rglob("*")):
-            if not f.is_file():
-                continue
-            rel = f.relative_to(root).as_posix()
-            try:
-                for i, line in enumerate(f.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+        # os.walk(followlinks=False): 디렉토리 symlink 를 따라가지 않는다 —
+        # rglob 은 파이썬 버전에 따라 symlink 디렉토리로 재귀해 워크스페이스 밖
+        # (또는 무한 루프)으로 샐 수 있다. 파일 symlink 도 아래에서 스킵 +
+        # resolve 재검증으로 이중 방어한다(모듈 docstring 의 sandbox 보장 준수).
+        for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+            dirnames.sort()
+            for name in sorted(filenames):
+                f = Path(dirpath) / name
+                if f.is_symlink():
+                    continue
+                try:
+                    if not f.resolve().is_relative_to(root):
+                        continue  # 방어적 재검증 — 어떤 경로로든 root 밖이면 제외
+                    if not f.is_file():
+                        continue
+                    # read_file 과 같은 상한으로 읽는다 — 거대 파일 하나가 메모리를
+                    # 삼키지 않게(라인 검색이므로 잘린 꼬리는 감수).
+                    data = f.read_bytes()[:_MAX_READ_BYTES]
+                except OSError:
+                    continue
+                rel = f.relative_to(root).as_posix()
+                for i, line in enumerate(data.decode("utf-8", errors="replace").splitlines(), 1):
                     if query in line:
                         matches.append({"path": rel, "line": i, "text": line.strip()[:200]})
                         if len(matches) >= _MAX_MATCHES:
                             return {"query": query, "matches": matches, "truncated": True}
-            except OSError:
-                continue
         return {"query": query, "matches": matches, "truncated": False}
 
     return search_files

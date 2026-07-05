@@ -30,7 +30,7 @@ from rice_runtime.server.composition_root import build_container
 
 
 class _NoopService:
-    async def invoke(self, call):
+    async def invoke(self, call, owner_id=None):
         raise AssertionError(f"unexpected invoke: {call}")
 
 

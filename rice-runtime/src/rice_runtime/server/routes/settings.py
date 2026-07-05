@@ -35,7 +35,27 @@ class SettingsIn(BaseModel):
     registered_models: list[dict[str, Any]] | None = None
 
 
+# API 응답에 평문 키를 싣지 않기 위한 마스크. GET 은 항상 마스크만 반환하고,
+# PUT 이 마스크 형태의 값을 되돌려 보내면 "변경 없음"으로 해석해 저장된 키를
+# 보존한다 — 프론트가 전체 목록을 라운드트립하는 기존 계약을 깨지 않는 방식.
+# (DB 평문 저장 자체는 0004 마이그레이션에 문서화된 로컬 프로토타입 결정 —
+# 키체인 이관은 별도 트랙. 여기서는 API 표면 노출만 닫는다.)
+_KEY_MASK_PREFIX = "••••"
+
+
+def _mask_key(key: str) -> str:
+    if not key:
+        return ""
+    suffix = key[-4:] if len(key) > 8 else ""
+    return f"{_KEY_MASK_PREFIX}{suffix}"
+
+
+def _is_masked_key(value: str) -> bool:
+    return value.startswith(_KEY_MASK_PREFIX)
+
+
 def _load_registered_models(c: Container) -> list[dict[str, Any]]:
+    """등록 모델 목록 (UI 용). apiKey 는 마스크 + hasKey 로만 노출한다."""
     rows = c.db.query_all(
         "SELECT model_id, provider, provider_label, api_key, extra FROM provider_models ORDER BY created_at"
     )
@@ -47,13 +67,20 @@ def _load_registered_models(c: Container) -> list[dict[str, Any]]:
                 "modelId": r["model_id"],
                 "provider": r["provider"],
                 "providerLabel": r["provider_label"],
-                "apiKey": r["api_key"],
+                "apiKey": _mask_key(r["api_key"] or ""),
+                "hasKey": bool(r["api_key"]),
                 # provider-specific (없으면 생략)
                 **({"baseUrl": extra["base_url"]} if extra.get("base_url") else {}),
                 **({"projectId": extra["project_id"]} if extra.get("project_id") else {}),
             }
         )
     return out
+
+
+def _stored_keys(c: Container) -> dict[str, str]:
+    """PUT 의 마스크값 보존용 — model_id → 저장된 평문 키 (교체 전에 읽는다)."""
+    rows = c.db.query_all("SELECT model_id, api_key FROM provider_models")
+    return {r["model_id"]: r["api_key"] or "" for r in rows}
 
 
 @router.get("/settings")
@@ -71,16 +98,21 @@ async def update_settings(body: SettingsIn, c: Container = Depends(get_container
     agent = AgentConfig(**{**cfg.agent.__dict__, **(body.agent or {})})
     ui = UIConfig(**{**cfg.ui.__dict__, **(body.ui or {})})
     new_cfg = Config(provider=provider, learning=cfg.learning, context=context, agent=agent, ui=ui)
-    save_config(c.paths, new_cfg)
-    c.config_store.update(new_cfg)  # live: provider/orchestrator observe this next turn (C-1)
 
-    # 등록 모델 목록이 오면 전체 교체 (프론트가 항상 전체 목록을 보낸다)
+    # 영속화 순서: ① DB 모델 교체(단일 트랜잭션) → ② config.yaml(원자 저장) →
+    # ③ live config. 이전엔 live 반영·파일 저장·DELETE·INSERT 가 전부 독립 커밋이라
+    # 중간 실패 시 "설정은 새 모델, credential 행은 없음 → echo 폴백" 반쪽 상태가
+    # 났다. 이제 어느 단계에서 죽어도 live config 는 갱신되지 않고 5xx 로 드러난다.
     if body.registered_models is not None:
-        c.db.execute("DELETE FROM provider_models")
+        stored = _stored_keys(c)  # 마스크 보존 해석은 교체 전 스냅샷 기준
         rows = []
         for m in body.registered_models:
             if not m.get("modelId"):
                 continue
+            api_key = m.get("apiKey", "") or ""
+            if _is_masked_key(api_key):
+                # GET 이 준 마스크가 그대로 돌아왔다 = 변경 의사 없음 → 기존 키 유지.
+                api_key = stored.get(m.get("modelId"), "")
             extra = {
                 k: v
                 for k, v in (("base_url", m.get("baseUrl")), ("project_id", m.get("projectId")))
@@ -91,14 +123,19 @@ async def update_settings(body: SettingsIn, c: Container = Depends(get_container
                     m.get("modelId"),
                     m.get("provider"),
                     m.get("providerLabel"),
-                    m.get("apiKey", ""),
+                    api_key,
                     json.dumps(extra) if extra else None,
                 )
             )
-        c.db.executemany(
-            "INSERT INTO provider_models(model_id, provider, provider_label, api_key, extra) VALUES (?, ?, ?, ?, ?)",
-            rows,
-        )
+        with c.db.transaction() as conn:
+            conn.execute("DELETE FROM provider_models")
+            conn.executemany(
+                "INSERT INTO provider_models(model_id, provider, provider_label, api_key, extra) VALUES (?, ?, ?, ?, ?)",
+                rows,
+            )
+
+    save_config(c.paths, new_cfg)
+    c.config_store.update(new_cfg)  # live: 모든 영속화가 성공한 뒤에만 (C-1)
 
     data = new_cfg.to_dict()
     data["registered_models"] = _load_registered_models(c)

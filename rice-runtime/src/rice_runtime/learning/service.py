@@ -198,6 +198,13 @@ class LearningService(ILearningService):
             else None
         )
 
+    # ── boot recovery ─────────────────────────────────────────────────────────
+    def recover_boot_state(self) -> int:
+        """부팅 시 1회 — 이전 프로세스가 남긴 고아 'running' 리뷰 잡을 pending 으로
+        되돌린다(composition_root 가 호출). 없으면 0. 자세한 근거는
+        LearningLedger.requeue_orphan_running_jobs docstring."""
+        return self._ledger.requeue_orphan_running_jobs()
+
     # ── turn-critical ─────────────────────────────────────────────────────────
     def prefetch(self, session_id: str, user_message: str) -> PrefetchResult:
         """Assemble injectable context for the next LLM call (LEARNING_LOOP §6, §7).
@@ -392,8 +399,10 @@ class LearningService(ILearningService):
             usage = self._usage_store.read(skill_id)  # 0-초기화 사이드카 생성 보장
             self._usage_store._write(usage)  # noqa: SLF001 (create_skill과 동일 관례)
             return 1
-        except Exception:
-            return None
+        # NotFoundError 외 read 실패(손상된 SKILL.md 파싱 오류, 권한/IO 오류)는
+        # 삼키지 않고 전파한다 — 이전엔 여기서 return None 으로 삼켜져 "사용자가
+        # 승인했는데 조용히 적용 안 됨"으로 끝났다(적대 리뷰 P0#5). 전파된 예외는
+        # effect_surfacing 이 skill_patch_failed SSE 로, 라우트는 API 오류로 보여준다.
 
         if expected_version is not None and expected_version != current.version:
             # 스킬은 존재하지만 제안이 만들어진 이후 버전이 움직였다(다른 제안 승인,

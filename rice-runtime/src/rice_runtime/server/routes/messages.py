@@ -91,6 +91,10 @@ async def get_session(session_id: str, c: Container = Depends(get_container)):
 async def delete_session(session_id: str, c: Container = Depends(get_container)):
     if c.sessions.get(session_id) is None:
         raise NotFoundError(f"session {session_id} not found")
+    # 스트리밍 중 삭제 방어: 진행 중 턴을 abort 하고 실제 종료까지 drain 한 뒤에
+    # 지운다 — 안 그러면 턴 후반의 transcript.append/observe 가 삭제된 행에 쓰다
+    # FK 오류로 죽는다(orchestrator.abort_and_drain docstring 참고).
+    await c.agent.abort_and_drain(session_id)
     c.sessions.delete(session_id)
     return {"success": True}
 
@@ -190,6 +194,12 @@ async def learn(session_id: str, body: LearnIn, c: Container = Depends(get_conta
 async def regenerate(session_id: str, c: Container = Depends(get_container)):
     if c.sessions.get(session_id) is None:
         raise NotFoundError(f"session {session_id} not found")
+    # busy 확인은 delete_after **이전**이어야 한다 — 이전엔 여기서 무조건 지운 뒤
+    # 스트림이 session_busy 로 거절돼, 진행 중 턴의 베이스라인 히스토리만 파괴하고
+    # 재생성은 하지도 않는 최악의 조합이었다. 아래 검사~delete_after 사이에 await 가
+    # 없어 단일 이벤트 루프에서 원자적이다.
+    if c.agent.is_active(session_id):
+        raise ConflictError("이 세션에서 이미 응답을 생성하고 있습니다. 완료 후 다시 시도하세요.")
     # Drop the stale assistant turn (everything after the last user message) so the
     # re-run replaces it rather than appending a second answer.
     history = c.sessions.history(session_id)

@@ -18,9 +18,13 @@ absent, which keeps `core` import-clean.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+import logging
+import os
+from dataclasses import asdict, dataclass, field, fields
 
 from .paths import RicePaths
+
+log = logging.getLogger("rice.core.config")
 
 
 @dataclass(frozen=True)
@@ -209,7 +213,12 @@ class ConfigStore:
 
 def load_config(paths: RicePaths) -> Config:
     """Load `config.yaml` over the defaults. Missing file or missing PyYAML →
-    defaults (keeps the skeleton runnable with no deps)."""
+    defaults (keeps the skeleton runnable with no deps).
+
+    Fail-soft: 파손된 YAML, dict가 아닌 최상위 값, 구버전의 미지 키 어느 것도
+    부팅을 막지 않는다 — 경고를 남기고 기본값(또는 인식 가능한 부분만)으로
+    기동한다. 설정 파일 오류로 런타임이 아예 안 뜨는 것이 최악의 상태다.
+    """
     cfg_path = paths.config
     if not cfg_path.exists():
         return Config()
@@ -217,27 +226,59 @@ def load_config(paths: RicePaths) -> Config:
         import yaml  # optional dependency
     except ImportError:
         return Config()
-    raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+    try:
+        raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+    except Exception:  # noqa: BLE001 — yaml.YAMLError + 인코딩/IO 오류
+        log.warning("config.yaml is corrupted — booting with defaults", exc_info=True)
+        return Config()
+    if not isinstance(raw, dict):
+        log.warning("config.yaml top level is %s (expected mapping) — booting with defaults", type(raw).__name__)
+        return Config()
     return _merge(Config(), raw)
 
 
 def save_config(paths: RicePaths, config: Config) -> None:
-    """Persist to `config.yaml`. No-op if PyYAML is unavailable."""
+    """Persist to `config.yaml` atomically. No-op if PyYAML is unavailable.
+
+    temp write → fsync → rename: 저장 도중 프로세스가 죽어도 config.yaml은
+    이전 버전 전체 또는 새 버전 전체 중 하나다(반쪽 YAML 없음).
+    """
     try:
         import yaml
     except ImportError:
         return
     paths.ensure()
-    paths.config.write_text(yaml.safe_dump(config.to_dict(), allow_unicode=True), encoding="utf-8")
+    target = paths.config
+    tmp = target.with_name(target.name + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write(yaml.safe_dump(config.to_dict(), allow_unicode=True))
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, target)
+
+
+def _known_fields(cls, section: dict) -> dict:
+    """dataclass가 모르는 키를 걸러낸다 — 구버전/수동 편집이 남긴 잔여 키가
+    TypeError로 전체 로드를 무산시키지 않게(무시된 키는 경고만)."""
+    names = {f.name for f in fields(cls)}
+    unknown = set(section) - names
+    if unknown:
+        log.warning("config.yaml: ignoring unknown %s keys: %s", cls.__name__, sorted(unknown))
+    return {k: v for k, v in section.items() if k in names}
 
 
 def _merge(base: Config, raw: dict) -> Config:
     """Shallow-merge a parsed dict onto defaults, section by section."""
-    prov = {**asdict(base.provider), **(raw.get("provider") or {})}
-    learn = {**asdict(base.learning), **(raw.get("learning") or {})}
-    context = {**asdict(base.context), **(raw.get("context") or {})}
-    agent = {**asdict(base.agent), **(raw.get("agent") or {})}
-    ui = {**asdict(base.ui), **(raw.get("ui") or {})}
+
+    def section(name: str) -> dict:
+        value = raw.get(name)
+        return value if isinstance(value, dict) else {}
+
+    prov = {**asdict(base.provider), **_known_fields(ProviderConfig, section("provider"))}
+    learn = {**asdict(base.learning), **_known_fields(LearningConfig, section("learning"))}
+    context = {**asdict(base.context), **_known_fields(ContextConfig, section("context"))}
+    agent = {**asdict(base.agent), **_known_fields(AgentConfig, section("agent"))}
+    ui = {**asdict(base.ui), **_known_fields(UIConfig, section("ui"))}
     return Config(
         provider=ProviderConfig(**prov),
         learning=LearningConfig(**learn),

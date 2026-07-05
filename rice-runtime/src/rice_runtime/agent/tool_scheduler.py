@@ -39,6 +39,11 @@ class ToolBatchResult:
         )
 
 
+# 한 배치에서 동시에 실행할 워커 상한 — 모델이 한 라운드에 도구 호출을 수십 개
+# 쏟아내도 태스크가 무제한 생성되지 않게 한다(per-batch semaphore).
+_MAX_PARALLEL_TOOLS = 5
+
+
 class ToolScheduler:
     def __init__(self, dispatcher: IToolDispatcher) -> None:
         self._dispatcher = dispatcher
@@ -55,14 +60,10 @@ class ToolScheduler:
                 for req in batch:
                     result.results[req.call.id] = ToolResult(req.call.id, ok=False, error="tool cancelled")
                 return
-
-            if len(batch) == 1:
-                req = batch[0]
-                async for event in self._dispatcher.dispatch(session_id, req.call, req.spec):
-                    yield event
-                result.results[req.call.id] = await self._dispatcher.result_for(req.call)
-                continue
-
+            # 단일 호출도 워커 태스크 경로를 태운다 — 이전의 인라인 `await dispatch`
+            # 경로는 실행 **도중** abort 를 감시하지 않아, 장시간 도구 하나가 턴
+            # abort/drain 을 무기한 막았다(적대 리뷰 P0#3). 워커 경로는 abort 시
+            # task.cancel() 로 실행 자체를 끊는다.
             async for event in self._run_parallel_batch(session_id, batch, result, abort):
                 yield event
 
@@ -74,12 +75,14 @@ class ToolScheduler:
         abort: asyncio.Event,
     ) -> AsyncGenerator[SSEEvent, None]:
         queue: asyncio.Queue[tuple[str, int, SSEEvent | ToolResult]] = asyncio.Queue()
+        semaphore = asyncio.Semaphore(_MAX_PARALLEL_TOOLS)
 
         async def worker(index: int, req: ScheduledToolRequest) -> None:
             try:
-                async for event in self._dispatcher.dispatch(session_id, req.call, req.spec):
-                    await queue.put(("event", index, event))
-                await queue.put(("result", index, await self._dispatcher.result_for(req.call)))
+                async with semaphore:
+                    async for event in self._dispatcher.dispatch(session_id, req.call, req.spec):
+                        await queue.put(("event", index, event))
+                    await queue.put(("result", index, await self._dispatcher.result_for(req.call)))
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # defensive: dispatcher normally converts failures to ToolResult

@@ -93,6 +93,9 @@ class ConnectorService(IConnectorService):
         self._permission = PermissionChecker(paths.plugins if paths else None)
         # 원격 MCP 클라이언트 — connector_id 당 하나(엔드포인트는 타입 디스크립터에서).
         self._clients: dict[str, RemoteMcpClient] = {}
+        # connector 별 토큰 refresh 직렬화 — 병렬 tool call 이 같은 만료 토큰을 보고
+        # refresh 를 두 번 돌리면 rotation 서버에서 한쪽이 무효 토큰으로 실패한다.
+        self._refresh_locks: dict[str, asyncio.Lock] = {}
         # 로컬 MCP(.mcp.json, stdio) — connector_id("local:<name>") → 캐시된 ToolSpec 목록.
         # list_tools() 는 sync 라 여기 캐시를 읽고, warm_local() 이 async 로 채운다.
         self._mcp_config_path = paths.mcp_config if paths else None
@@ -278,14 +281,17 @@ class ConnectorService(IConnectorService):
             return []
         return _specs_from_json(connector_id, row["tools_json"])
 
-    async def invoke(self, call: ToolCall) -> ToolResult:
+    async def invoke(self, call: ToolCall, owner_id: str | None = None) -> ToolResult:
         """connector 도구 실행 (권한 + HITL 승인은 dispatcher 가 이미 처리).
 
-        도구명을 소유한 connector 를 찾아 그 원격 MCP `tools/call` 로 위임한다.
+        dispatcher 가 넘긴 `owner_id`(ToolSpec.owner_id)가 있으면 그 connector 로
+        직접 라우팅하고, 없을 때만 도구명으로 소유자를 탐색한다 — 같은 도구명을
+        노출하는 커넥터가 둘일 때(두 Gmail 계정, search류 커스텀 MCP) 이름 재탐색이
+        모델이 고른 것과 다른 커넥터로 호출을 보내는 사고를 막는다.
         실패는 예외가 아니라 ToolResult(ok=False) 로 반환한다.
         """
         try:
-            owner = self._owner_of_tool(call.tool_name)
+            owner = self._resolve_owner(call.tool_name, owner_id)
             if owner is None:
                 return ToolResult(call.id, ok=False, error=f"no connected connector owns tool {call.tool_name!r}")
             connector_id, connector_type = owner
@@ -561,6 +567,25 @@ class ConnectorService(IConnectorService):
             "SELECT id, connector_type FROM connectors WHERE status='connected'"
         )
 
+    def _resolve_owner(self, tool_name: str, owner_id: str | None) -> tuple[str, str] | None:
+        """invoke 라우팅 대상 (connector_id, type). owner_id 우선, 없으면 이름 탐색.
+
+        owner_id 가 로컬 MCP("local:<name>")면 type="local", 아니면 connectors 행에서
+        타입을 찾는다. 지정된 owner 가 더 이상 없으면 이름 폴백 없이 None —
+        엉뚱한 커넥터로 흘러가느니 명시적 실패가 낫다(fail-closed).
+        """
+        if owner_id:
+            if owner_id in self._local_specs or owner_id.startswith("local:"):
+                return owner_id, "local"
+            row = self._db.query_one(
+                "SELECT connector_type FROM connectors WHERE id=? AND status='connected'",
+                (owner_id,),
+            )
+            if row is None:
+                return None
+            return owner_id, row["connector_type"]
+        return self._owner_of_tool(tool_name)
+
     def _owner_of_tool(self, tool_name: str) -> tuple[str, str] | None:
         """도구명을 노출하는 소유자의 (connector_id, type). 로컬 우선, 없으면 None.
 
@@ -627,36 +652,48 @@ class ConnectorService(IConnectorService):
             self._mark_healthy(connector_id)
             return credential.access_token
 
-        if not credential.refresh_token:
-            log.warning("connector %s token expired and no refresh_token", connector_id)
-            self._mark_error(connector_id)
-            return None
+        # 만료 → refresh 는 connector 별로 직렬화한다. 락 안에서 키체인을 다시 읽어
+        # 앞선 병렬 호출이 이미 갱신했으면(rotation 포함) 그 토큰을 그대로 쓴다.
+        lock = self._refresh_locks.setdefault(connector_id, asyncio.Lock())
+        async with lock:
+            credential = self._keychain.load(connector_id)
+            if credential is None:
+                self._mark_error(connector_id)
+                return None
+            if not credential.is_expired():
+                self._mark_healthy(connector_id)
+                return credential.access_token
 
-        flow = self._flows.get(connector_type)
-        if flow is None:
-            self._mark_error(connector_id)
-            return None
-        try:
-            refreshed = await flow.refresh_access_token(credential.refresh_token)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("token refresh failed for %s: %s", connector_id, exc)
-            self._mark_error(connector_id)
-            return None
-        # rotation 서버가 새 refresh_token 을 내려줬으면 함께 교체한다 — 이전 것은
-        # 서버가 무효화했을 수 있어 그대로 두면 다음 갱신부터 실패한다.
-        rotated = (
-            refreshed.refresh_token
-            if refreshed.refresh_token and refreshed.refresh_token != credential.refresh_token
-            else None
-        )
-        self._keychain.update_access_token(
-            connector_id,
-            access_token=refreshed.access_token,
-            expires_in=refreshed.expires_in,
-            refresh_token=rotated,
-        )
-        self._mark_healthy(connector_id)
-        return refreshed.access_token
+            if not credential.refresh_token:
+                log.warning("connector %s token expired and no refresh_token", connector_id)
+                self._mark_error(connector_id)
+                return None
+
+            flow = self._flows.get(connector_type)
+            if flow is None:
+                self._mark_error(connector_id)
+                return None
+            try:
+                refreshed = await flow.refresh_access_token(credential.refresh_token)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("token refresh failed for %s: %s", connector_id, exc)
+                self._mark_error(connector_id)
+                return None
+            # rotation 서버가 새 refresh_token 을 내려줬으면 함께 교체한다 — 이전 것은
+            # 서버가 무효화했을 수 있어 그대로 두면 다음 갱신부터 실패한다.
+            rotated = (
+                refreshed.refresh_token
+                if refreshed.refresh_token and refreshed.refresh_token != credential.refresh_token
+                else None
+            )
+            self._keychain.update_access_token(
+                connector_id,
+                access_token=refreshed.access_token,
+                expires_in=refreshed.expires_in,
+                refresh_token=rotated,
+            )
+            self._mark_healthy(connector_id)
+            return refreshed.access_token
 
     def _mark_error(self, connector_id: str) -> None:
         self._db.execute(

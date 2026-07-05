@@ -24,6 +24,7 @@ usage는 유지된다 (LEARNING_LOOP §5.2.4).
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -85,10 +86,13 @@ class UsageStore:
             return UsageData(skill=name, created_at=now_iso())
 
     def _write(self, usage: UsageData) -> None:
-        """usage 파일을 원자적으로 쓴다."""
+        """usage 파일을 원자적으로 쓴다 (temp write → rename — docstring이 늘
+        '원자적'이라 주장해 왔으나 write_text 직접 쓰기였다. 코드가 주장을 따라간다)."""
         self._paths.skills.mkdir(parents=True, exist_ok=True)
         path = self._usage_path(usage.skill)
-        path.write_text(json.dumps(usage.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps(usage.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(tmp, path)
 
     def increment_use(self, name: str) -> UsageData:
         """use += 1, last_used_at = now. 턴 관찰(observe)에서 호출."""

@@ -110,6 +110,13 @@ async def surface_learning_effect(
             # overwrite — tell the user to get a fresh proposal instead.
             yield ev_error("skill_patch_conflict", str(exc))
             return
+        except Exception as exc:  # noqa: BLE001
+            # 적용 실패(손상된 SKILL.md, 권한/IO 오류 — apply_patch 가 이제 삼키지
+            # 않고 전파한다)는 명시적 에러 이벤트로 사용자에게 보여준다. 스트림
+            # 전체를 turn_failed 로 죽이지 않고 이 효과만 실패로 마감한다.
+            log.exception("skill patch apply failed for %s", effect.skill_id)
+            yield ev_error("skill_patch_failed", f"스킬 '{effect.skill_id}' 적용 실패: {exc}")
+            return
         if response.decision == "approve" and new_version is not None:
             yield ev_skill_patched(effect.skill_id, new_version)
     else:  # pragma: no cover - effect union is closed

@@ -185,6 +185,14 @@ async def _run_command(
             stdout_bytes, _ = await asyncio.wait_for(
                 proc.communicate(), timeout=timeout_s
             )
+        except asyncio.CancelledError:
+            # 턴 abort 가 도구 실행을 취소하면(tool_scheduler 의 task.cancel)
+            # 자식 프로세스를 함께 내린다 — 안 죽이면 셸이 고아로 계속 돈다.
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+            raise
         except asyncio.TimeoutError:
             try:
                 proc.kill()
@@ -214,6 +222,22 @@ async def _run_command(
         }
 
 
+# 모델이 제공하는 timeout 의 서버 상한(초). 클램프가 없으면 timeout=86400 같은
+# 인자 하나로(사용자가 승인만 하면) 세션이 하루 종일 묶인다 — abort/drain 지연의
+# 최악 케이스를 유계로 만든다.
+_MIN_TIMEOUT_S = 1.0
+_MAX_TIMEOUT_S = 600.0
+_DEFAULT_TIMEOUT_S = 60.0
+
+
+def _clamp_timeout(raw: object) -> float:
+    try:
+        value = float(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return _DEFAULT_TIMEOUT_S
+    return min(max(value, _MIN_TIMEOUT_S), _MAX_TIMEOUT_S)
+
+
 def _make_terminal(workspace: Path) -> BuiltinTool:
     _env = _sanitize_env()
 
@@ -221,11 +245,13 @@ def _make_terminal(workspace: Path) -> BuiltinTool:
         command = args.get("command", "")
         if not command or not isinstance(command, str):
             raise ValueError("command is required and must be a string")
-        timeout_s = float(args.get("timeout", 60))
-        # cwd defaults to workspace root; reject escapes.
+        timeout_s = _clamp_timeout(args.get("timeout", _DEFAULT_TIMEOUT_S))
+        # cwd: 상대경로는 workspace 아래로, 절대경로는 그대로 허용한다. terminal 은
+        # 파일 도구와 달리 의도적으로 "호스트 셸"이다(docstring 참고) — 명령 자체가
+        # `cd /` 로 어디든 갈 수 있어 cwd 제한은 방어가 아니며, 실제 방어선은
+        # requires_approval=True 의 HITL 게이트다.
         cwd_rel = args.get("cwd")
         if cwd_rel:
-            # cwd is allowed to be any absolute path or relative to workspace.
             cwd = str(workspace / cwd_rel) if not os.path.isabs(cwd_rel) else cwd_rel
         else:
             cwd = str(workspace)
@@ -264,7 +290,7 @@ def tools(paths: RicePaths) -> list[tuple[ToolSpec, BuiltinTool]]:
                         },
                         "timeout": {
                             "type": "number",
-                            "description": "Execution timeout in seconds (default: 60).",
+                            "description": "Execution timeout in seconds (default: 60, max: 600).",
                         },
                     },
                     "required": ["command"],

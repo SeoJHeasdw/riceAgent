@@ -20,6 +20,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any
@@ -46,6 +47,9 @@ class RemoteMcpClient:
         self._owner_id: str = ""
         self._session_id: str | None = None
         self._initialized = False
+        # initialize 핸드셰이크 직렬화 — 같은 connector 의 병렬 tool call 이 세션형
+        # 서버에서 init 완료 전에 Mcp-Session-Id 없이 tools/call 을 쏘는 레이스 방지.
+        self._init_lock = asyncio.Lock()
         # 로컬 HTTP MCP 서버(.mcp.json 의 headers) 처럼 Bearer 토큰 외에 고정 헤더가
         # 필요한 경우용. 원격(OAuth) 커넥터는 None.
         self._extra_headers = extra_headers or {}
@@ -105,26 +109,32 @@ class RemoteMcpClient:
         """
         if self._initialized:
             return
-        self._initialized = True  # 재시도 폭주 방지: 성공/실패와 무관하게 1회만 시도
-        try:
-            resp = await self._rpc(
-                "initialize",
-                {
-                    "protocolVersion": _MCP_PROTOCOL_VERSION,
-                    "capabilities": {},
-                    "clientInfo": _CLIENT_INFO,
-                },
-                access_token,
-                rpc_id="init",
-                capture_session=True,
-            )
-            if resp.get("error"):
-                log.debug("mcp initialize returned error (stateless server?): %s", resp["error"])
+        async with self._init_lock:  # 병렬 첫 호출은 여기서 대기 — init 은 1회만
+            if self._initialized:
                 return
-            # 세션형 서버는 initialized 알림을 기대한다(응답 본문 없음 — 202).
-            await self._notify("notifications/initialized", access_token)
-        except Exception as exc:  # noqa: BLE001 — 무상태 서버면 정상 동작하므로 삼킨다
-            log.debug("mcp initialize skipped: %s", exc)
+            try:
+                resp = await self._rpc(
+                    "initialize",
+                    {
+                        "protocolVersion": _MCP_PROTOCOL_VERSION,
+                        "capabilities": {},
+                        "clientInfo": _CLIENT_INFO,
+                    },
+                    access_token,
+                    rpc_id="init",
+                    capture_session=True,
+                )
+                if resp.get("error"):
+                    log.debug("mcp initialize returned error (stateless server?): %s", resp["error"])
+                    return
+                # 세션형 서버는 initialized 알림을 기대한다(응답 본문 없음 — 202).
+                await self._notify("notifications/initialized", access_token)
+            except Exception as exc:  # noqa: BLE001 — 무상태 서버면 정상 동작하므로 삼킨다
+                log.debug("mcp initialize skipped: %s", exc)
+            finally:
+                # 재시도 폭주 방지: 성공/실패와 무관하게 1회만 시도. 락 해제 전에
+                # 세워야 대기 중이던 병렬 호출이 재시도하지 않는다.
+                self._initialized = True
 
     async def _rpc(
         self,

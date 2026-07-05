@@ -88,6 +88,18 @@ class IAgent(Protocol):
         Cancels any parked approvals for that session (RUNTIME_DESIGN §5.1)."""
         ...
 
+    def is_active(self, session_id: str) -> bool:
+        """True while a turn is streaming for `session_id`. Routes MUST check this
+        before any transcript mutation (delete/regenerate) — 진행 중 턴과 같은
+        transcript 를 놓고 경쟁하면 append 가 FK 오류/유실로 끝난다."""
+        ...
+
+    async def abort_and_drain(self, session_id: str, timeout_s: float = 10.0) -> bool:
+        """Abort the in-flight turn AND wait until it actually finishes (bounded by
+        `timeout_s`). Session deletion calls this first so the turn's tail writes
+        land before the rows disappear. True = no turn/drained; False = timed out."""
+        ...
+
 
 @runtime_checkable
 class IToolDispatcher(Protocol):

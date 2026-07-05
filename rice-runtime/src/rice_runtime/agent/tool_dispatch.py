@@ -217,7 +217,9 @@ class ToolDispatcher:
                     value = await cast(Callable[[dict], Awaitable[object]], fn)(call.arguments)
                 res = ToolResult(call.id, ok=True, result=value)
             elif spec.source == "connector":
-                res = await self._connectors.invoke(call)
+                # spec.owner_id 를 함께 넘긴다 — 같은 도구명을 노출하는 커넥터가
+                # 둘일 때 이름 재탐색이 다른 커넥터로 오배송하는 것을 막는다.
+                res = await self._connectors.invoke(call, owner_id=spec.owner_id)
             elif spec.source == "plugin":
                 res = await self._plugins.invoke(call)
             else:  # pragma: no cover - guarded by ToolSpec typing

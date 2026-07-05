@@ -19,8 +19,9 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Iterator, Sequence
 
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 
@@ -80,6 +81,23 @@ class Database:
     def query_all(self, sql: str, params: Sequence[Any] = ()) -> list[sqlite3.Row]:
         with self._lock:
             return self.raw.execute(sql, params).fetchall()
+
+    @contextmanager
+    def transaction(self) -> Iterator[sqlite3.Connection]:
+        """여러 문장을 하나의 트랜잭션으로 묶는다 — 전부 커밋되거나 전부 롤백된다.
+
+        `execute()`/`executemany()`는 문장마다 자체 커밋하므로 "DELETE 후 INSERT"
+        같은 교체 패턴이 중간에 죽으면 반쪽 상태가 남는다(예: provider_models 교체).
+        블록 안에서는 반드시 yield된 connection으로 직접 실행할 것 — self.execute()를
+        부르면 그 문장이 조기 커밋되어 원자성이 깨진다.
+        """
+        with self._lock:
+            try:
+                yield self.raw
+                self.raw.commit()
+            except BaseException:
+                self.raw.rollback()
+                raise
 
     # ── migrations (forward-only, tracked) ────────────────────────────────────
     def _run_migrations(self) -> None:
