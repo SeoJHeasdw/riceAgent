@@ -45,6 +45,13 @@ class ProviderConfig:
     model: str = "claude-sonnet-4-6"
     temperature: float = 0.7
     base_url: str | None = None  # Ollama only
+    # Per-generation OUTPUT cap for the main agent loop (Claude `max_tokens` /
+    # Ollama `num_predict`). Without this the providers fall back to their own
+    # tiny defaults — Claude's is 4096, which silently truncated long answers
+    # (a full slide outline) mid-sentence with stop_reason=max_tokens. Generous
+    # enough for long structured text AND large tool-call JSON (a 10-slide deck
+    # spec is emitted as output tokens), while still capping runaway generation.
+    max_output_tokens: int = 16_384
     # First-run gate: False until the user picks & connects a model in the
     # settings panel and saves (PUT /settings). The app shows the mandatory
     # model-onboarding flow while this is False, then trusts the saved provider.

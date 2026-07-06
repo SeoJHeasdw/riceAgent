@@ -30,6 +30,7 @@ from io import BytesIO
 from xml.sax.saxutils import escape
 
 from .formula import (
+    ERR_NAME,
     CellError,
     EvaluatedCell,
     Grid,
@@ -488,6 +489,7 @@ def _display(cell: _Cell) -> str:
 def _summarize(sheets: list[_Sheet]) -> dict:
     out_sheets = []
     errors: list[str] = []
+    warnings: list[str] = []
     formula_count = 0
     for sheet in sheets:
         preview: list[list[str]] = []
@@ -496,9 +498,18 @@ def _summarize(sheets: list[_Sheet]) -> dict:
                 if cell.formula is not None:
                     formula_count += 1
                     if isinstance(cell.value, CellError):
-                        errors.append(
-                            f"{sheet.name}!{index_to_col(ci + 1)}{ri + 1} ={cell.formula} → {cell.value}"
-                        )
+                        where = f"{sheet.name}!{index_to_col(ci + 1)}{ri + 1} ={cell.formula} → {cell.value}"
+                        # #NAME? here means "a function our local engine doesn't
+                        # evaluate" (VLOOKUP/SUMIF/…), NOT a broken formula — Excel
+                        # recomputes it fine on open. Reporting it as a hard error
+                        # made the model "fix" perfectly good formulas. Demote to a
+                        # warning so the local-eval blind spot isn't mistaken for a
+                        # spec bug. Every other CellError (#DIV/0!, #REF!, #VALUE!,
+                        # #NUM!, #CYCLE!) is a real modeling defect → stays an error.
+                        if cell.value == ERR_NAME:
+                            warnings.append(where)
+                        else:
+                            errors.append(where)
             if ri < _PREVIEW_ROWS:
                 preview.append([_display(c) for c in row[:_PREVIEW_COLS]])
         while preview and not any(s.strip() for s in preview[-1]):
@@ -508,7 +519,17 @@ def _summarize(sheets: list[_Sheet]) -> dict:
             "rows": len(sheet.rows),
             "computed_preview": ["\t".join(r) for r in preview],
         })
-    return {"sheets": out_sheets, "formulas": formula_count, "formula_errors": errors}
+    summary = {"sheets": out_sheets, "formulas": formula_count, "formula_errors": errors}
+    if warnings:
+        # Distinct key + guidance so the model doesn't treat these as fixable.
+        summary["formula_warnings"] = warnings
+        summary["formula_warnings_note"] = (
+            "These formulas use functions this tool doesn't evaluate locally, so "
+            "their cached preview value is #NAME?. They are written into the .xlsx "
+            "verbatim and Excel/Numbers will compute them correctly on open — do NOT "
+            "rewrite them. Only fix them if the function name is genuinely misspelled."
+        )
+    return summary
 
 
 # ── entry point ──────────────────────────────────────────────────────────────

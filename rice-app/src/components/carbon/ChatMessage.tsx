@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button, Icon, Tag } from '../ui';
 import { connectorIdForScope, type ThreadMessage, type ToolCall, type SkillRef, type EditDiffRow } from '../../lib/learningData';
@@ -584,6 +584,23 @@ const MemoryIndicator: React.FC<{
   </div>
 );
 
+// Live-ticking elapsed seconds since `startedAt`, re-rendering once per second
+// while `active`. WHY: commercial models run with extended thinking OFF, so they
+// stream no reasoning and can sit silent for many seconds before the first token.
+// A visible "N초" counter tells the user RICE is working (not stuck) even with no
+// reasoning to show. Ollama's live reasoning gets the same counter alongside it.
+const useElapsedSeconds = (startedAt: number | undefined, active: boolean): number => {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active || startedAt == null) return;
+    setNow(Date.now());
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [active, startedAt]);
+  if (startedAt == null) return 0;
+  return Math.max(0, Math.floor((now - startedAt) / 1000));
+};
+
 // ── collapsible thinking trace ───────────────────────────────
 const ThinkingBlock: React.FC<{ m: Extract<ThreadMessage, { kind: 'thinking' }> }> = ({ m }) => {
   // While streaming, default to open so the live reasoning is visible (the
@@ -591,6 +608,9 @@ const ThinkingBlock: React.FC<{ m: Extract<ThreadMessage, { kind: 'thinking' }> 
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
   const open = userOpen ?? !!m.streaming;
   const steps = m.steps ?? [];
+  const elapsed = useElapsedSeconds(m.startedAt, !!m.streaming);
+  // With reasoning text → "생각 중"; without (commercial models) → "응답 생성 중".
+  const liveLabel = `${m.text ? '생각 중' : '응답 생성 중'}… ${elapsed}초`;
   return (
     <div className="my-1.5 max-w-[640px]">
       <button
@@ -598,7 +618,9 @@ const ThinkingBlock: React.FC<{ m: Extract<ThreadMessage, { kind: 'thinking' }> 
         className="flex items-center gap-1.5 text-caption-01 text-text-helper hover:text-text-secondary transition-colors"
       >
         <Icon name="idea" size={14} className={`opacity-70 ${m.streaming ? 'animate-pulse' : ''}`} />
-        <span>{m.streaming ? '생각 중…' : m.duration ? `${m.duration} 동안 생각함` : '추론 과정'}</span>
+        <span className={m.streaming ? 'tabular-nums' : undefined}>
+          {m.streaming ? liveLabel : m.duration ? `${m.duration} 동안 생각함` : '추론 과정'}
+        </span>
         <Icon name={open ? 'chevron-up' : 'chevron-down'} size={14} />
       </button>
       {open && m.text != null && (

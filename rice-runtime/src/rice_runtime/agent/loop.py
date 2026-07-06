@@ -109,6 +109,7 @@ class AgentLoop:
         token_calibrator: "TokenCalibrator | None" = None,
         planner: TurnPlanner | None = None,
         agent_config: AgentConfig | None = None,
+        max_output_tokens: int | None = None,
     ) -> None:
         self._provider = provider
         self._dispatcher = dispatcher
@@ -119,6 +120,10 @@ class AgentLoop:
         # None이면 계획 단계 없이 순수 ReAct(기존 동작·테스트 그대로).
         self._planner = planner
         self._agent_config = agent_config or AgentConfig()
+        # 매 반복 생성의 출력 토큰 상한 — None이면 provider 기본값(Claude 4096)에
+        # 맡겨 긴 답이 문장 중간에 잘리던 버그가 났다. 오케스트레이터가
+        # cfg.provider.max_output_tokens를 주입한다.
+        self._max_output_tokens = max_output_tokens
 
     def _render(self, system_prompt: str, messages: list[Message], *, budget_scale: float):
         """이 반복에 보낼 컨텍스트를 렌더한다. budget_scale<1이면 컨텍스트 길이
@@ -236,6 +241,7 @@ class AgentLoop:
                         messages=provider_messages,
                         tools=iteration_tools,
                         temperature=self._temperature,
+                        max_tokens=self._max_output_tokens,
                     ):
                         produced_any = True
                         if abort.is_set():

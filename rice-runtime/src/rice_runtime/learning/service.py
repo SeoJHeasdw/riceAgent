@@ -37,7 +37,12 @@ from ..core.storage.sqlite import Database
 from ..core.tokens import estimate_tokens as _cjk_estimate_tokens
 from ..core.types import InjectedSkill, Message, MemoryItem, TurnOutcome, now_iso
 from ..prompts.discovery import SessionDigest
-from ..prompts.system import SKILL_GUIDANCE, SKILL_TRUST_NOTE
+from ..prompts.system import (
+    SKILL_GUIDANCE,
+    SKILL_INDEX_HEADER,
+    SKILL_INDEX_NOTE,
+    SKILL_TRUST_NOTE,
+)
 from .curator.consolidate import ConsolidationEngine
 from .curator.curator import Curator
 from .discovery import DiscoveryEngine
@@ -66,6 +71,7 @@ from .skill.analysis import AnalysisStore, SkillAnalysisData, effective_status
 from .skill.analyzer import SkillAnalyzer
 from .skill.builtin import BuiltinSkillCatalog
 from .skill.lifecycle import SkillLifecycle
+from .skill.relevance import AUTO_INJECT_THRESHOLD, score_skills
 from .skill.store import SkillData, SkillStore
 from .skill.usage import UsageStore
 from .user_model.profile import UserProfile
@@ -110,7 +116,8 @@ def _render_memories(memories: list[MemoryItem]) -> str:
 
 
 def _render_skills(skills: list[InjectedSkill]) -> str:
-    """Active 스킬 본문을 system prompt 블록으로 렌더링한다 (LEARNING_LOOP §7).
+    """Auto-injected 스킬 본문을 system prompt 블록으로 렌더링한다 (LEARNING_LOOP §7).
+    이제 '전부'가 아니라 이번 턴에 관련도가 높아 전문 주입된 것만 실린다.
     스킬은 신뢰 경계가 아니라 입력 데이터이므로 SKILL_TRUST_NOTE를 함께 싣는다
     — 위험 행동은 스킬 지시와 무관하게 승인을 거친다."""
     if not skills:
@@ -118,6 +125,24 @@ def _render_skills(skills: list[InjectedSkill]) -> str:
     lines = ["## Available Skills (follow these procedures when relevant)", SKILL_TRUST_NOTE]
     for sk in skills:
         lines.append(f"\n### [{sk.name}] (v{sk.version})\n{sk.body}")
+    return "\n".join(lines)
+
+
+_INDEX_DESC_MAX = 140  # one-liner cap per index row — keep the always-on index cheap
+
+
+def _render_skill_index(entries: list[tuple[str, str]]) -> str:
+    """Active 스킬 중 전문 주입되지 **않은** 것들의 짧은 인덱스(이름 + 한 줄 설명).
+    모델은 이걸 보고 `skill_view`로 필요한 전문만 온디맨드로 당긴다 — inject-all-active를
+    대체하는 하이브리드 주입의 '항상 켜진 인덱스' 절반이다."""
+    if not entries:
+        return ""
+    lines = [SKILL_INDEX_HEADER, SKILL_INDEX_NOTE]
+    for name, desc in entries:
+        one_line = " ".join((desc or "").split())
+        if len(one_line) > _INDEX_DESC_MAX:
+            one_line = one_line[: _INDEX_DESC_MAX - 1].rstrip() + "…"
+        lines.append(f"- {name} — {one_line}" if one_line else f"- {name}")
     return "\n".join(lines)
 
 
@@ -181,6 +206,9 @@ class LearningService(ILearningService):
         # in-memory로 충분: 같은 턴 안에서 스테이징→드레인이 끝난다(파킹과 달리
         # 턴을 넘어 살아남을 필요가 없다).
         self._staged: dict[str, list[PatchProposal]] = {}
+        # skill_view 로 이번 턴에 전문을 당긴 스킬들 — 세션별. observe()가 드레인해
+        # auto-injected 와 합쳐 use 카운터에 귀속한다(온디맨드 로딩도 '사용'이다).
+        self._viewed_skills: dict[str, set[str]] = {}
         self._review_gate = ReviewGate(
             min_tool_calls=config.review_min_tool_calls, nudge_turns=config.review_nudge_turns
         )
@@ -239,53 +267,69 @@ class LearningService(ILearningService):
         LearningLedger.requeue_orphan_running_jobs docstring."""
         return self._ledger.requeue_orphan_running_jobs()
 
+    # ── skill collection + relevance (hybrid injection) ───────────────────────
+    def _active_skills(self) -> list[SkillData]:
+        """Active 스킬 전체(빌트인 + 사용자). 빌트인 이름은 예약이라 동명 사용자
+        파일은 숨긴다(list_skills와 동일 규칙). prefetch 와 search_skills 의 공통 원천."""
+        builtin_names = self._builtin_skills.names()
+        skills = [s for s in self._builtin_skills.list() if s.state == "active"]
+        skills += [
+            s
+            for s in self._skill_store.list()
+            if s.state == "active" and s.name not in builtin_names
+        ]
+        return skills
+
+    # 한 턴에 전문 주입하는 스킬 상한 — inject-all-active로 회귀하지 않도록 관련도
+    # 상위 소수만. 예산(skill_inject_token_budget)이 먼저 걸리기도 한다.
+    _MAX_AUTO_INJECT = 2
+
     # ── turn-critical ─────────────────────────────────────────────────────────
     def prefetch(self, session_id: str, user_message: str) -> PrefetchResult:
         """Assemble injectable context for the next LLM call (LEARNING_LOOP §6, §7).
 
-        Delivers:
-          - Active 스킬 전부 token budget 내에서 주입 (inject-all-active-under-budget, §7)
+        Hybrid skill injection (replaces inject-all-active):
+          - 관련도 상위 & 고신뢰(≥ AUTO_INJECT_THRESHOLD) 스킬만 **전문 주입**
+            (예산·개수 상한 내). 무관한 프롬프트엔 전문이 하나도 안 들어간다.
+          - 나머지 active 스킬은 **짧은 인덱스**(이름 + 한 줄 설명)로만 실려서
+            모델이 `skill_view` 로 온디맨드로 당길 수 있다.
+        그 외 (변화 없음):
           - Recent facts (N = config.prefetch_recent_facts)
           - FTS5-matched memories (K = config.prefetch_fts_top_k) for the query
-          - Skill-creation guidance string
-          - User preferences (T5)
+          - Skill-creation guidance string + user preferences (T5)
         """
-        # ── 스킬 수집 (빌트인 + 사용자, active 전체, budget 내) ─────────────
-        builtin_names = self._builtin_skills.names()
-        all_active = [s for s in self._builtin_skills.list() if s.state == "active"]
-        all_active += [
-            s
-            for s in self._skill_store.list()
-            # 빌트인 이름은 예약 — 과거에 만들어진 동명 사용자 파일이 있어도
-            # 빌트인이 이긴다 (list_skills와 동일 규칙).
-            if s.state == "active" and s.name not in builtin_names
-        ]
+        all_active = self._active_skills()
+        by_name = {s.name: s for s in all_active}
+        ranked = score_skills(user_message, all_active)
 
+        # ── 고신뢰 상위 매칭만 전문 주입 (예산·개수 상한) ─────────────────
         injected_skills: list[InjectedSkill] = []
+        injected_names: set[str] = set()
         remaining_budget = self._config.skill_inject_token_budget
-
-        # 예산 내 전부 주입; 초과 시 use 상위 정렬 후 선별 (§7)
-        # 먼저 usage 데이터로 use 카운트를 가져온다
-        def _use_count(name: str) -> int:
-            return self._usage_store.read(name).use
-
-        active_sorted = sorted(all_active, key=lambda s: _use_count(s.name), reverse=True)
-
-        for skill in active_sorted:
+        for scored in ranked:
+            if scored.score < AUTO_INJECT_THRESHOLD:
+                break  # ranked 는 내림차순 — 이 아래는 전부 임계 미만
+            if len(injected_skills) >= self._MAX_AUTO_INJECT:
+                break
+            skill = by_name[scored.name]
             body = skill.body or ""
             tokens = _estimate_tokens(body)
             if tokens > remaining_budget:
-                # 예산 초과: 이 스킬 이후는 건너뜀 (이미 use 정렬되어 있으므로)
                 break
             injected_skills.append(
                 InjectedSkill(
-                    skill_id=skill.name,
-                    name=skill.name,
-                    version=skill.version,
-                    body=body,
+                    skill_id=skill.name, name=skill.name, version=skill.version, body=body
                 )
             )
+            injected_names.add(skill.name)
             remaining_budget -= tokens
+
+        # ── 전문 주입되지 않은 나머지는 짧은 인덱스로 ─────────────────────
+        index_entries = [
+            (s.name, s.description)
+            for s in sorted(all_active, key=lambda s: s.name)
+            if s.name not in injected_names
+        ]
 
         # ── 메모리 수집 ────────────────────────────────────────────────────
         recent = self._mem_search.recent(self._config.prefetch_recent_facts)
@@ -298,10 +342,13 @@ class LearningService(ILearningService):
         # ── system prompt 렌더링 ──────────────────────────────────────────
         mem_block = _render_memories(memories)
         skill_block = _render_skills(injected_skills)
+        index_block = _render_skill_index(index_entries)
         pref_block = self._user_profile.render_preference_block()
         parts = [SKILL_GUIDANCE]
         if skill_block:
             parts.append(skill_block)
+        if index_block:
+            parts.append(index_block)
         if mem_block:
             parts.append(mem_block)
         if pref_block:
@@ -313,6 +360,35 @@ class LearningService(ILearningService):
             skills=tuple(injected_skills),
             memories=tuple(memories),
         )
+
+    # ── on-demand skill loading (skill_search / skill_view 빌트인 백엔드) ───────
+    def search_skills(self, query: str, limit: int = 8) -> list[dict]:
+        """`skill_search` 빌트인의 백엔드 — active 스킬을 쿼리로 랭킹해 반환한다.
+        점수>0 매칭을 우선하되, 하나도 없으면 상위 몇 개를 그대로 보여준다(모델이
+        무엇이 있는지라도 알도록). 본문은 싣지 않는다 — 그건 skill_view의 몫."""
+        ranked = score_skills(query, self._active_skills())
+        positive = [s for s in ranked if s.score > 0]
+        chosen = positive[:limit] if positive else ranked[: min(limit, 5)]
+        return [
+            {"name": s.name, "description": s.description, "score": round(s.score, 2)}
+            for s in chosen
+        ]
+
+    def view_skill_body(self, session_id: str, skill_id: str) -> dict:
+        """`skill_view` 빌트인의 백엔드 — 스킬 전문을 반환하고 view 카운터를 올린다.
+        비활성(archived) 스킬은 사용자가 끈 것이므로 로딩을 거부한다(토글 존중).
+        이번 턴 조회 집합에 기록해 observe()가 use 카운터에 귀속하게 한다."""
+        skill = self._read_any_skill(skill_id)
+        if skill is None or skill.state != "active":
+            raise NotFoundError(f"skill {skill_id!r} not found or not active")
+        self._usage_store.increment_view(skill_id)
+        self._viewed_skills.setdefault(session_id, set()).add(skill_id)
+        return {
+            "name": skill.name,
+            "version": skill.version,
+            "description": skill.description,
+            "body": skill.body,
+        }
 
     async def observe(self, outcome: TurnOutcome) -> list[LearningEffect]:
         """턴 결과를 관찰해 *즉시·저비용* 학습 효과만 반환한다 (LEARNING_LOOP §1).
@@ -336,8 +412,11 @@ class LearningService(ILearningService):
         # ① 주입됐던 스킬 use 카운터 올리기 + observed 도구 ledger 갱신.
         #    도구 귀속은 턴 단위다 — 주입돼 있던 모든 스킬이 이 턴의 호출 도구를
         #    공유 기록한다("이 스킬이 시켰다"가 아니라 "주입된 턴의 실행 로그").
+        #    전문 주입(injected)뿐 아니라 skill_view로 온디맨드 로딩된 스킬도
+        #    '사용'으로 함께 귀속한다 — 세션 조회 집합은 여기서 드레인한다.
+        viewed = self._viewed_skills.pop(outcome.session_id, set())
         turn_tools = _turn_tool_names(outcome.history) if not outcome.aborted else []
-        for skill_id in outcome.injected_skill_ids:
+        for skill_id in dict.fromkeys((*outcome.injected_skill_ids, *viewed)):
             try:
                 self._usage_store.increment_use(skill_id)
                 if turn_tools:

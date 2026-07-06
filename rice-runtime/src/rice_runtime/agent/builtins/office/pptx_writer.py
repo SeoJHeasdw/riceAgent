@@ -25,11 +25,13 @@ Any slide may set `notes` (speaker notes, emitted as real notesSlides).
 
 from __future__ import annotations
 
-import re
 import zipfile
 from dataclasses import dataclass
 from io import BytesIO
 from xml.sax.saxutils import escape
+
+from .palette import PRESETS as _PRESETS
+from .palette import resolve_palette
 
 __all__ = ["DeckSpecError", "build_presentation"]
 
@@ -50,17 +52,9 @@ class DeckSpecError(ValueError):
 
 
 # ── theme ────────────────────────────────────────────────────────────────────
-
-_HEX = re.compile(r"^#?([0-9A-Fa-f]{6})$")
-
-
-def _hex(value: object, fallback: str) -> str:
-    if value is None:
-        return fallback
-    m = _HEX.match(str(value).strip())
-    if not m:
-        raise DeckSpecError(f"invalid hex color {value!r} — use 6-digit hex like '1E2761'")
-    return m.group(1).upper()
+# Palettes + preset resolution live in palette.py (shared with the .docx writer).
+# Resolution is lenient: a bad color/preset degrades to the default + a warning
+# rather than aborting the whole deck (small-model robustness — see palette.py).
 
 
 @dataclass(frozen=True)
@@ -79,15 +73,19 @@ class Theme:
     CARD = "F4F6FA"  # light card fill
 
     @classmethod
-    def from_spec(cls, raw: object) -> "Theme":
-        raw = raw if isinstance(raw, dict) else {}
+    def from_spec(cls, raw: object, warnings: list[str] | None = None) -> "Theme":
+        # `theme` accepts: "forest" (preset) · {"preset": "forest", ...} (preset +
+        # overrides) · {"primary": "..", ...} (custom) · None (default). Never
+        # raises — resolve_palette degrades bad input and notes it in `warnings`.
+        colors = resolve_palette(raw, warnings)
+        fonts = raw if isinstance(raw, dict) else {}
         return cls(
-            primary=_hex(raw.get("primary"), "1E2761"),
-            secondary=_hex(raw.get("secondary"), "CADCFC"),
-            accent=_hex(raw.get("accent"), "F96167"),
-            heading_font=str(raw.get("heading_font") or "Georgia"),
-            body_font=str(raw.get("body_font") or "Calibri"),
-            ea_font=(str(raw["ea_font"]) if raw.get("ea_font") else None),
+            primary=colors["primary"],
+            secondary=colors["secondary"],
+            accent=colors["accent"],
+            heading_font=str(fonts.get("heading_font") or "Georgia"),
+            body_font=str(fonts.get("body_font") or "Calibri"),
+            ea_font=(str(fonts["ea_font"]) if fonts.get("ea_font") else None),
         )
 
 
@@ -212,6 +210,22 @@ class _Shapes:
             '<p:txBody><a:bodyPr/><a:lstStyle/><a:p/></p:txBody></p:sp>'
         )
 
+    def connector(self, x1: float, y1: float, x2: float, y2: float, color: str, *, weight_emu: int = 28000) -> None:
+        """A straight line from (x1,y1) to (x2,y2) — used to draw line-chart series.
+        Offset/extent is the bounding box; flipH/flipV encode the direction."""
+        sid = self._next_id()
+        ox, oy = min(x1, x2), min(y1, y2)
+        flip = (' flipH="1"' if x2 < x1 else "") + (' flipV="1"' if y2 < y1 else "")
+        self.xml.append(
+            f'<p:cxnSp><p:nvCxnSpPr><p:cNvPr id="{sid}" name="Conn {sid}"/>'
+            "<p:cNvCxnSpPr/><p:nvPr/></p:nvCxnSpPr>"
+            f'<p:spPr><a:xfrm{flip}><a:off x="{_in(ox)}" y="{_in(oy)}"/>'
+            f'<a:ext cx="{_in(abs(x2 - x1))}" cy="{_in(abs(y2 - y1))}"/></a:xfrm>'
+            '<a:prstGeom prst="line"><a:avLst/></a:prstGeom>'
+            f'<a:ln w="{weight_emu}" cap="rnd"><a:solidFill><a:srgbClr val="{color}"/></a:solidFill>'
+            "<a:round/></a:ln></p:spPr></p:cxnSp>"
+        )
+
     def table(
         self,
         x: float,
@@ -260,6 +274,10 @@ class _Shapes:
 # ── spec helpers ─────────────────────────────────────────────────────────────
 
 def _text(raw: object, where: str, *, required: bool = False, max_len: int = _MAX_TEXT) -> str:
+    # Only genuinely-missing REQUIRED text raises (→ caught per-slide and salvaged,
+    # so the deck still builds). Over-length text is clamped, never fatal — losing
+    # a whole slide because one field ran long is exactly the failure mode small
+    # models trip on.
     if raw is None:
         if required:
             raise DeckSpecError(f"{where} is required")
@@ -268,18 +286,19 @@ def _text(raw: object, where: str, *, required: bool = False, max_len: int = _MA
     if required and not s:
         raise DeckSpecError(f"{where} is required")
     if len(s) > max_len:
-        raise DeckSpecError(f"{where} exceeds {max_len} chars")
+        s = s[: max_len - 1].rstrip() + "…"
     return s
 
 
 def _str_list(raw: object, where: str, *, max_items: int) -> list[str]:
+    # Lenient by design: None → empty, a bare scalar → a one-item list, extra
+    # items clamped. A malformed array shape never aborts the render.
     if raw is None:
         return []
     if not isinstance(raw, list):
-        raise DeckSpecError(f"{where} must be an array")
-    if len(raw) > max_items:
-        raise DeckSpecError(f"{where}: too many items ({len(raw)} > {max_items})")
-    return [_text(item, f"{where}[{i}]") for i, item in enumerate(raw)]
+        return [_text(raw, where)]
+    items = [_text(item, f"{where}[{i}]") for i, item in enumerate(raw[:max_items])]
+    return [s for s in items if s]
 
 
 # ── layout renderers ─────────────────────────────────────────────────────────
@@ -355,14 +374,15 @@ def _render_section(sp: _Shapes, slide: dict, idx: int, _total: int) -> None:
 def _bullet_paras(sp: _Shapes, items: list, where: str, *, sz: int = 15) -> list[str]:
     t = sp.theme
     paras: list[str] = []
-    if len(items) > 10:
-        raise DeckSpecError(f"{where}: keep bullets ≤ 10 per slide (got {len(items)})")
+    items = items[:10]  # clamp — a wall of bullets is design-bad but never fatal
     for i, item in enumerate(items):
         if isinstance(item, dict):
-            text = _text(item.get("text"), f"{where}[{i}].text", required=True)
+            text = _text(item.get("text"), f"{where}[{i}].text")
             subs = _str_list(item.get("sub"), f"{where}[{i}].sub", max_items=6)
         else:
-            text, subs = _text(item, f"{where}[{i}]", required=True), []
+            text, subs = _text(item, f"{where}[{i}]"), []
+        if not text:
+            continue  # skip an empty bullet rather than emit a naked bullet glyph
         paras.append(sp.para(sp.run(text, sz=sz, color=t.INK), bullet_color=t.accent,
                              line_pct=112, before_pts=9 if i else 0))
         paras.extend(
@@ -378,9 +398,13 @@ def _render_bullets(sp: _Shapes, slide: dict, _idx: int, _total: int) -> None:
     _kicker_title(sp, _text(slide.get("kicker"), "kicker"),
                   _text(slide.get("title"), "bullets slide title", required=True))
     items = slide.get("bullets")
-    if not isinstance(items, list) or not items:
-        raise DeckSpecError("bullets layout needs a non-empty `bullets` array")
-    sp.textbox(_MARGIN, 1.95, _BODY_W - 0.6, 4.9, _bullet_paras(sp, items, "bullets"))
+    if not isinstance(items, list):
+        items = _str_list(items, "bullets", max_items=10)  # coerce scalar/None
+    paras = _bullet_paras(sp, items, "bullets")
+    # An empty bullet list is design-poor but not fatal — a title-only slide is
+    # still valid. (The default layout falls here, so it must never raise.)
+    if paras:
+        sp.textbox(_MARGIN, 1.95, _BODY_W - 0.6, 4.9, paras)
 
 
 def _render_two_column(sp: _Shapes, slide: dict, _idx: int, _total: int) -> None:
@@ -526,6 +550,168 @@ def _render_closing(sp: _Shapes, slide: dict, _idx: int, _total: int) -> None:
                    [sp.para(sp.run(contact, sz=12, color="FFFFFF"))])
 
 
+# ── chart layout (shape-based bar/line — no embedded OOXML chart part) ─────────
+
+def _num(v: object) -> float | None:
+    """Coerce a spec value to a plottable float. Strips currency/units/commas so a
+    small model's "$3.4" or "1,200" still charts. Non-numeric → None."""
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    s = "".join(ch for ch in str(v) if ch.isdigit() or ch in ".-")
+    try:
+        return float(s) if s not in ("", "-", ".", "-.", "") else None
+    except ValueError:
+        return None
+
+
+def _fmt_val(v: float) -> str:
+    return f"{int(v):,}" if v == int(v) else f"{v:,.1f}"
+
+
+def _chart_data(chart: dict) -> tuple[str, list[str], list[tuple[str, list[float]]]]:
+    ctype = str(chart.get("type") or "column").strip().lower()
+    ctype = "line" if ctype == "line" else "column"  # 'bar' and everything else → columns
+    cats = _str_list(chart.get("categories"), "chart.categories", max_items=8)
+
+    # Keep None for unparseable cells so we can tell "genuinely 0" from "not a
+    # number at all" — a chart where NOTHING parsed is unusable and should salvage.
+    raw_series = chart.get("series")
+    parsed: list[tuple[str, list[float | None]]] = []
+    if isinstance(raw_series, list) and raw_series:
+        for s in raw_series[:3]:
+            if isinstance(s, dict):
+                name = _text(s.get("name"), "series.name", max_len=40)
+                raw_vals = s.get("values")
+            else:
+                name, raw_vals = "", s
+            nums = [_num(v) for v in raw_vals] if isinstance(raw_vals, list) else []
+            parsed.append((name, nums))
+    else:
+        raw_vals = chart.get("values")
+        nums = [_num(v) for v in raw_vals] if isinstance(raw_vals, list) else []
+        if nums:
+            parsed.append(("", nums))
+
+    if not any(n is not None for _, nums in parsed for n in nums):
+        raise DeckSpecError("chart needs numeric `values` (or series[].values)")
+
+    ncat = len(cats) or max((len(nums) for _, nums in parsed), default=0)
+    if not cats:
+        cats = [str(i + 1) for i in range(ncat)]
+    # pad/truncate to the category count; unparseable/missing cells plot as 0
+    series = [(name, [(v if v is not None else 0.0) for v in (nums + [None] * ncat)[:ncat]])
+              for name, nums in parsed]
+    return ctype, cats, series
+
+
+def _render_chart(sp: _Shapes, slide: dict, _idx: int, _total: int) -> None:
+    t = sp.theme
+    _motif(sp, on_dark=False)
+    _kicker_title(sp, _text(slide.get("kicker"), "kicker"),
+                  _text(slide.get("title"), "chart slide title", required=True))
+    chart = slide.get("chart")
+    if not isinstance(chart, dict):
+        raise DeckSpecError("chart layout needs a `chart` object {type, categories, series|values}")
+    ctype, cats, series = _chart_data(chart)
+    cycle = [t.primary, t.accent, t.MUTED]
+
+    plot_x0, plot_x1 = _MARGIN + 0.15, 13.333 - _MARGIN
+    plot_y0, plot_y1 = 2.55, 6.0
+    plot_w, plot_h = plot_x1 - plot_x0, plot_y1 - plot_y0
+    ncat, nser = len(cats), len(series)
+    maxval = max((v for _, vals in series for v in vals), default=0.0) or 1.0
+
+    # optional legend (multi-series or named series)
+    if nser > 1 or any(name for name, _ in series):
+        lx = plot_x0
+        for si, (name, _) in enumerate(series):
+            label = name or f"Series {si + 1}"
+            sp.shape(lx, 2.16, 0.2, 0.2, cycle[si], prst="roundRect", radius_pct=30)
+            sp.textbox(lx + 0.28, 2.12, 3.2, 0.3,
+                       [sp.para(sp.run(label, sz=11, color=t.INK))], anchor="ctr", autofit=False)
+            lx += 0.28 + 0.11 * len(label) + 0.55
+
+    sp.shape(plot_x0, plot_y1, plot_w, 0.018, t.MUTED)  # baseline axis
+    group_w = plot_w / ncat
+
+    if ctype == "column":
+        gap = group_w * 0.2
+        bar_w = (group_w - gap) / nser
+        for ci in range(ncat):
+            gx = plot_x0 + ci * group_w + gap / 2
+            for si, (_, vals) in enumerate(series):
+                h = max((vals[ci] / maxval) * plot_h, 0.0)
+                x, y = gx + si * bar_w, plot_y1 - h
+                if h > 0.02:
+                    sp.shape(x + bar_w * 0.08, y, bar_w * 0.84, h, cycle[si], prst="roundRect", radius_pct=6)
+                sp.textbox(x - 0.1, y - 0.32, bar_w + 0.2, 0.3,
+                           [sp.para(sp.run(_fmt_val(vals[ci]), sz=9, color=t.INK, bold=True), align="ctr")],
+                           anchor="b", autofit=False)
+    else:  # line
+        for si, (_, vals) in enumerate(series):
+            pts = [(plot_x0 + ci * group_w + group_w / 2, plot_y1 - (vals[ci] / maxval) * plot_h)
+                   for ci in range(ncat)]
+            for a, b in zip(pts, pts[1:]):
+                sp.connector(a[0], a[1], b[0], b[1], cycle[si])
+            for px, py in pts:
+                sp.shape(px - 0.07, py - 0.07, 0.14, 0.14, cycle[si], prst="ellipse")
+
+    for ci in range(ncat):  # category labels along the baseline
+        sp.textbox(plot_x0 + ci * group_w, plot_y1 + 0.08, group_w, 0.5,
+                   [sp.para(sp.run(cats[ci], sz=11, color=t.INK), align="ctr")], anchor="t", autofit=False)
+
+    footnote = _text(slide.get("footnote"), "footnote")
+    if footnote:
+        sp.textbox(_MARGIN, 6.85, _BODY_W, 0.35,
+                   [sp.para(sp.run(footnote, sz=9, color=t.MUTED, italic=True))])
+
+
+# ── salvage: render *something valid* from a slide that failed its layout ──────
+
+def _salvage_lines(raw: dict) -> list[str]:
+    out: list[str] = []
+    for key in ("subtitle", "summary", "message", "body", "content", "desc"):
+        v = raw.get(key)
+        if isinstance(v, str) and v.strip():
+            out.append(v.strip())
+    bullets = raw.get("bullets")
+    if isinstance(bullets, list):
+        for it in bullets:
+            if isinstance(it, dict) and isinstance(it.get("text"), str):
+                out.append(it["text"])
+            elif isinstance(it, str):
+                out.append(it)
+    return [x for x in out if x][:8]
+
+
+def _render_salvage(sp: _Shapes, raw: dict) -> None:
+    """Last resort when a layout renderer failed: emit a valid title(+bullets)
+    slide from whatever text we can recover, so content is never wholly lost and
+    the deck always builds."""
+    _motif(sp, on_dark=False)
+    title = _text(raw.get("title") or raw.get("heading") or raw.get("quote"), "", max_len=200) or "Slide"
+    _kicker_title(sp, _text(raw.get("kicker"), ""), title)
+    lines = _salvage_lines(raw)
+    if lines:
+        sp.textbox(_MARGIN, 1.95, _BODY_W - 0.6, 4.9, _bullet_paras(sp, lines, "salvage"))
+
+
+def _guess_layout(raw: dict) -> str:
+    """Infer a layout from the fields present — for when `layout` is missing or
+    unknown (a common small-model slip). Falls back to the most forgiving one."""
+    for field, layout in (
+        ("chart", "chart"), ("stats", "stats"), ("steps", "timeline"),
+        ("columns", "two_column"), ("quote", "quote"),
+    ):
+        if raw.get(field):
+            return layout
+    if raw.get("headers") or raw.get("rows"):
+        return "table"
+    return "bullets"
+
+
 _RENDERERS = {
     "title": _render_title,
     "section": _render_section,
@@ -535,6 +721,7 @@ _RENDERERS = {
     "table": _render_table,
     "timeline": _render_timeline,
     "quote": _render_quote,
+    "chart": _render_chart,
     "closing": _render_closing,
 }
 
@@ -742,13 +929,20 @@ def _content_types(n_slides: int, notes_indices: list[int]) -> str:
 # ── entry point ──────────────────────────────────────────────────────────────
 
 def build_presentation(spec: dict) -> tuple[bytes, dict]:
-    """Deck spec dict → (.pptx bytes, summary). Raises DeckSpecError on bad input."""
-    theme = Theme.from_spec(spec.get("theme"))
+    """Deck spec dict → (.pptx bytes, summary).
+
+    Fault-tolerant by design (small-model robustness): a malformed slide never
+    aborts the deck — it is rendered as a salvage slide and noted in
+    `summary["warnings"]`. The only hard error is an entirely empty `slides`
+    array (nothing to build)."""
+    warnings: list[str] = []
+    theme = Theme.from_spec(spec.get("theme"), warnings)
     raw_slides = spec.get("slides")
     if not isinstance(raw_slides, list) or not raw_slides:
         raise DeckSpecError("spec.slides must be a non-empty array of slide objects")
     if len(raw_slides) > _MAX_SLIDES:
-        raise DeckSpecError(f"too many slides ({len(raw_slides)} > {_MAX_SLIDES})")
+        warnings.append(f"too many slides ({len(raw_slides)}) — kept the first {_MAX_SLIDES}")
+        raw_slides = raw_slides[:_MAX_SLIDES]
 
     slides_xml: list[str] = []
     slide_meta: list[dict] = []
@@ -756,20 +950,25 @@ def build_presentation(spec: dict) -> tuple[bytes, dict]:
     section_counter = 0
     for i, raw in enumerate(raw_slides):
         if not isinstance(raw, dict):
-            raise DeckSpecError(f"slides[{i}] must be an object")
-        layout = str(raw.get("layout") or "").strip()
+            warnings.append(f"slides[{i}] is not an object — replaced with a placeholder")
+            raw = {}
+        layout = str(raw.get("layout") or "").strip().lower()
         renderer = _RENDERERS.get(layout)
         if renderer is None:
-            raise DeckSpecError(
-                f"slides[{i}]: unknown layout {layout!r} — use one of {sorted(_RENDERERS)}"
-            )
+            guessed = _guess_layout(raw)
+            if layout:
+                warnings.append(f"slides[{i}]: unknown layout {layout!r} → rendered as {guessed}")
+            layout, renderer = guessed, _RENDERERS[guessed]
         if layout == "section":
             section_counter += 1
         shapes = _Shapes(theme)
         try:
             renderer(shapes, raw, section_counter if layout == "section" else i + 1, len(raw_slides))
-        except DeckSpecError as exc:
-            raise DeckSpecError(f"slides[{i}] ({layout}): {exc}") from None
+        except Exception as exc:  # noqa: BLE001 — never let one slide kill the deck
+            warnings.append(f"slides[{i}] ({layout}): {exc} → rendered a salvage slide")
+            shapes = _Shapes(theme)
+            _render_salvage(shapes, raw)
+            layout = "bullets"  # salvage is a light title/bullets slide
         slides_xml.append(_slide_xml(shapes, dark_bg=layout in _DARK_LAYOUTS, theme=theme))
         note_text = _text(raw.get("notes"), f"slides[{i}].notes", max_len=4_000)
         if note_text:
@@ -855,4 +1054,8 @@ def build_presentation(spec: dict) -> tuple[bytes, dict]:
         "slide_count": len(slide_meta),
         "theme": {"primary": theme.primary, "secondary": theme.secondary, "accent": theme.accent},
     }
+    if warnings:
+        # Non-fatal issues the model may want to address on a regenerate. The file
+        # is valid regardless — these are advisories, not errors.
+        summary["warnings"] = warnings
     return buf.getvalue(), summary

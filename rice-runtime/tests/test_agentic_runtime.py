@@ -190,7 +190,7 @@ class _ToolThenFinalProvider:
     def capabilities(self):
         return ProviderCapabilities(native_tool_calling=True)
 
-    async def stream(self, *, system, messages, tools=(), temperature=0.7):
+    async def stream(self, *, system, messages, tools=(), temperature=0.7, **_):
         self.calls.append((system, tuple(messages)))
         if len(self.calls) == 1:
             yield ProviderChunk(kind="tool_call", tool_call=ToolCall(tool_name="huge", arguments={}, id="call_huge"))
@@ -252,7 +252,7 @@ class _TextProvider:
     def capabilities(self):
         return ProviderCapabilities()
 
-    async def stream(self, *, system, messages, tools=(), temperature=0.7):
+    async def stream(self, *, system, messages, tools=(), temperature=0.7, **_):
         self.messages = tuple(messages)
         yield ProviderChunk(kind="text", text="sub report")
         yield ProviderChunk(kind="done", stop_reason="end_turn")

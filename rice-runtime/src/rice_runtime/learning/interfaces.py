@@ -170,8 +170,21 @@ class ConsolidateResult:
 class ILearningService(Protocol):
     # ── turn-critical ─────────────────────────────────────────────────────────
     def prefetch(self, session_id: str, user_message: str) -> PrefetchResult:
-        """Assemble injectable context: active skills (all under token budget),
-        recent facts + FTS-matched memories, and skill-creation guidance."""
+        """Assemble injectable context: high-relevance active skills injected in
+        full (rest listed as a short index for on-demand skill_view), recent facts
+        + FTS-matched memories, and skill-creation guidance."""
+        ...
+
+    def search_skills(self, query: str, limit: int = 8) -> list[dict]:
+        """Rank active skills against `query` (name/description/tags/body lexical
+        match) → list of {name, description, score}. Backs the `skill_search` tool."""
+        ...
+
+    def view_skill_body(self, session_id: str, skill_id: str) -> dict:
+        """Load an active skill's full body → {name, version, description, body};
+        bumps its view counter and records the on-demand load for this turn's
+        use-attribution. Backs the `skill_view` tool. Raises NotFoundError if the
+        skill is missing or not active."""
         ...
 
     async def observe(self, outcome: TurnOutcome) -> list[LearningEffect]:

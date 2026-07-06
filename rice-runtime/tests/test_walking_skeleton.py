@@ -71,7 +71,7 @@ class _ToolThenAnswer:
     def capabilities(self):
         return ProviderCapabilities(native_tool_calling=True)
 
-    async def stream(self, *, system, messages, tools, temperature=0.7):
+    async def stream(self, *, system, messages, tools, temperature=0.7, **_):
         if not any(m.role == "tool" for m in messages):
             yield ProviderChunk(kind="tool_call", tool_call=ToolCall(tool_name="ping", arguments={"x": 1}))
             yield ProviderChunk(kind="done", stop_reason="tool_use")
@@ -121,7 +121,7 @@ class _TitleProvider:
     def capabilities(self):
         return ProviderCapabilities()
 
-    async def stream(self, *, system, messages, tools=(), temperature=0.7):
+    async def stream(self, *, system, messages, tools=(), temperature=0.7, **_):
         yield ProviderChunk(kind="text", text=self._title)
         yield ProviderChunk(kind="done", stop_reason="end_turn")
 
@@ -155,7 +155,7 @@ async def test_titler_skips_echo_fallback():
         def capabilities(self):
             return ProviderCapabilities()
 
-        async def stream(self, *, system, messages, tools=(), temperature=0.7):
+        async def stream(self, *, system, messages, tools=(), temperature=0.7, **_):
             yield ProviderChunk(kind="text", text="hi")
             yield ProviderChunk(kind="done", stop_reason="end_turn")
 
@@ -180,7 +180,7 @@ async def test_titler_caps_a_rambly_model():
         def capabilities(self):
             return ProviderCapabilities()
 
-        async def stream(self, *, system, messages, tools=(), temperature=0.7):
+        async def stream(self, *, system, messages, tools=(), temperature=0.7, **_):
             for _ in range(100_000):
                 yield ProviderChunk(kind="text", text="아주 긴 제목 ")
             yield ProviderChunk(kind="done", stop_reason="end_turn")

@@ -1025,6 +1025,17 @@ function ChatScreen() {
       return copy;
     });
 
+  // 모델 응답을 다시 기다리기 시작하는 지점(계획 확정 후 등)에서 가벼운 "작업 중"
+  // 표시(빈 streaming thinking 블록)를 심는다 — 추론을 스트리밍하지 않는 상용
+  // 모델도 경과 초 카운터가 계속 흐르게 하기 위함. 실제 콘텐츠(답변/도구/추론)가
+  // 오면 finalizeThinking이 즉시 걷어낸다. 이미 streaming 중이면 no-op.
+  const seedWaiting = () =>
+    setThread((p) => {
+      const last = p[p.length - 1];
+      if (last?.kind === 'thinking' && last.streaming) return p;
+      return [...p, { kind: 'thinking', duration: '', text: '', streaming: true, startedAt: Date.now() }];
+    });
+
   // plan_updated: 같은 planId 카드를 스냅샷으로 통째 교체 (없으면 이 지점에 생성).
   const upsertPlan = (d: PlanUpdatedEventData) => setThread((p) => upsertPlanBlock(p, d));
 
@@ -1165,9 +1176,11 @@ function ChatScreen() {
         const d = e.data as { text?: string };
         if (typeof d.text === 'string') appendThinking(d.text);
       } else if (e.type === 'plan_updated') {
-        // 계획 생성/전이/수정 — 플래너의 생각 블록을 닫고 계획 카드를 업서트.
+        // 계획 생성/전이/수정 — 플래너의 생각 블록을 닫고 계획 카드를 업서트한 뒤,
+        // 계획→답변 생성 사이의 침묵 구간에도 경과 카운터가 흐르도록 대기 표시를 심는다.
         finalizeThinking();
         upsertPlan(e.data as PlanUpdatedEventData);
+        seedWaiting();
       } else if (e.type === 'tool_call') {
         // a tool round begins → close the reasoning block, push a running trace card
         finalizeThinking();

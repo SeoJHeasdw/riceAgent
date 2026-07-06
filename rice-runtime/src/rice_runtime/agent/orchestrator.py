@@ -266,6 +266,7 @@ class Orchestrator:
                 token_calibrator=self._token_calibrator,
                 planner=planner,
                 agent_config=cfg.agent,
+                max_output_tokens=cfg.provider.max_output_tokens,
             )
             result = LoopResult()
             async for event in loop.run(ctx, session_id, result, abort):

@@ -45,7 +45,10 @@ The deck quotes the model, so the model comes first. Standard 3-sheet shape:
 
 The tool computes formulas locally and returns the grid — **read the computed
 numbers from the tool result and quote exactly those in the deck**. If
-`formula_errors` is non-empty, fix and regenerate before moving on.
+`formula_errors` is non-empty, fix and regenerate before moving on. Ignore
+`formula_warnings` (functions like VLOOKUP/SUMIF the local engine doesn't
+evaluate) — those formulas are correct and Excel computes them on open; don't
+rewrite them.
 
 ## Step 4 — Write the deck (`create_presentation`)
 

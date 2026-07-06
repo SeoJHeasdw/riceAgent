@@ -429,26 +429,68 @@ class TestLearningServiceT2:
         result = self._svc.curate()
         assert any(sid == "old-sk" for sid, _ in result.transitioned)
 
-    def test_prefetch_injects_active_skills(self):
+    def test_prefetch_auto_injects_relevant_skill(self):
+        """관련도 높은(이름/태그 일치) 쿼리는 스킬 전문을 자동 주입한다."""
         self._write_skill("active-sk", "active")
-        result = self._svc.prefetch("sess1", "hello")
+        result = self._svc.prefetch("sess1", "run the active-sk test")
         injected = [s.skill_id for s in result.skills]
         assert "active-sk" in injected
-        assert "business-planning" in injected  # 빌트인도 active면 함께 주입
 
-    def test_prefetch_does_not_inject_archived_skills(self):
-        self._write_skill("arch-sk", "archived")
+    def test_prefetch_indexes_irrelevant_skill_instead_of_injecting(self):
+        """무관한 쿼리('hello')엔 전문을 주입하지 않고 짧은 인덱스로만 싣는다
+        (inject-all-active 폐기 — 관련 없는 스킬 본문이 매 턴 들어가지 않는다)."""
+        self._write_skill("active-sk", "active")
         result = self._svc.prefetch("sess1", "hello")
+        assert "active-sk" not in [s.skill_id for s in result.skills]
+        # 인덱스에는 이름 + 설명이 있어야 한다(모델이 skill_view로 당길 수 있게).
+        assert "active-sk" in result.system_prompt_additions
+        assert "skill_view" in result.system_prompt_additions
+        # 본문(스텝)은 인덱스에 실리지 않는다.
+        assert "Do thing A" not in result.system_prompt_additions
+
+    def test_prefetch_does_not_inject_or_index_archived_skills(self):
+        self._write_skill("arch-sk", "archived")
+        result = self._svc.prefetch("sess1", "run the arch-sk test")
         assert "arch-sk" not in [s.skill_id for s in result.skills]
+        assert "arch-sk" not in result.system_prompt_additions
 
     def test_prefetch_includes_skill_guidance(self):
         result = self._svc.prefetch("sess1", "hello")
         assert "propose_skill" in result.system_prompt_additions
 
-    def test_prefetch_includes_skill_body_in_prompt(self):
+    def test_prefetch_includes_relevant_skill_body_in_prompt(self):
         self._write_skill("body-sk", "active")
-        result = self._svc.prefetch("sess1", "hello")
+        result = self._svc.prefetch("sess1", "load the body-sk test skill")
         assert "Do thing A" in result.system_prompt_additions
+
+    def test_search_skills_ranks_by_relevance(self):
+        self._write_skill("alpha-report", "active")
+        results = self._svc.search_skills("alpha-report")
+        assert results and results[0]["name"] == "alpha-report"
+        assert results[0]["score"] > 0
+
+    def test_view_skill_body_returns_body_and_bumps_view(self):
+        self._write_skill("view-body-sk", "active")
+        out = self._svc.view_skill_body("sess1", "view-body-sk")
+        assert "Do thing A" in out["body"]
+        assert UsageStore(self._paths).read("view-body-sk").view == 1
+
+    def test_view_skill_body_rejects_archived(self):
+        self._write_skill("off-sk", "archived")
+        with pytest.raises(NotFoundError):
+            self._svc.view_skill_body("sess1", "off-sk")
+
+    @pytest.mark.asyncio
+    async def test_observe_attributes_use_to_viewed_skills(self):
+        """skill_view로 온디맨드 로딩된 스킬도 use 카운터에 귀속된다."""
+        self._write_skill("viewed-sk", "active")
+        self._svc.view_skill_body("sess1", "viewed-sk")
+        outcome = TurnOutcome(
+            session_id="sess1", final_message="done", history=(),
+            tool_calls_made=0, injected_skill_ids=(),
+        )
+        await self._svc.observe(outcome)
+        assert UsageStore(self._paths).read("viewed-sk").use == 1
 
     @pytest.mark.asyncio
     async def test_observe_increments_use_for_injected_skills(self):

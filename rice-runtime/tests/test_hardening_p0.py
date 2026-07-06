@@ -127,7 +127,7 @@ class _MemoryProposingProvider:
     def capabilities(self) -> ProviderCapabilities:
         return ProviderCapabilities(native_tool_calling=True)
 
-    async def stream(self, *, system, messages, tools=(), temperature=0.7):
+    async def stream(self, *, system, messages, tools=(), temperature=0.7, **_):
         yield ProviderChunk(
             kind="tool_call",
             tool_call=ToolCall(tool_name="propose_memory_write", arguments={"kind": "fact", "content": self._content}),

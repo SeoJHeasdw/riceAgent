@@ -20,8 +20,9 @@ Registered builtin modules (add new ones here — one place):
   web_tools     — fetch_url (public web page → readable text; SSRF-guarded)
   vision_tools  — vision_analyze (image download + base64; requires vision provider)
   subagent_tools — delegate_subagent (parallel focused worker threads)
-  skill_tools   — propose_skill (미드턴 스킬 승격 제안, Self-Improvement v3 —
-                  learning 서비스가 주입됐을 때만 등록된다)
+  skill_tools   — skill_search + skill_view (스킬 인덱스 검색 · 전문 온디맨드
+                  로딩) + propose_skill (미드턴 스킬 승격 제안); learning 서비스가
+                  주입됐을 때만 등록된다
 
 `build_subagent_toolset(paths)`는 sub-agent 워커에게 주는 read-only 부분집합
 (read_file/list_dir/search_files/fetch_url)이다 — 쓰기·셸·재위임은 뺀다:

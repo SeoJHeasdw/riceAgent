@@ -25,6 +25,7 @@ from rice_runtime.agent.builtins.office.formula import (
     EvaluatedCell,
     evaluate_grid,
 )
+from rice_runtime.agent.builtins.office.docx_writer import build_document
 from rice_runtime.agent.builtins.office.pptx_writer import DeckSpecError, build_presentation
 from rice_runtime.agent.builtins.office.xlsx_writer import WorkbookSpecError, build_workbook
 from rice_runtime.agent.builtins.read_extract import extract_document_text
@@ -152,6 +153,33 @@ def test_xlsx_roundtrip_and_cached_values(tmp_path):
     assert "Sheet: Inputs" in text and "12500" in text
 
 
+def test_xlsx_unsupported_function_is_warning_not_error():
+    """#NAME?(로컬 미지원 함수 — VLOOKUP/SUMIF 등)는 fatal error가 아니라 warning.
+    수식 자체는 .xlsx에 그대로 쓰여 Excel이 재계산한다. 진짜 오류(#DIV/0!)만 error."""
+    spec = {
+        "sheets": [{
+            "name": "S",
+            "rows": [
+                [{"value": 10}],
+                [{"formula": "=VLOOKUP(A1,A:A,1)"}],  # 로컬 미지원 → #NAME?
+                [{"formula": "=A1/0"}],                 # 진짜 오류 → #DIV/0!
+            ],
+        }],
+    }
+    _data, summary = build_workbook(spec)
+    # #DIV/0!만 formula_errors에 남는다
+    assert any("#DIV/0!" in e for e in summary["formula_errors"])
+    assert not any("#NAME?" in e for e in summary["formula_errors"])
+    # #NAME?는 분리된 warning으로, 안내 노트와 함께
+    assert any("#NAME?" in w for w in summary["formula_warnings"])
+    assert "formula_warnings_note" in summary
+
+
+def test_xlsx_no_warnings_key_when_all_supported():
+    _data, summary = build_workbook(_model_spec())
+    assert "formula_warnings" not in summary
+
+
 def test_xlsx_spec_errors():
     with pytest.raises(WorkbookSpecError, match="sheets"):
         build_workbook({"sheets": []})
@@ -211,15 +239,78 @@ def test_pptx_all_layouts_valid_package(tmp_path):
     assert "only-here" not in text.split("# ── Slide 9 ──")[0]
 
 
-def test_pptx_spec_errors():
-    with pytest.raises(DeckSpecError, match="unknown layout"):
-        build_presentation({"slides": [{"layout": "fancy"}]})
-    with pytest.raises(DeckSpecError, match="title"):
-        build_presentation({"slides": [{"layout": "title"}]})
-    with pytest.raises(DeckSpecError, match="stats"):
-        build_presentation({"slides": [{"layout": "stats", "title": "t", "stats": []}]})
-    with pytest.raises(DeckSpecError, match="hex color"):
-        build_presentation({"theme": {"primary": "blue"}, "slides": [{"layout": "title", "title": "t"}]})
+def test_pptx_theme_preset_string_and_override():
+    from rice_runtime.agent.builtins.office.pptx_writer import Theme, _PRESETS
+
+    # bare string preset
+    t = Theme.from_spec("forest")
+    assert t.primary == _PRESETS["forest"]["primary"]
+    assert t.accent == _PRESETS["forest"]["accent"]
+    # preset + per-color override: preset base kept, accent swapped
+    t2 = Theme.from_spec({"preset": "forest", "accent": "F97316"})
+    assert t2.primary == _PRESETS["forest"]["primary"]
+    assert t2.accent == "F97316"
+    # a whole deck builds from a string preset
+    data, _summary = build_presentation({"theme": "midnight", "slides": [{"layout": "title", "title": "t"}]})
+    assert data[:2] == b"PK"
+
+
+def test_pptx_bad_theme_degrades_not_raises():
+    """Small-model robustness: an unknown preset / bad hex must NOT lose the deck —
+    it degrades to a default color and is reported in warnings."""
+    warns: list[str] = []
+    from rice_runtime.agent.builtins.office.pptx_writer import Theme
+    t = Theme.from_spec({"preset": "chartreuse", "primary": "blue"}, warns)
+    assert t.primary  # some valid hex
+    assert any("preset" in w for w in warns) and any("hex" in w for w in warns)
+    # whole deck still builds
+    data, summary = build_presentation(
+        {"theme": "chartreuse", "slides": [{"layout": "title", "title": "t"}]}
+    )
+    assert data[:2] == b"PK" and summary.get("warnings")
+
+
+def test_pptx_malformed_slides_never_crash():
+    """Unknown layout, missing required fields, and a non-object slide all
+    degrade to valid salvage slides — the deck always builds."""
+    data, summary = build_presentation({"slides": [
+        {"layout": "fancy", "title": "unknown layout", "bullets": ["a"]},
+        {"layout": "stats", "title": "no stats array"},
+        {"layout": "title"},          # missing required title
+        "not-an-object",
+    ]})
+    with zipfile.ZipFile(BytesIO(data)) as zf:
+        n = sum(1 for x in zf.namelist() if x.startswith("ppt/slides/slide") and x.endswith(".xml"))
+    assert n == 4  # every slide produced something
+    assert summary["slide_count"] == 4
+    assert len(summary["warnings"]) >= 3
+
+
+def test_pptx_chart_column_and_line(tmp_path):
+    data, summary = build_presentation({"theme": "finance", "slides": [
+        {"layout": "chart", "title": "Revenue", "chart": {
+            "type": "column", "categories": ["Y1", "Y2", "Y3"],
+            "series": [{"name": "Rev", "values": ["$1,000", "2000", 3400]},
+                       {"name": "Cost", "values": [800, 1200, 1500]}]}},
+        {"layout": "chart", "title": "Adoption", "chart": {
+            "type": "line", "categories": ["Q1", "Q2", "Q3", "Q4"], "values": [10, 25, 40, 80]}},
+    ]})
+    assert summary["slides"][0]["layout"] == "chart"
+    assert "warnings" not in summary  # clean spec → no warnings
+    out = tmp_path / "c.pptx"
+    out.write_bytes(data)
+    # opens + extracts (category labels land as slide text)
+    text = extract_document_text(str(out))
+    assert "Revenue" in text and "Y1" in text
+
+
+def test_pptx_chart_bad_data_salvages():
+    """A chart with no numeric data must not crash — it salvages to a valid slide."""
+    data, summary = build_presentation({"slides": [
+        {"layout": "chart", "title": "Broken", "chart": {"categories": ["A"], "values": ["n/a"]}},
+    ]})
+    assert data[:2] == b"PK"
+    assert summary["slide_count"] == 1 and summary.get("warnings")
 
 
 # ── 4. tool registration + sandbox ───────────────────────────────────────────
@@ -229,15 +320,19 @@ async def test_office_tools_registered_and_sandboxed():
     specs, handlers = build_builtin_tools(paths)
     by_name = {s.name: s for s in specs}
     assert "create_presentation" in by_name and "create_workbook" in by_name
+    assert "create_document" in by_name
     # 디스크 쓰기 도구 — write_file과 동일하게 승인 게이트를 탄다
     assert by_name["create_presentation"].requires_approval is True
     assert by_name["create_workbook"].requires_approval is True
+    assert by_name["create_document"].requires_approval is True
 
     # 샌드박스 탈출 거부
     with pytest.raises(ValueError, match="escapes workspace"):
         await handlers["create_workbook"]({"path": "../evil.xlsx", "sheets": [{"rows": [[1]]}]})
     with pytest.raises(ValueError, match=".pptx"):
         await handlers["create_presentation"]({"path": "deck.txt", "slides": [{"layout": "title", "title": "t"}]})
+    with pytest.raises(ValueError, match=".docx"):
+        await handlers["create_document"]({"path": "doc.txt", "blocks": [{"type": "paragraph", "text": "x"}]})
 
     # 정상 경로: 생성 → read_file 추출 라운드트립
     result = await handlers["create_presentation"](
@@ -252,3 +347,65 @@ async def test_office_tools_registered_and_sandboxed():
     )
     assert wb["formulas"] == 1 and wb["formula_errors"] == []
     assert "2" in wb["sheets"][0]["computed_preview"][0]
+
+    doc = await handlers["create_document"](
+        {"path": "out/report.docx", "title": "Report",
+         "blocks": [{"type": "heading", "text": "Intro"}, {"type": "bullets", "items": ["a", "b"]}]}
+    )
+    assert doc["blocks"] == 2
+    dread = await handlers["read_file"]({"path": "out/report.docx"})
+    assert dread["extracted"] is True and "Intro" in dread["content"]
+
+
+# ── 5. docx writer ────────────────────────────────────────────────────────────
+
+def test_docx_all_block_types_roundtrip(tmp_path):
+    spec = {
+        "title": "Analysis", "subtitle": "review", "theme": "forest",
+        "blocks": [
+            {"type": "heading", "level": 1, "text": "Overview"},
+            {"type": "paragraph", "text": "Line one.\n\nLine two."},
+            {"type": "bullets", "items": ["alpha", {"text": "nested", "level": 1}]},
+            {"type": "numbered", "items": ["first", "second"]},
+            {"type": "callout", "label": "Key", "text": "the takeaway"},
+            {"type": "table", "headers": ["k", "v"], "rows": [["a", "1"], ["b", "2"]]},
+            {"type": "quote", "text": "a quotation"},
+            {"type": "divider"},
+        ],
+    }
+    data, summary = build_document(spec)
+    with zipfile.ZipFile(BytesIO(data)) as zf:
+        assert zf.testzip() is None
+        names = set(zf.namelist())
+    assert {"word/document.xml", "word/styles.xml", "word/numbering.xml"} <= names
+    assert "warnings" not in summary
+    out = tmp_path / "a.docx"
+    out.write_bytes(data)
+    text = extract_document_text(str(out))
+    for token in ("Analysis", "Overview", "alpha", "first", "the takeaway", "quotation"):
+        assert token in text
+
+
+def test_docx_lenient_blocks_never_crash():
+    """Bare-string blocks, unknown type, missing fields, non-list blocks → all
+    degrade; the document is always valid + non-empty."""
+    data, summary = build_document({
+        "title": "T",
+        "blocks": [
+            "just a string",
+            {"type": "wat", "text": "unknown type"},
+            {"items": ["type inferred as bullets"]},
+            {"type": "table"},          # empty → skipped
+            {"type": "heading"},         # no text → skipped
+        ],
+    })
+    assert data[:2] == b"PK"
+    assert any("unknown type" in w for w in summary.get("warnings", []))
+
+
+def test_docx_empty_spec_still_valid():
+    """Even a contentless spec yields a valid, non-empty .docx (never a crash)."""
+    data, summary = build_document({})
+    with zipfile.ZipFile(BytesIO(data)) as zf:
+        assert zf.testzip() is None
+    assert summary.get("warnings")  # placeholder note
