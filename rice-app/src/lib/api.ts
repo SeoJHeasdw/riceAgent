@@ -13,6 +13,7 @@ import type {
   LearningEvent,
   RuntimeMemory,
 } from './types';
+import type { SkillAnalysis } from './learningData';
 
 /** stdio 또는 http 로컬 MCP 서버 정의 — GET /connectors/local/{test,''} 요청 바디 공통 shape. */
 export interface LocalMcpTransportPayload {
@@ -230,6 +231,10 @@ class ApiClient {
   }
   rollbackSkill(id: string, version: number): Promise<ApiResponse> {
     return this.send('POST', `/skills/${id}/rollback`, { version });
+  }
+  /** Rebuild the explanatory SKILL.md analysis sidecar. Does not modify the skill body. */
+  refreshSkillAnalysis(id: string): Promise<ApiResponse<SkillAnalysis>> {
+    return this.send('POST', `/skills/${id}/analysis/refresh`);
   }
 
   // ── suggestion inbox + discovery + ledger (Self-Improvement v3) ──

@@ -7,9 +7,8 @@ import { Markdown } from './Markdown';
 import { FileTypeIcon, FolderIcon } from './FileTypeIcon';
 
 /**
- * SkillSourceWorkspace — full-screen, IDE-like view of a skill *bundle*
- * (SKILL.md + scripts/ + references/ + assets/ …). A skill is a small repo, not
- * a single prompt, so the source needs the whole canvas — not a cramped pane.
+ * SkillSourceWorkspace — full-screen source view for SKILL.md and any bundled
+ * files an imported marketplace skill may carry.
  *
  * 학습 뷰가 홈(비개발자), 여기는 필요할 때 들어오는 소스 작업공간(개발자도 사용).
  * 편집은 학습 레이어가 뭉개지지 않도록 통합 chat-patch(onEdit)로만 흐른다.
@@ -178,7 +177,7 @@ export const SkillSourceWorkspace: React.FC<{
         <div className="flex-shrink-0 flex items-center gap-2 px-5 py-2 bg-interactive/8 border-b border-border-subtle-01">
           <Icon name="idea" size={14} className="text-icon-primary flex-shrink-0" />
           <span className="text-caption-01 text-text-secondary">
-            이 스킬은 대화로 학습돼 <span className="text-text-primary font-semibold">정의가 자동 구성</span>됐어요. 규칙·단계는 학습 뷰에서, 또는 위 <span className="font-semibold">편집</span>으로 다듬을 수 있어요.
+            이 스킬은 대화로 학습돼 <span className="text-text-primary font-semibold">정의가 자동 구성</span>됐어요. 작동 방식은 학습 뷰에서 해석해 보여주고, 본문은 위 <span className="font-semibold">편집</span>으로 다듬을 수 있어요.
           </span>
         </div>
       )}

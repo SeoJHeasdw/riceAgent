@@ -27,8 +27,6 @@ export interface EditPatch {
   targetPath: string;
   /** 표시용 파일명 */
   targetLabel: string;
-  /** SKILL.md 편집일 때만 — 학습 규칙으로 등록될 텍스트 (코드 파일 편집은 비움) */
-  newRuleText?: string;
 }
 
 type Msg = { role: 'user' | 'agent'; text: string };
@@ -57,8 +55,8 @@ const commentLine = (lang: SkillFileLanguage, text: string): string => {
 
 /**
  * 지시 → 대상 파일에 대한 patch 제안을 합성한다.
- * SKILL.md면 "내 개선" 섹션에 규칙 한 줄을 더하고(학습 의미), 그 외 파일이면 해당
- * 언어 주석으로 지시를 남긴다(실 LLM 편집의 mock — 흐름: 지시→diff→승인→version++).
+ * SKILL.md면 "내 개선" 섹션에 지침 한 줄을 더하고, 그 외 파일이면 해당 언어 주석으로
+ * 지시를 남긴다(실 LLM 편집의 mock — 흐름: 지시→diff→승인→version++).
  */
 function buildPatch(instruction: string, skill: Skill, detail: SkillDetail, targetPath?: string): EditPatch {
   const text = instruction.trim();
@@ -75,7 +73,7 @@ function buildPatch(instruction: string, skill: Skill, detail: SkillDetail, targ
     targetLabel: target?.path.split('/').pop() ?? 'SKILL.md',
   };
 
-  // ── SKILL.md: 규칙 한 줄을 "내 개선" 섹션에 추가 (학습 레이어) ──
+  // ── SKILL.md: 지침 한 줄을 "내 개선" 섹션에 추가 (분석 sidecar는 저장 후 재생성) ──
   if (target && isSkillMdPath(target.path)) {
     const bullet = `- ${text}`;
     const lines = current.split('\n');
@@ -96,7 +94,7 @@ function buildPatch(instruction: string, skill: Skill, detail: SkillDetail, targ
       diff.push({ t: 'add', text: '' });
       diff.push({ t: 'add', text: bullet });
     }
-    return { ...base, diff, proposedBody, newRuleText: text };
+    return { ...base, diff, proposedBody };
   }
 
   // ── 그 외 번들 파일: 언어 주석으로 지시를 남긴다 ──
@@ -131,7 +129,7 @@ export const SkillEditDrawer: React.FC<{
   /** 편집 대상 파일 경로 — 워크스페이스에서 열린 파일. 미지정 시 SKILL.md(지침). */
   targetPath?: string;
   onClose: () => void;
-  /** 승인 → 버전++·대상 파일 갱신(SKILL.md면 규칙도 등록). editedBody가 있으면 그 본문으로 저장. */
+  /** 승인 → 버전++·대상 파일 갱신. editedBody가 있으면 그 본문으로 저장. */
   onApply: (patch: EditPatch, editedBody?: string) => void;
 }> = ({ open, skill, detail, targetPath, onClose, onApply }) => {
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -230,7 +228,7 @@ export const SkillEditDrawer: React.FC<{
                 <Icon name="idea" size={15} className="text-icon-primary flex-shrink-0 mt-0.5" />
                 <div className="text-caption-01 text-text-secondary leading-5">
                   {targetIsSkillMd ? (
-                    <>바꾸고 싶은 점을 자연어로 적어주세요. 제안을 <span className="text-text-primary font-semibold">diff로 검토한 뒤 적용</span>하면 새 버전으로 저장돼요. 학습한 규칙·히스토리는 보존돼요.</>
+                    <>바꾸고 싶은 점을 자연어로 적어주세요. 제안을 <span className="text-text-primary font-semibold">diff로 검토한 뒤 적용</span>하면 새 버전으로 저장돼요. 작동 방식 분석은 저장 후 다시 만들 수 있어요.</>
                   ) : (
                     <><span className="font-mono text-text-secondary">{targetName}</span> 를 어떻게 바꿀지 적어주세요. 제안을 <span className="text-text-primary font-semibold">diff로 검토한 뒤 적용</span>하면 새 버전으로 저장돼요.</>
                   )}

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button, Icon, Tag, ResizeHandle, Toggle, ConfirmDialog, OverflowMenu } from '../components/ui';
 import { useResizable } from '../hooks/useResizable';
@@ -12,7 +12,7 @@ import { IMPACT_REPORT } from '../lib/learningData';
 import { ownedSkillFiles, ownedToMarketSkill, publishedMarketId } from '../lib/skillBridge';
 import { languageFromPath } from '../lib/skillFiles';
 import { api } from '../lib/api';
-import type { Skill, SkillDetail, SkillRule, SkillVersion, SkillHealth, SkillActivity, SkillOrigin, SkillUpstream } from '../lib/learningData';
+import type { Skill, SkillAnalysis, SkillAnalysisConfidence, SkillAnalysisToolMention, SkillDetail, SkillOrigin, SkillStep, SkillUpstream, SkillVersion } from '../lib/learningData';
 import type { IconName } from '../components/ui';
 import type { ConsolidateProposal } from '../lib/types';
 
@@ -241,142 +241,179 @@ const SectionLabel: React.FC<{ children: React.ReactNode; right?: React.ReactNod
 // ── 정보 텍스처 헬퍼 ───────────────────────────────────────────────
 const pctStr = (n: number) => `${Math.round(n * 100)}%`;
 
-// 규칙 학습 신뢰도 — 근거(교정·예시) 양에 따른 확신 정도
-const CONFIDENCE_META: Record<NonNullable<SkillRule['confidence']>, { label: string; cls: string }> = {
+const CONFIDENCE_META: Record<SkillAnalysisConfidence, { label: string; cls: string }> = {
   high: { label: '신뢰 높음', cls: 'text-support-success' },
-  medium: { label: '신뢰 보통', cls: 'text-text-helper' },
-  low: { label: '신뢰 낮음', cls: 'text-support-warning' },
+  medium: { label: '신뢰 보통', cls: 'text-text-secondary' },
+  low: { label: '추정', cls: 'text-support-warning' },
 };
 
-// 최근 활동 종류별 아이콘·색
-const ACTIVITY_META: Record<SkillActivity['kind'], { icon: IconName; cls: string }> = {
-  use: { icon: 'check-circle', cls: 'text-support-success' },
-  edit: { icon: 'edit', cls: 'text-link-primary' },
-  learn: { icon: 'idea', cls: 'text-icon-primary' },
-  share: { icon: 'share', cls: 'text-purple-60' },
-  restore: { icon: 'renew', cls: 'text-support-warning' },
-};
-
-// 처리 턴 추세 미니 스파크라인 — 내려갈수록(턴 감소) 개선이라 초록, 악화면 노랑
-const Sparkline: React.FC<{ points: number[] }> = ({ points }) => {
-  if (!points || points.length < 2) return null;
-  const w = 60, h = 20, pad = 2;
-  const min = Math.min(...points), max = Math.max(...points);
-  const range = max - min || 1;
-  const stepX = (w - pad * 2) / (points.length - 1);
-  const yy = (v: number) => pad + ((max - v) / range) * (h - pad * 2);
-  const d = points.map((v, i) => `${i === 0 ? 'M' : 'L'}${(pad + i * stepX).toFixed(1)},${yy(v).toFixed(1)}`).join(' ');
-  const improving = points[points.length - 1] <= points[0];
+const ConfidencePill: React.FC<{ value?: SkillAnalysisConfidence }> = ({ value = 'low' }) => {
+  const meta = CONFIDENCE_META[value];
   return (
-    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} fill="none" className={improving ? 'text-support-success' : 'text-support-warning'}>
-      <path d={d} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx={pad + (points.length - 1) * stepX} cy={yy(points[points.length - 1])} r="1.9" fill="currentColor" />
-    </svg>
-  );
-};
-
-// pp 증감 배지 (+8pp / -5pp)
-const DeltaBadge: React.FC<{ delta: number }> = ({ delta }) => {
-  if (!delta) return null;
-  const up = delta > 0;
-  return (
-    <span className={`inline-flex items-center text-caption-01 font-semibold ${up ? 'text-support-success' : 'text-support-error'}`}>
-      <Icon name={up ? 'chevron-up' : 'chevron-down'} size={11} />
-      {Math.abs(Math.round(delta * 100))}pp
+    <span className={`inline-flex items-center gap-1 text-caption-01 font-semibold ${meta.cls}`}>
+      <span className="h-1.5 w-1.5 rounded-full bg-current" />
+      {meta.label}
     </span>
   );
 };
 
-// 헤더의 "성과" 카드 — 성공률·효율·절감을 한눈에 (실서비스 질감)
-const HealthCard: React.FC<{ health: SkillHealth; uses: number }> = ({ health, uses }) => {
-  const ratingTotal = health.rating ? health.rating.up + health.rating.down : 0;
-  return (
-    <div className="relative overflow-hidden rounded-xl border border-border-subtle-01 bg-layer-01 p-4">
-      <span aria-hidden="true" className="absolute left-0 top-0 h-full w-0.5 bg-blue-60" />
-      <div className="flex items-center mb-3">
-        <span className="text-caption-01 font-semibold uppercase tracking-wider text-blue-30">성과</span>
-        {health.spark && (
-          <span className="ml-auto flex items-center gap-1.5">
-            <span className="text-caption-01 text-text-helper">처리 추세</span>
-            <Sparkline points={health.spark} />
-          </span>
-        )}
-      </div>
-      <div className="grid grid-cols-3 gap-3">
-        <div>
-          <div className="text-caption-01 text-text-helper">성공률</div>
-          <div className="flex items-baseline gap-1.5">
-            <span className="text-heading-03 font-light text-text-primary">{pctStr(health.successRate)}</span>
-            {health.successDelta != null && <DeltaBadge delta={health.successDelta} />}
-          </div>
-        </div>
-        <div>
-          <div className="text-caption-01 text-text-helper">평균 처리</div>
-          <div className="flex items-baseline gap-1">
-            <span className="text-heading-03 font-light text-text-primary">{health.avgTurns}</span>
-            <span className="text-caption-01 text-text-helper">턴</span>
-            {health.coldTurns != null && <span className="text-caption-01 text-support-success ml-0.5" title="스킬 없이 직접 했을 때">vs {health.coldTurns}턴</span>}
-          </div>
-        </div>
-        <div>
-          <div className="text-caption-01 text-text-helper">회당 절감</div>
-          <div className="flex items-baseline gap-1">
-            <span className="text-heading-03 font-light text-text-primary">~{health.timeSavedMin}</span>
-            <span className="text-caption-01 text-text-helper">분</span>
-          </div>
-        </div>
-      </div>
-      {ratingTotal > 0 && (
-        <div className="mt-3 pt-3 border-t border-border-subtle-01 flex items-center gap-3 text-caption-01">
-          <span className="inline-flex items-center gap-1 text-support-success"><Icon name="thumbs-up" size={13} /> {health.rating!.up}</span>
-          <span className="inline-flex items-center gap-1 text-text-helper"><Icon name="thumbs-down" size={13} /> {health.rating!.down}</span>
-          <span className="text-text-helper ml-auto">최근 {uses}회 사용 기준</span>
-        </div>
-      )}
-    </div>
-  );
+type ResolvedAnalysisStep = {
+  title: string;
+  description?: string;
+  confidence: SkillAnalysisConfidence;
+  evidence?: string;
 };
 
-// one editable rule — 규칙 텍스트 + 출처 + (적용 횟수·신뢰도·최근 적용) 텍스처
-const RuleRow: React.FC<{ r: SkillRule; onToggle: () => void; onRemove: () => void }> = ({ r, onToggle, onRemove }) => {
-  const conf = r.confidence ? CONFIDENCE_META[r.confidence] : null;
-  return (
-    <div className={`flex items-start gap-2.5 bg-background px-3.5 py-2.5 ${r.on ? '' : 'opacity-50'}`}>
-      <div className="flex-1 min-w-0">
-        <div className={`text-body-short-01 text-text-primary leading-[18px] ${r.on ? '' : 'line-through'}`}>{r.text}</div>
-        <div className="flex items-center gap-x-2.5 gap-y-1 mt-1 flex-wrap text-caption-01 text-text-helper">
-          <span className="inline-flex items-center gap-1">
-            <Icon name={r.source.includes('교정') ? 'edit' : r.source.includes('예시') ? 'idea' : 'view'} size={11} />
-            {r.source}
-          </span>
-          {typeof r.applied === 'number' && (
-            <span className="inline-flex items-center gap-1">
-              <span className="w-px h-2.5 bg-border-strong-01" />
-              {r.applied}회 적용
-            </span>
-          )}
-          {conf && (
-            <span className={`inline-flex items-center gap-1 ${conf.cls}`}>
-              <span className="w-1 h-1 rounded-full bg-current" />
-              {conf.label}
-            </span>
-          )}
-          {r.lastApplied && <span className="text-text-helper/80">· {r.lastApplied}</span>}
-        </div>
-      </div>
-      <div className="flex-shrink-0 mt-0.5">
-        <Toggle checked={r.on} onChange={onToggle} />
-      </div>
-      <button
-        onClick={onRemove}
-        title="규칙 삭제"
-        aria-label="규칙 삭제"
-        className="w-6 h-6 flex items-center justify-center text-icon-secondary hover:text-text-primary opacity-60 hover:opacity-100"
-      >
-        <Icon name="close" size={14} />
-      </button>
-    </div>
-  );
+type ResolvedToolSignal = SkillAnalysisToolMention & {
+  confidence: SkillAnalysisConfidence;
+};
+
+type ResolvedUnderstanding = {
+  summary: string;
+  sourceLabel: string;
+  statusLabel: string;
+  confidence: SkillAnalysisConfidence;
+  analyzedAt?: string;
+  stale: boolean;
+  steps: ResolvedAnalysisStep[];
+  tools: ResolvedToolSignal[];
+  warnings: string[];
+};
+
+const stripFrontmatter = (content: string): string =>
+  content.replace(/^---\s*[\s\S]*?\n---\s*/m, '').trim();
+
+const cleanMdLine = (line: string): string =>
+  line
+    .replace(/^\s{0,3}(?:[-*+]\s+|\d+[.)]\s+)/, '')
+    .replace(/[`*_>#]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const sentenceForTitle = (text: string): string => {
+  const cleaned = cleanMdLine(text);
+  const [first] = cleaned.split(/[.!?。]/);
+  return (first || cleaned).slice(0, 54);
+};
+
+const findMarkdownSection = (body: string, headingPattern: RegExp): string[] => {
+  const lines = body.split('\n');
+  const start = lines.findIndex((line) => /^#{2,4}\s+/.test(line) && headingPattern.test(line));
+  if (start === -1) return [];
+  const out: string[] = [];
+  for (let i = start + 1; i < lines.length; i += 1) {
+    if (/^#{2,4}\s+/.test(lines[i])) break;
+    out.push(lines[i]);
+  }
+  return out;
+};
+
+const stepCandidatesFromBody = (body: string): ResolvedAnalysisStep[] => {
+  const section = findMarkdownSection(body, /(workflow|how it works|steps|procedure|절차|작동 방식|사용 방법|흐름)/i);
+  const source = section.length ? section : body.split('\n');
+  return source
+    .filter((line) => /^\s*(?:[-*+]\s+|\d+[.)]\s+)/.test(line))
+    .map((line): ResolvedAnalysisStep => ({
+      title: sentenceForTitle(line),
+      description: section.length ? '원문의 절차 섹션에서 감지됨' : '원문 목록 구조에서 감지된 단계 후보',
+      confidence: section.length ? 'medium' : 'low',
+      evidence: cleanMdLine(line),
+    }))
+    .filter((s) => s.title.length > 0)
+    .slice(0, 6);
+};
+
+const toolNamesFromSection = (body: string): ResolvedToolSignal[] =>
+  findMarkdownSection(body, /(tools|tooling|사용 도구|도구)/i)
+    .filter((line) => /^\s*(?:[-*+]\s+|\d+[.)]\s+)/.test(line))
+    .map((line): ResolvedToolSignal => ({
+      name: sentenceForTitle(line),
+      kind: 'declared',
+      confidence: 'medium',
+      basis: 'SKILL.md 도구 섹션',
+      evidence: cleanMdLine(line),
+    }))
+    .filter((t) => t.name.length > 0)
+    .slice(0, 8);
+
+const KNOWN_TOOL_PATTERNS: { name: string; pattern: RegExp }[] = [
+  { name: 'terminal', pattern: /\b(terminal|shell|bash|zsh|command line|CLI|npm|pnpm|yarn|pytest|git|rg|grep)\b/i },
+  { name: 'file tools', pattern: /\b(read_file|write_file|edit_file|filesystem|file|workspace)\b/i },
+  { name: 'web/search', pattern: /\b(web search|browser|url|http|docs|검색|브라우저)\b/i },
+  { name: 'database', pattern: /\b(sql|db2|postgres|mysql|database|schema|query)\b/i },
+  { name: 'python', pattern: /\b(python|pandas|notebook|script\.py)\b/i },
+  { name: 'connector', pattern: /\b(gmail|calendar|drive|slack|salesforce|connector|oauth|api)\b/i },
+];
+
+const mentionedToolsFromBody = (body: string): ResolvedToolSignal[] =>
+  KNOWN_TOOL_PATTERNS
+    .filter((t) => t.pattern.test(body))
+    .map((t): ResolvedToolSignal => ({
+      name: t.name,
+      kind: 'mentioned',
+      confidence: 'low',
+      basis: '본문 키워드 감지',
+    }));
+
+const dedupeTools = (tools: ResolvedToolSignal[]): ResolvedToolSignal[] => {
+  const seen = new Set<string>();
+  const out: ResolvedToolSignal[] = [];
+  for (const tool of tools) {
+    const key = `${tool.kind}:${tool.name.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(tool);
+  }
+  return out;
+};
+
+const skillMdBody = (skill: Skill, detail: SkillDetail): string => {
+  const { files } = ownedSkillFiles(skill, detail);
+  const skillMd = files.find((f) => f.path.toLowerCase().endsWith('skill.md')) ?? files[0];
+  return stripFrontmatter(skillMd?.content ?? '');
+};
+
+const resolveUnderstanding = (skill: Skill, detail: SkillDetail): ResolvedUnderstanding => {
+  const body = skillMdBody(skill, detail);
+  const analysis = detail.analysis;
+  const hasFreshAnalysis = !!analysis && analysis.status === 'fresh';
+  const steps =
+    analysis?.proceduralSteps?.map((s): ResolvedAnalysisStep => ({
+      title: s.title,
+      description: s.description,
+      confidence: s.confidence ?? 'medium',
+      evidence: s.evidence,
+    })) ??
+    (detail.steps ?? []).map((s: SkillStep): ResolvedAnalysisStep => ({
+      title: s.label,
+      description: s.desc,
+      confidence: 'high',
+      evidence: s.tool,
+    }));
+  const fallbackSteps = steps.length ? steps : stepCandidatesFromBody(body);
+  const tools = dedupeTools([
+    ...(analysis?.toolMentions?.map((t): ResolvedToolSignal => ({ ...t, confidence: t.confidence ?? (t.kind === 'observed' ? 'high' : 'low') })) ?? []),
+    ...toolNamesFromSection(body),
+    ...mentionedToolsFromBody(body),
+  ]);
+
+  return {
+    summary: analysis?.summary?.trim() || detail.summary,
+    sourceLabel: hasFreshAnalysis ? 'AI 분석' : '원문 미리보기',
+    statusLabel: !analysis ? '분석 대기' : analysis.status === 'fresh' ? '최신' : analysis.status === 'stale' ? '재분석 권장' : analysis.status === 'failed' ? '분석 실패' : '분석 대기',
+    confidence: analysis?.confidence ?? (hasFreshAnalysis ? 'medium' : 'low'),
+    analyzedAt: analysis?.analyzedAt,
+    stale: !analysis || analysis.status !== 'fresh',
+    steps: fallbackSteps,
+    tools,
+    warnings: analysis?.warnings ?? [],
+  };
+};
+
+const ToolKindMeta: Record<ResolvedToolSignal['kind'], { label: string; icon: IconName; cls: string }> = {
+  observed: { label: '실제 사용', icon: 'check-circle', cls: 'text-support-success' },
+  declared: { label: '선언됨', icon: 'rule', cls: 'text-link-primary' },
+  mentioned: { label: '언급 후보', icon: 'search', cls: 'text-support-warning' },
 };
 
 // next version label, e.g. v3 → v4
@@ -816,6 +853,189 @@ const SourceLauncher: React.FC<{ skill: Skill; detail: SkillDetail; onOpen: () =
   );
 };
 
+const ToolSignalGroup: React.FC<{
+  title: string;
+  tools: ResolvedToolSignal[];
+  empty: string;
+}> = ({ title, tools, empty }) => (
+  <div className="min-w-0">
+    <div className="mb-2 flex items-center gap-1.5 text-caption-01 font-semibold text-text-secondary">
+      {title}
+      <span className="font-mono text-text-helper">{tools.length}</span>
+    </div>
+    {tools.length ? (
+      <div className="flex flex-wrap gap-1.5">
+        {tools.map((tool) => {
+          const meta = ToolKindMeta[tool.kind];
+          return (
+            <span
+              key={`${tool.kind}-${tool.name}`}
+              title={tool.evidence || tool.basis || meta.label}
+              className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-border-subtle-01 bg-layer-01 px-2 py-1 text-caption-01 text-text-secondary"
+            >
+              <Icon name={meta.icon} size={12} className={`${meta.cls} flex-shrink-0`} />
+              <span className="truncate font-mono">{tool.name}</span>
+              {tool.confidence === 'low' && <span className="text-support-warning">추정</span>}
+            </span>
+          );
+        })}
+      </div>
+    ) : (
+      <div className="text-caption-01 text-text-helper leading-4">{empty}</div>
+    )}
+  </div>
+);
+
+const SkillUnderstandingPanel: React.FC<{
+  skill: Skill;
+  detail: SkillDetail;
+  refreshing: boolean;
+  note: string | null;
+  onRefresh: () => void;
+  onOpenConnectors: () => void;
+}> = ({ skill, detail, refreshing, note, onRefresh, onOpenConnectors }) => {
+  const understanding = useMemo(() => resolveUnderstanding(skill, detail), [skill, detail]);
+  const observed = understanding.tools.filter((t) => t.kind === 'observed');
+  const declared = understanding.tools.filter((t) => t.kind === 'declared');
+  const mentioned = understanding.tools.filter((t) => t.kind === 'mentioned');
+
+  return (
+    <div>
+      <SectionLabel
+        right={
+          <button
+            onClick={onRefresh}
+            disabled={refreshing}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border-subtle-01 px-2 py-1 text-caption-01 font-semibold text-text-secondary hover:bg-layer-hover-01 hover:text-text-primary disabled:opacity-50"
+            title="SKILL.md를 다시 분석해 설명용 메타데이터를 갱신합니다"
+          >
+            <Icon name="renew" size={12} className={refreshing ? 'animate-spin text-icon-primary' : 'text-icon-secondary'} />
+            AI 분석 새로고침
+          </button>
+        }
+      >
+        스킬 이해
+      </SectionLabel>
+
+      <div className="rounded-lg border border-border-subtle-01 bg-layer-01">
+        <div className="border-b border-border-subtle-01 px-4 py-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Icon name="model" size={15} className="text-icon-primary" />
+            <span className="text-body-short-01 font-semibold text-text-primary">{understanding.sourceLabel}</span>
+            <Tag type={understanding.stale ? 'yellow' : 'gray'} size="sm">
+              {understanding.statusLabel}
+            </Tag>
+            <ConfidencePill value={understanding.confidence} />
+            {understanding.analyzedAt && (
+              <span className="text-caption-01 text-text-helper">{new Date(understanding.analyzedAt).toLocaleString('ko-KR')}</span>
+            )}
+          </div>
+          <p className="mt-2 max-w-[840px] text-body-short-01 leading-5 text-text-secondary">{understanding.summary}</p>
+          {note && (
+            <div className="mt-2 inline-flex items-center gap-1.5 text-caption-01 text-text-helper">
+              <Icon name="idea" size={12} className="text-icon-secondary" />
+              {note}
+            </div>
+          )}
+        </div>
+
+        <div className="grid gap-px bg-border-subtle-01 lg:grid-cols-[minmax(0,1.1fr)_minmax(280px,0.9fr)]">
+          <div className="bg-background p-4">
+            <div className="mb-3 flex items-center gap-2">
+              <Icon name="flow" size={15} className="text-icon-secondary" />
+              <span className="text-body-short-01 font-semibold text-text-primary">작동 방식</span>
+              <span className="text-caption-01 text-text-helper">원문 해석</span>
+            </div>
+            {understanding.steps.length ? (
+              <div className="flex flex-col gap-2.5">
+                {understanding.steps.map((step, i) => (
+                  <div key={`${step.title}-${i}`} className="flex gap-3">
+                    <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md border border-border-subtle-01 bg-layer-01 text-caption-01 font-mono text-text-secondary">
+                      {i + 1}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-body-short-01 font-semibold text-text-primary">{step.title}</span>
+                        <ConfidencePill value={step.confidence} />
+                      </div>
+                      {step.description && <div className="mt-0.5 text-caption-01 text-text-helper">{step.description}</div>}
+                      {step.evidence && (
+                        <div className="mt-1 truncate text-label-micro font-mono text-text-helper" title={step.evidence}>
+                          {step.evidence}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-md border border-border-subtle-01 bg-layer-01 px-3 py-2.5 text-caption-01 text-text-helper">
+                아직 구조화된 절차를 보여줄 근거가 없어요. 원문은 소스 보기에서 확인할 수 있습니다.
+              </div>
+            )}
+          </div>
+
+          <div className="bg-background p-4">
+            <div className="mb-3 flex items-center gap-2">
+              <Icon name="tools" size={15} className="text-icon-secondary" />
+              <span className="text-body-short-01 font-semibold text-text-primary">도구 단서</span>
+              <button
+                onClick={onOpenConnectors}
+                className="ml-auto inline-flex items-center gap-1 text-caption-01 text-link-primary hover:underline"
+              >
+                권한 관리 <Icon name="arrow-up-right" size={11} />
+              </button>
+            </div>
+            <div className="grid gap-4">
+              <ToolSignalGroup title="실제로 사용된 도구" tools={observed} empty="아직 실행 로그 기반 도구 기록이 없어요." />
+              <ToolSignalGroup title="선언된 도구" tools={declared} empty="manifest나 명시 섹션에서 선언된 도구가 없어요." />
+              <ToolSignalGroup title="본문 언급 후보" tools={mentioned} empty="본문에서 도구 후보를 찾지 못했어요." />
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 border-t border-border-subtle-01 px-4 py-2.5 text-caption-01 text-text-helper">
+          <Icon name="lock" size={12} className="text-icon-secondary" />
+          분석 결과는 설명용입니다. 실제 실행과 권한은 런타임 도구 정책과 승인 흐름이 결정합니다.
+          {understanding.warnings.map((w, i) => (
+            <span key={i} className="inline-flex items-center gap-1 text-support-warning">
+              <Icon name="warning" size={11} /> {w}
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const SkillTelemetryPanel: React.FC<{ skill: Skill; detail: SkillDetail }> = ({ skill, detail }) => {
+  const origin = ORIGIN_META[skillOrigin(skill)];
+  const metrics = [
+    { label: '주입/사용', value: `${skill.uses}회`, helper: skill.trend },
+    { label: '본문 개선', value: `${skill.patches ?? 0}회`, helper: '승인된 변경 기준' },
+    { label: '최근 사용', value: detail.lastUsed, helper: statusReason(skill) },
+    { label: '출처', value: origin.label, helper: detail.createdFrom },
+  ];
+  return (
+    <div>
+      <SectionLabel>실사용 근거</SectionLabel>
+      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border-subtle-01 bg-border-subtle-01 md:grid-cols-4">
+        {metrics.map((m) => (
+          <div key={m.label} className="min-w-0 bg-background px-3.5 py-3">
+            <div className="text-caption-01 text-text-helper">{m.label}</div>
+            <div className="mt-1 truncate text-body-short-01 font-semibold text-text-primary" title={m.value}>
+              {m.value}
+            </div>
+            <div className="mt-0.5 truncate text-caption-01 text-text-helper" title={m.helper}>
+              {m.helper}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 const SkillDetailView: React.FC<{
   skillId: string | null;
   onSetStatus: (id: string, next: SkillStatus) => void;
@@ -837,19 +1057,14 @@ const SkillDetailView: React.FC<{
   // Skill Market 공개 전용 다이얼로그 / 마켓에서 내리기 확인
   const [publishOpen, setPublishOpen] = useState(false);
   const [confirmUnshare, setConfirmUnshare] = useState(false);
-  // 규칙 편집은 자동 저장 — 변경 직후 잠깐 "자동 저장됨"을 띄워 저장 사실을 알린다.
-  const [ruleSaved, setRuleSaved] = useState(false);
-  const savedTimer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const flashSaved = () => {
-    setRuleSaved(true);
-    clearTimeout(savedTimer.current);
-    savedTimer.current = setTimeout(() => setRuleSaved(false), 1800);
-  };
-  // leaving a skill closes any open version snapshot / 확인 모달 / 저장 표시 / 소스·편집
+  const [analysisRefreshing, setAnalysisRefreshing] = useState(false);
+  const [analysisNote, setAnalysisNote] = useState<string | null>(null);
+  // leaving a skill closes any open version snapshot / 확인 모달 / 분석 상태 / 소스·편집
   useEffect(() => {
     setSnapVer(null);
     setConfirmRestore(null);
-    setRuleSaved(false);
+    setAnalysisRefreshing(false);
+    setAnalysisNote(null);
     setWorkspaceOpen(false);
     setSummaryOpen(false);
     setEditOpen(false);
@@ -858,7 +1073,6 @@ const SkillDetailView: React.FC<{
     setConfirmUnshare(false);
     setConfirmDelete(false);
   }, [skillId]);
-  useEffect(() => () => clearTimeout(savedTimer.current), []);
 
   // 런타임 스킬의 실제 SKILL.md 본문 lazy load — 목록 API(GET /skills)는 본문을
   // 내려주지 않으므로 상세를 처음 열 때 GET /skills/{id}로 채운다. 빌트인 스킬의
@@ -909,8 +1123,25 @@ const SkillDetailView: React.FC<{
 
   const builtin = isBuiltinSkill(skill);
   const patch = (fn: (d: SkillDetail) => SkillDetail) => setDetails((d) => ({ ...d, [skillId]: fn(d[skillId]) }));
-  const appliedRules = detail.rules.filter((r) => r.on).length;
   const summaryExpandable = detail.summary.length > 170;
+
+  const refreshAnalysis = async () => {
+    if (analysisRefreshing) return;
+    setAnalysisRefreshing(true);
+    setAnalysisNote(null);
+    const res = await api.refreshSkillAnalysis(skillId);
+    setAnalysisRefreshing(false);
+    if (res.success && res.data) {
+      setDetails((prev) => {
+        const cur = prev[skillId];
+        if (!cur) return prev;
+        return { ...prev, [skillId]: { ...cur, analysis: res.data as SkillAnalysis } };
+      });
+      setAnalysisNote('분석을 갱신했어요.');
+      return;
+    }
+    setAnalysisNote('분석 API 연결 전이라 원문 기반 미리보기를 유지합니다.');
+  };
 
   // restore a past version: save it as a new current version (history kept)
   const restore = (version: SkillVersion) => {
@@ -918,6 +1149,7 @@ const SkillDetailView: React.FC<{
     setSkills((a) => a.map((x) => (x.id === skillId ? { ...x, ver: newVer } : x)));
     patch((d) => ({
       ...d,
+      analysis: d.analysis ? { ...d.analysis, status: 'stale' } : d.analysis,
       rules: (version.rules ?? []).map((r, i) => ({
         id: `rv${Date.now()}-${i}`,
         text: r.text,
@@ -939,8 +1171,7 @@ const SkillDetailView: React.FC<{
   };
 
   // 편집 어시스턴트 적용 — patch 승인 → version++ + 대상 파일 갱신 + 활동 기록.
-  // SKILL.md 편집이면 학습 규칙도 등록(p.newRuleText), 코드/문서 파일 편집이면 파일만 갱신.
-  // 규칙 토글(ON/OFF)은 무버전 설정이지만, 이렇게 본문·파일을 바꾸는 편집은 버전을 만든다.
+  // 구조화된 절차/도구 표시는 본문에서 다시 분석되는 설명용 sidecar가 담당한다.
   const applyEditPatch = (p: EditPatch, editedBody?: string) => {
     const finalBody = editedBody ?? p.proposedBody;
     setSkills((a) => a.map((x) => (x.id === skillId ? { ...x, ver: p.toVer, patches: (x.patches ?? 0) + 1 } : x)));
@@ -954,16 +1185,10 @@ const SkillDetailView: React.FC<{
         files.unshift({ path: p.targetPath, language: languageFromPath(p.targetPath), content: finalBody });
       }
 
-      // SKILL.md 편집일 때만 학습 규칙 등록 (코드 파일 편집은 규칙 없음)
-      const newRule: SkillRule | null = p.newRuleText
-        ? { id: 'r' + Date.now(), text: p.newRuleText, source: '편집 어시스턴트', on: true, confidence: 'medium', applied: 0, lastApplied: '방금' }
-        : null;
-      const rules = newRule ? [...d.rules, newRule] : d.rules;
-
       return {
         ...d,
         files,
-        rules,
+        analysis: d.analysis ? { ...d.analysis, status: 'stale' } : d.analysis,
         versions: [
           {
             ver: p.toVer,
@@ -971,7 +1196,7 @@ const SkillDetailView: React.FC<{
             note: p.changelog,
             current: true,
             author: '편집 어시스턴트',
-            rules: rules.map((r) => (newRule && r.id === newRule.id ? { text: r.text, added: true } : { text: r.text })),
+            rules: d.rules.map((r) => ({ text: r.text })),
           },
           ...d.versions.map((v) => ({ ...v, current: false })),
         ],
@@ -981,7 +1206,7 @@ const SkillDetailView: React.FC<{
         ],
       };
     });
-    flashSaved();
+    setAnalysisNote('본문이 바뀌었어요. 필요하면 AI 분석을 새로고침하세요.');
   };
 
   // 복원 확인 팝업 — 칩 메뉴의 "전환"과 스냅샷의 "이 버전 복원" 두 경로가 모두 거친다.
@@ -999,8 +1224,8 @@ const SkillDetailView: React.FC<{
       }}
       description={
         <>
-          지금 적용 중인 규칙이 <span className="font-mono font-semibold text-text-primary">{confirmRestore.ver}</span> 시점의
-          규칙으로 교체돼요. 복원은 새 버전(<span className="font-mono">{bumpVer(skill.ver)}</span>)으로 저장되며, 기존 버전
+          지금 적용 중인 지침이 <span className="font-mono font-semibold text-text-primary">{confirmRestore.ver}</span> 시점의
+          지침으로 교체돼요. 복원은 새 버전(<span className="font-mono">{bumpVer(skill.ver)}</span>)으로 저장되며, 기존 버전
           기록은 지워지지 않아요.
         </>
       }
@@ -1106,98 +1331,18 @@ const SkillDetailView: React.FC<{
         </div>
       </div>
 
-      {/* scrollable body — 학습 섹션 (소스는 풀스크린 워크스페이스로 분리) */}
+      {/* scrollable body — source of truth is SKILL.md; this surface explains it for humans */}
       <div className="flex-1 min-w-0 overflow-y-auto px-7 pt-5 pb-10 flex flex-col gap-7">
-        {/* performance card — 성공률·효율·절감 한눈에 */}
-        {detail.health && <HealthCard health={detail.health} uses={skill.uses} />}
+        <SkillUnderstandingPanel
+          skill={skill}
+          detail={detail}
+          refreshing={analysisRefreshing}
+          note={analysisNote}
+          onRefresh={() => void refreshAnalysis()}
+          onOpenConnectors={() => navigate('/connectors')}
+        />
 
-        {/* 절차 단계 — 이 스킬이 엮는 도구 호출의 순서 (steps 가 있는 스킬만 표시) */}
-        {detail.steps && detail.steps.length > 0 && (
-          <div>
-            <SectionLabel right={<span className="text-caption-01 text-text-helper normal-case">순서대로 실행 · 각 단계가 쓰는 도구 표시</span>}>
-              단계 · {detail.steps.length}
-            </SectionLabel>
-            <div className="flex flex-col">
-              {detail.steps.map((st, i) => (
-                <div key={i} className="flex gap-3">
-                  <div className="flex flex-col items-center flex-shrink-0">
-                    <div className="w-7 h-7 rounded-lg bg-layer-02 border border-border-subtle-01 flex items-center justify-center">
-                      <Icon name={st.icon} size={15} className="text-icon-secondary" />
-                    </div>
-                    {i < detail.steps!.length - 1 && <div className="w-px flex-1 min-h-[14px] bg-border-strong-01 my-1" />}
-                  </div>
-                  <div className="pb-3 min-w-0">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-caption-01 font-mono text-text-helper">{i + 1}</span>
-                      <span className="text-body-short-01 font-semibold text-text-primary">{st.label}</span>
-                      <span className="text-label-micro font-mono text-text-helper border border-border-subtle-01 rounded px-1 py-px">
-                        {st.tool}
-                      </span>
-                    </div>
-                    <div className="text-caption-01 text-text-helper mt-0.5">{st.desc}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* learned rules — 빌트인은 규칙 학습 대상이 아니다(본문 불변) → 섹션 자체를 숨김 */}
-        {!builtin && (
-        <div>
-          <SectionLabel
-            right={
-              <Button
-                kind="ghost"
-                size="sm"
-                icon={<Icon name="add" size={14} />}
-                onClick={() => {
-                  patch((d) => ({
-                    ...d,
-                    rules: [...d.rules, { id: 'r' + Date.now(), text: '새 규칙 — 대화에서 교정하면 채워집니다', source: '수동 추가', on: true }],
-                  }));
-                  flashSaved();
-                }}
-              >
-                규칙 추가
-              </Button>
-            }
-          >
-            <span className="inline-flex items-center gap-2">
-              학습한 규칙 · {appliedRules}/{detail.rules.length} 적용
-              {/* 자동 저장 안내 — 토글·추가·삭제는 즉시 저장되므로 별도 저장 버튼이 없다 */}
-              <span
-                className={`inline-flex items-center gap-1 normal-case font-normal text-support-success transition-opacity duration-300 ${
-                  ruleSaved ? 'opacity-100' : 'opacity-0'
-                }`}
-              >
-                <Icon name="check" size={12} /> 자동 저장됨
-              </span>
-            </span>
-          </SectionLabel>
-          <div className="flex flex-col gap-px bg-border-subtle-01 rounded-lg overflow-hidden">
-            {detail.rules.map((r) => (
-              <RuleRow
-                key={r.id}
-                r={r}
-                onToggle={() => {
-                  patch((d) => ({ ...d, rules: d.rules.map((x) => (x.id === r.id ? { ...x, on: !x.on } : x)) }));
-                  flashSaved();
-                }}
-                onRemove={() => {
-                  patch((d) => ({ ...d, rules: d.rules.filter((x) => x.id !== r.id) }));
-                  flashSaved();
-                }}
-              />
-            ))}
-            {detail.rules.length === 0 && (
-              <div className="bg-background px-3.5 py-3.5 text-caption-01 text-text-helper">
-                아직 학습한 규칙이 없어요. 대화에서 교정하면 여기에 쌓입니다.
-              </div>
-            )}
-          </div>
-        </div>
-        )}
+        <SkillTelemetryPanel skill={skill} detail={detail} />
 
         {/* version history — 빌트인은 본문 불변이라 히스토리·복원이 없다 */}
         {!builtin && (
@@ -1249,74 +1394,6 @@ const SkillDetailView: React.FC<{
           </div>
         </div>
         )}
-
-        {/* recent activity — "살아있는" 데이터 질감 */}
-        {detail.activity && detail.activity.length > 0 && (
-          <div>
-            <SectionLabel>최근 활동</SectionLabel>
-            <div className="flex flex-col gap-px bg-border-subtle-01 rounded-lg overflow-hidden">
-              {detail.activity.map((a, i) => {
-                const meta = ACTIVITY_META[a.kind];
-                return (
-                  <div key={i} className="flex items-center gap-2.5 bg-background px-3.5 py-2.5">
-                    <Icon name={meta.icon} size={15} className={`flex-shrink-0 ${meta.cls}`} />
-                    <span className="text-body-short-01 text-text-primary flex-1 min-w-0 truncate">{a.text}</span>
-                    <span className="text-caption-01 text-text-helper flex-shrink-0">{a.when}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* where used — 빌트인은 사용처 추적 데이터가 없으면 빈 섹션을 숨긴다 */}
-        {!(builtin && detail.usage.length === 0) && (
-        <div>
-          <SectionLabel>사용처 · {detail.usage.length}</SectionLabel>
-          <div className="flex flex-col gap-px bg-border-subtle-01 rounded-lg overflow-hidden">
-            {detail.usage.map((u, i) => (
-              <div key={i} className="flex items-center gap-2.5 bg-background px-3.5 py-2.5">
-                <Icon name={u.icon} size={16} className="text-icon-secondary flex-shrink-0" />
-                <span className="text-body-short-01 text-text-primary flex-1 min-w-0 truncate">{u.name}</span>
-                <Tag type="gray" size="sm">
-                  {u.kind}
-                </Tag>
-              </div>
-            ))}
-          </div>
-        </div>
-        )}
-
-        {/* data permissions */}
-        <div>
-          <SectionLabel
-            right={
-              <button
-                onClick={() => navigate('/connectors')}
-                className="inline-flex items-center gap-1 text-caption-01 text-link-primary hover:underline"
-              >
-                접근 권한 관리 <Icon name="arrow-up-right" size={12} />
-              </button>
-            }
-          >
-            사용하는 데이터 접근
-          </SectionLabel>
-          {detail.permissions.length === 0 ? (
-            <div className="text-caption-01 text-text-helper">이 스킬은 외부 데이터에 접근하지 않아요.</div>
-          ) : (
-            <div className="flex gap-2 flex-wrap">
-              {detail.permissions.map((p, i) => (
-                <span
-                  key={i}
-                  className="inline-flex items-center gap-1.5 bg-layer-01 border border-border-subtle-01 rounded-md px-2.5 py-1.5 text-caption-01 font-mono text-text-secondary"
-                >
-                  <Icon name="lock" size={12} className="opacity-70" />
-                  {p.name} · {p.mode}
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
 
       </div>
 
@@ -1388,7 +1465,7 @@ const SkillDetailView: React.FC<{
           void api.deleteSkill(skillId);
           setConfirmDelete(false);
         }}
-        description="삭제하면 학습한 규칙과 버전 히스토리가 모두 사라지며 되돌릴 수 없어요."
+        description="삭제하면 스킬 본문, 분석 메타데이터, 버전 히스토리가 모두 사라지며 되돌릴 수 없어요."
       />
 
       {/* Skill Market 공개 — 무엇이 공개되는지 미리보기로 보여주고 한 번 더 묻는 전용 흐름 */}
