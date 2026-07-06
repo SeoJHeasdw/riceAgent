@@ -1653,8 +1653,7 @@ function MySkillsScreen() {
         }
       }),
     );
-    // api는 생명주기 state를 받는다 — inactive는 내부적으로 state=active이므로 active로 보고.
-    void api.setSkillState(id, next === 'inactive' ? 'active' : next);
+    void api.setSkillState(id, next);
   };
 
   /** 수동 "스킬 정리" (LEARNING_LOOP_DESIGN 5.1 데모 경로 · POST /skills/curate).

@@ -28,6 +28,8 @@ from .store import SkillData, SkillStore, parse_skill_md, serialize_skill_md
 SkillState = Literal["active", "stale", "archived"]
 
 _VALID_STATES: frozenset[str] = frozenset({"active", "stale", "archived"})
+# inactive는 UI 전용 표현 — DB(파일)에는 state=active + enabled=False로 저장된다.
+_ALL_SETTABLE: frozenset[str] = frozenset({"active", "stale", "archived", "inactive"})
 
 
 def _parse_iso(ts: str | None) -> datetime.datetime | None:
@@ -93,12 +95,22 @@ class SkillLifecycle:
         self._paths = paths
 
     def set_state(self, name: str, state: str) -> None:
-        """스킬 state를 명시적으로 변경한다. active/stale/archived만 허용."""
-        if state not in _VALID_STATES:
+        """스킬 state를 명시적으로 변경한다.
+
+        active/stale/archived/inactive 를 허용한다.
+        inactive는 파일에 state=active + enabled=False 로 저장된다.
+        active로 복구하면 enabled=True 로 함께 초기화한다.
+        """
+        if state not in _ALL_SETTABLE:
             from ...core.errors import ValidationError
             raise ValidationError(f"Unknown skill state {state!r}")
         skill = self._store.read(name)  # NotFoundError 위임
-        skill.state = state
+        if state == "inactive":
+            skill.state = "active"
+            skill.enabled = False
+        else:
+            skill.state = state
+            skill.enabled = True
         skill.updated_at = now_iso()
         self._store.write(skill)
 

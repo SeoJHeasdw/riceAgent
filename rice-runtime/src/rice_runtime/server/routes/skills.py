@@ -40,7 +40,7 @@ router = APIRouter(prefix="/skills", tags=["skills"])
 
 
 class StateIn(BaseModel):
-    state: str  # active | stale | archived
+    state: str  # active | stale | archived | inactive
 
 
 class ArchiveDecisionIn(BaseModel):

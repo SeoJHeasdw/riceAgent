@@ -270,13 +270,15 @@ class LearningService(ILearningService):
     # ── skill collection + relevance (hybrid injection) ───────────────────────
     def _active_skills(self) -> list[SkillData]:
         """Active 스킬 전체(빌트인 + 사용자). 빌트인 이름은 예약이라 동명 사용자
-        파일은 숨긴다(list_skills와 동일 규칙). prefetch 와 search_skills 의 공통 원천."""
+        파일은 숨긴다(list_skills와 동일 규칙). prefetch 와 search_skills 의 공통 원천.
+
+        enabled=False(UI 비활성) 스킬은 state=active여도 주입에서 제외한다."""
         builtin_names = self._builtin_skills.names()
-        skills = [s for s in self._builtin_skills.list() if s.state == "active"]
+        skills = [s for s in self._builtin_skills.list() if s.state == "active" and s.enabled]
         skills += [
             s
             for s in self._skill_store.list()
-            if s.state == "active" and s.name not in builtin_names
+            if s.state == "active" and s.enabled and s.name not in builtin_names
         ]
         return skills
 
@@ -985,6 +987,7 @@ class LearningService(ILearningService):
                     view=usage.view,
                     patch=usage.patch,
                     last_used_at=usage.last_used_at,
+                    enabled=skill.enabled,
                 )
             )
         return result
@@ -1015,6 +1018,7 @@ class LearningService(ILearningService):
             view=usage.view,
             patch=usage.patch,
             last_used_at=usage.last_used_at,
+            enabled=skill.enabled,
             body=skill.body,
         )
 

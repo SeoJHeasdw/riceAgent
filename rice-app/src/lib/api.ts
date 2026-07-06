@@ -203,7 +203,7 @@ class ApiClient {
   consolidateSkills(): Promise<ApiResponse<CurateConsolidateResult>> {
     return this.send('POST', '/skills/curate?mode=consolidate');
   }
-  setSkillState(id: string, state: 'active' | 'stale' | 'archived'): Promise<ApiResponse> {
+  setSkillState(id: string, state: 'active' | 'stale' | 'archived' | 'inactive'): Promise<ApiResponse> {
     return this.send('PATCH', `/skills/${id}/state`, { state });
   }
   /** 스킬 영구 삭제 — 본문·usage·히스토리 사이드카까지 제거된다. 빌트인은 422. */

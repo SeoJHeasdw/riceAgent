@@ -36,6 +36,9 @@ __all__ = ["BUILTIN_SOURCE", "BuiltinSkillCatalog"]
 BUILTIN_SOURCE = "builtin"
 _ASSET_DIR = Path(__file__).parent / "builtin_skills"
 _ALLOWED_STATES = frozenset({"active", "archived"})  # archived = 비활성(주입 중단)
+# 빌트인도 UI inactive를 받아 enabled=False로 저장하기 위해 inactive를 추가 허용한다.
+# 저장 값은 archived(동일한 "비활성" 의미)로 정규화한다.
+_ALLOWED_SETTABLE = frozenset({"active", "archived", "inactive"})
 
 
 class BuiltinSkillCatalog:
@@ -79,21 +82,27 @@ class BuiltinSkillCatalog:
             state = override.get("state")
             if state in _ALLOWED_STATES:
                 data.state = state
+            if "enabled" in override:
+                data.enabled = bool(override["enabled"])
             if override.get("updated_at"):
                 data.updated_at = override["updated_at"]
         return data
 
     # ── 상태 (enable/disable) ────────────────────────────────────────────────
     def set_state(self, name: str, state: str) -> None:
-        """active(활성) | archived(비활성)만 허용 — 그 외는 ValidationError."""
+        """active(활성) | archived/inactive(비활성) 허용 — 그 외는 ValidationError.
+
+        inactive는 archived로 정규화해 저장한다(빌트인의 비활성 = archived).
+        """
         if name not in self._skills:
             raise ValidationError(f"unknown builtin skill: {name!r}")
-        if state not in _ALLOWED_STATES:
+        if state not in _ALLOWED_SETTABLE:
             raise ValidationError(
-                f"빌트인 스킬 '{name}'은(는) 활성(active)/비활성(archived)만 전환할 수 있습니다 (got {state!r})."
+                f"빌트인 스킬 '{name}'은(는) 활성(active)/비활성(archived/inactive)만 전환할 수 있습니다 (got {state!r})."
             )
+        normalized = "archived" if state == "inactive" else state
         states = self._states()
-        states[name] = {"state": state, "updated_at": now_iso()}
+        states[name] = {"state": normalized, "enabled": normalized == "active", "updated_at": now_iso()}
         self._write_states(states)
 
     def _state_file(self) -> Path:

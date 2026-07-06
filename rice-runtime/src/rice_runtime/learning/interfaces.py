@@ -122,6 +122,7 @@ class SkillSummary:
     view: int = 0
     patch: int = 0
     last_used_at: str | None = None
+    enabled: bool = True
 
 
 @dataclass(frozen=True)

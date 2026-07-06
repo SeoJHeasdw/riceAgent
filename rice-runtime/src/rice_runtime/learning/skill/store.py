@@ -65,6 +65,9 @@ class SkillData:
     # (실행 로그)와 출처가 다른 제3의 단서 소스다 (analysis.py 계약). 설명 전용 —
     # 권한/실행 정책과 무관하다. 선택 필드라 기존 파일과 하위호환.
     tools: list[str] = field(default_factory=list)
+    # UI "비활성" 상태 영속화: state=active이지만 사용자가 주입을 꺼둔 스킬.
+    # True(기본) = 주입 허용, False = 주입 중단. 기존 파일과 하위호환(없으면 True).
+    enabled: bool = True
 
 
 # ── frontmatter 파싱 ──────────────────────────────────────────────────────────
@@ -160,6 +163,8 @@ def parse_skill_md(text: str) -> SkillData:
     state = fm.get("state", "active")
     if state not in ("active", "stale", "archived"):
         raise ValidationError(f"Unknown skill state {state!r}")
+    enabled_raw = fm.get("enabled", True)
+    enabled = bool(enabled_raw) if not isinstance(enabled_raw, bool) else enabled_raw
     tags = fm.get("tags") or []
     if isinstance(tags, str):
         tags = [t.strip() for t in tags.split(",") if t.strip()]
@@ -179,6 +184,7 @@ def parse_skill_md(text: str) -> SkillData:
         updated_at=fm.get("updated_at"),
         absorbed_into=fm.get("absorbed_into"),
         tools=[str(t) for t in tools],
+        enabled=enabled,
     )
 
 
@@ -190,6 +196,8 @@ def serialize_skill_md(skill: SkillData) -> str:
         "description": skill.description,
         "state": skill.state,
     }
+    if not skill.enabled:
+        fm["enabled"] = False
     if skill.tags:
         fm["tags"] = skill.tags
     if skill.tools:
