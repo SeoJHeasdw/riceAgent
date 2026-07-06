@@ -9,7 +9,7 @@ import React from 'react';
 // A workspace-file-looking code chip (e.g. `hello.txt`) → clickable when an
 // `onFileClick` handler is supplied (chat answers). Scoped to real file
 // extensions so command/identifier chips stay plain.
-const FILE_CHIP_RE = /^\.?\/?[\w.-]+\.(txt|md|markdown|json|jsonl|csv|tsv|log|ya?ml|py|js|ts|tsx|jsx|sh|bash|html?|css|scss|sql|toml|ini|env|xml|svg)$/i;
+const FILE_CHIP_RE = /^\.?\/?[\w.-]+\.(txt|md|markdown|json|jsonl|csv|tsv|log|ya?ml|py|js|ts|tsx|jsx|sh|bash|html?|css|scss|sql|toml|ini|env|xml|svg|pptx?|docx?|xlsx?|pdf)$/i;
 
 /** Render `inline code`, **bold** segments within a line of text. */
 const renderInline = (text: string, keyBase: string, onFileClick?: (path: string) => void): React.ReactNode[] => {

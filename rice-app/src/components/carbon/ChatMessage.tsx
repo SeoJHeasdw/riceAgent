@@ -9,7 +9,7 @@ import { Markdown } from './Markdown';
 // A workspace-file-looking inline code chip (e.g. `hello.txt`, `./src/a.ts`) →
 // rendered clickable to open the shared file viewer. Tightly scoped to real file
 // extensions so command/identifier chips (`db2.query`) stay plain.
-const FILE_CHIP_RE = /^\.?\/?[\w.-]+\.(txt|md|markdown|json|jsonl|csv|tsv|log|ya?ml|py|js|ts|tsx|jsx|sh|bash|html?|css|scss|sql|toml|ini|env|xml|svg)$/i;
+const FILE_CHIP_RE = /^\.?\/?[\w.-]+\.(txt|md|markdown|json|jsonl|csv|tsv|log|ya?ml|py|js|ts|tsx|jsx|sh|bash|html?|css|scss|sql|toml|ini|env|xml|svg|pptx?|docx?|xlsx?|pdf)$/i;
 
 // epoch ms → 시간 라벨 — undefined/0은 빈 문자열로 조용히 처리.
 // 오늘: "HH:MM" / 올해 다른 날: "M월 D일 HH:MM" / 작년 이전: "YYYY년 M월 D일 HH:MM"
