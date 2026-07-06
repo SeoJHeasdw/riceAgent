@@ -16,6 +16,13 @@ from ...core.errors import ProviderError
 from ...core.types import Message, ToolCall, ToolSpec
 from .interfaces import ILLMProvider, ProviderCapabilities, ProviderChunk
 
+# think:false is a request, not a guarantee: harmony-format reasoning models
+# (gpt-oss etc.) have no true off switch for their analysis pass and can burn the
+# whole num_predict budget on hidden reasoning, leaving nothing for the visible
+# answer (200 OK, content ""). The non-streaming branch of `stream` retries once
+# at this larger budget when that specific signature is detected.
+_REASONING_RETRY_NUM_PREDICT = 200
+
 
 def _to_ollama_tools(tools: Sequence[ToolSpec]) -> list[dict[str, Any]]:
     return [
@@ -135,12 +142,13 @@ class OllamaProvider(ILLMProvider):
             # stream-drain stall that happens when the caller breaks out of the
             # async-for early: with stream=False Ollama returns one JSON object,
             # httpx closes the connection cleanly, and no drain is needed.
+            options: dict[str, Any] = {"temperature": 0.0, "num_predict": max_tokens or 20}
             payload = {
                 "model": self._cfg.model,
                 "messages": ([{"role": "system", "content": system}] if system else []) + _to_ollama_messages(messages),
                 "stream": False,
                 "think": False,
-                "options": {"temperature": 0.0, "num_predict": max_tokens or 20},
+                "options": options,
                 "keep_alive": "5m",
             }
             if response_schema is not None:
@@ -150,6 +158,18 @@ class OllamaProvider(ILLMProvider):
             except Exception as exc:
                 raise ProviderError(f"ollama post failed: {exc}") from exc
             content = (item.get("message") or {}).get("content") or ""
+            if not content and item.get("done_reason") == "length":
+                # Confirmed signature of a reasoning-mandatory model eating the
+                # budget (see _REASONING_RETRY_NUM_PREDICT) — retry once with
+                # headroom. Models that already honor think:false within the
+                # small budget (qwen3 etc.) never take this branch, so they
+                # never pay for the extra round-trip.
+                options["num_predict"] = _REASONING_RETRY_NUM_PREDICT
+                try:
+                    item = await self._post_chat(payload)
+                except Exception as exc:
+                    raise ProviderError(f"ollama post retry failed: {exc}") from exc
+                content = (item.get("message") or {}).get("content") or ""
             if content:
                 yield ProviderChunk(kind="text", text=content)
             yield ProviderChunk(kind="done", stop_reason="end_turn")
