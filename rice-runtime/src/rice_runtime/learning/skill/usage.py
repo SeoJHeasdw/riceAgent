@@ -10,8 +10,15 @@
     "view": <int>,     # GET /skills/{id} 호출 시 +1 (get_skill에서)
     "patch": <int>,    # 본문 수정 승인 시 +1 (apply_patch에서)
     "last_used_at": "<ISO8601 | null>",
-    "created_at": "<ISO8601>"
+    "created_at": "<ISO8601>",
+    "tools": {"<tool_name>": <int>, ...}   # observed 도구 호출 ledger (아래 참고)
   }
+
+`tools` — **observed 도구 단서 ledger**: 이 스킬이 주입돼 있던 턴에서 실제로
+호출된 도구별 누적 카운트 (observe에서 record_tools로 증가). 분석 사이드카의
+mentioned(본문 감지)·frontmatter tools(declared 선언)와 출처가 분리된 실측
+단서다. 턴 단위 귀속이므로 "이 스킬이 그 도구를 시켰다"는 인과 단정이 아니라
+"주입된 턴의 실행 로그"라는 설명용 근거임에 유의 — UI도 그렇게 표기한다.
 
 파일 경로: ~/.rice/skills/<name>.usage.json
 파일이 없으면 0으로 초기화된 기본값을 반환하고, 증가 시 생성한다.
@@ -25,11 +32,16 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from ...core.paths import RicePaths
 from ...core.types import now_iso
+
+
+# observed 도구 ledger 상한 — 한 스킬의 사이드카가 무한히 크지 않게. 초과 시
+# 최저 카운트부터 탈락(자주 쓰인 도구가 살아남는 게 설명 가치가 높다).
+MAX_OBSERVED_TOOLS = 40
 
 
 @dataclass
@@ -40,6 +52,7 @@ class UsageData:
     patch: int = 0
     last_used_at: str | None = None
     created_at: str = ""
+    tools: dict[str, int] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -49,10 +62,13 @@ class UsageData:
             "patch": self.patch,
             "last_used_at": self.last_used_at,
             "created_at": self.created_at,
+            "tools": self.tools,
         }
 
     @classmethod
     def from_dict(cls, d: dict) -> "UsageData":
+        raw_tools = d.get("tools") or {}
+        tools = {str(k): int(v) for k, v in raw_tools.items()} if isinstance(raw_tools, dict) else {}
         return cls(
             skill=d.get("skill", ""),
             use=int(d.get("use", 0)),
@@ -60,6 +76,7 @@ class UsageData:
             patch=int(d.get("patch", 0)),
             last_used_at=d.get("last_used_at"),
             created_at=d.get("created_at", ""),
+            tools=tools,
         )
 
 
@@ -113,6 +130,20 @@ class UsageStore:
         """patch += 1. apply_patch 승인 시 증가."""
         usage = self.read(name)
         usage.patch += 1
+        self._write(usage)
+        return usage
+
+    def record_tools(self, name: str, tool_names: list[str]) -> UsageData:
+        """observed 도구 ledger 갱신 — 이 스킬이 주입돼 있던 턴에서 호출된 도구별
+        카운트 누적 (observe에서 호출). 상한 초과 시 최저 카운트부터 탈락."""
+        usage = self.read(name)
+        for tool in tool_names:
+            if not tool:
+                continue
+            usage.tools[tool] = usage.tools.get(tool, 0) + 1
+        if len(usage.tools) > MAX_OBSERVED_TOOLS:
+            kept = sorted(usage.tools.items(), key=lambda kv: kv[1], reverse=True)
+            usage.tools = dict(kept[:MAX_OBSERVED_TOOLS])
         self._write(usage)
         return usage
 

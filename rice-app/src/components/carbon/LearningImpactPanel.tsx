@@ -98,7 +98,12 @@ const StatTile: React.FC<{ label: string; value: string; sub: string; good?: boo
   </div>
 );
 
-export const LearningImpactPanel: React.FC<{ report: ImpactReport; onRerun?: () => void }> = ({ report, onRerun }) => {
+export const LearningImpactPanel: React.FC<{
+  report: ImpactReport;
+  onRerun?: () => void;
+  /** true = eval harness 실측(GET /eval/impact) 아님 — 데모 fixture 표시 */
+  demo?: boolean;
+}> = ({ report, onRerun, demo }) => {
   const [showTasks, setShowTasks] = useState(true);
   const a = report.aggregate;
   const when = new Date(report.generated_at).toLocaleDateString('ko-KR', { month: 'long', day: 'numeric' });
@@ -112,7 +117,18 @@ export const LearningImpactPanel: React.FC<{ report: ImpactReport; onRerun?: () 
             <Icon name="growth" size={22} className="text-white" />
           </div>
           <div className="min-w-0">
-            <h2 className="text-heading-03 font-semibold text-text-primary">학습 효과 (Learning Impact)</h2>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-heading-03 font-semibold text-text-primary">학습 효과 (Learning Impact)</h2>
+              {demo ? (
+                <span title="eval 결과가 아직 없어 데모 fixture를 표시 중 — eval harness를 실행하면 실측으로 바뀝니다">
+                  <Tag type="yellow" size="sm">데모 데이터</Tag>
+                </span>
+              ) : (
+                <span title="eval harness 실측 결과 (GET /eval/impact)">
+                  <Tag type="green" size="sm">평가 suite 실측</Tag>
+                </span>
+              )}
+            </div>
             <p className="text-caption-01 text-text-helper mt-0.5">
               같은 작업, 학습 전(cold) vs 후(warm) · suite {report.task_suite} · n={report.runs_per_task} · {report.model} · {when}
             </p>

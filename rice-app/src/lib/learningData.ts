@@ -216,11 +216,59 @@ export interface SkillAnalysis {
   bodyHash?: string;
   analyzerVersion?: string;
   analyzedAt?: string;
+  /** 요약/단계 산출 주체 — llm(AI 분석) vs heuristic(규칙 기반 추출) */
+  source?: 'llm' | 'heuristic';
   summary?: string;
   confidence?: SkillAnalysisConfidence;
   proceduralSteps?: SkillAnalysisStep[];
   toolMentions?: SkillAnalysisToolMention[];
   warnings?: string[];
+}
+
+/**
+ * 런타임 분석 payload (snake_case) — GET /skills/{id}.analysis ·
+ * POST /skills/{id}/analysis/refresh 응답. tool_mentions 는 서버가 이미
+ * observed(실행 로그)/declared(frontmatter 선언)/mentioned(본문 감지) 세 출처를
+ * 합류시킨 상태다 (learning/skill/analysis.py 계약).
+ */
+export interface RuntimeSkillAnalysis {
+  status: 'fresh' | 'stale' | 'missing' | 'failed';
+  body_hash: string | null;
+  analyzer_version: string | null;
+  analyzed_at: string | null;
+  source: 'llm' | 'heuristic' | null;
+  summary: string;
+  confidence: SkillAnalysisConfidence | null;
+  procedural_steps: {
+    title: string;
+    description?: string;
+    confidence?: SkillAnalysisConfidence;
+    evidence?: string;
+  }[];
+  tool_mentions: {
+    name: string;
+    kind: 'observed' | 'declared' | 'mentioned';
+    confidence?: SkillAnalysisConfidence;
+    basis?: string;
+    evidence?: string;
+  }[];
+  warnings: string[];
+}
+
+/** 런타임 분석 payload → 프론트 SkillAnalysis (snake→camel). */
+export function runtimeAnalysisToSkillAnalysis(raw: RuntimeSkillAnalysis): SkillAnalysis {
+  return {
+    status: raw.status,
+    bodyHash: raw.body_hash ?? undefined,
+    analyzerVersion: raw.analyzer_version ?? undefined,
+    analyzedAt: raw.analyzed_at ?? undefined,
+    source: raw.source ?? undefined,
+    summary: raw.summary || undefined,
+    confidence: raw.confidence ?? undefined,
+    proceduralSteps: raw.procedural_steps ?? [],
+    toolMentions: raw.tool_mentions ?? [],
+    warnings: raw.warnings ?? [],
+  };
 }
 
 export interface SkillDetail {

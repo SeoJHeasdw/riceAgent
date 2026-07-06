@@ -143,6 +143,27 @@ def build_container(
 
     resolve_provider = resolve_provider_override or _resolve_registry_provider
 
+    def resolve_utility_provider() -> ILLMProvider:
+        """Like resolve_provider, but returns an OllamaProvider with think=False.
+        For single-shot SHORT answers only (session titling): the instance-level
+        think=False routes Ollama to a non-streaming path with a tiny num_predict
+        default, which is exactly right for a one-line title and exactly wrong
+        for anything longer (the skill analyzer learned this the hard way — it
+        uses the main provider with per-call knobs instead). Non-Ollama providers
+        are returned as-is. eval 의 resolve_provider_override 는 여기에 적용하지
+        않는다 — titler 는 eval 시나리오의 대상이 아니다(기존 계약 유지)."""
+        kind = config_store.config.provider.kind
+        try:
+            provider = providers.get(kind)
+        except ProviderError as exc:
+            log.warning("provider %r unavailable (%s) → falling back to echo", kind, exc)
+            return providers.get("echo")
+        if kind == "ollama":
+            from ..agent.providers.ollama import OllamaProvider  # noqa: PLC0415
+            cfg = config_store.config.provider
+            return OllamaProvider(cfg, think=False)
+        return provider
+
     # `learning` now depends on `resolve_provider` (Phase A.3 — review()/learn()
     # need real judgment, not just regex) so it's constructed AFTER provider
     # selection, not before it as in the pre-learning-loop-evolution ordering.
@@ -150,8 +171,17 @@ def build_container(
     # think-disabled variant like the titler's) — review requires the same
     # reasoning quality as the conversation itself, and it's already off the hot
     # path (gated + its own endpoint), so there's no latency reason to downgrade it.
+    # The **analysis sidecar** also uses the main provider: its stability knobs
+    # (think=False · response_schema · max_tokens) are per-call arguments inside
+    # SkillAnalyzer._call — the planner's proven recipe. It must NOT get the
+    # utility provider instance: that one's instance-level think=False routes to
+    # the titler's non-streaming path whose num_predict defaults to ~20 tokens,
+    # which truncates any JSON to nothing (2026-07-06 실측 버그).
     learning_impl = LearningService(
-        db, config_store.config.learning, paths, resolve_provider=resolve_provider
+        db,
+        config_store.config.learning,
+        paths,
+        resolve_provider=resolve_provider,
     )
     # crash 복구: 이전 프로세스가 'running' 으로 남긴 리뷰 잡을 pending 으로 —
     # 안 하면 그 잡은 영구히 재수확되지 않는다(단일 프로세스라 부팅 시점 running 은
@@ -185,25 +215,8 @@ def build_container(
         info = sessions.get(session_id)
         return info.title if info else None
 
-    def resolve_titler_provider() -> ILLMProvider:
-        """Like resolve_provider, but returns an OllamaProvider with think=False.
-        Title generation is a single short request — disabling reasoning tokens
-        eliminates the httpx stream-drain stall and avoids an unnecessary GPU pass.
-        Non-Ollama providers are returned as-is (they have no think option)."""
-        kind = config_store.config.provider.kind
-        try:
-            provider = providers.get(kind)
-        except ProviderError as exc:
-            log.warning("provider %r unavailable (%s) → falling back to echo", kind, exc)
-            return providers.get("echo")
-        if kind == "ollama":
-            from ..agent.providers.ollama import OllamaProvider  # noqa: PLC0415
-            cfg = config_store.config.provider
-            return OllamaProvider(cfg, think=False)
-        return provider
-
     titler = SessionTitler(
-        resolve_provider=resolve_titler_provider,
+        resolve_provider=resolve_utility_provider,
         get_title=_session_title,
         set_title=sessions.set_title,
     )

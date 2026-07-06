@@ -33,7 +33,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -60,6 +60,11 @@ class SkillData:
     # 순수 정리(prune, 병합 대상 없음)로 archived됐으면 None. 기존 파서가 미지
     # frontmatter 키를 관대하게 처리하므로 순수 추가(마이그레이션 불필요).
     absorbed_into: str | None = None
+    # **선언된(declared) 도구** — manifest/마켓 메타데이터/작성자가 frontmatter 로
+    # 명시한 도구 목록. 분석 사이드카의 mentioned(본문 감지)·usage 의 observed
+    # (실행 로그)와 출처가 다른 제3의 단서 소스다 (analysis.py 계약). 설명 전용 —
+    # 권한/실행 정책과 무관하다. 선택 필드라 기존 파일과 하위호환.
+    tools: list[str] = field(default_factory=list)
 
 
 # ── frontmatter 파싱 ──────────────────────────────────────────────────────────
@@ -158,6 +163,9 @@ def parse_skill_md(text: str) -> SkillData:
     tags = fm.get("tags") or []
     if isinstance(tags, str):
         tags = [t.strip() for t in tags.split(",") if t.strip()]
+    tools = fm.get("tools") or []
+    if isinstance(tools, str):
+        tools = [t.strip() for t in tools.split(",") if t.strip()]
 
     return SkillData(
         name=str(name),
@@ -170,6 +178,7 @@ def parse_skill_md(text: str) -> SkillData:
         created_at=fm.get("created_at"),
         updated_at=fm.get("updated_at"),
         absorbed_into=fm.get("absorbed_into"),
+        tools=[str(t) for t in tools],
     )
 
 
@@ -183,6 +192,8 @@ def serialize_skill_md(skill: SkillData) -> str:
     }
     if skill.tags:
         fm["tags"] = skill.tags
+    if skill.tools:
+        fm["tools"] = skill.tools
     if skill.source is not None:
         fm["source"] = skill.source
     if skill.created_at is not None:

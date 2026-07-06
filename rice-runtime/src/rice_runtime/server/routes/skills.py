@@ -9,6 +9,7 @@
   POST  /skills/{id}/consolidate-decision  answer a consolidation merge PatchProposal (Phase B)
   GET   /skills/{id}/history    version history (diff · rollback UI)
   POST  /skills/{id}/rollback   restore a prior version
+  POST  /skills/{id}/analysis/refresh   설명용 분석 사이드카만 재생성 (본문 불변)
 
 Reads/writes go through `ILearningService`; the patch answer resolves the parked
 approval the orchestrator is awaiting (shared HITL mechanism, §5.1).
@@ -149,7 +150,23 @@ async def get_skill(skill_id: str, c: Container = Depends(get_container)):
     detail = c.learning.get_skill(skill_id)
     if detail is None:
         raise NotFoundError(f"skill {skill_id} not found")
-    return {"success": True, "data": detail.__dict__}
+    # 설명용 분석 사이드카를 함께 싣는다 — status 는 body hash 로 읽기 시점 판정
+    # (missing|stale|failed|fresh). 도구 단서는 observed(실행 로그)/declared
+    # (frontmatter)/mentioned(본문 감지) 세 출처가 합류된 상태다.
+    return {
+        "success": True,
+        "data": {**detail.__dict__, "analysis": c.learning.get_skill_analysis(skill_id)},
+    }
+
+
+@router.post("/{skill_id}/analysis/refresh")
+async def refresh_analysis(skill_id: str, c: Container = Depends(get_container)):
+    """설명용 분석 사이드카만 재생성한다 — SKILL.md 본문·버전·히스토리는 절대
+    건드리지 않는다. LLM 1회 호출(미배선/실패 시 휴리스틱 폴백)이라 느릴 수
+    있는 일반 REST — 프론트는 로딩 상태를 보여줘야 한다. 결과는 설명 전용이며
+    권한/실행/승인 판단에 쓰이지 않는다."""
+    data = await c.learning.refresh_skill_analysis(skill_id)
+    return {"success": True, "data": data}
 
 
 @router.put("/{skill_id}")

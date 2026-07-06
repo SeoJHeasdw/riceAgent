@@ -57,6 +57,7 @@ class CuratorScheduler:
         self._since_curate = 0
         self._since_discovery = 0
         self._since_review_sweep = 0
+        self._since_analysis = 0
 
     def start(self) -> None:
         if self._task is None or self._task.done():
@@ -78,6 +79,7 @@ class CuratorScheduler:
             self._since_curate += _TICK_SECONDS
             self._since_discovery += _TICK_SECONDS
             self._since_review_sweep += _TICK_SECONDS
+            self._since_analysis += _TICK_SECONDS
             cfg = self._container.config_store.config.learning
 
             if cfg.curator_interval_seconds and 0 < cfg.curator_interval_seconds <= self._since_curate:
@@ -104,6 +106,20 @@ class CuratorScheduler:
                         log.info("review sweep processed %d stale jobs", processed)
                 except Exception as exc:  # noqa: BLE001
                     log.warning("review sweep failed: %s", exc)
+
+            # 설명용 스킬 분석 드레인: 본문 변경(patch 승인/편집/rollback …)이
+            # enqueue 한 재분석 잡을 실행한다. 수동 refresh 엔드포인트와 동일
+            # 경로(refresh_skill_analysis)로 수렴하고, 사이드카만 쓴다.
+            if cfg.analysis_interval_seconds and 0 < cfg.analysis_interval_seconds <= self._since_analysis:
+                self._since_analysis = 0
+                try:
+                    done = await self._container.learning.run_pending_analyses(
+                        limit=cfg.analysis_max_per_tick
+                    )
+                    if done:
+                        log.info("skill analysis tick refreshed %d sidecar(s)", done)
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("skill analysis tick failed: %s", exc)
 
             if cfg.discovery_interval_seconds and 0 < cfg.discovery_interval_seconds <= self._since_discovery:
                 self._since_discovery = 0

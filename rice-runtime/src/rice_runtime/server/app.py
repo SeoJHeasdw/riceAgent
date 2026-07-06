@@ -32,6 +32,7 @@ def create_app(container: Container):
 
     from ..core.errors import RiceError
     from .routes import connectors as connectors_routes
+    from .routes import eval_impact as eval_impact_routes
     from .routes import messages as messages_routes
     from .routes import plugins as plugins_routes
     from .routes import settings as settings_routes
@@ -153,6 +154,7 @@ def create_app(container: Container):
     app.include_router(connectors_routes.router)
     app.include_router(settings_routes.router)
     app.include_router(workspace_routes.router)
+    app.include_router(eval_impact_routes.router)
     return app
 
 

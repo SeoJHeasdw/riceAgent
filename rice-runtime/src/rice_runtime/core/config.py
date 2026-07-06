@@ -109,6 +109,12 @@ class LearningConfig:
     # claim하지 않으면(탭 종료 등) 스케줄러 sweep이 백그라운드로 실행해 제안함으로
     # 라우팅한다. 0 이면 sweep 비활성(잡은 pending으로 남는다).
     review_job_stale_seconds: int = 900
+    # ── 설명용 스킬 분석 사이드카 (learning/skill/analysis.py) ──
+    # 본문 변경 경로들이 enqueue 한 재분석 잡을 스케줄러가 이 주기(초)로 드레인.
+    # 0 이면 백그라운드 비활성 (수동 POST /skills/{id}/analysis/refresh 만).
+    # LLM 1회 호출이지만 트리거가 전부 사용자 승인 이벤트라 빈도가 낮다 — 기본 켜짐.
+    analysis_interval_seconds: int = 180
+    analysis_max_per_tick: int = 2
 
 
 @dataclass(frozen=True)

@@ -13,7 +13,7 @@ import type {
   LearningEvent,
   RuntimeMemory,
 } from './types';
-import type { SkillAnalysis } from './learningData';
+import type { RuntimeSkillAnalysis } from './learningData';
 
 /** stdio 또는 http 로컬 MCP 서버 정의 — GET /connectors/local/{test,''} 요청 바디 공통 shape. */
 export interface LocalMcpTransportPayload {
@@ -186,6 +186,15 @@ class ApiClient {
   getSkill(id: string): Promise<ApiResponse> {
     return this.get(`/skills/${id}`);
   }
+  /** 스킬 본문/메타 직접 편집 (PUT /skills/{id}) — 본문 변경 시 런타임이
+   *  version+1·히스토리 보관·분석 사이드카 재분석 enqueue 까지 수행한다.
+   *  AI 편집 드로어(SkillEditDrawer)의 저장 경로. */
+  updateSkill(
+    id: string,
+    patch: { body?: string; description?: string; tags?: string[]; state?: 'active' | 'stale' | 'archived' },
+  ): Promise<ApiResponse> {
+    return this.send('PUT', `/skills/${id}`, patch);
+  }
   /** manual "스킬 정리" — curator transition trigger (rule-based only) */
   curateSkills(): Promise<ApiResponse> {
     return this.send('POST', '/skills/curate');
@@ -232,8 +241,10 @@ class ApiClient {
   rollbackSkill(id: string, version: number): Promise<ApiResponse> {
     return this.send('POST', `/skills/${id}/rollback`, { version });
   }
-  /** Rebuild the explanatory SKILL.md analysis sidecar. Does not modify the skill body. */
-  refreshSkillAnalysis(id: string): Promise<ApiResponse<SkillAnalysis>> {
+  /** Rebuild the explanatory SKILL.md analysis sidecar. Does not modify the skill
+   *  body — the runtime regenerates `<name>.analysis.json` only. Response is the
+   *  runtime payload (snake_case); map with runtimeAnalysisToSkillAnalysis. */
+  refreshSkillAnalysis(id: string): Promise<ApiResponse<RuntimeSkillAnalysis>> {
     return this.send('POST', `/skills/${id}/analysis/refresh`);
   }
 
@@ -406,11 +417,12 @@ class ApiClient {
     return this.send('DELETE', `/artifacts/${id}`);
   }
 
-  // ── Learning Impact (eval) — MVP reads a static fixture (EVAL 6.4) ──
-  // Runtime exposes eval/results/latest.json as a static file; no endpoint
-  // required for the demo. (Future: GET /eval/runs — EVAL 6.4.)
+  // ── Learning Impact (eval harness 결과) ─────────────────────────
+  /** cold→warm 정량 수치의 정본 — eval harness 산출물(latest.json)만 서빙한다.
+   *  일반 사용 데이터(usage/patch)로 성공률을 단정하지 않는 분리 원칙의 API 표면.
+   *  결과가 없으면 404 → { success: false } (호출 측이 데모 fixture 폴백). */
   getImpactReport(): Promise<ApiResponse<ImpactReport>> {
-    return this.get<ImpactReport>('/eval/results/latest.json');
+    return this.get<ImpactReport>('/eval/impact');
   }
 }
 

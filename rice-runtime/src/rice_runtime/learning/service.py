@@ -26,6 +26,7 @@ Implementation status per task batch:
 
 from __future__ import annotations
 
+import logging
 from typing import Callable
 
 from ..agent.providers.interfaces import ILLMProvider
@@ -61,16 +62,34 @@ from .review.context import LearningContextManager, ReviewContextConfig
 from .review.engine import ReviewEngine
 from .review.gate import ReviewGate
 from .skill import guard as skill_guard
+from .skill.analysis import AnalysisStore, SkillAnalysisData, effective_status
+from .skill.analyzer import SkillAnalyzer
 from .skill.builtin import BuiltinSkillCatalog
 from .skill.lifecycle import SkillLifecycle
 from .skill.store import SkillData, SkillStore
 from .skill.usage import UsageStore
 from .user_model.profile import UserProfile
 
+log = logging.getLogger("rice.learning.service")
+
+
 # 토큰 추정: CJK 인식 휴리스틱(core.tokens) — 이전 len//4는 한국어 예산을 2~4배 과소평가했다.
 # 프리페치 스킬 예산에도 같은 추정을 쓴다.
 def _estimate_tokens(text: str) -> int:
     return _cjk_estimate_tokens(text)
+
+
+def _turn_tool_names(history: tuple[Message, ...]) -> list[str]:
+    """이 턴에서 호출된 도구 이름들 — 마지막 user 메시지 이후의 assistant
+    tool_calls 를 수집한다 (observed 도구 ledger 의 원천)."""
+    names: list[str] = []
+    for m in reversed(history):
+        if m.role == "user":
+            break
+        for tc in m.tool_calls or ():
+            names.append(tc.tool_name)
+    names.reverse()
+    return names
 
 
 def _render_memories(memories: list[MemoryItem]) -> str:
@@ -121,6 +140,7 @@ class LearningService(ILearningService):
         paths: RicePaths | None = None,
         *,
         resolve_provider: Callable[[], ILLMProvider] | None = None,
+        resolve_analyzer_provider: Callable[[], ILLMProvider] | None = None,
     ) -> None:
         self._db = db
         self._config = config
@@ -136,6 +156,20 @@ class LearningService(ILearningService):
         # 아래 _ensure_not_builtin이 그 단일 관문이다.
         self._builtin_skills = BuiltinSkillCatalog(self._paths)
         self._usage_store = UsageStore(self._paths)
+        # 설명용 분석 사이드카 (skill/analysis.py — MySkills "스킬 이해" 패널의
+        # 데이터 소스). analyzer 는 기본적으로 메인 provider 를 쓰고 안정화
+        # (think=False·스키마 디코딩·max_tokens)는 per-call 로 건다 — provider
+        # 미배선이면 휴리스틱 전용으로 동작. resolve_analyzer_provider 는 테스트/
+        # 특수 배선용 오버라이드다.
+        self._analysis_store = AnalysisStore(self._paths)
+        self._analyzer = SkillAnalyzer(
+            resolve_provider=resolve_analyzer_provider or resolve_provider
+        )
+        # 재분석 대기열 — 본문을 바꾼 경로들이 enqueue 하고 스케줄러 틱이
+        # run_pending_analyses 로 드레인한다. in-memory 로 충분: 유실돼도
+        # staleness 가 body hash 계산이라 다음 refresh/조회가 stale 을 정확히
+        # 보고하고, 사용자가 언제든 수동 새로고침으로 복구할 수 있다.
+        self._analysis_queue: list[str] = []
         self._lifecycle = SkillLifecycle(self._skill_store, self._paths)
         self._curator = Curator(self._skill_store, self._lifecycle, config, self._usage_store)
         self._user_profile = UserProfile(self._mem_store)
@@ -299,10 +333,15 @@ class LearningService(ILearningService):
         """
         effects: list[LearningEffect] = []
 
-        # ① 주입됐던 스킬 use 카운터 올리기
+        # ① 주입됐던 스킬 use 카운터 올리기 + observed 도구 ledger 갱신.
+        #    도구 귀속은 턴 단위다 — 주입돼 있던 모든 스킬이 이 턴의 호출 도구를
+        #    공유 기록한다("이 스킬이 시켰다"가 아니라 "주입된 턴의 실행 로그").
+        turn_tools = _turn_tool_names(outcome.history) if not outcome.aborted else []
         for skill_id in outcome.injected_skill_ids:
             try:
                 self._usage_store.increment_use(skill_id)
+                if turn_tools:
+                    self._usage_store.record_tools(skill_id, turn_tools)
             except Exception:
                 # NOTE(agent): usage increment 실패는 조용히 넘긴다. 카운터 오류가
                 # 턴을 깨지 않도록 (fail-safe 우선).
@@ -398,6 +437,7 @@ class LearningService(ILearningService):
             self._skill_store.write(skill)
             usage = self._usage_store.read(skill_id)  # 0-초기화 사이드카 생성 보장
             self._usage_store._write(usage)  # noqa: SLF001 (create_skill과 동일 관례)
+            self.request_analysis(skill_id)  # 신규 생성 승인 → 설명 사이드카 생성
             return 1
         # NotFoundError 외 read 실패(손상된 SKILL.md 파싱 오류, 권한/IO 오류)는
         # 삼키지 않고 전파한다 — 이전엔 여기서 return None 으로 삼켜져 "사용자가
@@ -434,6 +474,9 @@ class LearningService(ILearningService):
 
         # ③ usage patch += 1
         self._usage_store.increment_patch(skill_id)
+        # 본문이 바뀌었다 — 설명 사이드카 재분석 enqueue (staleness 는 어차피
+        # hash 로 판정되지만, 백그라운드가 먼저 갱신해 두면 UI 가 stale 을 볼 틈이 짧다).
+        self.request_analysis(skill_id)
 
         return new_version
 
@@ -936,6 +979,7 @@ class LearningService(ILearningService):
         self._skill_store.write(skill)
         usage = self._usage_store.read(name)  # 0-초기화 사이드카 생성 보장
         self._usage_store._write(usage)  # noqa: SLF001 (모듈 내부 일관 사용)
+        self.request_analysis(name)  # 직접 생성 → 설명 사이드카 생성
         return self._detail_from(skill, usage)
 
     def update_skill(
@@ -975,6 +1019,8 @@ class LearningService(ILearningService):
             current.state = state
         current.updated_at = now_iso()
         self._skill_store.write(current)
+        if body_changed:
+            self.request_analysis(skill_id)  # 직접/AI 편집 저장 → 재분석
         return self._detail_from(current, self._usage_store.read(skill_id))
 
     def delete_skill(self, skill_id: str) -> None:
@@ -983,6 +1029,7 @@ class LearningService(ILearningService):
         self._skill_store.read(skill_id)  # 없으면 NotFoundError → 404
         self._skill_store.delete(skill_id)
         self._usage_store.delete(skill_id)
+        self._analysis_store.delete(skill_id)
 
     def curate(self) -> CurateResult:
         """수동 "스킬 정리": 시간 규칙을 즉시 적용한다 (LEARNING_LOOP §5.1)."""
@@ -1036,7 +1083,108 @@ class LearningService(ILearningService):
     def rollback(self, skill_id: str, version: int) -> int:
         """히스토리 버전을 현재로 복원한다. 새 version 번호 반환."""
         self._ensure_not_builtin(skill_id, "롤백")
-        return self._lifecycle.rollback(skill_id, version)
+        new_version = self._lifecycle.rollback(skill_id, version)
+        self.request_analysis(skill_id)  # 본문이 과거본으로 교체됨 → 재분석
+        return new_version
+
+    # ── explanatory analysis sidecar (MySkills "스킬 이해" 실배선, 2026-07-06) ──
+    def _read_any_skill(self, skill_id: str) -> SkillData | None:
+        """빌트인 우선 스킬 조회 (get_skill 과 동일 규칙, view 카운터는 안 올림)."""
+        skill = self._builtin_skills.get(skill_id)
+        if skill is not None:
+            return skill
+        try:
+            return self._skill_store.read(skill_id)
+        except Exception:
+            return None
+
+    def _analysis_payload(self, skill: SkillData, analysis: SkillAnalysisData | None) -> dict:
+        """API 응답용 분석 payload — 사이드카의 mentioned 에 세 출처의 도구 단서를
+        합류시킨다:
+          observed  = usage 사이드카의 실행 로그 ledger (턴 단위 귀속 실측)
+          declared  = SKILL.md frontmatter `tools:` 선언 (manifest/작성자 메타데이터)
+          mentioned = 분석 사이드카가 본문에서 감지한 후보 (LLM/휴리스틱)
+        status 는 읽기 시점 계산값(missing|stale|failed|fresh)이다."""
+        status = effective_status(analysis, skill.body)
+        usage = self._usage_store.read(skill.name)
+        observed = [
+            {
+                "name": name,
+                "kind": "observed",
+                "confidence": "high",
+                "basis": "실행 로그 — 이 스킬이 주입된 턴의 도구 호출",
+                "evidence": f"{count}회 호출됨",
+            }
+            for name, count in sorted(usage.tools.items(), key=lambda kv: kv[1], reverse=True)
+        ]
+        declared = [
+            {
+                "name": name,
+                "kind": "declared",
+                "confidence": "high",
+                "basis": "SKILL.md frontmatter(tools) 선언",
+            }
+            for name in skill.tools
+        ]
+        mentioned = list(analysis.tool_mentions) if analysis else []
+        return {
+            "status": status,
+            "body_hash": analysis.body_hash if analysis else None,
+            "analyzer_version": analysis.analyzer_version if analysis else None,
+            "analyzed_at": analysis.analyzed_at if analysis else None,
+            "source": analysis.source if analysis else None,
+            "summary": analysis.summary if analysis else "",
+            "confidence": analysis.confidence if analysis else None,
+            "procedural_steps": list(analysis.procedural_steps) if analysis else [],
+            "tool_mentions": observed + declared + mentioned,
+            "warnings": list(analysis.warnings) if analysis else [],
+        }
+
+    def get_skill_analysis(self, skill_id: str) -> dict | None:
+        skill = self._read_any_skill(skill_id)
+        if skill is None:
+            return None
+        return self._analysis_payload(skill, self._analysis_store.read(skill_id))
+
+    async def refresh_skill_analysis(self, skill_id: str) -> dict:
+        """사이드카만 재생성 — SKILL.md 본문·버전·히스토리는 절대 건드리지 않는다."""
+        skill = self._read_any_skill(skill_id)
+        if skill is None:
+            raise NotFoundError(f"skill {skill_id!r} not found")
+        analysis = await self._analyzer.analyze(skill)
+        self._analysis_store.write(analysis)
+        self._ledger.record(
+            "analysis_refreshed",
+            skill_id=skill_id,
+            detail={"source": analysis.source, "status": analysis.status},
+        )
+        return self._analysis_payload(skill, analysis)
+
+    def request_analysis(self, skill_id: str) -> None:
+        """재분석 enqueue (best-effort) — 본문을 바꾼 모든 경로(apply_patch/
+        create/update/rollback)가 호출한다. 스케줄러 틱이 드레인."""
+        if skill_id not in self._analysis_queue:
+            self._analysis_queue.append(skill_id)
+
+    async def run_pending_analyses(self, limit: int = 2) -> int:
+        """대기열 드레인 (server/scheduler.py 주기 호출). LLM 호출이 섞이므로
+        틱당 limit 으로 비용을 유계로 묶는다. 이미 fresh 면(그 사이 수동 refresh
+        등) 건너뛴다."""
+        processed = 0
+        while self._analysis_queue and processed < limit:
+            skill_id = self._analysis_queue.pop(0)
+            skill = self._read_any_skill(skill_id)
+            if skill is None:
+                continue  # 그 사이 삭제됨
+            existing = self._analysis_store.read(skill_id)
+            if effective_status(existing, skill.body) == "fresh":
+                continue
+            try:
+                await self.refresh_skill_analysis(skill_id)
+                processed += 1
+            except Exception:  # noqa: BLE001 — 분석 실패가 스케줄러를 깨면 안 된다
+                log.warning("background skill analysis failed for %s", skill_id, exc_info=True)
+        return processed
 
     # ── memory ────────────────────────────────────────────────────────────────
     def list_memories(self) -> list[MemoryItem]:

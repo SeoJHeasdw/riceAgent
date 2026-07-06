@@ -200,6 +200,21 @@ paths:
   /skills/{id}:
     get:
       tags: [skills]
+      summary: >
+        Skill detail. Includes `analysis` — the explanatory SKILL.md sidecar
+        (status computed at read time from body hash: missing|stale|failed|fresh;
+        tool_mentions merges observed/declared/mentioned sources). Explanatory
+        only — never drives permission/execution/approval policy.
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses: { "200": { $ref: "#/components/responses/Ok" }, "404": { $ref: "#/components/responses/Error" } }
+  /skills/{id}/analysis/refresh:
+    post:
+      tags: [skills]
+      summary: >
+        Regenerate the explanatory analysis sidecar (<name>.analysis.json) only —
+        the SKILL.md body/version/history are never touched. One low-temperature
+        structured-JSON LLM call (heuristic fallback when no provider); may be
+        slow — clients should show a loading state.
       parameters: [{ $ref: "#/components/parameters/Id" }]
       responses: { "200": { $ref: "#/components/responses/Ok" }, "404": { $ref: "#/components/responses/Error" } }
   /skills/curate:
@@ -393,6 +408,16 @@ paths:
       tags: [settings]
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { $ref: "#/components/responses/Ok" } }
+
+  /eval/impact:
+    get:
+      tags: [eval]
+      summary: >
+        Latest eval-harness ImpactReport (cold→warm). The ONLY source for
+        quantified learning-impact numbers — usage/patch counters must never be
+        presented as success rates (RICE_LEARNING_EVAL §6). 404 when no eval run
+        exists yet.
+      responses: { "200": { $ref: "#/components/responses/Ok" }, "404": { $ref: "#/components/responses/Error" } }
 
 components:
   securitySchemes:

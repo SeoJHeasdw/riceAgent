@@ -8,13 +8,13 @@ import { LearningImpactPanel } from '../components/carbon/LearningImpactPanel';
 import { SkillSourceWorkspace } from '../components/carbon/SkillSourceWorkspace';
 import { SkillPublishDialog } from '../components/carbon/SkillPublishDialog';
 import { SkillEditDrawer, type EditPatch } from '../components/carbon/SkillEditDrawer';
-import { IMPACT_REPORT } from '../lib/learningData';
+import { IMPACT_REPORT, runtimeAnalysisToSkillAnalysis } from '../lib/learningData';
 import { ownedSkillFiles, ownedToMarketSkill, publishedMarketId } from '../lib/skillBridge';
 import { languageFromPath } from '../lib/skillFiles';
 import { api } from '../lib/api';
-import type { Skill, SkillAnalysis, SkillAnalysisConfidence, SkillAnalysisToolMention, SkillDetail, SkillOrigin, SkillStep, SkillUpstream, SkillVersion } from '../lib/learningData';
+import type { RuntimeSkillAnalysis, Skill, SkillAnalysisConfidence, SkillAnalysisToolMention, SkillDetail, SkillOrigin, SkillStep, SkillUpstream, SkillVersion } from '../lib/learningData';
 import type { IconName } from '../components/ui';
-import type { ConsolidateProposal } from '../lib/types';
+import type { ConsolidateProposal, ImpactReport } from '../lib/types';
 
 /**
  * MySkillsScreen ("내 스킬") — full management screen for the user's own learned
@@ -323,12 +323,15 @@ const stepCandidatesFromBody = (body: string): ResolvedAnalysisStep[] => {
     .slice(0, 6);
 };
 
+// 본문 도구 섹션의 항목 — 출처 분리 원칙상 body 에서 온 건 전부 'mentioned'(언급
+// 후보)다. declared 는 frontmatter(tools:)/manifest 선언만이 정본이고 그건 서버
+// 분석 payload 로만 온다 (learning/skill/analysis.py 계약).
 const toolNamesFromSection = (body: string): ResolvedToolSignal[] =>
   findMarkdownSection(body, /(tools|tooling|사용 도구|도구)/i)
     .filter((line) => /^\s*(?:[-*+]\s+|\d+[.)]\s+)/.test(line))
     .map((line): ResolvedToolSignal => ({
       name: sentenceForTitle(line),
-      kind: 'declared',
+      kind: 'mentioned',
       confidence: 'medium',
       basis: 'SKILL.md 도구 섹션',
       evidence: cleanMdLine(line),
@@ -376,35 +379,53 @@ const skillMdBody = (skill: Skill, detail: SkillDetail): string => {
 const resolveUnderstanding = (skill: Skill, detail: SkillDetail): ResolvedUnderstanding => {
   const body = skillMdBody(skill, detail);
   const analysis = detail.analysis;
-  const hasFreshAnalysis = !!analysis && analysis.status === 'fresh';
-  const steps =
-    analysis?.proceduralSteps?.map((s): ResolvedAnalysisStep => ({
-      title: s.title,
-      description: s.description,
-      confidence: s.confidence ?? 'medium',
-      evidence: s.evidence,
-    })) ??
-    (detail.steps ?? []).map((s: SkillStep): ResolvedAnalysisStep => ({
-      title: s.label,
-      description: s.desc,
-      confidence: 'high',
-      evidence: s.tool,
-    }));
-  const fallbackSteps = steps.length ? steps : stepCandidatesFromBody(body);
-  const tools = dedupeTools([
-    ...(analysis?.toolMentions?.map((t): ResolvedToolSignal => ({ ...t, confidence: t.confidence ?? (t.kind === 'observed' ? 'high' : 'low') })) ?? []),
-    ...toolNamesFromSection(body),
-    ...mentionedToolsFromBody(body),
-  ]);
+  // 사이드카가 실재하면(missing 이 아니면) 서버 분석이 정본 — stale 이어도 클라이언트
+  // 휴리스틱보다 낫다(같은 휴리스틱 + LLM 층 결과이므로). missing/오프라인일 때만
+  // 원문 기반 미리보기 휴리스틱으로 폴백한다.
+  const hasAnalysis = !!analysis && analysis.status !== 'missing';
+  const analysisSteps = (analysis?.proceduralSteps ?? []).map((s): ResolvedAnalysisStep => ({
+    title: s.title,
+    description: s.description,
+    confidence: s.confidence ?? 'medium',
+    evidence: s.evidence,
+  }));
+  const workflowSteps = (detail.steps ?? []).map((s: SkillStep): ResolvedAnalysisStep => ({
+    title: s.label,
+    description: s.desc,
+    confidence: 'high',
+    evidence: s.tool,
+  }));
+  const steps = analysisSteps.length
+    ? analysisSteps
+    : workflowSteps.length
+      ? workflowSteps
+      : stepCandidatesFromBody(body);
+
+  // 도구 단서: 서버 payload 는 이미 observed(실행 로그)/declared(frontmatter 선언)/
+  // mentioned(본문 감지) 세 출처가 합류된 결과라 그대로 신뢰한다. 사이드카가 없을
+  // 때만 클라이언트가 본문에서 mentioned 후보를 임시로 긁는다.
+  const serverTools = (analysis?.toolMentions ?? []).map((t): ResolvedToolSignal => ({
+    ...t,
+    confidence: t.confidence ?? (t.kind === 'mentioned' ? 'low' : 'high'),
+  }));
+  const tools = hasAnalysis
+    ? dedupeTools(serverTools)
+    : dedupeTools([...toolNamesFromSection(body), ...mentionedToolsFromBody(body)]);
+
+  const sourceLabel = !hasAnalysis
+    ? '원문 미리보기'
+    : analysis?.source === 'llm'
+      ? 'AI 분석'
+      : '자동 분석 (규칙 기반)';
 
   return {
     summary: analysis?.summary?.trim() || detail.summary,
-    sourceLabel: hasFreshAnalysis ? 'AI 분석' : '원문 미리보기',
-    statusLabel: !analysis ? '분석 대기' : analysis.status === 'fresh' ? '최신' : analysis.status === 'stale' ? '재분석 권장' : analysis.status === 'failed' ? '분석 실패' : '분석 대기',
-    confidence: analysis?.confidence ?? (hasFreshAnalysis ? 'medium' : 'low'),
+    sourceLabel,
+    statusLabel: !hasAnalysis ? '분석 대기' : analysis!.status === 'fresh' ? '최신' : analysis!.status === 'stale' ? '재분석 권장' : '분석 실패',
+    confidence: analysis?.confidence ?? (hasAnalysis ? 'medium' : 'low'),
     analyzedAt: analysis?.analyzedAt,
     stale: !analysis || analysis.status !== 'fresh',
-    steps: fallbackSteps,
+    steps,
     tools,
     warnings: analysis?.warnings ?? [],
   };
@@ -1074,22 +1095,24 @@ const SkillDetailView: React.FC<{
     setConfirmDelete(false);
   }, [skillId]);
 
-  // 런타임 스킬의 실제 SKILL.md 본문 lazy load — 목록 API(GET /skills)는 본문을
-  // 내려주지 않으므로 상세를 처음 열 때 GET /skills/{id}로 채운다. 빌트인 스킬의
-  // "소스 보기"가 진짜 본문(교보재)을 보여주는 경로이자, 학습 스킬도 합성 대신
-  // 실제 SKILL.md를 보게 되는 공통 개선. 런타임 오프라인/목데이터면 조용히 유지.
+  // 런타임 스킬의 실제 SKILL.md 본문 + 분석 사이드카 lazy load — 목록 API(GET
+  // /skills)는 본문/분석을 내려주지 않으므로 상세를 처음 열 때 GET /skills/{id}로
+  // 채운다. 빌트인 스킬의 "소스 보기"가 진짜 본문(교보재)을 보여주는 경로이자,
+  // "스킬 이해" 패널이 서버 분석(observed/declared/mentioned 도구 단서 포함)을
+  // 받는 경로다. 런타임 오프라인/목데이터면 조용히 유지(원문 미리보기 폴백).
   useEffect(() => {
     if (!skillId) return;
     const current = details[skillId];
-    if (!current || (current.files && current.files.length)) return;
+    if (!current || (current.files && current.files.length && current.analysis)) return;
     let cancelled = false;
     void api.getSkill(skillId).then((res) => {
       if (cancelled || !res.success || !res.data) return;
       const data = res.data as {
         name: string; version: number; description: string;
         body?: string; tags?: string[]; source?: string | null;
+        analysis?: RuntimeSkillAnalysis | null;
       };
-      if (!data.body) return;
+      if (!data.body && !data.analysis) return;
       const fm = [
         `name: ${data.name}`,
         `version: ${data.version}`,
@@ -1097,16 +1120,21 @@ const SkillDetailView: React.FC<{
         ...(data.tags?.length ? [`tags: [${data.tags.join(', ')}]`] : []),
         ...(data.source ? [`source: ${data.source}`] : []),
       ].join('\n');
-      const md = `---\n${fm}\n---\n\n${data.body}`;
+      const md = `---\n${fm}\n---\n\n${data.body ?? ''}`;
       setDetails((prev) => {
         const cur = prev[skillId];
-        if (!cur || (cur.files && cur.files.length)) return prev;
+        if (!cur) return prev;
+        const keepFiles = !!(cur.files && cur.files.length);
+        if (keepFiles && cur.analysis) return prev;
         return {
           ...prev,
           [skillId]: {
             ...cur,
             summary: data.description || cur.summary,
-            files: [{ path: 'SKILL.md', language: languageFromPath('SKILL.md'), content: md }],
+            analysis: data.analysis ? runtimeAnalysisToSkillAnalysis(data.analysis) : cur.analysis,
+            files: keepFiles || !data.body
+              ? cur.files
+              : [{ path: 'SKILL.md', language: languageFromPath('SKILL.md'), content: md }],
           },
         };
       });
@@ -1125,6 +1153,8 @@ const SkillDetailView: React.FC<{
   const patch = (fn: (d: SkillDetail) => SkillDetail) => setDetails((d) => ({ ...d, [skillId]: fn(d[skillId]) }));
   const summaryExpandable = detail.summary.length > 170;
 
+  // 분석 새로고침 — 런타임이 사이드카(<name>.analysis.json)만 재생성한다.
+  // SKILL.md 본문/버전은 절대 변하지 않는다 (POST /skills/{id}/analysis/refresh 계약).
   const refreshAnalysis = async () => {
     if (analysisRefreshing) return;
     setAnalysisRefreshing(true);
@@ -1132,20 +1162,37 @@ const SkillDetailView: React.FC<{
     const res = await api.refreshSkillAnalysis(skillId);
     setAnalysisRefreshing(false);
     if (res.success && res.data) {
+      const mapped = runtimeAnalysisToSkillAnalysis(res.data);
       setDetails((prev) => {
         const cur = prev[skillId];
         if (!cur) return prev;
-        return { ...prev, [skillId]: { ...cur, analysis: res.data as SkillAnalysis } };
+        return { ...prev, [skillId]: { ...cur, analysis: mapped } };
       });
-      setAnalysisNote('분석을 갱신했어요.');
+      setAnalysisNote(
+        mapped.source === 'llm'
+          ? 'AI 분석을 갱신했어요.'
+          : mapped.status === 'failed'
+            ? 'AI 호출이 실패해 규칙 기반 분석으로 갱신했어요.'
+            : '규칙 기반 분석으로 갱신했어요 — LLM을 연결하면 더 풍부해져요.',
+      );
       return;
     }
-    setAnalysisNote('분석 API 연결 전이라 원문 기반 미리보기를 유지합니다.');
+    setAnalysisNote('런타임에 연결되지 않아 원문 기반 미리보기를 유지합니다.');
   };
 
-  // restore a past version: save it as a new current version (history kept)
+  // restore a past version: save it as a new current version (history kept).
+  // 런타임에도 반영(POST /skills/{id}/rollback) — 서버가 히스토리 보관·version+1·
+  // 분석 사이드카 재분석 enqueue 까지 수행한다. 서버가 매긴 버전 번호가 정본이라
+  // 응답으로 로컬 낙관 갱신을 보정한다. 런타임이 모르는 스킬(목/로컬 전용)이면
+  // 404가 돌아올 뿐이라 무해하다.
   const restore = (version: SkillVersion) => {
     const newVer = bumpVer(skill.ver);
+    void api.rollbackSkill(skillId, verNum(version.ver)).then((res) => {
+      const serverVer = res.success ? (res.data as { version?: number } | undefined)?.version : undefined;
+      if (serverVer && `v${serverVer}` !== newVer) {
+        setSkills((a) => a.map((x) => (x.id === skillId ? { ...x, ver: `v${serverVer}` } : x)));
+      }
+    });
     setSkills((a) => a.map((x) => (x.id === skillId ? { ...x, ver: newVer } : x)));
     patch((d) => ({
       ...d,
@@ -1174,6 +1221,13 @@ const SkillDetailView: React.FC<{
   // 구조화된 절차/도구 표시는 본문에서 다시 분석되는 설명용 sidecar가 담당한다.
   const applyEditPatch = (p: EditPatch, editedBody?: string) => {
     const finalBody = editedBody ?? p.proposedBody;
+    // 런타임 영속화(PUT /skills/{id}) — SKILL.md 가 대상일 때. 서버가 히스토리
+    // 보관·version+1·재분석 enqueue 를 수행한다(frontmatter 는 서버 소유라 본문만
+    // 보낸다). 번들 내 다른 파일(scripts…)은 런타임 스킬 저장소가 단일 SKILL.md
+    // 모델이라 로컬 상태로만 유지된다. 오프라인이면 실패 무해(로컬 프로토타입 유지).
+    if (p.targetPath.toLowerCase().endsWith('skill.md')) {
+      void api.updateSkill(skillId, { body: stripFrontmatter(finalBody) });
+    }
     setSkills((a) => a.map((x) => (x.id === skillId ? { ...x, ver: p.toVer, patches: (x.patches ?? 0) + 1 } : x)));
     patch((d) => {
       // 대상 파일 갱신(없으면 생성) — 소스 뷰가 승인 내용을 그대로 반영하도록
@@ -1529,6 +1583,18 @@ function MySkillsScreen() {
   const [sel, setSel] = useState<string | null>('s1');
   // "학습 효과" (Learning Impact) panel swaps into the detail pane (LE-1: keep 7 screens)
   const [showImpact, setShowImpact] = useState(false);
+  // cold→warm 정량 수치의 정본은 eval harness 산출물뿐이다(GET /eval/impact).
+  // 결과가 없으면(404/오프라인) 데모 fixture 로 폴백하되 "데모 데이터"로 명시한다 —
+  // 일반 사용 데이터로 성공률을 지어내지 않는 분리 원칙.
+  const [impact, setImpact] = useState<ImpactReport | null>(null);
+  const [impactLoaded, setImpactLoaded] = useState(false);
+  useEffect(() => {
+    if (!showImpact || impactLoaded) return;
+    void api.getImpactReport().then((res) => {
+      setImpactLoaded(true);
+      if (res.success && res.data) setImpact(res.data);
+    });
+  }, [showImpact, impactLoaded]);
   // 수동 "스킬 정리"(curator) 트리거 상태
   const [curating, setCurating] = useState(false);
   const [curateNote, setCurateNote] = useState<string | null>(null);
@@ -1926,7 +1992,11 @@ function MySkillsScreen() {
       />
 
       {/* detail — skill detail, or the Learning Impact panel (LE-1) */}
-      {showImpact ? <LearningImpactPanel report={IMPACT_REPORT} /> : <SkillDetailView skillId={effectiveSel} onSetStatus={setSkillStatus} />}
+      {showImpact ? (
+        <LearningImpactPanel report={impact ?? IMPACT_REPORT} demo={!impact} />
+      ) : (
+        <SkillDetailView skillId={effectiveSel} onSetStatus={setSkillStatus} />
+      )}
     </div>
   );
 }

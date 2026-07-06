@@ -362,6 +362,33 @@ class ILearningService(Protocol):
     def history(self, skill_id: str) -> list[SkillVersion]: ...
     def rollback(self, skill_id: str, version: int) -> int: ...
 
+    # ── explanatory analysis sidecar (2026-07-06, MySkills "스킬 이해" 실배선) ──
+    # SKILL.md 를 사람이 이해하는 설명으로 번역한 사이드카(learning/skill/analysis.py).
+    # **설명 전용** — 권한/실행/승인 판단에 절대 쓰지 않는다. 본문을 바꾸는 모든
+    # 경로(apply_patch/create/update/rollback)가 request_analysis 로 재분석을
+    # enqueue 하고, staleness 자체는 body hash 로 읽기 시점에 판정된다.
+    def get_skill_analysis(self, skill_id: str) -> dict | None:
+        """현재 분석 payload (GET /skills/{id} 의 `analysis` 필드). 사이드카의
+        mentioned(본문 감지)에 observed(usage 실행 로그)·declared(frontmatter
+        선언) 도구 단서를 합쳐 내보낸다. 스킬이 없으면 None."""
+        ...
+
+    async def refresh_skill_analysis(self, skill_id: str) -> dict:
+        """사이드카만 재생성 (POST /skills/{id}/analysis/refresh). SKILL.md 본문은
+        절대 건드리지 않는다. LLM 미배선/실패 시 휴리스틱 결과로 폴백. 스킬이
+        없으면 NotFoundError."""
+        ...
+
+    def request_analysis(self, skill_id: str) -> None:
+        """재분석 enqueue (best-effort, 즉시 반환) — 백그라운드 스케줄러 틱이
+        run_pending_analyses 로 드레인한다."""
+        ...
+
+    async def run_pending_analyses(self, limit: int = 2) -> int:
+        """enqueue 된 분석 잡을 최대 limit 건 실행 (server/scheduler.py 가 주기
+        호출). 반환: 처리 건수."""
+        ...
+
     # ── memory (routes/memories) ─────────────────────────────────────────────
     def list_memories(self) -> list[MemoryItem]: ...
 
