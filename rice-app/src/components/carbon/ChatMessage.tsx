@@ -77,18 +77,33 @@ const Rich: React.FC<{ text: string }> = ({ text }) => {
   );
 };
 
+const stripPlanningBreadcrumb = (text: string): string =>
+  text.replace(/^(?:\s*\(planning…\)\s*\n?)+/u, '').replace(/^(?:\s*\(planning\.\.\.\)\s*\n?)+/u, '');
+
+const AnimatedEllipsis: React.FC<{ className?: string }> = ({ className = '' }) => (
+  <span className={`rice-ellipsis ${className}`} aria-hidden="true">
+    <span>.</span>
+    <span>.</span>
+    <span>.</span>
+  </span>
+);
+
+const WaitingProgress: React.FC<{ className?: string }> = ({ className = '' }) => (
+  <span className={`rice-wait-progress ${className}`} aria-hidden="true">
+    <span />
+  </span>
+);
+
 // ── streaming typing indicator ───────────────────────────────
 // Shown in an assistant bubble that has no text yet (live SSE turn in flight),
 // so the user can tell RICE is generating a response and isn't stuck.
 const TypingDots: React.FC = () => (
-  <span className="inline-flex items-center gap-1 py-1" aria-label="응답 생성 중">
-    {[0, 1, 2].map((i) => (
-      <span
-        key={i}
-        className="w-1.5 h-1.5 rounded-full bg-icon-secondary animate-bounce"
-        style={{ animationDelay: `${i * 0.15}s` }}
-      />
-    ))}
+  <span className="inline-flex min-w-[160px] flex-col gap-1.5 py-1" aria-label="응답 생성 중">
+    <span className="text-caption-01 text-text-helper">
+      응답 생성 중
+      <AnimatedEllipsis />
+    </span>
+    <WaitingProgress />
   </span>
 );
 
@@ -587,8 +602,8 @@ const MemoryIndicator: React.FC<{
 // Live-ticking elapsed seconds since `startedAt`, re-rendering once per second
 // while `active`. WHY: commercial models run with extended thinking OFF, so they
 // stream no reasoning and can sit silent for many seconds before the first token.
-// A visible "N초" counter tells the user RICE is working (not stuck) even with no
-// reasoning to show. Ollama's live reasoning gets the same counter alongside it.
+// A visible "N초" counter tells the user RICE is working (not stuck) when there
+// is no reasoning trace to show.
 const useElapsedSeconds = (startedAt: number | undefined, active: boolean): number => {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -603,14 +618,29 @@ const useElapsedSeconds = (startedAt: number | undefined, active: boolean): numb
 
 // ── collapsible thinking trace ───────────────────────────────
 const ThinkingBlock: React.FC<{ m: Extract<ThreadMessage, { kind: 'thinking' }> }> = ({ m }) => {
+  const text = stripPlanningBreadcrumb(m.text ?? '');
+  const hasTrace = text.trim().length > 0;
   // While streaming, default to open so the live reasoning is visible (the
   // "motion"); once done it auto-collapses — unless the user toggled it.
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
   const open = userOpen ?? !!m.streaming;
   const steps = m.steps ?? [];
-  const elapsed = useElapsedSeconds(m.startedAt, !!m.streaming);
-  // With reasoning text → "생각 중"; without (commercial models) → "응답 생성 중".
-  const liveLabel = `${m.text ? '생각 중' : '응답 생성 중'}… ${elapsed}초`;
+  const elapsed = useElapsedSeconds(m.startedAt, !!m.streaming && !hasTrace);
+  // With reasoning text (Ollama message.thinking) → show the live trace under a
+  // plain "생각 중…" header. Empty waiting blocks (SaaS) keep the elapsed counter.
+  const liveLabel = hasTrace ? (
+    <>
+      생각 중
+      <AnimatedEllipsis />
+    </>
+  ) : (
+    <>
+      응답 생성 중
+      <AnimatedEllipsis />
+      <span className="ml-1 tabular-nums">{elapsed}초</span>
+    </>
+  );
+  if (!m.streaming && !hasTrace && steps.length === 0) return null;
   return (
     <div className="my-1.5 max-w-[640px]">
       <button
@@ -625,7 +655,7 @@ const ThinkingBlock: React.FC<{ m: Extract<ThreadMessage, { kind: 'thinking' }> 
       </button>
       {open && m.text != null && (
         <div className="mt-2 pl-1 text-caption-01 text-text-helper whitespace-pre-wrap leading-relaxed border-l-2 border-border-subtle-01 pl-3">
-          {m.text || (m.streaming ? <TypingDots /> : '…')}
+          {text || (m.streaming ? <WaitingProgress className="my-1 w-[180px]" /> : '…')}
         </div>
       )}
       {open && m.text == null && (
@@ -712,9 +742,9 @@ const PlanCard: React.FC<{ m: Extract<ThreadMessage, { kind: 'plan' }> }> = ({ m
                       s.status === 'in_progress'
                         ? 'text-text-primary font-medium'
                         : s.status === 'done'
-                          ? 'text-text-secondary'
+                          ? 'text-text-helper line-through decoration-border-strong-01'
                           : s.status === 'skipped'
-                            ? 'text-text-helper line-through'
+                            ? 'text-text-helper line-through decoration-border-strong-01'
                             : s.status === 'failed'
                               ? 'text-support-error'
                               : 'text-text-secondary'
@@ -1141,6 +1171,31 @@ const SkillProposalCard: React.FC<{
   );
 };
 
+// ── user-bubble affordance (copy on hover, beside timestamp) ─
+const UserCopyButton: React.FC<{ text: string }> = ({ text }) => {
+  const [copied, setCopied] = useState(false);
+
+  const copy = () => {
+    navigator.clipboard?.writeText(text).catch(() => {});
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
+  };
+
+  return (
+    <div className="group relative">
+      <button
+        type="button"
+        onClick={copy}
+        aria-label="내 메시지 복사하기"
+        className="w-6 h-6 inline-flex items-center justify-center rounded-md text-icon-secondary opacity-0 transition-all duration-150 hover:bg-layer-hover-01 hover:text-icon-primary group-hover/user:opacity-100 focus-visible:opacity-100"
+      >
+        <Icon name={copied ? 'check' : 'copy'} size={13} className={copied ? 'text-support-success' : undefined} />
+      </button>
+      <span className="action-tip">{copied ? '복사됨' : '복사하기'}</span>
+    </div>
+  );
+};
+
 // ── one assistant block body (no avatar/label — the turn carries identity) ─
 type AssistantMessage = Exclude<ThreadMessage, { kind: 'user' }>;
 
@@ -1290,13 +1345,16 @@ export const ChatTurn: React.FC<ChatTurnProps> = ({
   if (first.kind === 'user') {
     const timeLabel = formatTime(first.sentAt);
     return (
-      <div className="flex flex-col items-end gap-1 py-2.5" data-msg-index={items[0].index}>
-        <div className="max-w-[80%] bg-layer-02 rounded-2xl px-4 py-2.5 text-body-short-02 text-text-primary leading-relaxed break-words whitespace-pre-wrap">
-          {first.text}
+      <div className="group/user flex flex-col items-end py-2.5" data-msg-index={items[0].index}>
+        <div className="max-w-[80%]">
+          <div className="bg-layer-02 rounded-2xl px-4 py-2.5 text-body-short-02 text-text-primary leading-relaxed break-words whitespace-pre-wrap">
+            {first.text}
+          </div>
+          <div className="mt-1 flex items-center justify-between gap-2 pr-1">
+            <UserCopyButton text={first.text} />
+            {timeLabel && <span className="text-caption-01 text-text-helper select-none">{timeLabel}</span>}
+          </div>
         </div>
-        {timeLabel && (
-          <span className="text-caption-01 text-text-helper select-none pr-1">{timeLabel}</span>
-        )}
       </div>
     );
   }

@@ -144,9 +144,6 @@ class TurnPlanner:
             skill_names=[s.name for s in ctx.injected_skills],
             max_steps=self._config.plan_max_steps,
         )
-        # think=False면 계획이 나올 때까지 화면에 아무것도 없다 — 짧은 breadcrumb
-        # 하나로 "지금 계획 중"을 보이게 한다(로컬 모델 prefill 수십 초 대비).
-        yield ev_thinking("(planning…)\n")
         chunks: list[str] = []
         think_chars = 0
         try:
