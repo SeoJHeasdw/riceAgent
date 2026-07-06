@@ -675,6 +675,10 @@ function ChatScreen() {
   // a live (runtime) turn is streaming — gates the composer so we can't double-send,
   // and drives the "생성 중" affordance on the send button.
   const [busy, setBusy] = useState(false);
+  // Live plan snapshot for the active turn — drives a compact progress bar pinned
+  // above the composer so plan advancement stays visible even as the answer
+  // streams and scrolls the full plan card up out of view. Cleared when the turn ends.
+  const [livePlan, setLivePlan] = useState<PlanUpdatedEventData | null>(null);
   // session pending delete-confirmation (ConfirmDialog target), null = closed
   const [confirmDelete, setConfirmDelete] = useState<Session | null>(null);
   const [modelMode, setModelMode] = useState<'saas' | 'local'>('saas');
@@ -981,6 +985,8 @@ function ChatScreen() {
   // 턴을 교체(delete_after)하므로, 화면에서도 직전 턴 블록을 걷어내고 새로 스트리밍한다.
   const regenerate = () => {
     if (busy || !api.isEnabled || !liveSessionId.current) return;
+    sealAnswer();
+    setLivePlan(null);
     setBusy(true);
     setThread((p) => {
       let end = p.length; // strip trailing assistant turn (blocks after the last user msg)
@@ -1039,21 +1045,107 @@ function ChatScreen() {
   // plan_updated: 같은 planId 카드를 스냅샷으로 통째 교체 (없으면 이 지점에 생성).
   const upsertPlan = (d: PlanUpdatedEventData) => setThread((p) => upsertPlanBlock(p, d));
 
-  // Append to / create the streaming answer bubble.
-  // sentAt is stamped once when the bubble is first created (first token arrival).
-  const appendAnswer = (d: { delta?: string; content?: string }) =>
+  // ── smooth answer streaming ("typewriter") ────────────────────────────────
+  // SaaS models (Claude) push text deltas in fast bursts; rendering each burst
+  // verbatim strobes the screen and tires the eyes. We decouple render pace from
+  // arrival: deltas feed a target buffer, and a steady 30fps pump reveals a
+  // growing prefix. Catch-up is proportional (drain ~1/8 of the backlog per
+  // tick, min 2 chars) so a huge burst still animates in a few frames while a
+  // trickle types smoothly — and the tail keeps typing briefly after the network
+  // is done (the familiar chat "typing" feel), bounded so it never lags far.
+  const answerRef = useRef<{ target: string; shown: number; active: boolean }>({
+    target: '',
+    shown: 0,
+    active: false,
+  });
+  const answerTimerRef = useRef<number | null>(null);
+
+  const stopAnswerPump = () => {
+    if (answerTimerRef.current != null) {
+      window.clearInterval(answerTimerRef.current);
+      answerTimerRef.current = null;
+    }
+  };
+
+  const pumpTick = () => {
+    const a = answerRef.current;
+    if (a.shown >= a.target.length) {
+      stopAnswerPump();
+      return;
+    }
+    const step = Math.max(2, Math.ceil((a.target.length - a.shown) / 8));
+    a.shown = Math.min(a.target.length, a.shown + step);
+    const text = a.target.slice(0, a.shown);
     setThread((p) => {
       const copy = [...p];
       const last = copy[copy.length - 1];
-      const text = typeof d.content === 'string' ? d.content : undefined;
       if (last?.kind === 'agent') {
-        const next = text ?? (last.text ?? '') + (d.delta ?? '');
-        copy[copy.length - 1] = { ...last, text: next };
-      } else {
-        copy.push({ kind: 'agent', text: text ?? d.delta ?? '', sentAt: Date.now() });
+        copy[copy.length - 1] = { ...last, text };
+        return copy;
       }
-      return copy;
+      // Another card was appended over our bubble (tool/effect) — render this
+      // segment in full at its original spot and stop; a new segment starts fresh.
+      const idx = copy.map((b) => b.kind).lastIndexOf('agent');
+      if (idx >= 0) {
+        copy[idx] = { ...(copy[idx] as { kind: 'agent'; text: string }), text: a.target };
+        stopAnswerPump();
+        a.active = false;
+        return copy;
+      }
+      return p;
     });
+  };
+
+  const ensureAnswerPump = () => {
+    if (answerTimerRef.current == null) answerTimerRef.current = window.setInterval(pumpTick, 33);
+  };
+
+  // Feed a streamed delta (or the authoritative final `content`) into the pump.
+  const feedAnswer = (d: { delta?: string; content?: string }) => {
+    const a = answerRef.current;
+    if (!a.active) {
+      a.active = true;
+      a.target = '';
+      a.shown = 0;
+      setThread((p) => [...p, { kind: 'agent', text: '', sentAt: Date.now() }]);
+    }
+    if (typeof d.content === 'string') a.target = d.content;
+    else a.target += d.delta ?? '';
+    ensureAnswerPump();
+  };
+
+  // Close the current answer segment: render it in full now, stop the pump, and
+  // reset so the next text starts a fresh bubble. Called at every interruption
+  // (a tool round, a new user turn, stream error/close) — but NOT on `done`, so a
+  // just-finished answer types its tail out smoothly instead of snapping to full.
+  const sealAnswer = () => {
+    const a = answerRef.current;
+    if (a.active && a.shown < a.target.length) {
+      const text = a.target;
+      setThread((p) => {
+        const copy = [...p];
+        const idx = copy.map((b) => b.kind).lastIndexOf('agent');
+        if (idx >= 0) copy[idx] = { ...(copy[idx] as { kind: 'agent'; text: string }), text };
+        return copy;
+      });
+    }
+    a.active = false;
+    a.target = '';
+    a.shown = 0;
+    stopAnswerPump();
+  };
+
+  // Hard reset the live-render state without flushing — for switching sessions or
+  // starting a new chat, where a running pump must not write into the thread we're
+  // about to replace.
+  const resetLiveRender = () => {
+    stopAnswerPump();
+    answerRef.current = { target: '', shown: 0, active: false };
+    setLivePlan(null);
+  };
+
+  // Stop the pump if the component unmounts mid-stream.
+  useEffect(() => () => stopAnswerPump(), []);
 
   const pushAgentText = (text: string) => setThread((p) => [...p, { kind: 'agent', text }]);
 
@@ -1176,13 +1268,18 @@ function ChatScreen() {
         const d = e.data as { text?: string };
         if (typeof d.text === 'string') appendThinking(d.text);
       } else if (e.type === 'plan_updated') {
-        // 계획 생성/전이/수정 — 플래너의 생각 블록을 닫고 계획 카드를 업서트한 뒤,
+        // 계획 생성/전이/수정 — 진행 중이던 답변 세그먼트를 닫고, 플래너 생각 블록도
+        // 닫은 뒤 계획 카드를 업서트한다. livePlan 으로 컴포저 위 진행 바를 갱신하고,
         // 계획→답변 생성 사이의 침묵 구간에도 경과 카운터가 흐르도록 대기 표시를 심는다.
+        sealAnswer();
         finalizeThinking();
-        upsertPlan(e.data as PlanUpdatedEventData);
+        const plan = e.data as PlanUpdatedEventData;
+        upsertPlan(plan);
+        setLivePlan(plan.status === 'completed' ? null : plan);
         seedWaiting();
       } else if (e.type === 'tool_call') {
-        // a tool round begins → close the reasoning block, push a running trace card
+        // a tool round begins → close the answer + reasoning blocks, push a running card
+        sealAnswer();
         finalizeThinking();
         const d = e.data as { tool_call_id: string; tool_name: string; arguments?: Record<string, unknown> };
         // update_plan의 화면 표면은 계획 카드(plan_updated) — 도구 카드는 만들지 않는다.
@@ -1194,6 +1291,7 @@ function ChatScreen() {
       } else if (e.type === 'tool_approval_required') {
         // HITL gate — render the approval card; the backend stream stays parked
         // until the user posts a decision (handleToolApproval), then resumes.
+        sealAnswer();
         const d = e.data as { approval_id: string; tool_name: string; arguments?: Record<string, unknown>; reason?: string };
         const desc = describeTool(d.tool_name, d.arguments ?? {});
         setThread((p) => [
@@ -1227,9 +1325,12 @@ function ChatScreen() {
           }
           return copy;
         });
+        // 도구 결과를 받은 뒤 모델이 다음 판단을 하는 침묵 구간에도 카운터가 흐르게
+        // 대기 표시를 심는다(이미 streaming 중이면 no-op). 다음 콘텐츠가 걷어낸다.
+        seedWaiting();
       } else if (e.type === 'message') {
         finalizeThinking();
-        appendAnswer(e.data as { delta?: string; content?: string });
+        feedAnswer(e.data as { delta?: string; content?: string });
       } else if (e.type === 'memory_written') {
         handleMemoryWritten(e.data as MemoryWrittenEventData);
       } else if (e.type === 'skill_patch_proposed') {
@@ -1237,7 +1338,10 @@ function ChatScreen() {
       } else if (e.type === 'skill_patched') {
         handleSkillPatched(e.data as { skill_id: string; version: number });
       } else if (e.type === 'done') {
+        // NOTE: no sealAnswer() here — let the typewriter finish its tail smoothly
+        // after the network is done (that trailing type-out is the desired feel).
         finalizeThinking();
+        setLivePlan(null);
         setBusy(false);
         const sid = liveSessionId.current;
         // First turn of a new session → ask the runtime to name it from the opening
@@ -1267,19 +1371,25 @@ function ChatScreen() {
           });
         }
       } else if (e.type === 'error') {
+        sealAnswer();
         finalizeThinking();
+        setLivePlan(null);
         const d = e.data as { message?: string };
         pushAgentText(`⚠️ 오류: ${d.message ?? '실행 실패'}`);
         setBusy(false);
       }
     },
     onError: (msg: string) => {
+      sealAnswer();
       finalizeThinking();
+      setLivePlan(null);
       pushAgentText(`⚠️ 연결 오류: ${msg}`);
       setBusy(false);
     },
     onClose: () => {
+      sealAnswer();
       finalizeThinking();
+      setLivePlan(null);
       setBusy(false);
     },
   });
@@ -1311,6 +1421,7 @@ function ChatScreen() {
   // Open a DB-backed session: load its persisted messages and make it the live
   // target so subsequent sends continue the same conversation.
   const openLiveSession = async (id: string) => {
+    resetLiveRender(); // a running typewriter must not bleed into the loaded thread
     setActiveSessionId(id);
     liveSessionId.current = id;
     needsTitleRefresh.current = false; // 기존 세션 — 제목 이미 있음
@@ -1390,6 +1501,8 @@ function ChatScreen() {
   // Shared by send() and handleCorrect() (a correction is just a user turn).
   const runLiveTurn = (q: string) => {
     setIsEmpty(false);
+    sealAnswer(); // flush any lingering typewriter tail from the previous turn
+    setLivePlan(null);
     setBusy(true);
     setThread((p) => [
       ...p,
@@ -1513,6 +1626,7 @@ function ChatScreen() {
   };
 
   const newChat = () => {
+    resetLiveRender();
     setIsEmpty(true);
     setThread([]);
     // Start a fresh backend session — otherwise the next send reuses the previous
@@ -1780,6 +1894,25 @@ function ChatScreen() {
           {/* Composer */}
           <div className="flex-shrink-0 px-5 pt-2 pb-5">
             <div className="w-full max-w-[920px] mx-auto relative">
+              {/* Live plan progress — pinned above the composer while a planned turn
+                  runs, so step advancement stays visible even after the full plan
+                  card scrolls up out of view. */}
+              {busy && livePlan && livePlan.steps.length > 0 && (() => {
+                const steps = livePlan.steps;
+                const done = steps.filter((s) => s.status === 'done' || s.status === 'skipped').length;
+                const cur = steps.find((s) => s.status === 'in_progress') ?? steps.find((s) => s.status === 'pending');
+                return (
+                  <div className="mb-2 flex items-center gap-2 rounded-lg border border-border-subtle-01 border-l-2 border-l-blue-40 bg-layer-01 px-3 py-1.5">
+                    <Icon name="flow" size={13} className="text-blue-40 flex-shrink-0 animate-pulse" />
+                    <span className="text-caption-01 text-text-secondary truncate min-w-0 flex-1">
+                      {cur ? cur.title : livePlan.goal}
+                    </span>
+                    <span className="text-label-micro text-text-helper tabular-nums flex-shrink-0">
+                      {done}/{steps.length}
+                    </span>
+                  </div>
+                );
+              })()}
               {/* Inline slash-command popover — floats above the composer box */}
               {skillsOpen && isInlineSlash && (
                 <SkillsPopover

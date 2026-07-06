@@ -52,6 +52,10 @@ class ProviderConfig:
     # enough for long structured text AND large tool-call JSON (a 10-slide deck
     # spec is emitted as output tokens), while still capping runaway generation.
     max_output_tokens: int = 16_384
+    # Ollama HTTP 타임아웃(초). 로컬 추론 모델은 긴 생성(PPT 구성안, 코드 등)에서
+    # 60초를 쉽게 넘긴다 — 기본 300초로 설정해 ReadTimeout을 방지한다.
+    # SaaS 프로바이더(Claude/OpenAI)는 이 값을 사용하지 않는다.
+    timeout_seconds: int = 600
     # First-run gate: False until the user picks & connects a model in the
     # settings panel and saves (PUT /settings). The app shows the mandatory
     # model-onboarding flow while this is False, then trusts the saved provider.

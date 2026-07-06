@@ -106,7 +106,8 @@ class OllamaProvider(ILLMProvider):
         import httpx  # noqa: PLC0415 - optional dependency by design
 
         base_url = (self._cfg.base_url or "http://localhost:11434").rstrip("/")
-        async with httpx.AsyncClient(base_url=base_url, timeout=60.0) as client:
+        timeout = getattr(self._cfg, "timeout_seconds", 300)
+        async with httpx.AsyncClient(base_url=base_url, timeout=timeout) as client:
             async with client.stream("POST", "/api/chat", json=payload) as response:
                 response.raise_for_status()
                 async for line in response.aiter_lines():
@@ -119,7 +120,8 @@ class OllamaProvider(ILLMProvider):
         import httpx  # noqa: PLC0415 - optional dependency by design
 
         base_url = (self._cfg.base_url or "http://localhost:11434").rstrip("/")
-        async with httpx.AsyncClient(base_url=base_url, timeout=60.0) as client:
+        timeout = getattr(self._cfg, "timeout_seconds", 300)
+        async with httpx.AsyncClient(base_url=base_url, timeout=timeout) as client:
             response = await client.post("/api/chat", json=payload)
             response.raise_for_status()
             return response.json()
