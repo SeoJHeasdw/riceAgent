@@ -91,7 +91,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
           </button>
           <Button
             kind={tone}
-            size="sm"
+            size="xs"
             className="min-w-[72px]"
             icon={confirmIcon ? <Icon name={confirmIcon} size={14} /> : undefined}
             onClick={onConfirm}

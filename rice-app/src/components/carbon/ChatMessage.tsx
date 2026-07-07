@@ -1003,8 +1003,7 @@ const ApprovalCard: React.FC<{
             <div className="flex items-center gap-1.5 flex-shrink-0 pt-0.5">
               <Button
                 kind="ghost"
-                size="sm"
-                className="!h-8"
+                size="xs"
                 onClick={() => {
                   setState('denied');
                   onRespond?.('reject');
@@ -1014,8 +1013,7 @@ const ApprovalCard: React.FC<{
               </Button>
               <Button
                 kind="primary"
-                size="sm"
-                className="!h-8"
+                size="xs"
                 icon={<Icon name="check" size={14} />}
                 onClick={() => {
                   setState('approved');
