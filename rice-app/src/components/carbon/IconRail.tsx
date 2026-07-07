@@ -42,6 +42,7 @@ const RailButton: React.FC<{
       onClick={() => onNavigate(item.id, item.path)}
       data-tour={`nav-${item.id}`}
       className={`
+        electron-no-drag
         flex items-center justify-center w-9 h-9 rounded-[10px]
         transition-colors duration-150
         outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus
@@ -78,7 +79,7 @@ export const IconRail: React.FC<IconRailProps> = ({ items, activeId, onNavigate 
   const bottomItems = items.filter((item) => item.pinBottom);
 
   return (
-    <nav className="w-[52px] h-full bg-shell border-r border-shell-border flex flex-col items-center py-2">
+    <nav className="w-[52px] h-full bg-shell border-r border-shell-border flex flex-col items-center py-2 electron-drag">
       {/* Main navigation */}
       <div className="flex flex-col items-center gap-1 w-full">
         {topItems.map((item) => (

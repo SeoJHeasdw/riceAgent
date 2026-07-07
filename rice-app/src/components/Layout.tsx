@@ -27,33 +27,36 @@ export const Layout: React.FC<LayoutProps> = ({
   // 같은 화면 안의 하위 경로 변화(예: /connectors/:id)는 key가 그대로라 remount되지 않는다.
   const location = useLocation();
   const screenKey = location.pathname.split('/')[1] || 'home';
+  const isChatScreen = screenKey === 'chat';
 
   return (
     <div className="flex flex-col h-screen w-screen bg-background overflow-hidden">
       {/* Titlebar / window drag region — 아이콘 레일과 함께 brand shell을 이룬다.
           긴 태그라인은 window chrome이 아니라 Home·Settings About의 몫. */}
-      <header
-        className={`
-          h-11 flex-shrink-0 flex items-center gap-2.5
-          bg-shell border-b border-shell-border electron-drag
-          ${isElectron ? 'pl-[84px]' : 'pl-4'} pr-4
-        `}
-      >
-        <div
-          className="
-            flex items-center justify-center w-6 h-6 rounded-md
-            bg-gradient-to-br from-blue-60 to-purple-60
-            text-white font-mono font-bold text-caption-01
-            select-none
-          "
-          aria-hidden="true"
+      {!isChatScreen && (
+        <header
+          className={`
+            h-11 flex-shrink-0 flex items-center gap-2.5
+            bg-shell border-b border-shell-border electron-drag
+            ${isElectron ? 'pl-[84px]' : 'pl-4'} pr-4
+          `}
         >
-          R
-        </div>
-        <span className="text-body-short-01 font-semibold text-white select-none">
-          RICE
-        </span>
-      </header>
+          <div
+            className="
+              flex items-center justify-center w-6 h-6 rounded-md
+              bg-gradient-to-br from-blue-60 to-purple-60
+              text-white font-mono font-bold text-caption-01
+              select-none
+            "
+            aria-hidden="true"
+          >
+            R
+          </div>
+          <span className="text-body-short-01 font-semibold text-white select-none">
+            RICE
+          </span>
+        </header>
+      )}
 
       {/* Rail + content */}
       <div className="flex flex-1 min-h-0">

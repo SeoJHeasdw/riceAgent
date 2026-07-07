@@ -150,7 +150,6 @@ const MarkdownTable: React.FC<{
   const tableSignature = JSON.stringify({ columns, rows });
   const modelRef = useRef<{
     signature: string;
-    columnValues: string[][];
     compactColumns: boolean[];
     initialWidths: number[];
   } | null>(null);
@@ -160,13 +159,12 @@ const MarkdownTable: React.FC<{
     const compactColumns = columns.map((column, col) => isCompactTableColumn(column, columnValues[col] ?? []));
     modelRef.current = {
       signature: tableSignature,
-      columnValues,
       compactColumns,
       initialWidths: columns.map((column, col) => estimateColumnWidth(column, columnValues[col] ?? [], columns.length)),
     };
   }
 
-  const { columnValues, compactColumns, initialWidths } = modelRef.current!;
+  const { compactColumns, initialWidths } = modelRef.current!;
   const [widthState, setWidthState] = useState(() => ({ signature: tableSignature, widths: initialWidths }));
   const dragRef = useRef<{ col: number; startX: number; startWidth: number } | null>(null);
   const widths = widthState.signature === tableSignature ? widthState.widths : initialWidths;

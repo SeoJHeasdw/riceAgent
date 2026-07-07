@@ -675,10 +675,6 @@ function ChatScreen() {
   // a live (runtime) turn is streaming — gates the composer so we can't double-send,
   // and drives the "생성 중" affordance on the send button.
   const [busy, setBusy] = useState(false);
-  // Live plan snapshot for the active turn — drives a compact progress bar pinned
-  // above the composer so plan advancement stays visible even as the answer
-  // streams and scrolls the full plan card up out of view. Cleared when the turn ends.
-  const [livePlan, setLivePlan] = useState<PlanUpdatedEventData | null>(null);
   // session pending delete-confirmation (ConfirmDialog target), null = closed
   const [confirmDelete, setConfirmDelete] = useState<Session | null>(null);
   const [modelMode, setModelMode] = useState<'saas' | 'local'>('saas');
@@ -986,7 +982,6 @@ function ChatScreen() {
   const regenerate = () => {
     if (busy || !api.isEnabled || !liveSessionId.current) return;
     sealAnswer();
-    setLivePlan(null);
     setBusy(true);
     setThread((p) => {
       let end = p.length; // strip trailing assistant turn (blocks after the last user msg)
@@ -1046,17 +1041,14 @@ function ChatScreen() {
   const upsertPlan = (d: PlanUpdatedEventData) => setThread((p) => upsertPlanBlock(p, d));
 
   // ── smooth answer streaming ("typewriter") ────────────────────────────────
-  // SaaS models (Claude) push text deltas in fast bursts; rendering each burst
-  // verbatim strobes the screen and tires the eyes. We decouple render pace from
-  // arrival: deltas feed a target buffer, and a steady 30fps pump reveals a
-  // growing prefix. Catch-up is proportional (drain ~1/8 of the backlog per
-  // tick, min 2 chars) so a huge burst still animates in a few frames while a
-  // trickle types smoothly — and the tail keeps typing briefly after the network
-  // is done (the familiar chat "typing" feel), bounded so it never lags far.
-  const answerRef = useRef<{ target: string; shown: number; active: boolean }>({
+  // Deltas can arrive as either tiny character trickles or large bursts. Rendering
+  // them verbatim makes the text shimmer; draining by a fixed, bounded chunk gives
+  // a calmer reading rhythm while a short buffer groups one-character trickles.
+  const answerRef = useRef<{ target: string; shown: number; active: boolean; lastFeedAt: number }>({
     target: '',
     shown: 0,
     active: false,
+    lastFeedAt: 0,
   });
   const answerTimerRef = useRef<number | null>(null);
 
@@ -1073,7 +1065,9 @@ function ChatScreen() {
       stopAnswerPump();
       return;
     }
-    const step = Math.max(2, Math.ceil((a.target.length - a.shown) / 8));
+    const backlog = a.target.length - a.shown;
+    if (backlog < 5 && Date.now() - a.lastFeedAt < 80) return;
+    const step = backlog > 260 ? 24 : backlog > 140 ? 16 : backlog > 64 ? 10 : backlog > 24 ? 6 : 3;
     a.shown = Math.min(a.target.length, a.shown + step);
     const text = a.target.slice(0, a.shown);
     setThread((p) => {
@@ -1107,10 +1101,12 @@ function ChatScreen() {
       a.active = true;
       a.target = '';
       a.shown = 0;
+      a.lastFeedAt = Date.now();
       setThread((p) => [...p, { kind: 'agent', text: '', sentAt: Date.now() }]);
     }
     if (typeof d.content === 'string') a.target = d.content;
     else a.target += d.delta ?? '';
+    a.lastFeedAt = Date.now();
     ensureAnswerPump();
   };
 
@@ -1132,6 +1128,7 @@ function ChatScreen() {
     a.active = false;
     a.target = '';
     a.shown = 0;
+    a.lastFeedAt = 0;
     stopAnswerPump();
   };
 
@@ -1140,8 +1137,7 @@ function ChatScreen() {
   // about to replace.
   const resetLiveRender = () => {
     stopAnswerPump();
-    answerRef.current = { target: '', shown: 0, active: false };
-    setLivePlan(null);
+    answerRef.current = { target: '', shown: 0, active: false, lastFeedAt: 0 };
   };
 
   // Stop the pump if the component unmounts mid-stream.
@@ -1269,13 +1265,12 @@ function ChatScreen() {
         if (typeof d.text === 'string') appendThinking(d.text);
       } else if (e.type === 'plan_updated') {
         // 계획 생성/전이/수정 — 진행 중이던 답변 세그먼트를 닫고, 플래너 생각 블록도
-        // 닫은 뒤 계획 카드를 업서트한다. livePlan 으로 컴포저 위 진행 바를 갱신하고,
-        // 계획→답변 생성 사이의 침묵 구간에도 경과 카운터가 흐르도록 대기 표시를 심는다.
+        // 닫은 뒤 계획 카드를 업서트한다. 계획→답변 생성 사이의 침묵 구간에도
+        // 경과 카운터가 흐르도록 대기 표시를 심는다.
         sealAnswer();
         finalizeThinking();
         const plan = e.data as PlanUpdatedEventData;
         upsertPlan(plan);
-        setLivePlan(plan.status === 'completed' ? null : plan);
         seedWaiting();
       } else if (e.type === 'tool_call') {
         // a tool round begins → close the answer + reasoning blocks, push a running card
@@ -1341,7 +1336,6 @@ function ChatScreen() {
         // NOTE: no sealAnswer() here — let the typewriter finish its tail smoothly
         // after the network is done (that trailing type-out is the desired feel).
         finalizeThinking();
-        setLivePlan(null);
         setBusy(false);
         const sid = liveSessionId.current;
         // First turn of a new session → ask the runtime to name it from the opening
@@ -1373,7 +1367,6 @@ function ChatScreen() {
       } else if (e.type === 'error') {
         sealAnswer();
         finalizeThinking();
-        setLivePlan(null);
         const d = e.data as { message?: string };
         pushAgentText(`⚠️ 오류: ${d.message ?? '실행 실패'}`);
         setBusy(false);
@@ -1382,14 +1375,12 @@ function ChatScreen() {
     onError: (msg: string) => {
       sealAnswer();
       finalizeThinking();
-      setLivePlan(null);
       pushAgentText(`⚠️ 연결 오류: ${msg}`);
       setBusy(false);
     },
     onClose: () => {
       sealAnswer();
       finalizeThinking();
-      setLivePlan(null);
       setBusy(false);
     },
   });
@@ -1502,7 +1493,6 @@ function ChatScreen() {
   const runLiveTurn = (q: string) => {
     setIsEmpty(false);
     sealAnswer(); // flush any lingering typewriter tail from the previous turn
-    setLivePlan(null);
     setBusy(true);
     setThread((p) => [
       ...p,
@@ -1763,7 +1753,7 @@ function ChatScreen() {
 
   return (
     <FileViewerProvider>
-      <div className="flex flex-1 min-w-0 overflow-hidden">
+      <div className="relative flex flex-1 min-w-0 overflow-hidden">
         {/* Session Sidebar */}
         <SessionSidebar
           sessions={sessions}
@@ -1790,34 +1780,18 @@ function ChatScreen() {
         {/* Main */}
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-background">
           {/* Header */}
-          <div className="h-[52px] flex-shrink-0 flex items-center gap-3 px-4 border-b border-border-subtle-01">
-            {/* 사이드바가 접히면 미니 레일 대신 여기서 다시 연다 (Claude 데스크톱 문법) */}
+          <div className="h-11 flex-shrink-0 flex items-center gap-3 px-4 border-b border-border-subtle-01 electron-drag">
             {!sessionSidebarOpen && (
-              <div className="-ml-1.5 mr-0.5 flex items-center gap-0.5 flex-shrink-0">
-                <Tooltip label="대화 목록 열기">
-                  <button
-                    onClick={() => setSessionSidebarOpen(true)}
-                    className="flex items-center justify-center w-8 h-8 rounded-lg text-icon-secondary hover:bg-layer-hover-01 hover:text-icon-primary transition-colors"
-                  >
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                      <rect x="3" y="3" width="18" height="18" rx="2" />
-                      <path d="M9 3v18" />
-                      <path d="m14 9 3 3-3 3" />
-                    </svg>
-                  </button>
-                </Tooltip>
-                <Tooltip label="새 대화">
-                  <button
-                    onClick={newChat}
-                    className="flex items-center justify-center w-8 h-8 rounded-lg text-icon-secondary hover:bg-layer-hover-01 hover:text-icon-primary transition-colors"
-                  >
-                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M12 20h9" />
-                      <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
-                    </svg>
-                  </button>
-                </Tooltip>
-              </div>
+              <Tooltip label="대화 목록 펼치기" side="bottom">
+                <button
+                  type="button"
+                  onClick={() => setSessionSidebarOpen(true)}
+                  className="electron-no-drag -ml-1 flex h-7 w-7 items-center justify-center rounded-md text-icon-secondary hover:bg-layer-hover-01 hover:text-icon-primary transition-colors"
+                  aria-label="대화 목록 펼치기"
+                >
+                  <Icon name="side-panel-open" size={16} />
+                </button>
+              </Tooltip>
             )}
             <span className="text-body-short-01 font-semibold text-text-primary truncate">
               {isEmpty ? '새 대화' : activeSession?.title || '대화'}
@@ -1828,7 +1802,7 @@ function ChatScreen() {
               <button
                 onClick={() => setLearningPanelOpen((o) => !o)}
                 data-tour="learning-loop"
-                className={`flex items-center gap-1.5 px-2 py-0.5 border border-border-subtle-01 hover:bg-layer-hover-01 transition-colors text-text-secondary text-caption-01 rounded-md ${
+                className={`electron-no-drag flex items-center gap-1.5 px-2 py-0.5 border border-border-subtle-01 hover:bg-layer-hover-01 transition-colors text-text-secondary text-caption-01 rounded-md ${
                   learningPanelOpen ? 'bg-layer-selected-01' : ''
                 }`}
                 title={learningPanelOpen ? '학습 루프 접기' : '학습 루프 펼치기'}
@@ -1894,25 +1868,6 @@ function ChatScreen() {
           {/* Composer */}
           <div className="flex-shrink-0 px-5 pt-2 pb-5">
             <div className="w-full max-w-[920px] mx-auto relative">
-              {/* Live plan progress — pinned above the composer while a planned turn
-                  runs, so step advancement stays visible even after the full plan
-                  card scrolls up out of view. */}
-              {busy && livePlan && livePlan.steps.length > 0 && (() => {
-                const steps = livePlan.steps;
-                const done = steps.filter((s) => s.status === 'done' || s.status === 'skipped').length;
-                const cur = steps.find((s) => s.status === 'in_progress') ?? steps.find((s) => s.status === 'pending');
-                return (
-                  <div className="mb-2 flex items-center gap-2 rounded-lg border border-border-subtle-01 border-l-2 border-l-blue-40 bg-layer-01 px-3 py-1.5">
-                    <Icon name="flow" size={13} className="text-blue-40 flex-shrink-0 animate-pulse" />
-                    <span className="text-caption-01 text-text-secondary truncate min-w-0 flex-1">
-                      {cur ? cur.title : livePlan.goal}
-                    </span>
-                    <span className="text-label-micro text-text-helper tabular-nums flex-shrink-0">
-                      {done}/{steps.length}
-                    </span>
-                  </div>
-                );
-              })()}
               {/* Inline slash-command popover — floats above the composer box */}
               {skillsOpen && isInlineSlash && (
                 <SkillsPopover

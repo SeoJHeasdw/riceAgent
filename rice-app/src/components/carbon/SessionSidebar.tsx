@@ -98,180 +98,179 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
   const groupedSessions = groupSessions(filteredSessions);
 
-  // 접히면 미니 레일 없이 완전히 사라진다 — 다시 여는 토글은 채팅 헤더가 맡는다.
-  if (!isOpen) return null;
-
   return (
     <div
-      className="flex-shrink-0 bg-layer-01 border-r border-border-subtle-01 flex flex-col min-w-0 overflow-hidden"
-      style={{ width }}
+      className={`flex-shrink-0 bg-layer-01 flex flex-col min-w-0 overflow-hidden transition-[width] duration-200 ease-out ${
+        isOpen ? 'border-r border-border-subtle-01' : 'border-r-0'
+      }`}
+      style={{ width: isOpen ? width : 0 }}
+      aria-hidden={!isOpen}
     >
-      {/* Header — 채팅 헤더(h-[52px] + border-b)와 같은 높이로 맞춰 한 줄로 이어지게 */}
-      <div className="flex items-center px-4 h-[52px] border-b border-border-subtle-01 flex-shrink-0 min-w-0">
-        <span className="text-label-02 font-semibold text-text-primary truncate">
-          대화
-        </span>
-        <span className="ml-2 text-caption-01 font-mono text-text-helper flex-shrink-0">
-          {sessions.length}
-        </span>
-        <button
-          onClick={onToggle}
-          className="ml-auto -mr-1.5 flex items-center justify-center w-8 h-8 flex-shrink-0 rounded-lg text-icon-secondary hover:bg-layer-hover-01 hover:text-icon-primary transition-colors"
-          title="대화 목록 접기"
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="3" y="3" width="18" height="18" rx="2" />
-            <path d="M9 3v18" />
-            <path d="m15 9-3 3 3 3" />
-          </svg>
-        </button>
-      </div>
-
-      {/* Quick actions — 대형 버튼·입력박스 대신 목록과 같은 문법의 한 줄 진입점.
-          검색 행은 클릭 시 같은 자리에서 입력으로 변신한다 (레이아웃 점프 없음). */}
-      <div className="px-2 pt-2 pb-1 flex flex-col gap-0.5 flex-shrink-0">
-        <button
-          onClick={onNewSession}
-          className="flex items-center w-full gap-0.5 h-6 px-0.5 rounded-lg text-body-short-01 font-medium text-link-primary hover:bg-layer-hover-01 transition-colors"
-        >
-          <span className="flex items-center justify-center w-5 h-5 flex-shrink-0">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-          </span>
-          새 대화
-        </button>
-
-        {searchOpen ? (
-          <div className="flex items-center w-full h-6 px-0.5 rounded-lg bg-layer-02/60 ring-1 ring-inset ring-border-subtle-02 focus-within:ring-focus transition-shadow">
-            <span className="flex items-center justify-center w-5 h-5 flex-shrink-0 text-icon-secondary">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-                <circle cx="11" cy="11" r="7" />
-                <path d="m21 21-4.35-4.35" />
-              </svg>
-            </span>
-            <input
-              type="text"
-              autoFocus
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') closeSearch();
-              }}
-              placeholder="대화 검색"
-              className="flex-1 min-w-0 bg-transparent border-none outline-none text-text-primary text-body-short-01 font-sans placeholder:text-text-placeholder"
-            />
-            <button
-              onClick={closeSearch}
-              title="검색 닫기"
-              className="p-0.5 -mr-0.5 rounded hover:bg-layer-hover-02 transition-colors"
-            >
-              <Icon name="close" size={12} className="text-icon-secondary" />
-            </button>
-          </div>
-        ) : (
+      <div
+        className={`h-full flex flex-col min-w-0 transition-[opacity,transform] duration-200 ease-out ${
+          isOpen ? 'opacity-100 translate-x-0' : 'pointer-events-none opacity-0 -translate-x-2'
+        }`}
+        style={{ width }}
+      >
+        {/* Header row is a quiet drag area; only the panel toggle remains next to mac traffic lights. */}
+        <div className="h-11 border-b border-border-subtle-01 flex-shrink-0 electron-drag flex items-center">
           <button
-            onClick={() => setSearchOpen(true)}
-            className="flex items-center gap-0.5 w-full h-6 px-0.5 rounded-lg text-body-short-01 text-text-secondary hover:bg-layer-hover-01 hover:text-text-primary transition-colors"
+            type="button"
+            onClick={onToggle}
+            className="electron-no-drag ml-8 flex h-7 w-7 items-center justify-center rounded-md text-icon-secondary hover:bg-layer-hover-01 hover:text-icon-primary transition-colors"
+            aria-label="대화 목록 접기"
+            title="대화 목록 접기"
+          >
+            <Icon name="side-panel-close" size={16} />
+          </button>
+        </div>
+
+        {/* Quick actions — 대형 버튼·입력박스 대신 목록과 같은 문법의 한 줄 진입점.
+            검색 행은 클릭 시 같은 자리에서 입력으로 변신한다 (레이아웃 점프 없음). */}
+        <div className="px-2 pt-2 pb-1 flex flex-col gap-0.5 flex-shrink-0">
+          <button
+            onClick={onNewSession}
+            className="flex items-center w-full gap-0.5 h-6 px-0.5 rounded-lg text-body-short-01 font-medium text-link-primary hover:bg-layer-hover-01 transition-colors"
           >
             <span className="flex items-center justify-center w-5 h-5 flex-shrink-0">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-                <circle cx="11" cy="11" r="7" />
-                <path d="m21 21-4.35-4.35" />
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <path d="M12 5v14M5 12h14" />
               </svg>
             </span>
-            대화 검색
+            새 대화
+          </button>
+
+          {searchOpen ? (
+            <div className="flex items-center w-full h-6 px-0.5 rounded-lg bg-layer-02/60 ring-1 ring-inset ring-border-subtle-02 focus-within:ring-focus transition-shadow">
+              <span className="flex items-center justify-center w-5 h-5 flex-shrink-0 text-icon-secondary">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                  <circle cx="11" cy="11" r="7" />
+                  <path d="m21 21-4.35-4.35" />
+                </svg>
+              </span>
+              <input
+                type="text"
+                autoFocus
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') closeSearch();
+                }}
+                placeholder="대화 검색"
+                className="flex-1 min-w-0 bg-transparent border-none outline-none text-text-primary text-body-short-01 font-sans placeholder:text-text-placeholder"
+              />
+              <button
+                onClick={closeSearch}
+                title="검색 닫기"
+                className="p-0.5 -mr-0.5 rounded hover:bg-layer-hover-02 transition-colors"
+              >
+                <Icon name="close" size={12} className="text-icon-secondary" />
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setSearchOpen(true)}
+              className="flex items-center gap-0.5 w-full h-6 px-0.5 rounded-lg text-body-short-01 text-text-secondary hover:bg-layer-hover-01 hover:text-text-primary transition-colors"
+            >
+              <span className="flex items-center justify-center w-5 h-5 flex-shrink-0">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                  <circle cx="11" cy="11" r="7" />
+                  <path d="m21 21-4.35-4.35" />
+                </svg>
+              </span>
+              대화 검색
+            </button>
+          )}
+        </div>
+
+        {/* Session list */}
+        <div className="flex-1 overflow-y-auto overflow-x-hidden px-2 py-1">
+          {groupedSessions.length === 0 ? (
+            <div className="px-4 py-8 text-center text-body-short-01 text-text-helper">
+              {searchQuery ? '검색 결과가 없어요' : '아직 대화가 없어요'}
+            </div>
+          ) : (
+            groupedSessions.map((group) => (
+              <div key={group.name} className="mb-1.5">
+                <div className="text-caption-01 font-medium text-text-helper px-2 pt-2 pb-0.5">
+                  {group.name}
+                </div>
+                {/* 컴팩트 한 줄 행 — 시점은 그룹 헤더가 말해주므로 행에는 제목만 */}
+                <div className="space-y-px">
+                  {group.items.map((session) => {
+                    const isActive = session.id === activeSessionId;
+                    return (
+                      <div
+                        key={session.id}
+                        className="relative"
+                        onMouseEnter={() => setHoveredSession(session.id)}
+                        onMouseLeave={() => setHoveredSession(null)}
+                      >
+                        <button
+                          onClick={() => onSelectSession(session.id)}
+                          title={session.title}
+                          className={`flex items-center w-full min-w-0 h-6 px-2 text-left cursor-pointer border-none rounded-lg transition-colors ${
+                            isActive
+                              ? 'bg-layer-selected-01'
+                              : 'bg-transparent hover:bg-layer-hover-01'
+                          }`}
+                        >
+                          <span
+                            className={`block flex-1 min-w-0 text-body-short-01 truncate ${
+                              hoveredSession === session.id ? 'pr-6' : ''
+                            } ${isActive ? 'text-text-primary font-medium' : 'text-text-secondary'}`}
+                          >
+                            {session.title}
+                          </span>
+                        </button>
+
+                        {/* Delete button on hover (incl. the active session) */}
+                        {hoveredSession === session.id && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDeleteSession(session.id);
+                            }}
+                            className="absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded-md text-icon-secondary hover:bg-layer-hover-02 hover:text-support-error transition-colors"
+                            title="대화 삭제"
+                          >
+                            <Icon name="trash" size={13} />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* Model footer */}
+        {modelName && onOpenModelSettings && (
+          <button
+            onClick={onOpenModelSettings}
+            data-tour="model-settings"
+            className="flex items-center gap-2.5 border-t border-border-subtle-01 px-3 py-3 text-left flex-shrink-0 hover:bg-layer-hover-01 transition-colors"
+            title="모델 설정"
+          >
+            <div className="w-7 h-6 flex-shrink-0 flex items-center justify-center rounded-lg bg-layer-02 border border-border-subtle-02">
+              <Icon
+                name={modelMode === 'local' ? 'server' : 'cloud'}
+                size={15}
+                className={modelMode === 'local' ? 'text-teal-40' : 'text-blue-50'}
+              />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-body-short-01 text-text-primary truncate">{modelName}</div>
+              <div className="text-caption-01 text-text-helper">
+                {modelMode === 'local' ? '로컬 · Ollama' : 'SaaS · watsonx'}
+              </div>
+            </div>
+            <Icon name="settings" size={15} className="text-icon-secondary flex-shrink-0" />
           </button>
         )}
       </div>
-
-      {/* Session list */}
-      <div className="flex-1 overflow-y-auto overflow-x-hidden px-2 py-1">
-        {groupedSessions.length === 0 ? (
-          <div className="px-4 py-8 text-center text-body-short-01 text-text-helper">
-            {searchQuery ? '검색 결과가 없어요' : '아직 대화가 없어요'}
-          </div>
-        ) : (
-          groupedSessions.map((group) => (
-            <div key={group.name} className="mb-1.5">
-              <div className="text-caption-01 font-medium text-text-helper px-2 pt-2 pb-0.5">
-                {group.name}
-              </div>
-              {/* 컴팩트 한 줄 행 — 시점은 그룹 헤더가 말해주므로 행에는 제목만 */}
-              <div className="space-y-px">
-                {group.items.map((session) => {
-                  const isActive = session.id === activeSessionId;
-                  return (
-                    <div
-                      key={session.id}
-                      className="relative"
-                      onMouseEnter={() => setHoveredSession(session.id)}
-                      onMouseLeave={() => setHoveredSession(null)}
-                    >
-                      <button
-                        onClick={() => onSelectSession(session.id)}
-                        title={session.title}
-                        className={`flex items-center w-full min-w-0 h-6 px-2 text-left cursor-pointer border-none rounded-lg transition-colors ${
-                          isActive
-                            ? 'bg-layer-selected-01'
-                            : 'bg-transparent hover:bg-layer-hover-01'
-                        }`}
-                      >
-                        <span
-                          className={`block flex-1 min-w-0 text-body-short-01 truncate ${
-                            hoveredSession === session.id ? 'pr-6' : ''
-                          } ${isActive ? 'text-text-primary font-medium' : 'text-text-secondary'}`}
-                        >
-                          {session.title}
-                        </span>
-                      </button>
-
-                      {/* Delete button on hover (incl. the active session) */}
-                      {hoveredSession === session.id && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onDeleteSession(session.id);
-                          }}
-                          className="absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded-md text-icon-secondary hover:bg-layer-hover-02 hover:text-support-error transition-colors"
-                          title="대화 삭제"
-                        >
-                          <Icon name="trash" size={13} />
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-
-      {/* Model footer */}
-      {modelName && onOpenModelSettings && (
-        <button
-          onClick={onOpenModelSettings}
-          data-tour="model-settings"
-          className="flex items-center gap-2.5 border-t border-border-subtle-01 px-3 py-3 text-left flex-shrink-0 hover:bg-layer-hover-01 transition-colors"
-          title="모델 설정"
-        >
-          <div className="w-7 h-6 flex-shrink-0 flex items-center justify-center rounded-lg bg-layer-02 border border-border-subtle-02">
-            <Icon
-              name={modelMode === 'local' ? 'server' : 'cloud'}
-              size={15}
-              className={modelMode === 'local' ? 'text-teal-40' : 'text-blue-50'}
-            />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="text-body-short-01 text-text-primary truncate">{modelName}</div>
-            <div className="text-caption-01 text-text-helper">
-              {modelMode === 'local' ? '로컬 · Ollama' : 'SaaS · watsonx'}
-            </div>
-          </div>
-          <Icon name="settings" size={15} className="text-icon-secondary flex-shrink-0" />
-        </button>
-      )}
     </div>
   );
 };

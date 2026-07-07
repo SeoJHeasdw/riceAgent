@@ -689,17 +689,40 @@ const ThinkingBlock: React.FC<{ m: Extract<ThreadMessage, { kind: 'thinking' }> 
 // 턴 계획의 살아있는 상태 — plan_updated 스냅샷마다 통째로 교체된다. 에이전트
 // "작업 구조"의 문법(도구 카드와 같은 층)이지 AI 제안 순간이 아니다 → ai-tile 금지.
 const PlanStepMarker: React.FC<{ status: PlanStepData['status'] }> = ({ status }) => {
-  if (status === 'done') return <Icon name="check" size={13} className="text-support-success flex-shrink-0" />;
-  if (status === 'failed') return <Icon name="close" size={13} className="text-support-error flex-shrink-0" />;
-  return (
-    <span className="w-[13px] h-[13px] flex items-center justify-center flex-shrink-0">
-      {status === 'in_progress' ? (
-        <span className="w-2 h-2 rounded-full bg-blue-40 animate-pulse" />
-      ) : status === 'skipped' ? (
+  if (status === 'done') {
+    return (
+      <span className="w-4 h-4 rounded-[4px] border border-support-success/55 bg-support-success/10 flex items-center justify-center flex-shrink-0">
+        <Icon name="check" size={11} className="text-support-success" />
+      </span>
+    );
+  }
+  if (status === 'failed') {
+    return (
+      <span className="w-4 h-4 rounded-[4px] border border-support-error/55 bg-support-error/10 flex items-center justify-center flex-shrink-0">
+        <Icon name="close" size={11} className="text-support-error" />
+      </span>
+    );
+  }
+  if (status === 'in_progress') {
+    return (
+      <span className="w-4 h-4 flex items-center justify-center flex-shrink-0">
+        <span className="relative flex h-2 w-2">
+          <span className="absolute inline-flex h-full w-full rounded-full bg-blue-40 opacity-60 animate-ping" />
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-blue-40" />
+        </span>
+      </span>
+    );
+  }
+  if (status === 'skipped') {
+    return (
+      <span className="w-4 h-4 rounded-[4px] border border-border-strong-01/70 flex items-center justify-center flex-shrink-0">
         <span className="w-1.5 h-px bg-text-helper" />
-      ) : (
-        <span className="w-2 h-2 rounded-full border border-border-strong-01" />
-      )}
+      </span>
+    );
+  }
+  return (
+    <span className="w-4 h-4 rounded-[4px] border border-border-strong-01/70 flex items-center justify-center flex-shrink-0">
+      <span className="w-1.5 h-1.5 rounded-full border border-border-strong-02/80" />
     </span>
   );
 };
@@ -709,50 +732,49 @@ const PlanCard: React.FC<{ m: Extract<ThreadMessage, { kind: 'plan' }> }> = ({ m
   const failed = m.steps.some((s) => s.status === 'failed');
   const completed = m.status === 'completed';
   return (
-    <div className="my-1.5 max-w-[640px]">
-      <div className="rounded-xl border border-border-subtle-01 border-l-2 border-l-blue-40 bg-layer-01 px-4 py-3">
-        <div className="flex items-center gap-2">
-          <Icon name="flow" size={15} className="text-blue-40 flex-shrink-0" />
-          <span className="text-body-short-01 font-semibold text-text-primary">실행 계획</span>
-          {m.revision > 1 && (
-            <span className="text-label-micro text-text-helper border border-border-subtle-01 rounded px-1 py-px">
-              수정 {m.revision - 1}회
-            </span>
-          )}
+    <div className="my-2 max-w-[680px]">
+      <div className="border-l border-border-subtle-01 pl-4 py-0.5">
+        <div className="flex items-center gap-2 min-w-0">
           <span
-            className={`ml-auto text-caption-01 flex-shrink-0 ${
+            className={`w-2 h-2 rounded-full flex-shrink-0 ${
+              completed ? 'bg-support-success' : failed ? 'bg-support-error' : 'bg-blue-40'
+            }`}
+          />
+          <span className="text-body-short-01 font-semibold text-text-primary">실행 계획</span>
+          {m.revision > 1 && <span className="text-caption-01 text-text-helper">수정 {m.revision - 1}회</span>}
+          <span
+            className={`ml-auto text-caption-01 tabular-nums flex-shrink-0 ${
               completed ? 'text-support-success' : failed ? 'text-support-error' : 'text-text-helper'
             }`}
           >
             {completed ? '완료' : `${doneCount}/${m.steps.length}`}
           </span>
         </div>
-        <div className="mt-1 text-caption-01 text-text-secondary">{m.goal}</div>
-        <div className="mt-2.5 flex flex-col gap-1.5">
+        <div className="mt-1 text-caption-01 text-text-helper truncate">{m.goal}</div>
+        <div className="mt-2 flex flex-col gap-1.5">
           {m.steps.map((s) => {
             const secondary = s.note || (s.status === 'in_progress' || s.status === 'pending' ? s.detail : '');
+            const muted = s.status === 'done' || s.status === 'skipped';
             return (
-              <div key={s.id} className="flex items-start gap-2 min-w-0">
-                <span className="mt-[3px]">
+              <div key={s.id} className="flex items-start gap-2.5 min-w-0">
+                <span className="mt-[1px]">
                   <PlanStepMarker status={s.status} />
                 </span>
-                <div className="min-w-0">
-                  <span
-                    className={`text-caption-01 ${
+                <div className="min-w-0 flex-1">
+                  <div
+                    className={`text-body-short-01 leading-[19px] ${
                       s.status === 'in_progress'
                         ? 'text-text-primary font-medium'
-                        : s.status === 'done'
-                          ? 'text-text-helper line-through decoration-border-strong-01'
-                          : s.status === 'skipped'
-                            ? 'text-text-helper line-through decoration-border-strong-01'
-                            : s.status === 'failed'
-                              ? 'text-support-error'
-                              : 'text-text-secondary'
+                        : muted
+                          ? 'text-text-helper/70 line-through decoration-border-strong-02'
+                          : s.status === 'failed'
+                            ? 'text-support-error'
+                            : 'text-text-secondary'
                     }`}
                   >
                     {s.title}
-                  </span>
-                  {secondary ? <div className="text-label-micro text-text-helper truncate">{secondary}</div> : null}
+                  </div>
+                  {secondary ? <div className="text-caption-01 text-text-helper truncate">{secondary}</div> : null}
                 </div>
               </div>
             );
@@ -766,54 +788,131 @@ const PlanCard: React.FC<{ m: Extract<ThreadMessage, { kind: 'plan' }> }> = ({ m
 // ── generic builtin/connector tool call trace ───────────────
 // One card per live tool call: shows the tool + args while running, then the
 // result/error once the runtime sends tool_result.
-// Render a flat object as aligned key→value rows (replaces a raw JSON dump). A
-// `path` value is rendered as a clickable file link.
-const KeyVals: React.FC<{ obj: Record<string, unknown>; onFile: (p: string) => void }> = ({ obj, onFile }) => (
-  <div className="flex flex-col gap-1">
-    {Object.entries(obj).map(([k, v]) => {
-      const val = typeof v === 'string' ? v : JSON.stringify(v);
-      return (
-        <div key={k} className="flex gap-2 text-caption-01">
-          <span className="text-text-helper font-mono min-w-[80px] flex-shrink-0">{k}</span>
-          {k === 'path' && typeof v === 'string' ? (
-            <button onClick={() => onFile(v)} className="text-blue-40 font-mono break-all text-left hover:underline">
-              {val}
-            </button>
-          ) : (
-            <span className="text-text-secondary font-mono break-all whitespace-pre-wrap">{val}</span>
-          )}
-        </div>
-      );
-    })}
-  </div>
-);
+const TOOL_LABELS: Record<string, string> = {
+  create_presentation: '프레젠테이션 생성',
+  create_document: '문서 생성',
+  create_workbook: '워크북 생성',
+  read_file: '파일 읽기',
+  write_file: '파일 작성',
+  terminal: '터미널 실행',
+};
+
+const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+
+const parseResultObject = (result?: string): Record<string, unknown> | null => {
+  if (result == null) return null;
+  try {
+    const parsed = JSON.parse(result);
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+const formatBytes = (v: unknown): string | null => {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return null;
+  if (v < 1024) return `${v} B`;
+  if (v < 1024 * 1024) return `${(v / 1024).toFixed(v < 10 * 1024 ? 1 : 0)} KB`;
+  return `${(v / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const summarizeValue = (key: string, value: unknown): string => {
+  if (value == null) return '없음';
+  if (key === 'bytes_written') return formatBytes(value) ?? String(value);
+  if (typeof value === 'string') return value.length > 140 ? `${value.slice(0, 140)}…` : value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) {
+    if (key === 'slides') {
+      const titles = value
+        .map((item) => (isRecord(item) && typeof item.title === 'string' ? item.title : null))
+        .filter(Boolean)
+        .slice(0, 3);
+      return `${value.length}장${titles.length ? ` · ${titles.join(', ')}${value.length > titles.length ? '…' : ''}` : ''}`;
+    }
+    if (key === 'blocks') return `${value.length}개 블록`;
+    if (key === 'warnings') return value.length ? value.map(String).join(' · ') : '없음';
+    return `${value.length}개 항목`;
+  }
+  if (isRecord(value)) return `${Object.keys(value).length}개 필드`;
+  return String(value);
+};
 
 const BuiltinToolCard: React.FC<{ m: Extract<ThreadMessage, { kind: 'toolcall' }> }> = ({ m }) => {
   const [open, setOpen] = useState(false);
+  const [rawOpen, setRawOpen] = useState(false);
   const { openFile } = useFileViewer();
-  const path = typeof m.args.path === 'string' ? (m.args.path as string) : null;
   const dot =
     m.status === 'running' ? 'bg-support-warning animate-pulse' : m.status === 'error' ? 'bg-support-error' : 'bg-support-success';
 
-  // tool results arrive as a string; pretty-render it as key→values when it's a JSON object
-  const resultObj: Record<string, unknown> | null = (() => {
-    if (m.result == null) return null;
-    try {
-      const o = JSON.parse(m.result);
-      return o && typeof o === 'object' && !Array.isArray(o) ? (o as Record<string, unknown>) : null;
-    } catch {
-      return null;
-    }
-  })();
+  const resultObj = parseResultObject(m.result);
+  const path =
+    (typeof resultObj?.path === 'string' ? resultObj.path : null) ??
+    (typeof m.args.path === 'string' ? (m.args.path as string) : null);
+  const title =
+    (typeof m.args.title === 'string' ? (m.args.title as string) : null) ??
+    (typeof resultObj?.title === 'string' ? resultObj.title : null);
+  const toolLabel = TOOL_LABELS[m.tool] ?? m.tool.replace(/_/g, ' ');
+  const slideCount =
+    typeof resultObj?.slide_count === 'number'
+      ? resultObj.slide_count
+      : Array.isArray(m.args.slides)
+        ? m.args.slides.length
+        : null;
+  const sheetCount =
+    typeof resultObj?.sheet_count === 'number'
+      ? resultObj.sheet_count
+      : Array.isArray(m.args.sheets)
+        ? m.args.sheets.length
+        : null;
+
+  const rows: { label: string; value: React.ReactNode; mono?: boolean }[] = [];
+  const push = (label: string, value: unknown, mono = false) => {
+    if (value == null || value === '') return;
+    rows.push({ label, value: summarizeValue(label, value), mono });
+  };
+  if (path) {
+    rows.push({
+      label: '파일',
+      mono: true,
+      value: (
+        <button onClick={() => openFile(path)} className="text-blue-40 font-mono break-all text-left hover:underline">
+          {path}
+        </button>
+      ),
+    });
+  }
+  push('제목', title);
+  push('테마', resultObj?.theme ?? m.args.theme, true);
+  push('슬라이드', slideCount != null ? `${slideCount}장` : null);
+  push('시트', sheetCount != null ? `${sheetCount}개` : null);
+  push('용량', formatBytes(resultObj?.bytes_written) ?? null);
+  push('구성', m.args.slides ?? m.args.blocks ?? m.args.sheets);
+  push('경고', resultObj?.warnings);
+
+  if (rows.length === 0) {
+    Object.entries(resultObj ?? m.args)
+      .slice(0, 5)
+      .forEach(([key, value]) => push(key, value, true));
+  }
+
+  const rawDetails = JSON.stringify(
+    {
+      arguments: m.args,
+      ...(resultObj ? { result: resultObj } : m.result ? { result: m.result } : {}),
+      ...(m.error ? { error: m.error } : {}),
+    },
+    null,
+    2,
+  );
 
   return (
-    <div className="my-1.5 max-w-[640px]">
+    <div className="my-1.5 max-w-[680px]">
       <button
         onClick={() => setOpen((o) => !o)}
         className="flex items-center gap-2 w-full text-left text-caption-01 text-text-secondary hover:text-text-primary transition-colors"
       >
         <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dot}`} />
-        <span className="font-mono text-blue-40">{m.tool}</span>
+        <span className="font-semibold text-text-secondary">{toolLabel}</span>
         {path && <span className="font-mono text-text-helper truncate">{path}</span>}
         <span className="text-text-helper">
           {m.status === 'running' ? '실행 중…' : m.status === 'error' ? '실패' : '완료'}
@@ -821,29 +920,24 @@ const BuiltinToolCard: React.FC<{ m: Extract<ThreadMessage, { kind: 'toolcall' }
         <Icon name={open ? 'chevron-up' : 'chevron-down'} size={14} className="ml-auto flex-shrink-0" />
       </button>
       {open && (
-        <div className="mt-2 ml-3.5 border-l-2 border-border-subtle-01 pl-3 flex flex-col gap-2.5">
-          {Object.keys(m.args).length > 0 && (
-            <div>
-              <div className="text-label-micro uppercase tracking-wider text-text-helper mb-1">arguments</div>
-              <KeyVals obj={m.args} onFile={openFile} />
+        <div className="mt-2 ml-3.5 border-l border-border-subtle-01 pl-3 flex flex-col gap-2.5">
+          {rows.length > 0 && (
+            <div className="grid grid-cols-[72px_minmax(0,1fr)] gap-x-3 gap-y-1">
+              {rows.map((row) => (
+                <React.Fragment key={row.label}>
+                  <span className="text-caption-01 text-text-helper">{row.label}</span>
+                  <span
+                    className={`text-caption-01 text-text-secondary min-w-0 break-words ${
+                      row.mono ? 'font-mono' : ''
+                    }`}
+                  >
+                    {row.value}
+                  </span>
+                </React.Fragment>
+              ))}
             </div>
           )}
-          {(m.result != null || m.error != null) && (
-            <div>
-              <div className="text-label-micro uppercase tracking-wider text-text-helper mb-1">
-                {m.error != null ? 'error' : 'result'}
-              </div>
-              {m.error != null ? (
-                <span className="text-caption-01 font-mono text-support-error break-all">{m.error}</span>
-              ) : resultObj ? (
-                <KeyVals obj={resultObj} onFile={openFile} />
-              ) : (
-                <pre className="text-caption-01 font-mono text-text-secondary whitespace-pre-wrap break-all m-0">
-                  {m.result}
-                </pre>
-              )}
-            </div>
-          )}
+          {m.error != null && <span className="text-caption-01 font-mono text-support-error break-all">{m.error}</span>}
           {path && (
             <button
               onClick={() => openFile(path)}
@@ -852,6 +946,19 @@ const BuiltinToolCard: React.FC<{ m: Extract<ThreadMessage, { kind: 'toolcall' }
               <Icon name="document" size={13} />
               {path} 열어보기
             </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setRawOpen((o) => !o)}
+            className="self-start inline-flex items-center gap-1 text-caption-01 text-text-helper hover:text-text-secondary transition-colors"
+          >
+            <Icon name={rawOpen ? 'chevron-up' : 'chevron-down'} size={12} />
+            원본 세부정보 {rawOpen ? '접기' : '보기'}
+          </button>
+          {rawOpen && (
+            <pre className="max-h-[260px] overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-border-subtle-01 bg-background px-3 py-2 text-label-micro leading-[18px] text-text-helper font-mono m-0">
+              {rawDetails}
+            </pre>
           )}
         </div>
       )}
@@ -867,30 +974,76 @@ const ApprovalCard: React.FC<{
   onRespond?: (decision: 'approve' | 'reject') => void;
 }> = ({ m, onRespond }) => {
   const [state, setState] = useState<'pending' | 'approved' | 'denied'>('pending');
-  const [body, setBody] = useState(m.body ?? '');
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const hasPreview = !!m.fields?.length || !!m.body;
   return (
-    <div className="my-1.5 max-w-[620px]">
+    <div className="my-1.5 max-w-[680px]">
       {/* 도구 실행 승인은 AI 문법이 아니라 warning 문법 — ai-tile 금지 */}
-      <div className="rounded-xl border border-border-subtle-01 border-l-2 border-l-support-warning bg-layer-01 p-4">
-        <div className="flex items-center gap-2 mb-2">
-          <Icon name="warning" size={15} filled className="text-orange-40 flex-shrink-0" />
-          <span className="text-body-short-01 font-semibold text-text-primary">실행 승인이 필요해요</span>
-        </div>
-        <div className="flex items-center gap-2 mb-2 flex-wrap">
-          <span className="text-caption-01 font-mono text-blue-40 flex-shrink-0">{m.tool}</span>
-          <span className="text-body-short-01 text-text-primary">{m.label}</span>
-          <span className="inline-flex items-center gap-1 flex-shrink-0 border border-border-subtle-01 px-1.5 py-0.5 rounded text-label-micro font-mono text-text-helper">
-            <Icon name="lock" size={10} className="opacity-70" />
-            {m.scope.name} · {m.scope.mode}
+      <div className="rounded-lg border border-border-subtle-01 border-l-2 border-l-support-warning bg-layer-01 px-3 py-2.5">
+        <div className="flex items-start gap-2.5">
+          <span className="mt-0.5 w-6 h-6 rounded-md bg-support-warning/12 flex items-center justify-center flex-shrink-0">
+            <Icon name="warning" size={14} filled className="text-orange-40" />
           </span>
-        </div>
-        <p className="text-caption-01 text-text-secondary mb-3">{m.reason}</p>
-        {(m.fields || m.body) && (
-          <div className="mb-3 border border-border-subtle-01 rounded-lg overflow-hidden bg-layer-01">
-            <div className="px-3 py-2 border-b border-border-subtle-01 flex items-center gap-1.5">
-              <Icon name="send" size={12} className="text-icon-secondary opacity-70" />
-              <span className="text-caption-01 font-semibold text-text-secondary">메일 미리보기</span>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 min-w-0 flex-wrap">
+              <span className="text-body-short-01 font-semibold text-text-primary">승인 필요</span>
+              <span className="text-caption-01 font-mono text-blue-40 truncate max-w-[180px]">{m.tool}</span>
+              <span className="text-body-short-01 text-text-secondary truncate">{m.label}</span>
+              <span className="inline-flex items-center gap-1 flex-shrink-0 border border-border-subtle-01 px-1.5 py-0.5 rounded text-label-micro font-mono text-text-helper">
+                <Icon name="lock" size={10} className="opacity-70" />
+                {m.scope.mode}
+              </span>
             </div>
+            <div className="mt-0.5 text-caption-01 text-text-helper line-clamp-2">{m.reason}</div>
+            {hasPreview && (
+              <button
+                type="button"
+                onClick={() => setPreviewOpen((o) => !o)}
+                className="mt-1.5 inline-flex items-center gap-1 text-caption-01 text-link-primary hover:underline"
+              >
+                <Icon name={previewOpen ? 'chevron-up' : 'chevron-down'} size={12} />
+                실행 내용 {previewOpen ? '접기' : '보기'}
+              </button>
+            )}
+          </div>
+          {state === 'pending' ? (
+            <div className="flex items-center gap-1.5 flex-shrink-0 pt-0.5">
+              <Button
+                kind="ghost"
+                size="sm"
+                className="!h-8"
+                onClick={() => {
+                  setState('denied');
+                  onRespond?.('reject');
+                }}
+              >
+                거부
+              </Button>
+              <Button
+                kind="primary"
+                size="sm"
+                className="!h-8"
+                icon={<Icon name="check" size={14} />}
+                onClick={() => {
+                  setState('approved');
+                  onRespond?.('approve');
+                }}
+              >
+                승인
+              </Button>
+            </div>
+          ) : state === 'approved' ? (
+            <span className="inline-flex items-center gap-1.5 text-caption-01 text-support-success flex-shrink-0 pt-1">
+              <Icon name="check-circle" size={13} /> 승인됨
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 text-caption-01 text-text-helper flex-shrink-0 pt-1">
+              <Icon name="close" size={13} /> 거부됨
+            </span>
+          )}
+        </div>
+        {previewOpen && hasPreview && (
+          <div className="mt-2 ml-8 border border-border-subtle-01 rounded-md bg-background overflow-hidden">
             {m.fields && (
               <div className="px-3 py-2 flex flex-col gap-1">
                 {m.fields.map((f) => (
@@ -902,54 +1055,18 @@ const ApprovalCard: React.FC<{
               </div>
             )}
             {m.body !== undefined && (
-              <div className="border-t border-border-subtle-01">
-                <textarea
-                  value={body}
-                  onChange={(e) => setBody(e.target.value)}
-                  disabled={state !== 'pending'}
-                  className="w-full px-3 py-2.5 text-caption-01 text-text-secondary font-sans leading-relaxed resize-none bg-transparent border-0 outline-none focus:ring-1 focus:ring-focus disabled:text-text-helper disabled:cursor-default"
-                  style={{ minHeight: '120px', maxHeight: '220px' }}
-                  rows={6}
-                  spellCheck={false}
-                />
-              </div>
+              <pre className="border-t border-border-subtle-01 first:border-t-0 max-h-[160px] overflow-y-auto whitespace-pre-wrap break-words m-0 px-3 py-2 text-caption-01 leading-relaxed text-text-secondary font-sans">
+                {m.body}
+              </pre>
             )}
           </div>
         )}
         {state === 'pending' ? (
-          <div className="flex items-center gap-2">
-            <span className="text-caption-01 text-text-helper">외부에 영향을 주는 작업입니다.</span>
-            <div className="flex-1" />
-            <Button
-              kind="ghost"
-              size="sm"
-              onClick={() => {
-                setState('denied');
-                onRespond?.('reject');
-              }}
-            >
-              거부
-            </Button>
-            <Button
-              kind="primary"
-              size="sm"
-              icon={<Icon name="check" size={14} />}
-              onClick={() => {
-                setState('approved');
-                onRespond?.('approve');
-              }}
-            >
-              승인하고 실행
-            </Button>
-          </div>
+          null
         ) : state === 'approved' ? (
-          <span className="inline-flex items-center gap-1.5 text-caption-01 text-support-success">
-            <Icon name="check-circle" size={13} /> 승인됨 · {m.approvedText ?? '실행했어요'}
-          </span>
+          <div className="mt-2 ml-8 text-caption-01 text-support-success">{m.approvedText ?? '실행했어요'}</div>
         ) : (
-          <span className="inline-flex items-center gap-1.5 text-caption-01 text-text-helper">
-            <Icon name="close" size={13} /> 거부됨 · {m.deniedText ?? '실행하지 않았어요'}
-          </span>
+          <div className="mt-2 ml-8 text-caption-01 text-text-helper">{m.deniedText ?? '실행하지 않았어요'}</div>
         )}
       </div>
     </div>

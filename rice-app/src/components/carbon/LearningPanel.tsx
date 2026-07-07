@@ -500,15 +500,15 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ isLearning = true,
 
   return (
     <div className="h-full flex-shrink-0 bg-layer-01 border-l border-border-subtle-01 flex flex-col overflow-hidden" style={{ width }}>
-      {/* header — 스크롤 밖 고정, 사이드바·채팅 헤더와 같은 52px 라인 */}
-      <div className="flex items-center gap-2 px-4 h-[52px] border-b border-border-subtle-01 flex-shrink-0">
-          <Icon name="renew" size={18} className="text-icon-primary" />
-          <span className="text-body-short-02 font-semibold text-text-primary">학습 루프</span>
+      {/* header — 스크롤 밖 고정, 채팅의 compact window row와 같은 높이 */}
+      <div className="flex items-center gap-2 px-4 h-11 border-b border-border-subtle-01 flex-shrink-0 electron-drag">
+          <Icon name="renew" size={16} className="text-icon-primary" />
+          <span className="text-label-02 font-semibold text-text-primary">학습 루프</span>
           <button
             type="button"
             onClick={() => setTransparencyOpen(true)}
             title="학습 투명성 — 모델이 본 것/못 본 것, 격리·차단된 메모리, 되돌릴 수 있는 변경"
-            className="ml-auto flex-shrink-0 flex items-center gap-1 h-[22px] px-2 rounded text-label-micro text-text-secondary hover:bg-layer-hover-01"
+            className="electron-no-drag ml-auto flex-shrink-0 flex items-center gap-1 h-[22px] px-2 rounded text-label-micro text-text-secondary hover:bg-layer-hover-01"
           >
             <Icon name="view" size={14} />
             투명성
