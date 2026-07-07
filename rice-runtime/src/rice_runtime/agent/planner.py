@@ -200,12 +200,11 @@ class TurnPlanner:
         상한에서 끊는다. 어떤 실패든 outcome.plan=None(fail-soft)."""
         # echo(모델 미설정 스켈레톤)는 프롬프트를 되돌려줄 뿐 계획을 세울 수 없다
         # — titler와 같은 스킵(agent/titler.py 참조).
+        # NOTE: "계획 중" 하드코딩 breadcrumb 는 넣지 않는다(2026-07-07 사용자 결정)
+        # — 플래너 호출 동안의 진행 표시는 프론트엔드(생각중 애니메이션·경과 시간)가
+        # 담당하고, 여기서는 모델이 실제로 흘리는 thinking 만 통과시킨다.
         if getattr(self._provider, "name", "") == "echo":
             return
-        # "계획 중" breadcrumb — think=False라 모델 thinking이 없어도 플래너 호출
-        # 동안 UI가 침묵하지 않도록 런타임이 한 줄을 흘린다(rationale primitive와
-        # 같은 원칙: 사용자에게 보이는 진행 서사는 모델 재량이 아니라 런타임 계약).
-        yield ev_thinking("계획 수립 중 — 요청의 의도와 필요한 단계를 파악합니다…")
         recent = ctx.history[-max(1, self._config.planner_recent_messages) :]
         # history 꼬리가 방금 들어온 user 메시지면 문맥에서 제외(요청 섹션과 중복).
         if recent and recent[-1].role == "user" and recent[-1].content == user_message:

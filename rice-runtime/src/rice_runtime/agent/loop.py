@@ -27,7 +27,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 from dataclasses import dataclass, field
 from typing import Sequence
 
@@ -99,25 +98,11 @@ _PLAN_RECONCILE_NUDGE = (
     "final answer."
 )
 
-# ── 사용자용 1줄 preamble 의 결정론적 fallback (P1: rationale primitive) ────────
-# 시스템 프롬프트의 NARRATE 지시는 계약이 아니라 희망사항이다 — 소형 모델은 자주
-# 무시한다. 서사가 비면 런타임이 ToolCall+plan step 에서 한 줄을 합성해 스트림
-# 순서(thinking 종료 → preamble → tool_call)를 보장한다. 모델 문장은 장식,
-# 런타임 fallback 이 계약.
-_HANGUL = re.compile(r"[가-힣]")
-
-
-def _fallback_preamble(calls, plan_state: PlanState | None, korean: bool) -> str:
-    real = [c for c in calls if c.tool_name.strip() and c.tool_name not in (UPDATE_PLAN_SPEC.name, START_PLAN_SPEC.name)]
-    if not real:
-        return ""  # 계획 보고 라운드엔 서사가 필요 없다(계획 카드가 곧 서사다)
-    names = ", ".join(dict.fromkeys(c.tool_name for c in real))
-    step = None
-    if plan_state is not None:
-        step = next((s for s in plan_state.plan.steps if s.status == "in_progress"), None)
-    if korean:
-        return f"{step.title} — {names} 도구를 실행합니다." if step else f"{names} 도구를 실행합니다."
-    return f"{step.title} — running {names}." if step else f"Running {names}."
+# NOTE: 사용자용 1줄 preamble 을 런타임이 템플릿으로 합성하던 fallback 은 제거됐다
+# (2026-07-07 사용자 결정). 서사는 모델의 몫이다 — BASE_SYSTEM_PROMPT 의 NARRATE
+# 지시가 유일한 채널이고, 모델이 침묵한 라운드의 진행 표시는 프론트엔드
+# (thinking 애니메이션·도구 카드)가 담당한다. 하드코딩 문장을 사용자에게
+# 스트리밍하는 것은 제품 원칙 위반.
 
 
 @dataclass
@@ -223,9 +208,6 @@ class AgentLoop:
         messages: list[Message] = list(ctx.history)
         tool_calls_made = 0
         final_text = ""
-        # preamble fallback 언어 — 마지막 사용자 메시지에 한글이 있으면 ko, 아니면 en.
-        last_user_text = next((m.content for m in reversed(messages) if m.role == "user"), "")
-        user_korean = bool(_HANGUL.search(last_user_text))
 
         # ── PLAN: 의도 파악 + 필요 시 계획 수립 (fail-soft — 실패해도 턴 진행) ──
         plan_state: PlanState | None = None
@@ -339,15 +321,6 @@ class AgentLoop:
             # assembling history, so the model never re-sees stale thinking.
             thinking_text = "".join(thinking_parts)
             metadata: dict = {"thinking": thinking_text} if thinking_text else {}
-            # ── 결정론적 1줄 preamble: 도구를 부르는데 사용자용 서사가 비었으면
-            # 런타임이 합성해 스트림한다(thinking 종료 → preamble → tool_call 순서
-            # 보장). NARRATE 프롬프트 지시를 모델이 무시해도 UI 계약은 지켜진다.
-            if pending_calls and not assistant_text.strip():
-                synth_preamble = _fallback_preamble(pending_calls, plan_state, user_korean)
-                if synth_preamble:
-                    yield ev_message(delta=synth_preamble)
-                    assistant_text = synth_preamble
-                    metadata["synthetic_preamble"] = True
             if pending_plan_meta is not None:
                 # 계획 생성 스냅샷은 턴의 첫 어시스턴트 메시지에 1회 부착(리로드 복원용).
                 metadata.update(pending_plan_meta)

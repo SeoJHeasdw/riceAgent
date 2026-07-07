@@ -131,8 +131,9 @@ async def test_planner_builds_plan_for_complex_query():
     assert plan.goal == "테스트 목표"
     assert [s.id for s in plan.steps] == ["s1", "s2"]
     assert plan.steps[0].detail == "use echo"
-    # think=False라 모델 thinking은 없지만, "계획 중" breadcrumb 하나는 흐른다.
-    assert [e.type for e in events] == [EventType.THINKING]
+    # think=False + 하드코딩 breadcrumb 금지(2026-07-07) → 이벤트는 흐르지 않는다.
+    # 플래너 호출 동안의 진행 표시는 프론트엔드(생각중 애니메이션)가 담당한다.
+    assert events == []
     # 플래너 호출은 도구 없이, thinking 억제 + 스키마 제약으로 나간다
     assert provider.calls[0]["tools"] == ()
     assert provider.calls[0]["think"] is False
@@ -174,7 +175,7 @@ async def test_planner_provider_error_fails_soft():
 
     plan, events = await _run_planner(_Boom(), _ctx((_spec("echo"),)))
     assert plan is None
-    assert [e.type for e in events] == [EventType.THINKING]  # breadcrumb만
+    assert events == []  # fail-soft — 하드코딩 breadcrumb 도 없다
 
 
 # ── plan state machine ───────────────────────────────────────────────────────
@@ -515,9 +516,10 @@ async def test_loop_auto_reconciles_abandoned_plan():
 
 
 @pytest.mark.asyncio
-async def test_loop_synthesizes_preamble_when_model_calls_tools_silently():
-    """P1 rationale primitive: NARRATE 지시를 모델이 무시해도(서사 없이 tool call)
-    런타임이 결정론적 1줄 preamble 을 합성해 스트림한다 — 사용자 언어(한글) 감지."""
+async def test_loop_streams_no_synthetic_text_on_silent_tool_rounds():
+    """사용자에게 보이는 서사는 모델의 몫(NARRATE 프롬프트) — 모델이 서사 없이
+    tool call 만 해도 런타임이 하드코딩 문장을 합성해 스트림하지 않는다
+    (2026-07-07 결정: 침묵 라운드의 진행 표시는 프론트엔드가 담당)."""
     provider = _ScriptedProvider(
         [
             _text({"plan_needed": False}),  # planner: 단순
@@ -539,9 +541,9 @@ async def test_loop_synthesizes_preamble_when_model_calls_tools_silently():
     events = [ev async for ev in loop.run(_ctx((_spec("echo"),)), "s1", result, asyncio.Event())]
 
     deltas = [e.data.get("delta") for e in events if e.type == EventType.MESSAGE and e.data.get("delta")]
-    assert any("echo" in d and "실행합니다" in d for d in deltas)  # ko 감지 + 도구명
-    synth = next(m for m in result.history if m.metadata.get("synthetic_preamble"))
-    assert synth.role == "assistant" and synth.tool_calls
+    assert deltas == ["답변"]  # 모델이 직접 쓴 텍스트만 — 합성 preamble 없음
+    assert result.final_message == "답변"
+    assert not any(m.metadata.get("synthetic_preamble") for m in result.history)
 
 
 def test_completed_plan_nudges_skill_capture():
