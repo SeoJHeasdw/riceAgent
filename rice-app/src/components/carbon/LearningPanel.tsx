@@ -501,7 +501,7 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ isLearning = true,
   return (
     <div className="h-full flex-shrink-0 bg-layer-01 border-l border-border-subtle-01 flex flex-col overflow-hidden" style={{ width }}>
       {/* header — 스크롤 밖 고정, 채팅의 compact window row와 같은 높이 */}
-      <div className="flex items-center gap-2 px-4 h-11 border-b border-shell-border flex-shrink-0 electron-drag">
+      <div className="flex items-center gap-2 px-4 h-11 flex-shrink-0 electron-drag">
           <Icon name="renew" size={16} className="text-icon-primary" />
           <span className="text-label-02 font-semibold text-text-primary">학습 루프</span>
           <button
