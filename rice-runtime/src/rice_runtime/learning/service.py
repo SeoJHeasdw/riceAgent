@@ -27,6 +27,7 @@ Implementation status per task batch:
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from typing import Callable
 
 from ..agent.providers.interfaces import ILLMProvider
@@ -124,7 +125,10 @@ def _render_skills(skills: list[InjectedSkill]) -> str:
         return ""
     lines = ["## Available Skills (follow these procedures when relevant)", SKILL_TRUST_NOTE]
     for sk in skills:
-        lines.append(f"\n### [{sk.name}] (v{sk.version})\n{sk.body}")
+        # provenance 를 헤딩에 남긴다 — "왜 이게 프롬프트에 있었나"가 transcript
+        # 만으로 감사 가능해야 한다(plugin 스킬도 같은 파이프라인을 타므로).
+        origin = f", {sk.source}" if sk.source != "learned" else ""
+        lines.append(f"\n### [{sk.name}] (v{sk.version}{origin})\n{sk.body}")
     return "\n".join(lines)
 
 
@@ -209,6 +213,10 @@ class LearningService(ILearningService):
         # skill_view 로 이번 턴에 전문을 당긴 스킬들 — 세션별. observe()가 드레인해
         # auto-injected 와 합쳐 use 카운터에 귀속한다(온디맨드 로딩도 '사용'이다).
         self._viewed_skills: dict[str, set[str]] = {}
+        # 외부 소스(plugin) 스킬 레지스트리 — prefetch(extra_skills=...)가 매 턴
+        # 갱신한다. skill_search/skill_view 가 인덱스에 실린 plugin 스킬을 실제로
+        # 찾고 열 수 있게 하는 온디맨드 반쪽(store 에는 없는 스킬들이므로).
+        self._extra_skills: dict[str, InjectedSkill] = {}
         self._review_gate = ReviewGate(
             min_tool_calls=config.review_min_tool_calls, nudge_turns=config.review_nudge_turns
         )
@@ -287,7 +295,12 @@ class LearningService(ILearningService):
     _MAX_AUTO_INJECT = 2
 
     # ── turn-critical ─────────────────────────────────────────────────────────
-    def prefetch(self, session_id: str, user_message: str) -> PrefetchResult:
+    def prefetch(
+        self,
+        session_id: str,
+        user_message: str,
+        extra_skills: Sequence[InjectedSkill] = (),
+    ) -> PrefetchResult:
         """Assemble injectable context for the next LLM call (LEARNING_LOOP §6, §7).
 
         Hybrid skill injection (replaces inject-all-active):
@@ -295,14 +308,23 @@ class LearningService(ILearningService):
             (예산·개수 상한 내). 무관한 프롬프트엔 전문이 하나도 안 들어간다.
           - 나머지 active 스킬은 **짧은 인덱스**(이름 + 한 줄 설명)로만 실려서
             모델이 `skill_view` 로 온디맨드로 당길 수 있다.
+          - `extra_skills`(plugin SKILL.md 번들)도 **같은 파이프라인**을 탄다 —
+            전량 주입이 아니라 스코어링→예산→인덱스→skill_view. 동명 학습
+            스킬이 이긴다(사용자 학습이 시장 번들보다 우선).
         그 외 (변화 없음):
           - Recent facts (N = config.prefetch_recent_facts)
           - FTS5-matched memories (K = config.prefetch_fts_top_k) for the query
           - Skill-creation guidance string + user preferences (T5)
         """
         all_active = self._active_skills()
-        by_name = {s.name: s for s in all_active}
-        ranked = score_skills(user_message, all_active)
+        learned_names = {s.name for s in all_active}
+        extras = [s for s in extra_skills if s.name and s.name not in learned_names]
+        # 온디맨드 레지스트리 갱신 — 인덱스에 실린 plugin 스킬을 skill_search/
+        # skill_view 가 찾을 수 있어야 인덱스가 거짓말이 아니게 된다.
+        self._extra_skills = {s.name: s for s in extras}
+        candidates: list = all_active + extras
+        by_name = {s.name: s for s in candidates}
+        ranked = score_skills(user_message, candidates)
 
         # ── 고신뢰 상위 매칭만 전문 주입 (예산·개수 상한) ─────────────────
         injected_skills: list[InjectedSkill] = []
@@ -319,7 +341,9 @@ class LearningService(ILearningService):
             if tokens > remaining_budget:
                 break
             injected_skills.append(
-                InjectedSkill(
+                skill
+                if isinstance(skill, InjectedSkill)  # plugin 스킬은 provenance 그대로
+                else InjectedSkill(
                     skill_id=skill.name, name=skill.name, version=skill.version, body=body
                 )
             )
@@ -329,7 +353,7 @@ class LearningService(ILearningService):
         # ── 전문 주입되지 않은 나머지는 짧은 인덱스로 ─────────────────────
         index_entries = [
             (s.name, s.description)
-            for s in sorted(all_active, key=lambda s: s.name)
+            for s in sorted(candidates, key=lambda s: s.name)
             if s.name not in injected_names
         ]
 
@@ -367,8 +391,12 @@ class LearningService(ILearningService):
     def search_skills(self, query: str, limit: int = 8) -> list[dict]:
         """`skill_search` 빌트인의 백엔드 — active 스킬을 쿼리로 랭킹해 반환한다.
         점수>0 매칭을 우선하되, 하나도 없으면 상위 몇 개를 그대로 보여준다(모델이
-        무엇이 있는지라도 알도록). 본문은 싣지 않는다 — 그건 skill_view의 몫."""
-        ranked = score_skills(query, self._active_skills())
+        무엇이 있는지라도 알도록). 본문은 싣지 않는다 — 그건 skill_view의 몫.
+        plugin 스킬(_extra_skills)도 후보에 포함 — 인덱스에 실렸으면 찾을 수 있어야 한다."""
+        learned = self._active_skills()
+        learned_names = {s.name for s in learned}
+        extras = [s for s in self._extra_skills.values() if s.name not in learned_names]
+        ranked = score_skills(query, learned + extras)
         positive = [s for s in ranked if s.score > 0]
         chosen = positive[:limit] if positive else ranked[: min(limit, 5)]
         return [
@@ -382,7 +410,19 @@ class LearningService(ILearningService):
         이번 턴 조회 집합에 기록해 observe()가 use 카운터에 귀속하게 한다."""
         skill = self._read_any_skill(skill_id)
         if skill is None or skill.state != "active":
-            raise NotFoundError(f"skill {skill_id!r} not found or not active")
+            # store 에 없으면 plugin 스킬 레지스트리 폴백 — 인덱스가 광고한 이름은
+            # 항상 열려야 한다. usage sidecar 는 store 스킬 전용이라 건드리지 않고,
+            # 조회 귀속(viewed)만 provenance id 로 기록한다.
+            extra = self._extra_skills.get(skill_id)
+            if extra is None:
+                raise NotFoundError(f"skill {skill_id!r} not found or not active")
+            self._viewed_skills.setdefault(session_id, set()).add(extra.skill_id)
+            return {
+                "name": extra.name,
+                "version": extra.version,
+                "description": extra.description,
+                "body": extra.body,
+            }
         self._usage_store.increment_view(skill_id)
         self._viewed_skills.setdefault(session_id, set()).add(skill_id)
         return {

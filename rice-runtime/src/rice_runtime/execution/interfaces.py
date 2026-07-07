@@ -76,11 +76,16 @@ class IPluginLoader(Protocol):
         ...
 
     def injected_skills(self) -> list[InjectedSkill]:
-        """SKILL.md bundles that enabled plugins contribute to the system prompt."""
+        """Active SKILL.md bundles from enabled plugins. The orchestrator feeds
+        these into learning.prefetch as `extra_skills` — they ride the same
+        relevance pipeline (index → top-K full body → skill_view) as learned
+        skills instead of being injected wholesale."""
         ...
 
-    async def invoke(self, call: ToolCall) -> ToolResult:
-        """Run a plugin tool via the sandbox (after dispatcher's approval check)."""
+    async def invoke(self, call: ToolCall, owner_id: str | None = None) -> ToolResult:
+        """Run a plugin tool via the sandbox (after dispatcher's approval check).
+        `owner_id` = the owning plugin id from the ToolSpec, so same-named tools
+        across plugins never misroute; None → cross-plugin name scan."""
         ...
 
     # ── management (routes/plugins.py, routes/artifacts.py) ──────────────────

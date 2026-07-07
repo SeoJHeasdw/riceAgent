@@ -188,6 +188,11 @@ class PluginLoader:
         """SKILL.md bundles from enabled plugins → InjectedSkill (CONTRACTS §2.2).
 
         Walks `~/.rice/plugins/<plugin_id>/skills/*.md` for each enabled plugin.
+        Only `state: active` skills surface (an author shipping a draft/archived
+        skill must not leak into prompts), and description/tags/provenance ride
+        along so these skills go through the SAME relevance pipeline as learned
+        skills (learning.prefetch: index → top-K full body → skill_view) instead
+        of being dumped wholesale into the system prompt.
         """
         skills: list[InjectedSkill] = []
         for info in self._list_enabled_plugin_infos():
@@ -204,19 +209,24 @@ class PluginLoader:
                     fm = _parse_skill_md_minimal(text)
                     if not fm["name"]:
                         fm["name"] = md_path.stem
+                    if fm["state"] != "active":
+                        continue
                     skills.append(
                         InjectedSkill(
                             skill_id=f"plugin:{info.id}:{fm['name']}",
                             name=fm["name"],
                             version=int(fm["version"]),
-                            body=text,  # full SKILL.md content as body
+                            body=fm["body"],
+                            description=fm["description"],
+                            tags=tuple(fm["tags"]),
+                            source="plugin",
                         )
                     )
                 except (OSError, ValueError):
                     continue
         return skills
 
-    async def invoke(self, call: ToolCall) -> ToolResult:
+    async def invoke(self, call: ToolCall, owner_id: str | None = None) -> ToolResult:
         """Run a plugin tool through the sandbox (ISandbox.run is the choke point).
 
         Resolves the tool's **dotted entrypoint** (`module.func`) from the owning
@@ -224,8 +234,14 @@ class PluginLoader:
         path, so the real plugin code actually loads & runs (v1: the bare tool name
         was eval'd in the child → always ImportError/NameError). Runs in a child
         process — never in-process.
+
+        `owner_id` (the ToolSpec's owning plugin id, passed by the dispatcher)
+        makes resolution owner-aware: when two enabled plugins declare the same
+        tool name, the call goes to the plugin that advertised the spec instead
+        of whichever plugin happens to enumerate first. None falls back to the
+        cross-plugin scan (legacy callers).
         """
-        entry, plugin_dir = self._resolve_tool_entry(call.tool_name)
+        entry, plugin_dir = self._resolve_tool_entry(call.tool_name, owner_id=owner_id)
         if entry is None:
             return ToolResult(
                 call.id, ok=False, error=f"no entrypoint registered for plugin tool '{call.tool_name}'"
@@ -237,16 +253,22 @@ class PluginLoader:
         )
         return ToolResult(call.id, ok=result.ok, result=result.result, error=result.error)
 
-    def _resolve_tool_entry(self, tool_name: str) -> tuple[str | None, Path | None]:
+    def _resolve_tool_entry(
+        self, tool_name: str, owner_id: str | None = None
+    ) -> tuple[str | None, Path | None]:
         """Map a plugin tool name → (dotted entrypoint, plugin install dir).
 
-        Looks across enabled plugins' manifests. Each tool decl may carry an
-        `entry` (dotted `module.func`); if absent, falls back to
-        `<entrypoint.module>.<tool_name>`, else the bare tool name. The plugin's
-        install dir is returned so the sandbox can import its module.
-        Returns (None, None) if no enabled plugin declares the tool.
+        With `owner_id`, only that plugin's manifest is consulted (owner-aware
+        dispatch); otherwise looks across enabled plugins' manifests. Each tool
+        decl may carry an `entry` (dotted `module.func`); if absent, falls back
+        to `<entrypoint.module>.<tool_name>`, else the bare tool name. The
+        plugin's install dir is returned so the sandbox can import its module.
+        Returns (None, None) if no matching enabled plugin declares the tool.
         """
-        for info in self._list_enabled_plugin_infos():
+        infos = self._list_enabled_plugin_infos()
+        if owner_id is not None:
+            infos = [i for i in infos if i.id == owner_id]
+        for info in infos:
             manifest_path = self._paths.plugins / info.id / "rice-artifact.json"
             if not manifest_path.exists():
                 continue

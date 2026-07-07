@@ -222,12 +222,18 @@ async def test_loop_plans_executes_and_react_updates():
     provider = _ScriptedProvider(
         [
             _text(_PLAN_JSON),  # planner call
-            [  # round 1: report s1 in_progress→done + run a real tool
+            [  # round 1: report s1+s2 done + run a real tool (plan enforcement:
+                # 미종결 단계가 남으면 final answer가 차단되므로 정직하게 종결한다)
                 ProviderChunk(
                     kind="tool_call",
                     tool_call=ToolCall(
                         tool_name="update_plan",
-                        arguments={"updates": [{"step_id": "s1", "status": "done", "note": "echoed"}]},
+                        arguments={
+                            "updates": [
+                                {"step_id": "s1", "status": "done", "note": "echoed"},
+                                {"step_id": "s2", "status": "done"},
+                            ]
+                        },
                         id="call_up1",
                     ),
                 ),
@@ -323,7 +329,22 @@ async def test_loop_escalates_to_plan_via_start_plan():
                     ),
                 ),
             ],
-            _text("최종 답변"),  # round 2: 계획 모드에서 마무리
+            [  # round 2: 계획 종결 보고 (enforcement: 미종결 final 차단)
+                ProviderChunk(
+                    kind="tool_call",
+                    tool_call=ToolCall(
+                        tool_name="update_plan",
+                        arguments={
+                            "updates": [
+                                {"step_id": "s1", "status": "done"},
+                                {"step_id": "s2", "status": "done"},
+                            ]
+                        },
+                        id="call_up2",
+                    ),
+                ),
+            ],
+            _text("최종 답변"),  # round 3: 계획 모드에서 마무리
         ]
     )
     loop = AgentLoop(
@@ -335,9 +356,9 @@ async def test_loop_escalates_to_plan_via_start_plan():
     result = LoopResult()
     events = [ev async for ev in loop.run(_ctx((_spec("echo"),)), "s1", result, asyncio.Event())]
 
-    # 승격 순간 계획 스냅샷(rev1)이 흐른다
+    # 승격 순간 계획 스냅샷(rev1) + 종결 보고(rev2)가 흐른다
     plan_events = [e for e in events if e.type == EventType.PLAN_UPDATED]
-    assert [e.data["revision"] for e in plan_events] == [1]
+    assert [e.data["revision"] for e in plan_events] == [1, 2]
     assert [s["title"] for s in plan_events[0].data["steps"]] == ["수집", "분석"]
 
     # round 1(ReAct)엔 start_plan이, 승격 후 round 2엔 update_plan이 광고된다(상호 배타)
@@ -401,7 +422,8 @@ async def test_loop_drift_guard_forces_reassessment():
             _text(_PLAN_JSON),  # planner
             [ProviderChunk(kind="tool_call", tool_call=ToolCall(tool_name="echo", arguments={}, id="c1"))],
             [ProviderChunk(kind="tool_call", tool_call=ToolCall(tool_name="echo", arguments={}, id="c2"))],
-            _text("끝"),
+            _text("끝"),  # 미종결 final 시도 → reconcile 넛지
+            _text("끝"),  # 넛지도 무시 → 런타임이 auto-reconcile 후 final 수용
         ]
     )
 
@@ -420,6 +442,106 @@ async def test_loop_drift_guard_forces_reassessment():
     # round1(무보고) 후엔 아직 아니고, round2(무보고) 후의 세 번째 실행 호출에 경고
     assert "REASSESS NOW" not in provider.calls[2]["system"]
     assert "REASSESS NOW" in provider.calls[3]["system"]
+
+
+@pytest.mark.asyncio
+async def test_loop_blocks_final_answer_while_plan_unfinished():
+    """P1 plan enforcement: 미종결 단계가 남은 채 tool call 없이 답하면 final 로
+    받지 않고 reconcile 을 강제한다 — 모델이 update_plan 으로 종결한 뒤에야 끝."""
+    provider = _ScriptedProvider(
+        [
+            _text(_PLAN_JSON),  # planner
+            _text("다 됐습니다"),  # 미종결 상태의 성급한 final 시도 → 넛지
+            [  # 넛지 후: 계획 종결 보고
+                ProviderChunk(
+                    kind="tool_call",
+                    tool_call=ToolCall(
+                        tool_name="update_plan",
+                        arguments={
+                            "updates": [
+                                {"step_id": "s1", "status": "done"},
+                                {"step_id": "s2", "status": "skipped", "note": "불필요"},
+                            ]
+                        },
+                        id="call_rec",
+                    ),
+                ),
+            ],
+            _text("진짜 최종 답변"),
+        ]
+    )
+    loop = AgentLoop(
+        provider=provider,
+        dispatcher=_dispatcher({}),
+        planner=TurnPlanner(provider=provider, config=AgentConfig()),
+        agent_config=AgentConfig(),
+    )
+    result = LoopResult()
+    events = [ev async for ev in loop.run(_ctx((_spec("echo"),)), "s1", result, asyncio.Event())]
+
+    # 넛지가 synthetic user 메시지로 감사 가능하게 남는다
+    assert any(m.metadata.get("synthetic") == "plan_reconcile" for m in result.history)
+    plan_events = [e for e in events if e.type == EventType.PLAN_UPDATED]
+    assert [e.data["revision"] for e in plan_events] == [1, 2]
+    assert plan_events[-1].data["status"] == "completed"
+    assert result.final_message == "진짜 최종 답변"
+
+
+@pytest.mark.asyncio
+async def test_loop_auto_reconciles_abandoned_plan():
+    """넛지까지 무시되면 런타임이 미종결 단계를 skipped 로 닫는다 — 계획 카드가
+    영원히 열린 채 남지 않는 것은 프롬프트 희망사항이 아니라 런타임 불변식."""
+    provider = _ScriptedProvider(
+        [
+            _text(_PLAN_JSON),  # planner
+            _text("끝1"),  # 미종결 final 시도 → 넛지
+            _text("끝2"),  # 넛지도 무시 → auto-reconcile 후 final 수용
+        ]
+    )
+    loop = AgentLoop(
+        provider=provider,
+        dispatcher=_dispatcher({}),
+        planner=TurnPlanner(provider=provider, config=AgentConfig()),
+        agent_config=AgentConfig(),
+    )
+    result = LoopResult()
+    events = [ev async for ev in loop.run(_ctx((_spec("echo"),)), "s1", result, asyncio.Event())]
+
+    plan_events = [e for e in events if e.type == EventType.PLAN_UPDATED]
+    final_plan = plan_events[-1].data
+    assert final_plan["status"] == "completed"
+    assert all(s["status"] == "skipped" for s in final_plan["steps"])  # 성공 위조 금지
+    assert result.final_message == "끝2"
+
+
+@pytest.mark.asyncio
+async def test_loop_synthesizes_preamble_when_model_calls_tools_silently():
+    """P1 rationale primitive: NARRATE 지시를 모델이 무시해도(서사 없이 tool call)
+    런타임이 결정론적 1줄 preamble 을 합성해 스트림한다 — 사용자 언어(한글) 감지."""
+    provider = _ScriptedProvider(
+        [
+            _text({"plan_needed": False}),  # planner: 단순
+            [ProviderChunk(kind="tool_call", tool_call=ToolCall(tool_name="echo", arguments={}, id="c1"))],
+            _text("답변"),
+        ]
+    )
+
+    async def echo(args):
+        return {"ok": True}
+
+    loop = AgentLoop(
+        provider=provider,
+        dispatcher=_dispatcher({"echo": echo}),
+        planner=TurnPlanner(provider=provider, config=AgentConfig()),
+        agent_config=AgentConfig(),
+    )
+    result = LoopResult()
+    events = [ev async for ev in loop.run(_ctx((_spec("echo"),)), "s1", result, asyncio.Event())]
+
+    deltas = [e.data.get("delta") for e in events if e.type == EventType.MESSAGE and e.data.get("delta")]
+    assert any("echo" in d and "실행합니다" in d for d in deltas)  # ko 감지 + 도구명
+    synth = next(m for m in result.history if m.metadata.get("synthetic_preamble"))
+    assert synth.role == "assistant" and synth.tool_calls
 
 
 def test_completed_plan_nudges_skill_capture():
@@ -464,7 +586,12 @@ async def test_orchestrator_streams_plan_and_persists_snapshots(tmp_path):
                     kind="tool_call",
                     tool_call=ToolCall(
                         tool_name="update_plan",
-                        arguments={"updates": [{"step_id": "s1", "status": "done"}]},
+                        arguments={
+                            "updates": [
+                                {"step_id": "s1", "status": "done"},
+                                {"step_id": "s2", "status": "done"},
+                            ]
+                        },
                         id="call_up",
                     ),
                 )

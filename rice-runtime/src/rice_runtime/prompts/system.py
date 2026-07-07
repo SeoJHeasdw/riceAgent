@@ -89,17 +89,6 @@ def compose_system_prompt(*sections: str | None) -> str:
     return "\n\n".join(parts)
 
 
-def render_skills_block(
-    skills,
-    header: str = "## Available Skills (follow these procedures when relevant)",
-) -> str:
-    """Render injected skills (InjectedSkill-like: .name/.version/.body) into a
-    system-prompt block. Shared by learning prefetch (learned skills) and the
-    orchestrator (plugin-provided skills) so the on-prompt format stays identical
-    (LEARNING_LOOP §7, CONTRACTS §2.2). Empty input → empty string."""
-    if not skills:
-        return ""
-    lines = [header, SKILL_TRUST_NOTE]
-    for sk in skills:
-        lines.append(f"\n### [{sk.name}] (v{sk.version})\n{sk.body}")
-    return "\n".join(lines)
+# NOTE: render_skills_block (plugin 스킬 전용 전량 렌더) 은 제거됐다 — plugin
+# 스킬도 learning.prefetch(extra_skills=...) 를 통해 learned 스킬과 동일한
+# 관련도 파이프라인(인덱스 → top-K 전문 → skill_view)으로 주입된다.

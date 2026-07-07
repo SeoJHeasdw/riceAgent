@@ -202,6 +202,10 @@ class TurnPlanner:
         # — titler와 같은 스킵(agent/titler.py 참조).
         if getattr(self._provider, "name", "") == "echo":
             return
+        # "계획 중" breadcrumb — think=False라 모델 thinking이 없어도 플래너 호출
+        # 동안 UI가 침묵하지 않도록 런타임이 한 줄을 흘린다(rationale primitive와
+        # 같은 원칙: 사용자에게 보이는 진행 서사는 모델 재량이 아니라 런타임 계약).
+        yield ev_thinking("계획 수립 중 — 요청의 의도와 필요한 단계를 파악합니다…")
         recent = ctx.history[-max(1, self._config.planner_recent_messages) :]
         # history 꼬리가 방금 들어온 user 메시지면 문맥에서 제외(요청 섹션과 중복).
         if recent and recent[-1].role == "user" and recent[-1].content == user_message:
@@ -279,6 +283,28 @@ class PlanState:
     def note_tool_round(self) -> None:
         """update_plan 없이 도구 라운드가 지나갔음을 기록 — drift guard 카운터."""
         self.rounds_without_update += 1
+
+    def reconcile_abandoned(self, note: str = "turn ended without a status report") -> None:
+        """모델이 계획을 종결하지 않고 최종 답을 내버렸을 때의 런타임 강제 정리.
+
+        루프가 reconcile 넛지(1회)까지 무시된 뒤에 부른다 — 미종결 단계를 전부
+        `skipped`(+note)로 닫고 계획을 completed 로 전이해, UI 계획 카드가 영원히
+        열린 채 남지 않게 한다. `done` 으로 올리지 않는 이유: 모델이 보고하지 않은
+        단계를 런타임이 성공으로 위조하면 안 된다 — "보고 없이 끝남"을 정직하게
+        남기는 쪽이 감사 가능하다."""
+        steps = tuple(
+            s
+            if s.status in _TERMINAL
+            else PlanStep(id=s.id, title=s.title, detail=s.detail, status="skipped", note=note)
+            for s in self.plan.steps
+        )
+        self.plan = TurnPlan(
+            goal=self.plan.goal,
+            steps=steps,
+            plan_id=self.plan.plan_id,
+            revision=self.plan.revision + 1,
+            status="completed",
+        )
 
     def apply(self, arguments: dict) -> dict:
         """update_plan 호출 하나를 적용하고 도구 결과 payload를 돌려준다.

@@ -422,6 +422,12 @@ tags: [plugin, test]
             (plugin_id,),
         )
 
+        # state != active인 스킬은 프롬프트 어디에도 실리면 안 된다(전량 주입 우회 방지).
+        (skills_dir / "draft-skill.md").write_text(
+            "---\nname: draft-skill\nversion: 1\ndescription: wip\nstate: archived\n---\nbody",
+            encoding="utf-8",
+        )
+
         skills = loader.injected_skills()
         assert len(skills) == 1
         s = skills[0]
@@ -429,9 +435,12 @@ tags: [plugin, test]
         assert s.name == "my-plugin-skill"
         assert s.version == 2
         assert "plugin:test-plugin" in s.skill_id
-        # body must be the full SKILL.md (learning-compatible)
+        # body = frontmatter가 벗겨진 본문 + relevance 파이프라인용 메타(설명/태그/출처)
         assert "Do the plugin thing" in s.body
-        assert "---" in s.body  # frontmatter preserved
+        assert "---" not in s.body  # frontmatter stripped (index/주입 렌더에 노이즈 금지)
+        assert s.description == "A plugin-provided skill"
+        assert "plugin" in s.tags
+        assert s.source == "plugin"
 
     def test_parse_skill_md_minimal_roundtrip(self):
         """_parse_skill_md_minimal이 learning SKILL.md 포맷 필드를 올바르게 파싱함."""

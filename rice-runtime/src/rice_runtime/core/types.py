@@ -166,13 +166,20 @@ class TurnPlan:
 # ─────────────────────────────────────────────────────────────────────────────
 @dataclass(frozen=True)
 class InjectedSkill:
-    """An active skill injected into the system prompt (LEARNING_LOOP §7,
-    inject-all-active-under-budget). `body` is the SKILL.md content."""
+    """An active skill injected into the system prompt (LEARNING_LOOP §7).
+    `body` is the SKILL.md body (frontmatter stripped). `description`/`tags`
+    exist so non-learning sources (plugin SKILL.md bundles) can ride the same
+    relevance pipeline as learned skills — index rendering and lexical scoring
+    both need them. `source` is provenance for audit ("why was this in the
+    prompt"): "learned" (skill store / builtin) or "plugin"."""
 
     skill_id: str
     name: str
     version: int
     body: str
+    description: str = ""
+    tags: tuple[str, ...] = ()
+    source: str = "learned"
 
 
 @dataclass(frozen=True)

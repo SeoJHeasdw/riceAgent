@@ -29,6 +29,7 @@ sit behind this. Returns use small DTOs defined here so routes don't reach insid
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Literal, Protocol, runtime_checkable
 
@@ -170,10 +171,20 @@ class ConsolidateResult:
 @runtime_checkable
 class ILearningService(Protocol):
     # ── turn-critical ─────────────────────────────────────────────────────────
-    def prefetch(self, session_id: str, user_message: str) -> PrefetchResult:
+    def prefetch(
+        self,
+        session_id: str,
+        user_message: str,
+        extra_skills: Sequence[InjectedSkill] = (),
+    ) -> PrefetchResult:
         """Assemble injectable context: high-relevance active skills injected in
         full (rest listed as a short index for on-demand skill_view), recent facts
-        + FTS-matched memories, and skill-creation guidance."""
+        + FTS-matched memories, and skill-creation guidance.
+
+        `extra_skills` are externally-sourced skills (plugin SKILL.md bundles from
+        IPluginLoader.injected_skills) that ride the SAME relevance pipeline —
+        scored, budgeted, indexed, and viewable via skill_view — instead of being
+        injected wholesale. A learned skill of the same name wins."""
         ...
 
     def search_skills(self, query: str, limit: int = 8) -> list[dict]:

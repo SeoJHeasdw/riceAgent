@@ -31,6 +31,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Protocol, cast
 
 from ..connector.interfaces import IConnectorService
+from ..core import lexical
 from ..core.types import (
     ApprovalRequest,
     SSEEvent,
@@ -119,17 +120,56 @@ _TOOL_CALL_SPEC = ToolSpec(
 BRIDGE_TOOL_SPECS: tuple[ToolSpec, ...] = (_TOOL_SEARCH_SPEC, _TOOL_DESCRIBE_SPEC, _TOOL_CALL_SPEC)
 
 
+# 접힌 상태에서 사용자 메시지와 관련도 높은 도구를 브릿지 옆에 함께 노출하는
+# "스포트라이트" — 전체를 접기만 하면 소형 모델이 tool_search 를 부를 줄 몰라
+# 도구를 못 쓰는 실패가 잦다. top-K 만 직접 노출하고 나머지는 브릿지 뒤에 둔다.
+_SPOTLIGHT_BUDGET_TOKENS = 4_000
+_SPOTLIGHT_MAX_TOOLS = 8
+
+
+def _score_tool(query_tokens: set[str], spec: ToolSpec) -> float:
+    """도구 관련도: 이름(언더스코어/점 분해) 2.0 가중 + 설명 1.0 가중.
+    exact/substring/bigram-fuzzy 사다리는 core/lexical.py 하나를 공유한다."""
+    name_text = spec.name.replace("_", " ").replace(".", " ")
+    return 2.0 * lexical.field_score(query_tokens, name_text) + lexical.field_score(
+        query_tokens, spec.description
+    )
+
+
 def fold_tools_for_budget(
-    core: tuple[ToolSpec, ...], foldable: tuple[ToolSpec, ...]
+    core: tuple[ToolSpec, ...], foldable: tuple[ToolSpec, ...], query: str = ""
 ) -> tuple[ToolSpec, ...]:
     """§2.1/§11 progressive disclosure: `foldable`(connector+plugin, "non-core") 스키마
     합이 예산을 넘지 않으면 그대로 다 노출한다(MVP 는 대개 이 경로 — 커넥터 1~2개론
-    안 넘는다). 넘으면 `core`(builtin)는 그대로 두고 `foldable` 은 3개 브릿지 도구로 접는다
-    — LLM 은 tool_search/describe/call 로 그 뒤의 실제 도구에 접근한다.
+    안 넘는다). 넘으면 `core`(builtin)는 그대로 두고 `foldable` 은 3개 브릿지 도구로
+    접는다 — LLM 은 tool_search/describe/call 로 그 뒤의 실제 도구에 접근한다.
+
+    `query`(이 턴의 사용자 메시지)가 있으면 접힌 카탈로그 중 관련도 상위 도구를
+    소예산(_SPOTLIGHT_BUDGET_TOKENS)·소개수(_SPOTLIGHT_MAX_TOOLS) 안에서 브릿지와
+    **함께** 직접 노출한다 — "많으면 전부 접는다"가 아니라 "관련한 것만 펴고
+    나머지를 접는다". 매칭은 결정론적 lexical 라우팅(core/lexical.py — ko→en
+    intent 확장 포함)이며, 점수 0 도구는 절대 펴지 않는다.
     """
     if sum(_estimate_tool_tokens(t) for t in foldable) <= _TOOL_BUDGET_TOKENS:
         return core + foldable
-    return core + BRIDGE_TOOL_SPECS
+    spotlight: list[ToolSpec] = []
+    q = lexical.expand_query(lexical.tokens(query))
+    if q:
+        ranked = sorted(
+            ((score, spec) for spec in foldable if (score := _score_tool(q, spec)) > 0),
+            key=lambda pair: pair[0],
+            reverse=True,
+        )
+        remaining = _SPOTLIGHT_BUDGET_TOKENS
+        for _, spec in ranked:
+            if len(spotlight) >= _SPOTLIGHT_MAX_TOOLS:
+                break
+            cost = _estimate_tool_tokens(spec)
+            if cost > remaining:
+                continue
+            spotlight.append(spec)
+            remaining -= cost
+    return core + BRIDGE_TOOL_SPECS + tuple(spotlight)
 
 
 class ToolDispatcher:
@@ -221,7 +261,9 @@ class ToolDispatcher:
                 # 둘일 때 이름 재탐색이 다른 커넥터로 오배송하는 것을 막는다.
                 res = await self._connectors.invoke(call, owner_id=spec.owner_id)
             elif spec.source == "plugin":
-                res = await self._plugins.invoke(call)
+                # owner_id 를 함께 넘긴다 — 같은 도구명을 선언한 플러그인이 둘일 때
+                # 이름 재탐색이 다른 플러그인으로 오배송하는 것을 막는다(connector 와 동일).
+                res = await self._plugins.invoke(call, owner_id=spec.owner_id)
             else:  # pragma: no cover - guarded by ToolSpec typing
                 raise ValueError(f"unknown tool source: {spec.source}")
         except Exception as exc:  # tool failures are data, not crashes (loop continues)
@@ -242,12 +284,30 @@ class ToolDispatcher:
         RUNTIME_DESIGN §5 실행 승인은 노출 방식과 무관하게 항상 적용되는 별개의 방어선).
         """
         if call.tool_name == "tool_search":
-            query = str(call.arguments.get("query", "")).strip().lower()
-            matches = [
-                {"name": t.name, "description": t.description}
-                for t in self._folded_catalog.values()
-                if not query or query in t.name.lower() or query in t.description.lower()
-            ]
+            # 단순 substring 이 아니라 relevance 랭킹(core/lexical.py 공유 사다리 —
+            # exact/substring/fuzzy + ko→en intent 확장)으로 상위 매칭을 돌려준다.
+            # 빈 쿼리는 "뭐가 있나" 브라우징이므로 전체 카탈로그를 그대로 반환.
+            query = str(call.arguments.get("query", "")).strip()
+            q = lexical.expand_query(lexical.tokens(query))
+            if not q:
+                matches = [
+                    {"name": t.name, "description": t.description}
+                    for t in self._folded_catalog.values()
+                ]
+            else:
+                ranked = sorted(
+                    (
+                        (score, t)
+                        for t in self._folded_catalog.values()
+                        if (score := _score_tool(q, t)) > 0
+                    ),
+                    key=lambda pair: pair[0],
+                    reverse=True,
+                )
+                matches = [
+                    {"name": t.name, "description": t.description, "score": round(score, 2)}
+                    for score, t in ranked[:12]
+                ]
             res = ToolResult(call.id, ok=True, result={"matches": matches})
         elif call.tool_name == "tool_describe":
             name = str(call.arguments.get("name", ""))
