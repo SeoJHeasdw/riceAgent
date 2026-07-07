@@ -22,7 +22,7 @@ Implementation status per task batch:
              제안함(suggestions/decide_suggestion, 타임아웃 이동) + discovery.py
              (크로스세션 발굴) + stage_proposal/resolve_proposal(미드턴 T5) +
              delete_memory(위생). LEARNING_LOOP §9.
-"""
+""" 
 
 from __future__ import annotations
 
