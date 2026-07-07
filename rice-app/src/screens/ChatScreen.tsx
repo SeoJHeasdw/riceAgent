@@ -17,6 +17,10 @@ import { FileViewerProvider } from '../lib/fileViewer/FileViewerProvider';
 import { useToast } from '../lib/toast/ToastContext';
 import type { RegisteredModel } from '../components/carbon/ModelSettingsPanel';
 
+// Electron(hiddenInset)에서만 좌상단에 macOS 트래픽 라이트가 있다. 고정 토글·헤더 여백을
+// 이 값으로 gating해 브라우저 디자인 데모에서는 불필요한 좌측 여백을 두지 않는다.
+const isElectron = navigator.userAgent.toLowerCase().includes('electron');
+
 // 등록 모델의 provider(UI) → 런타임 provider kind 매핑.
 // 'custom'(OpenAI 호환)도 openai kind로 — 같은 어댑터에 base_url만 다르다.
 const providerKind = (provider?: string): 'claude' | 'openai' | 'watsonx' => {
@@ -1762,7 +1766,6 @@ function ChatScreen() {
           onNewSession={newChat}
           onDeleteSession={requestDeleteSession}
           isOpen={sessionSidebarOpen}
-          onToggle={() => setSessionSidebarOpen(!sessionSidebarOpen)}
           width={sessionPanel.width}
           modelName={selectedModelName}
           modelMode={modelMode}
@@ -1779,20 +1782,13 @@ function ChatScreen() {
 
         {/* Main */}
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-background">
-          {/* Header */}
-          <div className="h-11 flex-shrink-0 flex items-center gap-3 px-4 border-b border-border-subtle-01 electron-drag">
-            {!sessionSidebarOpen && (
-              <Tooltip label="대화 목록 펼치기" side="bottom">
-                <button
-                  type="button"
-                  onClick={() => setSessionSidebarOpen(true)}
-                  className="electron-no-drag -ml-1 flex h-7 w-7 items-center justify-center rounded-md text-icon-secondary hover:bg-layer-hover-01 hover:text-icon-primary transition-colors"
-                  aria-label="대화 목록 펼치기"
-                >
-                  <Icon name="side-panel-open" size={16} />
-                </button>
-              </Tooltip>
-            )}
+          {/* Header — faint divider (was a hard #393939 line); left padding clears the
+              fixed toggle only when the session panel is collapsed. */}
+          <div
+            className={`h-11 flex-shrink-0 flex items-center gap-3 pr-4 border-b border-shell-border electron-drag ${
+              sessionSidebarOpen ? 'pl-4' : isElectron ? 'pl-[68px]' : 'pl-11'
+            }`}
+          >
             <span className="text-body-short-01 font-semibold text-text-primary truncate">
               {isEmpty ? '새 대화' : activeSession?.title || '대화'}
             </span>
@@ -2089,6 +2085,27 @@ function ChatScreen() {
             <LearningPanel width={learningPanel.width} onOpenConversation={openConversation} />
           </>
         )}
+
+        {/* Fixed chat-list toggle — rendered LAST on purpose. In Electron the drag-region
+            hit test is resolved in DOM order (later wins), so a no-drag button placed before
+            the sidebar/header drag strips gets re-covered and the OS swallows the click as a
+            window move. As the final child its no-drag hole wins → reliably clickable. It's a
+            small window-drag strip pinned by the macOS traffic lights, staying put whether the
+            session panel is open or collapsed. */}
+        <div
+          className="absolute top-0 left-0 z-30 flex h-11 items-center electron-drag"
+          style={{ paddingLeft: isElectron ? 30 : 8 }}
+        >
+          <button
+            type="button"
+            onClick={() => setSessionSidebarOpen((o) => !o)}
+            className="electron-no-drag flex h-7 w-7 items-center justify-center rounded-md text-icon-secondary hover:bg-layer-hover-01 hover:text-icon-primary transition-colors"
+            aria-label={sessionSidebarOpen ? '대화 목록 접기' : '대화 목록 펼치기'}
+            title={sessionSidebarOpen ? '대화 목록 접기' : '대화 목록 펼치기'}
+          >
+            <Icon name="sidebar" size={18} />
+          </button>
+        </div>
       </div>
 
       {/* Model Settings Panel (기어 아이콘) */}

@@ -21,7 +21,6 @@ export interface SessionSidebarProps {
   onNewSession: () => void;
   onDeleteSession: (id: string) => void;
   isOpen: boolean;
-  onToggle: () => void;
   /** Panel width in px (drag-resizable from parent) */
   width?: number;
   /** Selected model name shown in the footer model button */
@@ -76,7 +75,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   onNewSession,
   onDeleteSession,
   isOpen,
-  onToggle,
   width = 264,
   modelName,
   modelMode = 'saas',
@@ -101,7 +99,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   return (
     <div
       className={`flex-shrink-0 bg-layer-01 flex flex-col min-w-0 overflow-hidden transition-[width] duration-200 ease-out ${
-        isOpen ? 'border-r border-border-subtle-01' : 'border-r-0'
+        isOpen ? 'border-r border-shell-border' : 'border-r-0'
       }`}
       style={{ width: isOpen ? width : 0 }}
       aria-hidden={!isOpen}
@@ -112,42 +110,28 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         }`}
         style={{ width }}
       >
-        {/* Header row is a quiet drag area; only the panel toggle remains next to mac traffic lights. */}
-        <div className="h-11 border-b border-border-subtle-01 flex-shrink-0 electron-drag flex items-center">
-          <button
-            type="button"
-            onClick={onToggle}
-            className="electron-no-drag ml-8 flex h-7 w-7 items-center justify-center rounded-md text-icon-secondary hover:bg-layer-hover-01 hover:text-icon-primary transition-colors"
-            aria-label="대화 목록 접기"
-            title="대화 목록 접기"
-          >
-            <Icon name="side-panel-close" size={16} />
-          </button>
-        </div>
+        {/* Header row only reserves the macOS traffic-light zone; the toggle itself is a
+            fixed control owned by ChatScreen so it stays put when the panel collapses. */}
+        <div className="h-11 flex-shrink-0 electron-drag" aria-hidden="true" />
 
-        {/* Quick actions — 대형 버튼·입력박스 대신 목록과 같은 문법의 한 줄 진입점.
+        {/* Quick actions — 목록과 같은 문법의 한 줄 진입점(대형 버튼·입력박스 대신).
             검색 행은 클릭 시 같은 자리에서 입력으로 변신한다 (레이아웃 점프 없음). */}
-        <div className="px-2 pt-2 pb-1 flex flex-col gap-0.5 flex-shrink-0">
+        <div className="px-2 pt-1 pb-1.5 flex flex-col gap-0.5 flex-shrink-0">
           <button
             onClick={onNewSession}
-            className="flex items-center w-full gap-0.5 h-6 px-0.5 rounded-lg text-body-short-01 font-medium text-link-primary hover:bg-layer-hover-01 transition-colors"
+            className="group flex items-center w-full gap-2.5 h-9 px-2.5 rounded-lg text-body-short-01 font-medium text-text-primary hover:bg-layer-hover-01 transition-colors"
           >
-            <span className="flex items-center justify-center w-5 h-5 flex-shrink-0">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                <path d="M12 5v14M5 12h14" />
-              </svg>
-            </span>
+            <Icon
+              name="compose"
+              size={17}
+              className="flex-shrink-0 text-icon-secondary group-hover:text-icon-primary transition-colors"
+            />
             새 대화
           </button>
 
           {searchOpen ? (
-            <div className="flex items-center w-full h-6 px-0.5 rounded-lg bg-layer-02/60 ring-1 ring-inset ring-border-subtle-02 focus-within:ring-focus transition-shadow">
-              <span className="flex items-center justify-center w-5 h-5 flex-shrink-0 text-icon-secondary">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-                  <circle cx="11" cy="11" r="7" />
-                  <path d="m21 21-4.35-4.35" />
-                </svg>
-              </span>
+            <div className="flex items-center w-full h-9 gap-2.5 px-2.5 rounded-lg bg-layer-02/60 ring-1 ring-inset ring-border-subtle-02 focus-within:ring-focus transition-shadow">
+              <Icon name="search" size={17} className="flex-shrink-0 text-icon-secondary" />
               <input
                 type="text"
                 autoFocus
@@ -164,20 +148,19 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                 title="검색 닫기"
                 className="p-0.5 -mr-0.5 rounded hover:bg-layer-hover-02 transition-colors"
               >
-                <Icon name="close" size={12} className="text-icon-secondary" />
+                <Icon name="close" size={13} className="text-icon-secondary" />
               </button>
             </div>
           ) : (
             <button
               onClick={() => setSearchOpen(true)}
-              className="flex items-center gap-0.5 w-full h-6 px-0.5 rounded-lg text-body-short-01 text-text-secondary hover:bg-layer-hover-01 hover:text-text-primary transition-colors"
+              className="group flex items-center gap-2.5 w-full h-9 px-2.5 rounded-lg text-body-short-01 text-text-secondary hover:bg-layer-hover-01 hover:text-text-primary transition-colors"
             >
-              <span className="flex items-center justify-center w-5 h-5 flex-shrink-0">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-                  <circle cx="11" cy="11" r="7" />
-                  <path d="m21 21-4.35-4.35" />
-                </svg>
-              </span>
+              <Icon
+                name="search"
+                size={17}
+                className="flex-shrink-0 text-icon-secondary group-hover:text-icon-primary transition-colors"
+              />
               대화 검색
             </button>
           )}

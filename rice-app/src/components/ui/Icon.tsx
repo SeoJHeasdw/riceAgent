@@ -57,7 +57,9 @@ export type IconName =
   | 'terminal'
   | 'document'
   | 'side-panel-close'
-  | 'side-panel-open';
+  | 'side-panel-open'
+  | 'sidebar'
+  | 'compose';
 
 const PATHS: Record<IconName, React.ReactNode> = {
   renew: <><path d="M3 12a9 9 0 0 1 15-6.7L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" /><path d="M3 21v-5h5" /></>,
@@ -111,6 +113,10 @@ const PATHS: Record<IconName, React.ReactNode> = {
   document: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></>,
   'side-panel-close': <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M15 4v16" /><path d="M11.5 9.5 9 12l2.5 2.5" /></>,
   'side-panel-open': <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M15 4v16" /><path d="M8.5 9.5 11 12l-2.5 2.5" /></>,
+  // Sidebar toggle — clean panel glyph (no chevron); the fixed chat-list toggle by the traffic lights
+  sidebar: <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16" /></>,
+  // Compose / new chat — rounded square with a pencil (ChatGPT/Codex "새 대화" affordance)
+  compose: <><path d="M11 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L13 14l-4 1 1-4z" /></>,
 };
 
 export interface IconProps {

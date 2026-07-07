@@ -21,6 +21,8 @@ export interface IconRailProps {
   items: IconRailItem[];
   activeId: string;
   onNavigate: (id: string, path: string) => void;
+  /** Reserve the macOS traffic-light zone at the top (screens without the app titlebar, e.g. Chat) */
+  topInset?: boolean;
 }
 
 const RailButton: React.FC<{
@@ -74,12 +76,16 @@ const RailButton: React.FC<{
   </div>
 );
 
-export const IconRail: React.FC<IconRailProps> = ({ items, activeId, onNavigate }) => {
+export const IconRail: React.FC<IconRailProps> = ({ items, activeId, onNavigate, topInset = false }) => {
   const topItems = items.filter((item) => !item.pinBottom);
   const bottomItems = items.filter((item) => item.pinBottom);
 
   return (
     <nav className="w-[52px] h-full bg-shell border-r border-shell-border flex flex-col items-center py-2 electron-drag">
+      {/* Traffic-light clearance — mirrors the h-11 titlebar the other screens reserve,
+          so the first rail icon sits below the macOS window buttons instead of under them. */}
+      {topInset && <div className="h-11 flex-shrink-0" aria-hidden="true" />}
+
       {/* Main navigation */}
       <div className="flex flex-col items-center gap-1 w-full">
         {topItems.map((item) => (

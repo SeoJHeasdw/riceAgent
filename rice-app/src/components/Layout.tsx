@@ -64,6 +64,7 @@ export const Layout: React.FC<LayoutProps> = ({
           items={railItems}
           activeId={activeRailId}
           onNavigate={onNavigate}
+          topInset={isChatScreen && isElectron}
         />
         <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
           <div key={screenKey} className="flex-1 flex flex-col min-h-0 animate-fade-in">
