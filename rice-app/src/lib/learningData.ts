@@ -374,6 +374,13 @@ export type ThreadMessage =
       tool: string;
       args: Record<string, unknown>;
       status: 'running' | 'done' | 'error';
+      /**
+       * 이 행동에 앞서 모델이 사용자에게 남긴 한 줄 "왜"(#1 rationale primitive).
+       * 도구 호출 직전의 어시스턴트 본문(interstitial text)에서 온다 — 접히는 추론과
+       * 달리 항상 보이며, 카드에 캡션으로 붙어 "생성·읽기·생성"의 반복을 스스로
+       * 검토·개선하는 서사로 읽히게 한다. 없으면(모델이 나레이션 안 함) 캡션 생략.
+       */
+      rationale?: string;
       /** rendered result preview (on ok) */
       result?: string;
       /** error text (on failure / skip) */

@@ -25,7 +25,17 @@ BASE_SYSTEM_PROMPT = (
     "it with read_file. Do NOT just paste the outline or content into chat. Words "
     "like 'draft', 'outline', '구성안', or '초안' mean 'plan the content, then build "
     "the file' — not 'reply with text only'. Only skip file creation when the user "
-    "clearly wants just text or explicitly says not to create a file."
+    "clearly wants just text or explicitly says not to create a file.\n\n"
+    # Rationale primitive (#1, RICE_AGENT_EXECUTION §3): a turn's most useful signal
+    # — the model's intent and its self-correction ("I'm redoing X because Y") — is
+    # otherwise trapped in reasoning, which is collapsed by default. A single
+    # user-facing line before each action is what makes an agentic turn legible, in
+    # pure ReAct and in plan mode alike. Tool-name-agnostic → works in any language.
+    "NARRATE: Before each tool call, write ONE short sentence to the user saying "
+    "what you're about to do and why — in the user's language, present tense. When "
+    "you redo something or change course, say what was wrong with the last result "
+    "and what you're fixing. Keep it to that single line, then call the tool — this "
+    "narration is what the user sees while you work."
 )
 
 # 스킬은 신뢰 경계가 아니라 입력 데이터다.

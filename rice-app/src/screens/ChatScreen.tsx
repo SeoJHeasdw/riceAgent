@@ -125,12 +125,26 @@ const toThread = (msgs: RawMessage[]): ThreadMessage[] => {
     } else if (m.role === 'assistant') {
       if (m.metadata?.thinking) out.push({ kind: 'thinking', duration: '', text: m.metadata.thinking, streaming: false });
       if (m.metadata?.plan) out = upsertPlanBlock(out, m.metadata.plan);
-      for (const tc of m.tool_calls ?? []) {
-        // update_plan의 화면 표면은 계획 카드다 — 별도 도구 카드는 노이즈.
-        if (tc.tool_name === 'update_plan') continue;
-        out.push({ kind: 'toolcall', callId: tc.id, tool: tc.tool_name, args: tc.arguments ?? {}, status: 'done' });
-      }
-      if (m.content) out.push({ kind: 'agent', text: m.content, sentAt: m.ts });
+      // update_plan·start_plan의 화면 표면은 계획 카드다 — 별도 도구 카드는 노이즈.
+      const realCalls = (m.tool_calls ?? []).filter(
+        (tc) => tc.tool_name !== 'update_plan' && tc.tool_name !== 'start_plan',
+      );
+      // 본문 + 도구 호출이 같이 있으면 그 본문은 행동의 preamble(rationale) — 첫
+      // 도구 카드의 캡션으로 붙인다(라이브의 tool_call 리듀서와 대칭). 본문만
+      // (도구 없음) 있으면 그건 최종 답변 → agent 버블. 이 규칙이 리로드와
+      // 라이브가 같은 그림을 그리게 한다.
+      const rationale = m.content && realCalls.length > 0 ? m.content : undefined;
+      realCalls.forEach((tc, i) => {
+        out.push({
+          kind: 'toolcall',
+          callId: tc.id,
+          tool: tc.tool_name,
+          args: tc.arguments ?? {},
+          status: 'done',
+          rationale: i === 0 ? rationale : undefined,
+        });
+      });
+      if (m.content && realCalls.length === 0) out.push({ kind: 'agent', text: m.content, sentAt: m.ts });
     } else if (m.role === 'tool') {
       // update_plan 결과 메시지가 실은 최신 계획 스냅샷 → 카드 갱신.
       if (m.metadata?.plan) {
@@ -1136,6 +1150,24 @@ function ChatScreen() {
     stopAnswerPump();
   };
 
+  // Lift the in-progress answer buffer as the rationale for an imminent tool call
+  // (#1 rationale primitive). The interstitial text the model streamed before acting
+  // IS its one-line "why" — return the full buffered text (authoritative, even if the
+  // typewriter hasn't caught up) and tear the pump down WITHOUT sealing a standalone
+  // bubble; the caller re-homes it as the tool card's caption. Null if nothing was
+  // streamed (model didn't narrate) → card renders with no caption, as before.
+  const takeStreamingAnswer = (): string | null => {
+    const a = answerRef.current;
+    if (!a.active) return null;
+    const text = a.target.trim();
+    a.active = false;
+    a.target = '';
+    a.shown = 0;
+    a.lastFeedAt = 0;
+    stopAnswerPump();
+    return text || null;
+  };
+
   // Hard reset the live-render state without flushing — for switching sessions or
   // starting a new chat, where a running pump must not write into the thread we're
   // about to replace.
@@ -1277,16 +1309,33 @@ function ChatScreen() {
         upsertPlan(plan);
         seedWaiting();
       } else if (e.type === 'tool_call') {
-        // a tool round begins → close the answer + reasoning blocks, push a running card
-        sealAnswer();
+        // a tool round begins → close the reasoning block, push a running card.
         finalizeThinking();
         const d = e.data as { tool_call_id: string; tool_name: string; arguments?: Record<string, unknown> };
-        // update_plan의 화면 표면은 계획 카드(plan_updated) — 도구 카드는 만들지 않는다.
-        if (d.tool_name === 'update_plan') return;
-        setThread((p) => [
-          ...p,
-          { kind: 'toolcall', callId: d.tool_call_id, tool: d.tool_name, args: d.arguments ?? {}, status: 'running' },
-        ]);
+        // update_plan·start_plan의 화면 표면은 계획 카드(plan_updated) — 도구 카드는
+        // 만들지 않는다. 그 앞의 preamble은 평범한 답변 세그먼트로 흘려보낸다.
+        if (d.tool_name === 'update_plan' || d.tool_name === 'start_plan') {
+          sealAnswer();
+          return;
+        }
+        // 이 행동 직전에 스트리밍된 본문 = 행동의 rationale(#1). 떠도는 버블 대신
+        // 카드의 캡션으로 재배치한다: 버퍼를 걷어오고, 펌프가 만든 진행형 agent
+        // 버블을 제거한 뒤, rationale을 실은 실행 카드를 append한다.
+        const rationale = takeStreamingAnswer();
+        setThread((p) => {
+          const base = rationale != null && p[p.length - 1]?.kind === 'agent' ? p.slice(0, -1) : p;
+          return [
+            ...base,
+            {
+              kind: 'toolcall',
+              callId: d.tool_call_id,
+              tool: d.tool_name,
+              args: d.arguments ?? {},
+              status: 'running',
+              rationale: rationale ?? undefined,
+            },
+          ];
+        });
       } else if (e.type === 'tool_approval_required') {
         // HITL gate — render the approval card; the backend stream stays parked
         // until the user posts a decision (handleToolApproval), then resumes.

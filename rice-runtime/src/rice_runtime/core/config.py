@@ -170,7 +170,11 @@ class AgentConfig:
     지점들이다: 계획 수립에 한 번 더 LLM을 부르고, 매 반복 계획 상태를 프롬프트에
     다시 실으며, 계획이 크면 반복 상한을 늘린다."""
 
-    # 턴 시작 시 플래너 호출 여부. False면 이전과 동일한 순수 ReAct 루프.
+    # 턴 시작 시 *eager* 플래너 호출 여부(의도가 명백히 복합일 때 미리 계획 수립).
+    # False면 턴 시작에 계획을 세우지 않는다 — 단, 실행 중 lazy 에스컬레이션은 이
+    # 플래그와 무관하게 항상 가능하다(loop.py의 start_plan): 순수 ReAct로 돌다가
+    # 분해 너비가 드러나면 모델이 그 자리에서 계획으로 승격한다. 즉 True=eager+lazy,
+    # False="기본 ReAct, 복잡도가 오르면 lazy 승격"(플래너 LLM 호출 세금 없음).
     planning_enabled: bool = True
     # 플래너에게 보여줄 최근 대화 메시지 수(의도 파악용 문맥).
     planner_recent_messages: int = 12

@@ -146,6 +146,8 @@ _STATUS_MARK = {
 }
 
 _REACT_GUIDANCE = """How to work this plan (ReAct):
+- Before each tool call, tell the user in one short sentence what you're doing and \
+why (especially when redoing something), then call the tool.
 - Work the first step that is not done; set it in_progress via update_plan when you start it.
 - After EVERY tool result, briefly reassess before acting again: did it complete the current \
 step (→ mark done, with a one-line note), did it fail (→ retry differently or mark failed), \

@@ -299,10 +299,99 @@ async def test_loop_without_plan_stays_pure_react():
     events = [ev async for ev in loop.run(_ctx((_spec("echo"),)), "s1", result, asyncio.Event())]
 
     assert not [e for e in events if e.type == EventType.PLAN_UPDATED]
-    # 계획이 없으면 update_plan을 광고하지 않고, 시스템 프롬프트도 그대로다
-    assert [t.name for t in provider.calls[1]["tools"]] == ["echo"]
+    # 계획이 없으면 update_plan이 아니라 start_plan(escalation trigger)을 광고한다.
+    # 계획 블록이 없으니 시스템 프롬프트는 그대로다.
+    assert [t.name for t in provider.calls[1]["tools"]] == ["echo", "start_plan"]
     assert provider.calls[1]["system"] == "sys"
     assert result.final_message == "바로 답변"
+
+
+@pytest.mark.asyncio
+async def test_loop_escalates_to_plan_via_start_plan():
+    """#2 lazy escalation: 단순으로 판정돼 ReAct로 출발하지만, 실행 중 복잡도가
+    드러나면 모델이 start_plan으로 그 자리에서 계획으로 승격한다."""
+    provider = _ScriptedProvider(
+        [
+            _text({"plan_needed": False}),  # 플래너: 단순으로 판정 → ReAct 출발
+            [  # round 1 (ReAct): 복잡도(분해 너비) 발견 → start_plan 승격
+                ProviderChunk(
+                    kind="tool_call",
+                    tool_call=ToolCall(
+                        tool_name="start_plan",
+                        arguments={"goal": "두 갈래 작업", "steps": [{"title": "수집"}, {"title": "분석"}]},
+                        id="call_sp1",
+                    ),
+                ),
+            ],
+            _text("최종 답변"),  # round 2: 계획 모드에서 마무리
+        ]
+    )
+    loop = AgentLoop(
+        provider=provider,
+        dispatcher=_dispatcher({}),
+        planner=TurnPlanner(provider=provider, config=AgentConfig()),
+        agent_config=AgentConfig(),
+    )
+    result = LoopResult()
+    events = [ev async for ev in loop.run(_ctx((_spec("echo"),)), "s1", result, asyncio.Event())]
+
+    # 승격 순간 계획 스냅샷(rev1)이 흐른다
+    plan_events = [e for e in events if e.type == EventType.PLAN_UPDATED]
+    assert [e.data["revision"] for e in plan_events] == [1]
+    assert [s["title"] for s in plan_events[0].data["steps"]] == ["수집", "분석"]
+
+    # round 1(ReAct)엔 start_plan이, 승격 후 round 2엔 update_plan이 광고된다(상호 배타)
+    r1_tools = [t.name for t in provider.calls[1]["tools"]]
+    r2_tools = [t.name for t in provider.calls[2]["tools"]]
+    assert "start_plan" in r1_tools and "update_plan" not in r1_tools
+    assert "update_plan" in r2_tools and "start_plan" not in r2_tools
+
+    # 승격 후에야 시스템 프롬프트에 살아있는 계획이 렌더된다
+    assert "## Active Plan" not in provider.calls[1]["system"]
+    assert "## Active Plan" in provider.calls[2]["system"]
+
+    # start_plan은 감사 가능(tool_call)하고, 스냅샷이 tool 메시지 metadata로 영속화된다
+    assert "start_plan" in [e.data["tool_name"] for e in events if e.type == EventType.TOOL_CALL]
+    sp_msg = next(m for m in result.history if m.metadata.get("tool_name") == "start_plan")
+    assert sp_msg.metadata["plan"]["revision"] == 1
+    assert result.final_message == "최종 답변"
+
+
+@pytest.mark.asyncio
+async def test_loop_start_plan_rejects_single_step_and_stays_react():
+    """반복 깊이(단일 산출물 재작업)는 계획이 아니다 — 1단계 승격 시도는 '그냥 계속
+    일하라' 넛지로 반려되고 턴은 순수 ReAct로 남는다(over-planning 방지의 코드 강제)."""
+    provider = _ScriptedProvider(
+        [
+            _text({"plan_needed": False}),  # 플래너: 단순
+            [  # round 1: 깊이(1단계)로 잘못 승격 시도 → 반려
+                ProviderChunk(
+                    kind="tool_call",
+                    tool_call=ToolCall(
+                        tool_name="start_plan",
+                        arguments={"goal": "한 산출물", "steps": [{"title": "다시 만들기"}]},
+                        id="call_sp0",
+                    ),
+                ),
+            ],
+            _text("계속해서 마무리"),  # round 2: 반려 후 계속
+        ]
+    )
+    loop = AgentLoop(
+        provider=provider,
+        dispatcher=_dispatcher({}),
+        planner=TurnPlanner(provider=provider, config=AgentConfig()),
+        agent_config=AgentConfig(),
+    )
+    result = LoopResult()
+    events = [ev async for ev in loop.run(_ctx((_spec("echo"),)), "s1", result, asyncio.Event())]
+
+    # 계획은 서지 않는다
+    assert not [e for e in events if e.type == EventType.PLAN_UPDATED]
+    # 반려는 ok=False tool_result로 감사되고, 아직 계획이 없으니 여전히 start_plan을 광고
+    assert any(e.type == EventType.TOOL_RESULT and e.data.get("ok") is False for e in events)
+    assert "start_plan" in [t.name for t in provider.calls[2]["tools"]]
+    assert result.final_message == "계속해서 마무리"
 
 
 @pytest.mark.asyncio

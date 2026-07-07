@@ -58,6 +58,33 @@ _VALID_STEP_STATUS = ("pending", "in_progress", "done", "failed", "skipped")
 _TERMINAL = ("done", "failed", "skipped")
 
 
+# ── 공유 계획 빌더 — eager 플래너와 실행 중 lazy 에스컬레이션이 같은 규칙을 쓴다 ──
+def build_plan_from_steps(goal: object, raw_steps: object) -> TurnPlan | None:
+    """`goal` + `[{title, detail}]` → 검증된 TurnPlan(최소 2단계) 또는 None.
+
+    두 경로가 이 하나의 규칙을 공유한다: 턴 시작의 eager 플래너(_parse)와,
+    실행 도중 모델이 복잡도(분해 *너비*)를 발견해 부르는 lazy 에스컬레이션
+    (start_plan, loop.py). "1단계짜리 계획은 계획이 아니다" — 단일 산출물을
+    다듬는 반복(깊이)은 순수 ReAct로 남고, 서로 다른 서브태스크가 2개 이상일
+    때만(너비) 계획으로 승격한다. 이 경계가 over-planning을 막는 핵심이다."""
+    goal_text = str(goal or "").strip()
+    if not goal_text or not isinstance(raw_steps, list):
+        return None
+    steps: list[PlanStep] = []
+    for item in raw_steps[:_HARD_MAX_STEPS]:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title") or "").strip()
+        if not title:
+            continue
+        steps.append(
+            PlanStep(id=f"s{len(steps) + 1}", title=title, detail=str(item.get("detail") or "").strip())
+        )
+    if len(steps) < 2:
+        return None
+    return TurnPlan(goal=goal_text, steps=tuple(steps))
+
+
 # ── update_plan — 루프가 가로채는 가상 빌트인의 스키마 ─────────────────────────
 UPDATE_PLAN_SPEC = ToolSpec(
     name="update_plan",
@@ -98,6 +125,48 @@ UPDATE_PLAN_SPEC = ToolSpec(
             },
             "reason": {"type": "string", "description": "One line: why the plan changed (for revisions)."},
         },
+    },
+    source="builtin",
+    requires_approval=False,
+)
+
+
+# ── start_plan — ReAct 도중 계획으로 승격하는 가상 빌트인(루프가 가로챈다) ────────
+# update_plan이 "이미 있는 계획을 갱신"이라면, start_plan은 "계획이 없던 턴에서
+# 계획을 시작"이다. plan_state가 없을 때만(순수 ReAct) 광고된다 — 있으면 update_plan.
+# 설명이 escalation trigger의 정책(분해 너비 O, 반복 깊이 X)을 그대로 담는다:
+# 모델이 이 경계를 오판하면 over-planning이 돌아온다.
+START_PLAN_SPEC = ToolSpec(
+    name="start_plan",
+    description=(
+        "Escalate to an explicit plan — call this ONCE when the task turns out to "
+        "need SEVERAL DISTINCT subtasks that build on each other (gather → analyze "
+        "→ produce → deliver). Give the goal and the ordered steps; from then on you "
+        "report progress with update_plan. Do NOT call it to retry or polish a "
+        "single deliverable — redoing one file until it is good is normal work, just "
+        "keep going. Needs two or more genuinely different steps, or don't call it."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "goal": {
+                "type": "string",
+                "description": "One sentence stating the user's intent, in the user's language.",
+            },
+            "steps": {
+                "type": "array",
+                "description": "2+ ordered, distinct subtasks.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string"},
+                        "detail": {"type": "string", "description": "which tool(s) it uses and what it produces"},
+                    },
+                    "required": ["title"],
+                },
+            },
+        },
+        "required": ["goal", "steps"],
     },
     source="builtin",
     requires_approval=False,
@@ -190,28 +259,8 @@ class TurnPlanner:
             return None
         if not data.get("plan_needed"):
             return None
-        goal = str(data.get("goal") or "").strip()
-        raw_steps = data.get("steps")
-        if not goal or not isinstance(raw_steps, list):
-            return None
-        steps: list[PlanStep] = []
-        for item in raw_steps[:_HARD_MAX_STEPS]:
-            if not isinstance(item, dict):
-                continue
-            title = str(item.get("title") or "").strip()
-            if not title:
-                continue
-            steps.append(
-                PlanStep(
-                    id=f"s{len(steps) + 1}",
-                    title=title,
-                    detail=str(item.get("detail") or "").strip(),
-                )
-            )
-        # 1단계짜리 "계획"은 계획이 아니다 — 단순 실행으로 처리.
-        if len(steps) < 2:
-            return None
-        return TurnPlan(goal=goal, steps=tuple(steps))
+        # start_plan(lazy escalation)과 같은 규칙으로 검증한다 — 1단계는 계획이 아니다.
+        return build_plan_from_steps(data.get("goal"), data.get("steps"))
 
 
 @dataclass

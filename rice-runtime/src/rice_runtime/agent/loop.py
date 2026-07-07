@@ -51,7 +51,14 @@ from .context_manager import (
     estimate_context_tokens as _pure_ctx_tokens,
 )
 from .interfaces import IToolDispatcher
-from .planner import UPDATE_PLAN_SPEC, PlanOutcome, PlanState, TurnPlanner
+from .planner import (
+    START_PLAN_SPEC,
+    UPDATE_PLAN_SPEC,
+    PlanOutcome,
+    PlanState,
+    TurnPlanner,
+    build_plan_from_steps,
+)
 from .providers.interfaces import ILLMProvider, ProviderChunk
 from .tool_scheduler import ScheduledToolRequest, ToolBatchResult, ToolScheduler
 
@@ -219,8 +226,16 @@ class AgentLoop:
                 result.aborted = True
                 break
 
-            # update_plan은 계획이 있는 동안만 광고한다(계획 없는 턴에 노이즈 금지).
-            iteration_tools = ctx.tools + (UPDATE_PLAN_SPEC,) if plan_state is not None else ctx.tools
+            # 계획이 있으면 update_plan(진행 보고)을, 없고 도구가 있으면 start_plan
+            # (ReAct 도중 계획으로 승격하는 escalation trigger)을 광고한다. 둘은 상호
+            # 배타 — start_plan은 plan_state가 없을 때만 존재하므로 한 번 승격하면
+            # 사라진다(이중 계획 불가). 순수 대화(도구 없음)엔 둘 다 붙이지 않는다.
+            if plan_state is not None:
+                iteration_tools = ctx.tools + (UPDATE_PLAN_SPEC,)
+            elif ctx.tools:
+                iteration_tools = ctx.tools + (START_PLAN_SPEC,)
+            else:
+                iteration_tools = ctx.tools
             iteration_system = self._system_prompt_for(ctx, plan_state, tool_calls_made)
 
             assistant_parts: list[str] = []
@@ -312,6 +327,56 @@ class AgentLoop:
             # ordered. Results are appended in model-call order.
             scheduled: list[ScheduledToolRequest] = []
             for call in pending_calls:
+                # ── start_plan 인터셉트: ReAct 도중 계획으로 승격(#2 lazy escalation).
+                # plan_state가 없을 때만 광고·유효하다. 검증(≥2 distinct steps)을
+                # 통과하면 plan_state를 세우고 스냅샷을 SSE(plan_updated)와 tool
+                # metadata(plan)로 흘려 리로드가 같은 지점에 카드를 복원하게 하고,
+                # 다음 반복부터 update_plan 광고 + 계획 블록 렌더로 전환된다. 승격
+                # 실패(1단계 등, 분해 너비 부족)는 "그냥 계속 일하라" 넛지로 되돌린다.
+                if plan_state is None and call.tool_name == START_PLAN_SPEC.name:
+                    yield ev_tool_call(call)
+                    new_plan = build_plan_from_steps(call.arguments.get("goal"), call.arguments.get("steps"))
+                    if new_plan is None:
+                        res = ToolResult(
+                            call.id,
+                            ok=False,
+                            error=(
+                                "start_plan needs a goal and 2+ distinct steps. If this is really "
+                                "one deliverable, don't plan — keep working and verify your result."
+                            ),
+                        )
+                        yield ev_tool_result(res)
+                        messages.append(
+                            Message(
+                                role="tool",
+                                content=_render_tool_result(res),
+                                metadata={"tool_call_id": call.id, "tool_source": "builtin", "tool_name": call.tool_name},
+                            )
+                        )
+                        tool_calls_made += 1
+                        continue
+                    plan_state = PlanState(new_plan)
+                    yield ev_plan_updated(plan_state.plan)
+                    res = ToolResult(call.id, ok=True, result={"ok": True, "plan": plan_state.plan.to_dict()})
+                    yield ev_tool_result(res)
+                    messages.append(
+                        Message(
+                            role="tool",
+                            content=_render_tool_result(res),
+                            metadata={
+                                "tool_call_id": call.id,
+                                "tool_source": "builtin",
+                                "tool_name": call.tool_name,
+                                "plan": plan_state.plan.to_dict(),
+                            },
+                        )
+                    )
+                    tool_calls_made += 1
+                    log.info(
+                        "turn escalated to plan mid-flight: %d steps (session %s) — %s",
+                        len(plan_state.plan.steps), session_id, plan_state.plan.goal,
+                    )
+                    continue
                 # ── update_plan 인터셉트: 계획 상태는 턴-로컬이다 — dispatcher를
                 # 태우지 않고 여기서 적용한다(외부 실행·승인·영속 부작용 없음).
                 # 갱신마다 전체 스냅샷을 SSE로 흘리고, tool 메시지 metadata에도 실어
@@ -378,7 +443,10 @@ class AgentLoop:
 
             # ── ReAct drift guard 카운터: 실제 도구 라운드가 계획 보고 없이
             # 지나가면 누적 — 임계 도달 시 다음 반복 프롬프트가 재평가를 강제한다.
-            if plan_state is not None and not any(c.tool_name == UPDATE_PLAN_SPEC.name for c in pending_calls):
+            # 계획 관련 호출(update_plan·start_plan)은 "보고"이므로 카운트에서 제외한다.
+            if plan_state is not None and not any(
+                c.tool_name in (UPDATE_PLAN_SPEC.name, START_PLAN_SPEC.name) for c in pending_calls
+            ):
                 plan_state.note_tool_round()
             # loop continues: provider sees the tool results next iteration
 

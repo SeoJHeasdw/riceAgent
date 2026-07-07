@@ -900,6 +900,14 @@ const BuiltinToolCard: React.FC<{ m: Extract<ThreadMessage, { kind: 'toolcall' }
 
   return (
     <div className="my-1.5 max-w-[680px]">
+      {/* rationale(#1): 행동 직전 모델이 남긴 한 줄 "왜" — 접히는 추론과 달리 항상
+          보이며 파란 좌측 강조(에이전트 목소리)로 카드에 묶인다. "생성·읽기·생성"의
+          반복을 자기검토→개선 서사로 읽히게 하는 핵심 캡션. */}
+      {m.rationale && (
+        <p className="mb-1.5 border-l-2 border-blue-40/45 pl-2.5 text-caption-01 leading-relaxed text-text-secondary">
+          {m.rationale}
+        </p>
+      )}
       <button
         onClick={() => setOpen((o) => !o)}
         className="flex items-center gap-2 w-full text-left text-caption-01 text-text-secondary hover:text-text-primary transition-colors"
