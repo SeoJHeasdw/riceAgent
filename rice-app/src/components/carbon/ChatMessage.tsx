@@ -88,22 +88,15 @@ const AnimatedEllipsis: React.FC<{ className?: string }> = ({ className = '' }) 
   </span>
 );
 
-const WaitingProgress: React.FC<{ className?: string }> = ({ className = '' }) => (
-  <span className={`rice-wait-progress ${className}`} aria-hidden="true">
-    <span />
-  </span>
-);
-
 // ── streaming typing indicator ───────────────────────────────
 // Shown in an assistant bubble that has no text yet (live SSE turn in flight),
 // so the user can tell RICE is generating a response and isn't stuck.
 const TypingDots: React.FC = () => (
-  <span className="inline-flex min-w-[160px] flex-col gap-1.5 py-1" aria-label="응답 생성 중">
+  <span className="inline-flex min-w-[160px] py-1" aria-label="응답 생성 중">
     <span className="text-caption-01 text-text-helper">
       응답 생성 중
       <AnimatedEllipsis />
     </span>
-    <WaitingProgress />
   </span>
 );
 
@@ -655,7 +648,7 @@ const ThinkingBlock: React.FC<{ m: Extract<ThreadMessage, { kind: 'thinking' }> 
       </button>
       {open && m.text != null && (
         <div className="mt-2 pl-1 text-caption-01 text-text-helper whitespace-pre-wrap leading-relaxed border-l-2 border-border-subtle-01 pl-3">
-          {text || (m.streaming ? <WaitingProgress className="my-1 w-[180px]" /> : '…')}
+          {text || '…'}
         </div>
       )}
       {open && m.text == null && (
