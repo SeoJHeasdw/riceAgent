@@ -23,7 +23,7 @@ Implementation status per task batch:
              (크로스세션 발굴) + stage_proposal/resolve_proposal(미드턴 T5) +
              delete_memory(위생). LEARNING_LOOP §9.
 """ 
-
+ 
 from __future__ import annotations
 
 import logging
