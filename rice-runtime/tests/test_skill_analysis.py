@@ -108,7 +108,7 @@ def test_body_writes_enqueue_and_drain_refreshes():
     assert svc.get_skill_analysis("demo-skill")["status"] == "fresh"
 
     # apply_patch(승인) 트리거 → stale → 드레인이 다시 fresh 로.
-    svc.apply_patch("demo-skill", approved=True, proposed_body="# 새 본문\n", expected_version=1)
+    svc.apply_patch("demo-skill", approved=True, proposed_body="# 새 본문\n1. 새 단계 실행\n", expected_version=1)
     assert "demo-skill" in svc._analysis_queue
     asyncio.run(svc.run_pending_analyses(limit=5))
     assert svc.get_skill_analysis("demo-skill")["status"] == "fresh"

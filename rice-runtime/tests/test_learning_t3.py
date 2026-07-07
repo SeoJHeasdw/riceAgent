@@ -324,15 +324,15 @@ class TestApplyPatchFull:
     def test_history_after_multiple_patches(self):
         """2번 패치 후 history에 v1, v2 각각 존재."""
         self._store.write(_make_skill("multi-patch"))
-        self._svc.apply_patch("multi-patch", approved=True, edited_body="## v2\n")
-        self._svc.apply_patch("multi-patch", approved=True, edited_body="## v3\n")
+        self._svc.apply_patch("multi-patch", approved=True, edited_body="## v2\n1. second step\n")
+        self._svc.apply_patch("multi-patch", approved=True, edited_body="## v3\n1. third step\n")
         hist = self._svc.history("multi-patch")
         assert len(hist) == 2
 
     def test_rollback_after_patch(self):
         """v1→patch→v2→rollback(v1)→v3, 본문 복원."""
         self._store.write(_make_skill("rb-after-patch"))
-        self._svc.apply_patch("rb-after-patch", approved=True, edited_body="## v2\n")
+        self._svc.apply_patch("rb-after-patch", approved=True, edited_body="## v2\n1. second step\n")
         new_v = self._svc.rollback("rb-after-patch", 1)
         assert new_v == 3
         detail = self._svc.get_skill("rb-after-patch")

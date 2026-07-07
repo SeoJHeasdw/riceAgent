@@ -389,7 +389,7 @@ class TestLearningServiceT2:
 
     def test_apply_patch_creates_history(self):
         self._write_skill("patch-hist")
-        self._svc.apply_patch("patch-hist", approved=True, edited_body="## New\n")
+        self._svc.apply_patch("patch-hist", approved=True, edited_body="## New\n1. do the new step\n")
         hist = self._svc.history("patch-hist")
         assert len(hist) == 1
         assert hist[0].version == 1
@@ -403,7 +403,7 @@ class TestLearningServiceT2:
 
     def test_history_returns_versions(self):
         self._write_skill("hist-sk")
-        self._svc.apply_patch("hist-sk", approved=True, edited_body="v2 body")
+        self._svc.apply_patch("hist-sk", approved=True, edited_body="v2 body\n1. updated step\n")
         history = self._svc.history("hist-sk")
         assert len(history) == 1
 

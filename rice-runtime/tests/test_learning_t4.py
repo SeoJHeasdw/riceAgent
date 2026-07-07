@@ -190,13 +190,13 @@ class TestApplyPatchCreation:
 
     def test_no_history_dir_created_for_fresh_skill(self):
         """생성 경로는 archive_to_history를 타지 않는다 — 보관할 이전 버전이 없다."""
-        self._svc.apply_patch("no-history-sk", approved=True, proposed_body="body")
+        self._svc.apply_patch("no-history-sk", approved=True, proposed_body="1. fresh step\n")
         hist_dir = self._paths.skill_history("no-history-sk")
         assert not hist_dir.exists() or list(hist_dir.glob("*.md")) == []
 
     def test_usage_starts_at_zero_not_one(self):
         """생성은 "patch"가 아니다 — usage.patch는 0으로 시작한다(create_skill과 동일)."""
-        self._svc.apply_patch("fresh-usage-sk", approved=True, proposed_body="body")
+        self._svc.apply_patch("fresh-usage-sk", approved=True, proposed_body="1. fresh step\n")
         usage = UsageStore(self._paths).read("fresh-usage-sk")
         assert usage.patch == 0
 
@@ -635,7 +635,7 @@ class TestLearningServiceReviewFacade:
         cfg = LearningConfig(review_min_tool_calls=9999, review_nudge_turns=9999)
         call = ToolCall(
             tool_name="propose_skill_create",
-            arguments={"name": "explicit-learn-sk", "description": "d", "body": "body"},
+            arguments={"name": "explicit-learn-sk", "description": "d", "body": "1. explicit step\n"},
         )
         svc = self._svc_with_provider(_FakeProvider([call]), cfg)
         history = [Message(role="user", content="hi"), Message(role="assistant", content="done")]
@@ -708,12 +708,12 @@ class TestGuardWiredIntoWritePaths:
         assert "REDACTED" in detail.body
 
     def test_update_skill_rejects_oversize_body(self):
-        self._svc.create_skill(name="update-target", body="short")
+        self._svc.create_skill(name="update-target", body="1. short step\n")
         with pytest.raises(ValidationError):
             self._svc.update_skill("update-target", body="x" * 101)
 
     def test_update_skill_redacts_secret_when_body_changes(self):
-        self._svc.create_skill(name="update-leaky", body="short")
+        self._svc.create_skill(name="update-leaky", body="1. short step\n")
         detail = self._svc.update_skill("update-leaky", body="token: sk-ant-api03-abcdefghijklmnopqrstuvwxyz")
         assert "sk-ant-api03" not in detail.body
         assert "REDACTED" in detail.body
@@ -721,12 +721,12 @@ class TestGuardWiredIntoWritePaths:
     def test_update_skill_unchanged_body_skips_guard_check(self):
         """body를 안 바꾸면(=None) 크기 검증도 안 탄다 — description/tags만 바꾸는
         흔한 경우가 오버사이즈 기존 스킬 때문에 막히지 않아야 한다."""
-        self._svc.create_skill(name="meta-only", body="short")
+        self._svc.create_skill(name="meta-only", body="1. short step\n")
         detail = self._svc.update_skill("meta-only", description="새 설명")
         assert detail.description == "새 설명"
 
     def test_apply_patch_rejects_oversize_proposed_body(self):
-        self._svc.create_skill(name="patch-target", body="short")
+        self._svc.create_skill(name="patch-target", body="1. short step\n")
         with pytest.raises(ValidationError):
             self._svc.apply_patch("patch-target", approved=True, proposed_body="x" * 101)
 

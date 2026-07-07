@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from dataclasses import replace
 from typing import Callable
 
 from ..agent.providers.interfaces import ILLMProvider
@@ -68,6 +69,7 @@ from .review.context import LearningContextManager, ReviewContextConfig
 from .review.engine import ReviewEngine
 from .review.gate import ReviewGate
 from .skill import guard as skill_guard
+from .skill.verifier import VerificationReport, verify_candidate
 from .skill.analysis import AnalysisStore, SkillAnalysisData, effective_status
 from .skill.analyzer import SkillAnalyzer
 from .skill.builtin import BuiltinSkillCatalog
@@ -170,9 +172,14 @@ class LearningService(ILearningService):
         *,
         resolve_provider: Callable[[], ILLMProvider] | None = None,
         resolve_analyzer_provider: Callable[[], ILLMProvider] | None = None,
+        resolve_tool_names: Callable[[], set[str]] | None = None,
     ) -> None:
         self._db = db
         self._config = config
+        # 승격 검증 harness(skill/verifier.py)의 도구 카탈로그 소스 — 스킬 본문이
+        # 호출을 지시하는 도구가 실재하는지 검사한다. None(대부분의 테스트/독립
+        # 사용)이면 그 검사만 스킵되고 나머지 검증은 동일하게 돈다.
+        self._resolve_tool_names = resolve_tool_names
         # paths가 None이면 기본 경로를 사용한다.
         # NOTE(agent): paths=None은 T1 이전 테스트와의 역호환을 위해 허용한다.
         # composition_root.py에서 paths를 DI로 주입하므로 실제 실행 경로에서는 항상 제공된다.
@@ -543,6 +550,11 @@ class LearningService(ILearningService):
                 return None  # 본문이 전혀 없으면 만들 수 없다 (fail-closed)
             skill_guard.validate_content_size(new_body, self._config.skill_max_body_chars)
             new_body, _ = skill_guard.scrub_secrets(new_body)  # 방어적 재적용(대부분 이미 클린)
+            # 승격 검증 harness의 **최종 관문** — 어떤 경로(카드 승인, 제안함,
+            # 사용자 편집 본문)로 왔든 fail 본문은 디스크에 닿지 못한다.
+            self._enforce_verification(
+                name=skill_id, body=new_body, description=description, tags=tags, current_body=None
+            )
             now = now_iso()
             skill = SkillData(
                 name=skill_id,
@@ -587,6 +599,11 @@ class LearningService(ILearningService):
             new_body = current.body
         skill_guard.validate_content_size(new_body, self._config.skill_max_body_chars)
         new_body, _ = skill_guard.scrub_secrets(new_body)
+        # 최종 관문(패치 경로) — 사용자 편집(edited_body)이 본문을 깨뜨린 경우까지 잡는다.
+        self._enforce_verification(
+            name=skill_id, body=new_body, description=current.description,
+            tags=tuple(current.tags), current_body=current.body,
+        )
         new_version = current.version + 1
         current.version = new_version
         current.body = new_body
@@ -600,6 +617,116 @@ class LearningService(ILearningService):
         self.request_analysis(skill_id)
 
         return new_version
+
+    # ── 승격 검증 harness (skill/verifier.py — 리뷰 P1) ───────────────────────
+    def _verify_candidate(
+        self,
+        *,
+        name: str,
+        body: str,
+        description: str = "",
+        tags: tuple[str, ...] = (),
+        current_body: str | None = None,
+    ) -> VerificationReport:
+        """verify_candidate에 서비스가 아는 문맥(active 스킬 이름들, 도구 카탈로그)을
+        모아 넘기는 어댑터. 카탈로그 조회 실패는 해당 검사 스킵으로 강등한다 —
+        검증 인프라 문제가 제안/승격 흐름을 깨면 안 된다."""
+        known: set[str] | None = None
+        if self._resolve_tool_names is not None:
+            try:
+                known = set(self._resolve_tool_names())
+            except Exception:  # noqa: BLE001
+                log.warning("tool catalog resolve failed — skipping tool-existence check", exc_info=True)
+        existing = [s.name for s in self._active_skills() if s.name != name]
+        return verify_candidate(
+            name=name,
+            body=body,
+            description=description,
+            tags=tags,
+            current_body=current_body,
+            existing_names=existing,
+            known_tool_names=known,
+        )
+
+    def _enforce_verification(
+        self,
+        *,
+        name: str,
+        body: str,
+        description: str = "",
+        tags: tuple[str, ...] = (),
+        current_body: str | None = None,
+    ) -> None:
+        """쓰기 직전의 fail-closed 강제 — fail 판정이면 ValidationError.
+
+        스크리닝(_screen_proposals/stage_proposal)이 놓칠 수 있는 경로까지 덮는
+        백스톱이다: 제안함의 오래된 payload, 카드에서 사용자가 직접 고친
+        edited_body, 수동 생성/편집 라우트. warn은 여기서 무시한다 — 카드에서
+        이미 보였거나(제안 경로) 사용자가 직접 쓴 본문(수동 경로)이므로 차단할
+        권리는 객관적 무결성 위반에만 있다."""
+        report = self._verify_candidate(
+            name=name, body=body, description=description, tags=tags, current_body=current_body
+        )
+        if report.failed:
+            self._ledger.record(
+                "verifier_rejected",
+                skill_id=name,
+                origin="apply",
+                detail=report.to_detail(),
+            )
+            raise ValidationError(f"스킬 검증 실패: {report.failure_text()}")
+
+    def _screen_proposals(
+        self,
+        effects: list[LearningEffect],
+        *,
+        origin: str,
+        session_id: str | None = None,
+    ) -> list[LearningEffect]:
+        """LLM이 낳은 제안(review/learn/sweep/discovery 전부)의 단일 검증 관문.
+
+        fail → 제안 드랍 + ledger `verifier_rejected`(findings 포함) — 이것이
+        리뷰가 요구한 quarantine이다: 실패 제안은 증발하지 않고 감사 가능하게
+        남되, 카드/제안함/디스크 어디에도 닿지 않는다.
+        warn → PatchProposal.warnings에 병합(승인 카드에 그대로 표시).
+        MemoryWritten 등 비-제안 효과는 그대로 통과."""
+        screened: list[LearningEffect] = []
+        for effect in effects:
+            if not isinstance(effect, PatchProposal):
+                screened.append(effect)
+                continue
+            current_body: str | None = None
+            if effect.from_version > 0:
+                try:
+                    current_body = self._skill_store.read(effect.skill_id).body
+                except Exception:  # noqa: BLE001 — 스킬이 사라졌으면 생성으로 검증
+                    current_body = None
+            report = self._verify_candidate(
+                name=effect.skill_id,
+                body=effect.proposed_body,
+                description=effect.description,
+                tags=effect.tags,
+                current_body=current_body,
+            )
+            if report.failed:
+                log.warning(
+                    "proposal for %r rejected by verifier (%s): %s",
+                    effect.skill_id, origin, report.failure_text(),
+                )
+                self._ledger.record(
+                    "verifier_rejected",
+                    skill_id=effect.skill_id,
+                    session_id=session_id,
+                    origin=origin,
+                    trigger=effect.trigger,
+                    detail={"changelog": effect.changelog, **report.to_detail()},
+                )
+                continue
+            warning_lines = report.warning_lines()
+            if warning_lines:
+                effect = replace(effect, warnings=effect.warnings + warning_lines)
+            screened.append(effect)
+        return screened
 
     # ── mid-turn staging (T5, Self-Improvement v3) ────────────────────────────
     def stage_proposal(
@@ -668,6 +795,38 @@ class LearningService(ILearningService):
                 "status": "dropped",
                 "message": "제안이 성립하지 않습니다 (빈 본문, 크기 초과, 이름 규약 위반, 또는 기존 본문과 동일).",
             }
+
+        # ── 승격 검증 harness: 성립한 제안만 검증한다(정책 검사 — 이름 규약·
+        # plugin 소유·동일 본문 — 가 먼저다). fail이면 스테이징을 거부하고 사유를
+        # 도구 결과로 되돌린다 — 모델이 같은 턴에 본문을 고쳐 재제안하는 피드백
+        # 루프. (HITL 카드는 '그럴듯하지만 잘린/조작된 본문'을 못 잡는다 — P1.)
+        report = self._verify_candidate(
+            name=proposal.skill_id,
+            body=proposal.proposed_body,
+            description=proposal.description or (current.description if current else ""),
+            tags=proposal.tags or (tuple(current.tags) if current else ()),
+            current_body=current.body if current is not None else None,
+        )
+        if report.failed:
+            self._ledger.record(
+                "verifier_rejected",
+                skill_id=proposal.skill_id,
+                session_id=session_id,
+                origin="agent",
+                trigger="T5",
+                detail={"changelog": proposal.changelog, **report.to_detail()},
+            )
+            return {
+                "status": "rejected",
+                "message": (
+                    f"검증 실패로 제안이 거부되었습니다: {report.failure_text()} "
+                    "— 본문을 고쳐 다시 propose_skill을 호출하세요."
+                ),
+            }
+        # 검증 warn은 차단이 아니라 표시 — 승인 카드의 warnings로 병합해 사용자가
+        # 판단할 근거를 준다(예: 참조 도구가 카탈로그에 없음, 절차 단계 없음).
+        if report.warning_lines():
+            proposal = replace(proposal, warnings=proposal.warnings + report.warning_lines())
         queue.append(proposal)
         self._ledger.record(
             "proposed",
@@ -846,6 +1005,10 @@ class LearningService(ILearningService):
         if self._discovery_engine is None:
             return []
         proposals = await self._discovery_engine.discover(digests)
+        proposals = [
+            p for p in self._screen_proposals(list(proposals), origin="discovery")
+            if isinstance(p, PatchProposal)
+        ]
         added: list[dict] = []
         for p in proposals:
             sid = self._ledger.add_suggestion(
@@ -926,6 +1089,8 @@ class LearningService(ILearningService):
         except Exception:
             self._ledger.finish_review_job(job["id"], "failed", {"error": "engine"})
             raise
+        # 승격 검증 harness — LLM 제안은 카드에 닿기 전에 스크리닝된다.
+        effects = self._screen_proposals(effects, origin="review", session_id=session_id)
         self._ledger.finish_review_job(job["id"], "done", {"effects": len(effects)})
         return effects
 
@@ -961,6 +1126,7 @@ class LearningService(ILearningService):
                 continue
             self._review_gate.mark_reviewed(session_id)
             effects = await self._review_engine.review(session_id, history)
+            effects = self._screen_proposals(effects, origin="review_sweep", session_id=session_id)
             suggestions_added = 0
             for effect in effects:
                 if not isinstance(effect, PatchProposal):
@@ -989,7 +1155,8 @@ class LearningService(ILearningService):
         """명시적 사용자 요청 — 게이트 없이 항상 실행(POST /sessions/{id}/learn, Phase C)."""
         if self._review_engine is None:
             return []
-        return await self._review_engine.learn(session_id, history, instruction)
+        effects = await self._review_engine.learn(session_id, history, instruction)
+        return self._screen_proposals(effects, origin="learn", session_id=session_id)
 
     # ── management ────────────────────────────────────────────────────────────
     def _ensure_not_builtin(self, skill_id: str, action: str) -> None:
@@ -1083,9 +1250,11 @@ class LearningService(ILearningService):
             pass
 
         # Phase D: 사용자 직접 작성 경로도 동일 가드를 거친다(이전엔 크기/시크릿
-        # 검증이 전혀 없었다 — 지금 함께 닫는다).
+        # 검증이 전혀 없었다 — 지금 함께 닫는다). 승격 검증 harness도 동일 —
+        # 수동 경로만 무결성 검사를 우회하면 관문이 관문이 아니게 된다.
         skill_guard.validate_content_size(body, self._config.skill_max_body_chars)
         body, _ = skill_guard.scrub_secrets(body)
+        self._enforce_verification(name=name, body=body, description=description, tags=tags)
 
         now = now_iso()
         skill = SkillData(
@@ -1126,6 +1295,12 @@ class LearningService(ILearningService):
             assert body is not None  # narrows for the type checker (body_changed implies this)
             skill_guard.validate_content_size(body, self._config.skill_max_body_chars)
             body, _ = skill_guard.scrub_secrets(body)
+            self._enforce_verification(
+                name=skill_id, body=body,
+                description=description if description is not None else current.description,
+                tags=tuple(tags) if tags is not None else tuple(current.tags),
+                current_body=current.body,
+            )
             current_path = self._paths.skills / f"{skill_id}.md"
             if current_path.exists():
                 self._skill_store.archive_to_history(

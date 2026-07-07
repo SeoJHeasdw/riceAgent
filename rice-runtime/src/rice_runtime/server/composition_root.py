@@ -22,6 +22,8 @@ from typing import Callable
 from ..agent.builtins import build_builtin_tools, build_subagent_toolset
 from ..agent.interfaces import IAgent, IApprovalGate, ISessionTitler
 from ..agent.orchestrator import Orchestrator
+from ..agent.planner import START_PLAN_SPEC, UPDATE_PLAN_SPEC
+from ..agent.tool_dispatch import BRIDGE_TOOL_SPECS
 from ..agent.subagents import SubAgentRunner
 from ..agent.titler import SessionTitler
 from ..agent.providers.interfaces import ILLMProvider, IProviderRegistry
@@ -177,11 +179,28 @@ def build_container(
     # utility provider instance: that one's instance-level think=False routes to
     # the titler's non-streaming path whose num_predict defaults to ~20 tokens,
     # which truncates any JSON to nothing (2026-07-06 실측 버그).
+    def _known_tool_names() -> set[str]:
+        """스킬 승격 검증 harness(learning/skill/verifier.py)용 도구 카탈로그 스냅샷
+        — 스킬 본문이 호출을 지시하는 도구가 실재하는지 검사한다. `builtin_specs`는
+        이 아래에서 정의되지만 실제 호출은 턴 중(빌드 완료 후)이라 late binding으로
+        안전하다. 루프 가상 빌트인(update_plan/start_plan)과 브릿지 3종도 스킬이
+        정당하게 참조할 수 있으므로 포함한다."""
+        names: set[str] = {t.name for t in BRIDGE_TOOL_SPECS}
+        names.update((UPDATE_PLAN_SPEC.name, START_PLAN_SPEC.name))
+        names.update(t.name for t in builtin_specs)
+        try:
+            names.update(t.name for t in connectors.list_tools())
+            names.update(t.name for t in plugins.list_tools())
+        except Exception:  # noqa: BLE001 — 카탈로그 조회 실패가 검증/턴을 깨면 안 된다
+            log.warning("tool catalog enumeration failed for skill verifier", exc_info=True)
+        return names
+
     learning_impl = LearningService(
         db,
         config_store.config.learning,
         paths,
         resolve_provider=resolve_provider,
+        resolve_tool_names=_known_tool_names,
     )
     # crash 복구: 이전 프로세스가 'running' 으로 남긴 리뷰 잡을 pending 으로 —
     # 안 하면 그 잡은 영구히 재수확되지 않는다(단일 프로세스라 부팅 시점 running 은
