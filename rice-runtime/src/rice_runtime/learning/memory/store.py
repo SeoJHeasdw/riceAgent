@@ -17,15 +17,15 @@ Writing rules enforced here (LEARNING_LOOP §6):
     model/tool).
 
 The store doesn't validate *semantic* content ("is this a good fact") — that
-judgement belongs to the observer (`service.py::observe`, `review/engine.py`).
+judgement belongs to the review engine (`review/engine.py`). `observe()` no
+longer performs regex fact/preference extraction.
 We validate `kind` at the boundary, AND (Phase D, 2026-07-02) scrub obvious
 secret patterns (`skill/guard.py::scrub_secrets`) — a narrow, deliberate
 exception to "content is the caller's job". Unlike skill writes (which funnel
-through exactly 3 `LearningService` methods), memory is written from two
-different modules (`observe()`'s regex path AND `ReviewEngine`'s LLM path,
-both calling `add()` directly) — memory is also NEVER HITL-reviewed before
-persisting, so it's the higher-risk, ungated path. Putting the scrub at this
-single true chokepoint means neither caller can forget it.
+through exactly 3 `LearningService` methods), memory is NEVER HITL-reviewed
+before persisting, so it's the higher-risk, ungated path. Putting the scrub at
+this single true chokepoint keeps the write boundary safe even if new memory
+callers are added later.
 """
 
 from __future__ import annotations

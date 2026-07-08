@@ -1,6 +1,6 @@
 # RICE Product Idea
 
-> 작성일: 2026-06-10
+> 작성일: 2026-06-10 (개정: **2026-07-08 — 소스 드리프트 동기화**: HomeScreen 반영, 게시 UI 상태 정정)
 > 목적: 팀원들과 공유하기 위한 RICE 제품 컨셉 문서
 
 ---
@@ -16,6 +16,7 @@ RICE는 사용자의 업무 경험을 축적하며 학습·진화하는 개인 �
 
 **아키텍처 개요:**
 - **2개 백엔드 구조**: rice-runtime (로컬) + rice-platform (원격)
+- **콘텐츠 저장소**: rice-marketplace sibling repo를 rice-platform이 마운트해 skill/plugin artifact source로 사용
 - **rice-runtime 내부**: 모듈화된 모놀리스 (Protocol 기반 인터페이스)
 - **배포 형태**: Electron 앱 + PyInstaller 단일 바이너리
 
@@ -45,7 +46,7 @@ RICE는 사용자의 업무 경험을 축적하며 학습·진화하는 개인 �
 - 사용자 선호와 스타일 학습
 - 이후 작업에서 자동 적용
 
-> Learning loop 진행은 실시간 SSE 이벤트로 화면에 가시화된다(이벤트 명세 정본은 [RICE_CONTRACTS.md](RICE_CONTRACTS.md) 1.3 — 개선(patch) 포함 8종, 생성은 2026-07-02부터 patch(from_version=0)로 통일).
+> Learning loop 진행은 실시간 SSE 이벤트로 화면에 가시화된다(이벤트 명세 정본은 [RICE_CONTRACTS.md](RICE_CONTRACTS.md) 1.3 — 개선(patch) 포함 9종(2026-07-04 `plan_updated` 추가), 생성은 2026-07-02부터 patch(from_version=0)로 통일).
 
 ### 3.2 User Modeling
 사용자별 개인화
@@ -60,21 +61,38 @@ RICE는 사용자의 업무 경험을 축적하며 학습·진화하는 개인 �
 
 ---
 
-## 4. 주요 화면 구성 (현재 7개 + 로드맵)
+## 4. 주요 화면 구성 (현재 8개 + 로드맵, 2026-07-08 정정 — HomeScreen 누락돼 있었음)
+
+### 4.0 HomeScreen → rice-runtime
+
+개인화 홈 베이스 — 제품의 핵심 약속인 "쓸수록 똑똑해진다"를 로그인 직후 한눈에 보여주는 대시보드(2026-06-29 신규 추가, 이 문서 최초 반영).
+
+**성격:**
+- 앱 기본 랜딩 화면(다른 화면으로 가기 전 허브)
+- 학습 통계·자주 쓰는 스킬·대기 중인 제안을 집계해 보여준다
+- 전용 백엔드 엔드포인트를 신설하지 않고 기존 API(`/skills`, `/eval/impact` 등)를 재사용
+
+**목적:**
+학습 축적을 화면 하나로 요약해, MySkillsScreen까지 들어가지 않아도 "얼마나 똑똑해졌는지"를 바로 체감하게 한다.
+
+---
 
 ### 4.1 ChatScreen → rice-runtime
 메인 작업 공간
 
-**기능:**
+**현재 구현/배선된 기능:**
 - 대화 인터페이스
 - 모델 선택
 - 세션 히스토리 (페이지네이션 로드)
 - 로컬 메모리/스킬 기반 응답
 - 툴/플러그인 실행 결과 표시
-- 파일 첨부 / 멀티모달 입력
 - 응답 재생성(regenerate) · 복사
-- 대화 내보내기 / 공유
-- 음성 입력(STT) — ★ 향후
+- LearningPanel 사이드 패널 및 학습 투명성 모달(`GET /learning/events`, `GET /memories`)
+
+**로드맵/미구현:**
+- 파일 첨부 / 멀티모달 입력 — 계약 설계는 있으나 `POST /sessions/{id}/attachments`와 `MessageIn.attachment_ids`가 아직 없다
+- 대화 내보내기 / 공유 — runtime 라우트 없음
+- 음성 입력(STT)
 
 **특징:**
 - Claude Desktop 스타일 벤치마킹
@@ -166,11 +184,11 @@ Learning loop이 축적한 스킬을 보고 관리하는 화면
 
 ---
 
-### 4.8 향후 추가 검토 화면 (현재 UI 미구현 · 로드맵)
+### 4.8 향후 추가 검토 화면 (로드맵)
 
-> 설계는 UI의 상위집합이다. 아래는 컨셉상 필요하나 현재 7개 화면엔 없는 것 — 디자인 개선·기능 추가 후보로 추적한다.
+> 설계는 UI의 상위집합이다. 아래는 컨셉상 필요하나 현재 8개 화면엔 없는 것 — 디자인 개선·기능 추가 후보로 추적한다.
 
-- **Skill 작성·게시(Authoring/Publish)**: "개인 스킬 공유"의 진입점. 사용자가 skill(SKILL.md)을 만들어 Skill Market에 publish(`POST /artifacts`). 현재 게시 UI 없음. (설치된 skill 관리는 MySkillsScreen이 담당 — Skill↔Plugin 관리는 MySkills/MyPlugins로 이미 대칭)
+- **Skill 작성·게시(Authoring/Publish)**: "개인 스킬 공유"의 진입점. 사용자가 skill(SKILL.md)을 만들어 Skill Market에 publish(`POST /artifacts`). **UI는 존재한다**(`SkillAuthorModal`·`SkillPublishDialog`, SkillMarketScreen/MySkillsScreen에 배선됨 — 2026-07-08 확인). 현재는 로컬 React state만 갱신하고 실제 `POST /artifacts` 호출까지는 아직 연결되지 않았다. 남은 일은 UI 신설이 아니라 백엔드 연동이다. (설치된 skill 관리는 MySkillsScreen이 담당 — Skill↔Plugin 관리는 MySkills/MyPlugins로 이미 대칭)
 - **세션 관리 보강**: 세션 이름변경 · FTS5 검색 · 보관(archive).
 
 > 각 화면의 엔드포인트 계약은 [RICE_CONTRACTS.md](RICE_CONTRACTS.md), 화면→백엔드→모듈 매핑은 [RICE_RUNTIME_DIRECTORY.md](RICE_RUNTIME_DIRECTORY.md) 4장을 참조한다.
@@ -229,9 +247,11 @@ RICE는 **2개 백엔드** 구조를 채택한다:
    - Skill Market + Plugin Market 통합
    - artifact_type으로 구분 (skill | plugin)
 
+보조 콘텐츠 저장소로 sibling repo `rice-marketplace`가 있다. 이는 skill/plugin artifact 원본을 보관하는 저장소이며, `rice-platform`이 `RICE_ARTIFACTS_DIR`/`RICE_PLUGIN_MARKETPLACES`로 마운트해 서빙한다. API를 제공하는 별도 백엔드는 아니다.
+
 ### 8.2 rice-runtime 내부 모듈
 
-6개 모듈(server / agent / execution / learning / connector / core)로 구성된 모듈화 모놀리스다. 상세 디렉토리 트리·모듈 책임·핵심 불변식(직접 import 금지, composition_root 단일 와이어링)은 [RICE_RUNTIME_DIRECTORY.md](RICE_RUNTIME_DIRECTORY.md)(정본)를 참조한다.
+server / agent / execution / learning / connector / core / prompts의 7개 모듈로 구성된 모듈화 모놀리스다. `prompts`는 model-facing 프롬프트 조립 전용 leaf 모듈이다(2026-07-08 문서 반영). 상세 디렉토리 트리·모듈 책임·핵심 불변식(직접 import 금지, composition_root 단일 와이어링)은 [RICE_RUNTIME_DIRECTORY.md](RICE_RUNTIME_DIRECTORY.md)(정본)를 참조한다.
 
 ---
 

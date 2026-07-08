@@ -1,6 +1,6 @@
 # RICE Learning Eval Design
 
-> 작성일: 2026-06-22 (개정: 2026-06-26) · 상태: **확정 (결정 완료)**
+> 작성일: 2026-06-22 (개정: 2026-06-26, **2026-07-08 — 소스 드리프트 동기화**: `/eval/impact` 실배선 반영, mock 메커니즘 정정, §9 negative eval 신규) · 상태: **확정 (결정 완료)**
 > 범위: 제품 thesis "쓸수록 똑똑해짐"을 **정량적으로 측정·증명**하는 방법 — 측정 지표, cold/warm 실험 설계, eval harness, in-app "Learning Impact" 가시화(디자인 데모 surface), 데이터 계약, 데모 스크립트
 > 관계: [RICE_LEARNING_LOOP_DESIGN.md](RICE_LEARNING_LOOP_DESIGN.md)는 *무엇이 학습되는가*(skill·memory·patch)를 정의한다. 이 문서는 *학습이 일어났음을 어떻게 측정·증명하는가*를 정의한다. patch 메커니즘은 [RICE_LEARNING_LOOP_DESIGN.md](RICE_LEARNING_LOOP_DESIGN.md) 5.2, SSE 이벤트는 [RICE_CONTRACTS.md](RICE_CONTRACTS.md) 1.3, 화면 매핑은 [RICE_RUNTIME_DIRECTORY.md](RICE_RUNTIME_DIRECTORY.md) 4장.
 
@@ -8,7 +8,7 @@
 
 ## 1. 목적 & 측정 철학
 
-RICE의 단 하나의 핵심 주장은 **"쓸수록 사용자에게 맞춰 똑똑해진다"**([RICE_PRODUCT_IDEA.md](RICE_PRODUCT_IDEA.md))이다. 지금까지 이 주장의 증거는 **정성적**이다 — SSE 이벤트(8종, [RICE_CONTRACTS.md](RICE_CONTRACTS.md) 1.3)로 `skill_patch_proposed`(신규 생성은 `from_version=0`)·`memory_written`·`skill_patched`가 화면에 흐르는 것을 *보여준다*. 그러나 "스킬이 생성되는 것이 보인다"는 "스킬 덕분에 실제로 더 잘/빨리 한다"와 다르다.
+RICE의 단 하나의 핵심 주장은 **"쓸수록 사용자에게 맞춰 똑똑해진다"**([RICE_PRODUCT_IDEA.md](RICE_PRODUCT_IDEA.md))이다. 지금까지 이 주장의 증거는 **정성적**이다 — SSE 이벤트(9종, [RICE_CONTRACTS.md](RICE_CONTRACTS.md) 1.3)로 `skill_patch_proposed`(신규 생성은 `from_version=0`)·`memory_written`·`skill_patched`가 화면에 흐르는 것을 *보여준다*. 그러나 "스킬이 생성되는 것이 보인다"는 "스킬 덕분에 실제로 더 잘/빨리 한다"와 다르다.
 
 이 문서는 그 간극을 닫는다: **동일한 과제를 학습 전(cold) vs 학습 후(warm)로 실행해, 더 적은 turn·tool call로 더 높은 성공률에 도달함을 숫자로 증명**한다.
 
@@ -80,11 +80,11 @@ RICE의 단 하나의 핵심 주장은 **"쓸수록 사용자에게 맞춰 똑�
 |----|-------------|-----------|-------------------|
 | T-A | "이 서비스 배포해줘" | `deploy-k8s-service` | mock 배포 tool이 올바른 순서/인자로 호출됨 |
 | T-B | "프로젝트 테스트 돌려줘" | `run-tests` + pytest preference | mock test runner가 `-n 8`(교정 반영)로 호출됨 |
-| T-C | "WXO 에러 X 트러블슈팅" | `wxo-expert` plugin | 정답 진단 단계 시퀀스 도달 |
+| T-C | "배포 오류(ImagePullBackOff) 트러블슈팅" | `deploy-k8s-service`(실제 `eval/tasks/t_c_debug.yaml` 기준. `wxo-expert` plugin은 현재 eval task에 사용되지 않음) | 정답 진단 단계 시퀀스 도달 |
 
 **성공 체크는 결정적 mock 기반으로 구현한다.** 실제 부수효과(실 배포) 대신 **mock tool의 호출 시퀀스/최종 상태**로 판정한다(예: 정해진 인자·순서로 호출됐는가, 최종 상태가 기대값인가). LLM-judge(자유 서술 채점)는 결정성을 해치므로 **보조 수단으로만** 쓴다. 각 task의 `success_check`는 이 결정적 술어로 작성한다.
 
-> mock tool은 built-in tool로 구현(코드 실행 sandbox 불필요, [RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md) 5장). 결정적으로 응답하도록 고정한다(예: 정해진 입력 → 정해진 결과·실패).
+> **메커니즘 정정(2026-07-08)**: 현재 eval task는 mock builtin tool이 아니라 `eval/scripted_provider.py::ScriptedToolProvider`를 통해 **LLM provider 응답을 결정적으로 재생**한다. 각 task YAML의 `script:` 블록(고정 tool-call 시퀀스)을 재생하고, 시스템 프롬프트에 `skill_marker` 문자열이 있는지로 cold/warm 분기를 결정한다. task YAML이 참조하는 도구명(`kubectl_apply`/`kubectl_rollout_status`/`kubectl_get_pods`/`kubectl_describe_pod`/`kubectl_create_secret`/`search_docs`)은 실제 builtin 카탈로그에 등록되지 않은 eval 전용 이름이며, 루프는 이를 "unknown tool" 결과로 처리하면서도 `tool_calls` 지표에는 집계한다. 현재 3개 태스크는 모두 scripted replay이며, `eval/results/latest.json`의 `model` 필드는 `"scripted"`다. 실제 provider 기반 task를 추가할 경우 아래 §5 "모델 고정" 원칙을 적용한다.
 
 ---
 
@@ -95,21 +95,23 @@ RICE의 단 하나의 핵심 주장은 **"쓸수록 사용자에게 맞춰 똑�
 ```
 rice-runtime/
 └── eval/                          # 학습 측정 하네스 (tests/와 분리)
-    ├── tasks/                     # task 정의 (YAML: prompt + success_check + related_skill)
+    ├── tasks/                     # task 정의 (YAML: prompt + success_check + related_skill + script)
     │   ├── t_a_deploy.yaml
-    │   └── ...
+    │   ├── t_b_tests.yaml
+    │   └── t_c_debug.yaml
+    ├── scripted_provider.py       # ★ 결정론 재생 프로바이더(§4 정정 참고) — 현재 태스크 3종 전부가 이걸 씀
+    ├── negative.py                # ★ 안전성 negative eval(N1~N6, §9 신규)
     ├── profiles/
-    │   ├── cold/                  # 빈 ~/.rice 시드 (스킬 0)
-    │   └── warm/                  # 스냅샷 시드 (스킬 + patch 반영) — 방법 B
+    │   └── warm/                  # 스냅샷 시드(방법 B). cold는 checked-in 디렉토리가 아니라 실행마다 tempfile로 생성
     ├── runner.py                  # cold/warm 프로파일로 suite 실행 → 메트릭 수집
     ├── metrics.py                 # turns/tool_calls/success/skill_hit 집계
     ├── report.py                  # results JSON(6장 계약) + 사람이 읽는 요약 생성
-    └── results/                   # 타임스탬프별 결과 (cold/warm/delta)
+    └── results/                   # 타임스탬프별 결과(cold/warm/delta) + negative-latest.json
 ```
 
 **runner 흐름:**
 ```
-1. COLD: profiles/cold → 격리된 ~/.rice_eval_cold 로 runtime 세션 기동
+1. COLD: 실행마다 빈 임시 프로파일(tempfile, prefix=rice-eval-cold-) 생성
          → suite의 각 task를 N회 실행 → metrics 기록
 2. WARM 준비: 방법 B(스냅샷) 또는 A(워밍업 실행)로 ~/.rice_eval_warm 구성
 3. WARM: 동일 suite를 N회 실행 → metrics 기록
@@ -117,7 +119,7 @@ rice-runtime/
 ```
 
 **측정의 함정과 처리 (정직성):**
-- **LLM 비결정성** → 각 task **N회(권장 3~5)** 반복, **중앙값/평균 + 분산** 보고. `temperature`는 낮게 고정.
+- **LLM 비결정성** → 각 task **N회** 반복, **중앙값/평균 + 분산** 보고. 현재 runner 기본값은 `runs_per_task=3`이며, 데모용 seed fixture는 5회 예시를 사용한다. `temperature`는 낮게 고정.
 - **모델 고정** → cold/warm 동일 provider·model(예: `claude-sonnet-4-6`). 모델이 다르면 ablation이 오염된다.
 - **성공 결정성** → 4장의 mock 기반 체크. LLM-judge는 보조.
 - **분리 진단** → `skill_hit`으로 "학습 적용 여부" 자체를 확인. warm·skill_hit=false면 검색 문제로 切り分け.
@@ -133,7 +135,7 @@ rice-runtime/
 
 ### 6.1 위치
 
-**MySkillsScreen 내 패널.** 7화면 구조를 유지하면서 정량 증거를 차별점 화면에 자연 배치한다. (검토했던 대안: ChatScreen 사이드 배지 — 공간 협소 / 새 8번째 화면 신설 — 화면 구조 변경 부담.)
+**MySkillsScreen 내 패널.** 별도 화면을 추가하지 않고 정량 증거를 차별점 화면에 자연 배치한다. (검토했던 대안: ChatScreen 사이드 배지 — 공간 협소 / 새 화면 신설 — 화면 구조 변경 부담.)
 
 > **구현 상태**: 이 패널은 프론트엔드에 **이미 구현됨** — [`LearningImpactPanel.tsx`](rice-app/src/components/carbon/LearningImpactPanel.tsx)가 MySkillsScreen 안에서 "Learning Impact" 탭으로 렌더된다([MySkillsScreen.tsx](rice-app/src/screens/MySkillsScreen.tsx) — `showImpact` 토글). 6.3 스키마(`ImpactReport`)에만 의존하므로 현재 시드 fixture가 추후 harness 실측치로 drop-in 교체된다.
 
@@ -159,6 +161,8 @@ rice-runtime/
 ### 6.3 데이터 계약 (results JSON → UI)
 
 UI는 이 스키마에만 의존한다. 디자인 단계엔 **시드 fixture**로, 런타임 완성 후엔 harness 실측으로 동일 스키마를 채운다(drop-in).
+
+아래 JSON은 `eval/results/demo-v1-seed.json` 형태의 데모 seed 예시다. 실제 harness 기본 실행(`eval/runner.py::main`)은 `runs_per_task=3`으로 `eval/results/latest.json`을 생성한다.
 
 ```json
 {
@@ -186,8 +190,9 @@ UI는 이 스키마에만 의존한다. 디자인 단계엔 **시드 fixture**�
 
 ### 6.4 노출 경로
 
-- 데모 단계(★): 런타임이 `eval/results/latest.json`을 **정적 fixture**로 노출하거나, 앱이 번들한 fixture를 읽는다. 엔드포인트 불필요.
-- 향후: `GET /eval/runs`, `GET /eval/runs/{id}` (선택, [RICE_CONTRACTS.md](RICE_CONTRACTS.md)에 추가). MVP는 fixture로 충분.
+- **구현 상태**: `GET /eval/impact`는 `server/routes/eval_impact.py`에 구현되어 있으며, 최신 `ImpactReport`를 `$RICE_EVAL_RESULTS/latest.json` → `~/.rice/eval/results/latest.json` → repo 내 `eval/results/latest.json` 순서로 조회해 반환한다.
+- 프론트(`MySkillsScreen`)는 이 엔드포인트를 직접 호출한다. 번들된 시드(`IMPACT_REPORT`)는 fetch 실패 시의 폴백이며, `LearningImpactPanel`은 `demo={!impact}` 플래그로 데모 데이터와 평가 suite 실측치를 구분한다.
+- 현재 계약 경로는 `/eval/impact`다. 초기 설계에서 검토했던 `/eval/runs`는 채택되지 않았으며, 최종 경로는 [RICE_CONTRACTS.md](RICE_CONTRACTS.md)가 정본이다.
 
 ---
 
@@ -198,7 +203,7 @@ UI는 이 스키마에만 의존한다. 디자인 단계엔 **시드 fixture**�
 | 대상 문서 | 변경 |
 |-----------|------|
 | [RICE_LEARNING_LOOP_DESIGN.md](RICE_LEARNING_LOOP_DESIGN.md) | 이미 반영: 5.2 patch(개선) 절, `use`·`patch`가 측정 지표임 명시(§3) |
-| [RICE_CONTRACTS.md](RICE_CONTRACTS.md) | (선택) `GET /eval/runs`·`/eval/runs/{id}` — **MVP는 fixture로 대체 가능** |
+| [RICE_CONTRACTS.md](RICE_CONTRACTS.md) | `GET /eval/impact` 계약 반영(`/eval/runs`는 채택되지 않음) |
 | [RICE_PRODUCT_IDEA.md](RICE_PRODUCT_IDEA.md) | MySkillsScreen에 "Learning Impact" 패널 추가(4.4) |
 | [RICE_RUNTIME_DIRECTORY.md](RICE_RUNTIME_DIRECTORY.md) | `eval/` 디렉토리 추가(`tests/`와 별개, 5장 트리) |
 | [README.md](README.md) | 문서 목록에 본 문서 추가, 단일 출처 규칙에 "학습 측정 = LEARNING_EVAL" 한 줄 |
@@ -217,3 +222,22 @@ UI는 이 스키마에만 의존한다. 디자인 단계엔 **시드 fixture**�
 ```
 
 → **정량(패널) + 정성(라이브 SSE·diff 카드)** 이 동일 주장을 두 각도에서 증명한다. 비개발자에겐 패널의 막대·퍼센트가, 개발자에겐 JSON·반복 횟수·분산이 각각 설득력을 가진다.
+
+---
+
+## 9. Negative (안전성) Eval — "배우면 안 되는 것을 배우지 않았는가" (신규, 이 문서 최초 반영 — 2026-07-08)
+
+§1-8은 전부 **긍정적 학습 효과**(더 잘·빨리 함)를 증명하는 축이다. `eval/negative.py`는 반대 축을 결정론적으로 검증하는 별도 하네스다 — 모듈 자체 docstring 표현을 빌리면 "배우면 안 되는 것을 배우지 않는다"는 걸 증명한다. 결과는 `eval/results/negative-latest.json`.
+
+여섯 개 화이트박스 체크(코드 경로를 직접 assert — LLM 판단 없음):
+
+| id | 검증 대상 |
+|----|-----------|
+| N1 | 시크릿이 스킬/메모리 본문에 영속되지 않음(LEARNING_LOOP §8 스크러빙) |
+| N2 | 프롬프트 인젝션이 스킬 제안에서 플래그됨(`warnings`, `guard.py::scan_risks` — LEARNING_LOOP §8) |
+| N3 | 인젝션이 섞인 메모리가 격리(quarantine)됨(LEARNING_LOOP §6) |
+| N4 | 반복 거부된 제안에 쿨다운이 걸림(LEARNING_LOOP §9.1) |
+| N5 | stale patch(낙관적 동시성 충돌)가 감지됨 |
+| N6 | 외부 콘텐츠 파생 메모리가 승인 전엔 주입되지 않고, 승인 후엔 정상 주입됨(격리와 같은 축의 왕복 확인) |
+
+이 6종은 이미 통과하는 상태로 하네스에 들어와 있다(신규 기능이 아니라 §1-8과 마찬가지로 이미 구현된 방어선의 **회귀 방지 축**). §1의 "측정은 곧 contribution의 증거다" 원칙을 안전성 쪽에도 적용한 것 — 정량적 학습 효과만 자랑하고 안전장치는 말로만 있다고 하지 않기 위함이다.

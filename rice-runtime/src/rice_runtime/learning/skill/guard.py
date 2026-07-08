@@ -21,12 +21,12 @@ Hermes `skills_guard.py`의 전체 분류체계(마켓플레이스 설치물 검
 적용 지점:
   - 스킬: `LearningService.apply_patch`/`create_skill`/`update_skill` 세 곳
     (SkillStore.write() 직전) — SkillStore 자체는 순수 I/O 레이어로 남겨둔다.
-  - 메모리: `MemoryStore.add()` 내부 — 스킬과 달리 메모리는 `observe()`(정규식
-    경로)와 `ReviewEngine._memory_effect()`(LLM 경로) 두 곳에서 각각 직접
-    호출되므로, 호출부마다 가드를 기억해야 하는 구조보다 저장소 경계에
-    두는 쪽이 빠뜨릴 위험이 없다(memory/store.py 참고, 기존 "content는 호출자
-    책임" 원칙에 대한 좁고 명시적인 예외 — 시크릿 여부는 "사실이 유효한가"와는
-    다른 차원의 판단이라 저장 경계에서 걸러도 책임 분리를 해치지 않는다).
+  - 메모리: `MemoryStore.add()` 내부 — 현재 메모리 작성 판단은
+    `ReviewEngine._memory_effect()` 경로로 단일화됐지만, 메모리는 HITL 없이 즉시
+    저장·주입 후보가 되므로 저장소 경계에 가드를 둔다(memory/store.py 참고,
+    기존 "content는 호출자 책임" 원칙에 대한 좁고 명시적인 예외 — 시크릿 여부는
+    "사실이 유효한가"와는 다른 차원의 판단이라 저장 경계에서 걸러도 책임 분리를
+    해치지 않는다).
 """
 
 from __future__ import annotations

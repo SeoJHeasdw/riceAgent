@@ -1,6 +1,6 @@
 # RICE Repo Strategy (레포 분리 전략)
 
-> 작성일: 2026-06-10 (개정: 2026-06-18)
+> 작성일: 2026-06-10 (개정: 2026-06-18, **2026-07-08 — 소스 드리프트 동기화**: 모노레포 서술·Connector 범위·rice-marketplace 관계 정정)
 > 목적: RICE의 초기 제품 구조와 레포 분리 전략 정리
 > 선행 문서: 제품 컨셉은 [RICE_PRODUCT_IDEA.md](RICE_PRODUCT_IDEA.md), learning loop 참조 분석은 [HERMES_LEARNING_LOOP_REFERENCE.md](HERMES_LEARNING_LOOP_REFERENCE.md) 참고
 > 모듈 구조 정본: [RICE_RUNTIME_DIRECTORY.md](RICE_RUNTIME_DIRECTORY.md) · 런타임/계약 설계: [RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md), [RICE_CONTRACTS.md](RICE_CONTRACTS.md)
@@ -20,7 +20,7 @@ RICE는 macOS와 Windows를 모두 지원하는 로컬 데스크톱 애플리케
 |------|------|------|
 | Frontend | `rice-app` | Electron, React, TailwindCSS, shadcn/ui |
 | Agent Runtime | `rice-runtime` | Python |
-| Market Platform | `rice-platform` | Python (API), React (admin-web) |
+| Market Platform | `rice-platform` | Python (API) — admin-web(React)은 설계만 있고 미구현, [RICE_PLATFORM_DESIGN.md](RICE_PLATFORM_DESIGN.md) 정본(2026-07-08 정정) |
 
 에이전트의 learning loop(경험에서 스킬 생성 → 사용하며 개선 → 세션을 넘나드는 user modeling)는 Hermes Agent 분석([HERMES_LEARNING_LOOP_REFERENCE.md](HERMES_LEARNING_LOOP_REFERENCE.md))을 참조 모델로 삼는다.
 
@@ -51,13 +51,15 @@ RICE는 단순 프론트엔드 앱이 아니라 아래 3개 축의 결합이다.
 
 ## 3. 레포 구성: 3개 권장
 
-> 용어 정리: 정확히는 "레포 3개, 각 레포는 내부에 여러 패키지를 가진 모노레포 구조"이다. 전체 전략은 멀티레포(polyrepo)이고, 각 레포가 모노레포다.
+> 2026-07-08 구조 확인: RICE 자체 코드는 3개 레포로 나누는 **polyrepo** 전략을 유지한다. 다만 현재 각 레포는 별도 workspace/monorepo가 아니라 단일 패키지 구조다. `rice-app`은 workspace 없는 단일 npm 패키지, `rice-platform`은 단일 Python 패키지, `rice-runtime`은 하나의 설치 가능 Python 패키지 내부에 server/agent/execution/learning/connector/core/prompts 모듈을 둔다. "각 레포 내부 monorepo"는 현재 구현이 아니라 향후 목표 구조로 분류한다.
 
 ### 권장 3개
 
 1. `rice-app` — 보여주는 것 (앱 셸 + 프론트엔드 제품 레이어)
 2. `rice-runtime` — 생각하고 실행하는 것 (제품의 핵심 두뇌 레이어)
 3. `rice-platform` — 공유하고 배포하는 것 (배포 플랫폼 레이어)
+
+> **콘텐츠 저장소 관계**: 실행 환경에는 sibling repo `rice-marketplace`도 존재할 수 있다. 이 저장소는 Anthropic/OpenAI 마켓플레이스의 plugin/skill artifact를 보관하는 콘텐츠 소스이며, `rice-platform`이 `RICE_ARTIFACTS_DIR`/`RICE_PLUGIN_MARKETPLACES` env로 마운트해 서빙한다(README.md 정본). API 백엔드나 RICE 자체 코드 레포가 아니므로 위 3개 레포 카운트에는 포함하지 않는다.
 
 ### 검토했지만 채택하지 않은 대안
 
@@ -92,7 +94,7 @@ RICE는 단순 프론트엔드 앱이 아니라 아래 3개 축의 결합이다.
 - Electron main process가 런타임 프로세스의 spawn / health check / 재시작 / 종료를 책임짐
 - 포트 충돌 회피와 인증(로컬 토큰) 최소 수준 포함
 
-스트리밍은 **SSE 이벤트 8종**으로 learning loop을 가시화한다(이벤트 명세 정본은 [RICE_CONTRACTS.md](RICE_CONTRACTS.md) 1.3).
+스트리밍은 **SSE 이벤트 9종**으로 learning loop을 가시화한다(2026-07-04 `plan_updated` 추가 — 이벤트 명세 정본은 [RICE_CONTRACTS.md](RICE_CONTRACTS.md) 1.3).
 
 이 계약(API 스키마)이 두 레포의 공유 지점이므로, OpenAPI 스펙으로 정의하고 양쪽에서 타입을 생성하는 것을 기본 전략으로 한다 (4.3 참조).
 
@@ -164,11 +166,11 @@ RICE는 단순 프론트엔드 앱이 아니라 아래 3개 축의 결합이다.
 - **connector management** (외부 서비스 연결 관리)
 - **credential storage** (OS 키체인 연동)
 - **permission system** (plugin/tool → connector 접근 검증)
-- 로컬 API 서버 (4.1의 IPC 계약 구현) — SSE 8종 + 승인 parking(`approval.py`)
+- 로컬 API 서버 (4.1의 IPC 계약 구현) — SSE 9종 + 승인 parking(`approval.py`)
 - **학습 측정 harness** (`eval/` — cold/warm 비교, `tests/`와 별개. [RICE_LEARNING_EVAL.md](RICE_LEARNING_EVAL.md))
 - 추후 remote execution 확장 포인트
 
-**내부 모듈 구조**: 6개 모듈(server / agent / execution / learning / connector / core)의 모듈화 모놀리스. 상세 디렉토리 트리·모듈 책임·핵심 불변식(직접 import 금지, composition_root 단일 와이어링)은 [RICE_RUNTIME_DIRECTORY.md](RICE_RUNTIME_DIRECTORY.md)(정본)를 참조한다.
+**내부 모듈 구조**: server / agent / execution / learning / connector / core / prompts의 모듈화 모놀리스. `prompts`는 model-facing 프롬프트 전용 leaf 모듈이다. 상세 디렉토리 트리·모듈 책임·핵심 불변식(직접 import 금지, composition_root 단일 와이어링)은 [RICE_RUNTIME_DIRECTORY.md](RICE_RUNTIME_DIRECTORY.md)(정본)를 참조한다.
 
 Hermes 참조 문서 기준 대응 개념:
 - `AIAgent.run_conversation()`
@@ -227,22 +229,19 @@ flowchart LR
 
 ## 7. 각 레포 내부 패키지 예시
 
-### `rice-app`
-- `apps/desktop`
-- `packages/ui`
-- `packages/shared-types` (레포 내부용; 런타임 API 타입은 코드젠)
-- `packages/desktop-bridge`
+> **2026-07-08 확인**: 이 절은 목표 패키지 구조 예시다. `rice-app`·`rice-platform`은 아직 해당 구조로 분리되지 않았으므로, 아래에 목표와 실제 구조를 병기한다.
+
+### `rice-app` — 목표(위) vs 실제
+- 목표: `apps/desktop` / `packages/ui` / `packages/shared-types` / `packages/desktop-bridge`
+- **실제**: workspace 없는 **단일 flat npm 패키지**(`src/`, `electron/`, `public/`가 하나의 `package.json` 아래) — 위 패키지 분리는 없다.
 
 ### `rice-runtime`
-- 내부는 `src/rice_runtime/` 아래 **6모듈**(server / agent / execution / learning / connector / core)로 구성한다. 상세 디렉토리·모듈 책임은 [RICE_RUNTIME_DIRECTORY.md](RICE_RUNTIME_DIRECTORY.md)(정본)를 단일 출처로 한다.
+- 내부는 `src/rice_runtime/` 아래 **7모듈**(server / agent / execution / learning / connector / core / prompts)로 구성한다. 상세 디렉토리·모듈 책임은 [RICE_RUNTIME_DIRECTORY.md](RICE_RUNTIME_DIRECTORY.md)(정본)를 단일 출처로 한다. 이는 여러 설치 가능 패키지가 아니라 한 Python 패키지 내부의 모듈 분리다.
 - `server/`가 runtime OpenAPI 스펙(`contracts/runtime.yaml`)을 소유한다.
 
-### `rice-platform`
-- `apps/api` (OpenAPI 스펙 소유)
-- `apps/admin-web`
-- `packages/catalog`
-- `packages/artifact-registry`
-- `packages/billing-mock`
+### `rice-platform` — 목표(위) vs 실제
+- 목표: `apps/api` / `apps/admin-web` / `packages/catalog` / `packages/artifact-registry` / `packages/billing-mock`
+- **실제**: **단일 flat Python 패키지**(`app.py`+`registry.py` 2파일) — `admin-web`(React)도 나머지 패키지 분리도 없다. 상세는 [RICE_PLATFORM_DESIGN.md](RICE_PLATFORM_DESIGN.md) 정본.
 
 ---
 
@@ -284,9 +283,9 @@ flowchart LR
 | 2 | IPC 방식 | **localhost HTTP + SSE**(+POST), WS 미승격 | CONTRACTS 1.1·1.2 |
 | 3 | 모델 프로바이더 | SaaS=Claude / on-prem=Ollama, SaaS 키만 OS 키체인 | RUNTIME_DESIGN 6장 |
 | 4 | **artifact 스펙** | `rice-artifact.yaml` + skill=`SKILL.md`/plugin=`skills/` 묶음 | CONTRACTS 2장 |
-| 5 | 설치 artifact 신뢰 | 자식 프로세스 + env 스크럽(데모 신뢰), `execute_code`는 repo cwd 한정 | RUNTIME_DESIGN 5장 |
-| 6 | Hermes 차용 범위 | 차용표 확정 — Honcho 제외, Curator 수동 트리거, `execute_code` 포함 | RUNTIME_DESIGN 1장 |
-| 7 | **Connector OAuth 흐름** | **Gmail 단일 커넥터**만 진지 구현, OAuth 2.0 Authorization Code Flow | RUNTIME_DESIGN 9장 · CONTRACTS 4장 |
+| 5 | 설치 artifact 신뢰 | 자식 프로세스 + env 스크럽(데모 신뢰). 에이전트 코드 실행 도구(`execute_code`→실제 구현명 `terminal`)는 **cwd 한정 원안이 채택되지 않음**(2026-07-08 정정 — 실제 방어선은 승인 게이트뿐) | RUNTIME_DESIGN 5장 |
+| 6 | Hermes 차용 범위 | 차용표 확정 — Honcho 제외, Curator 수동 트리거, 코드/명령 실행 도구(`execute_code`→`terminal`) 포함(경계는 원안보다 약함, 위 5번 참고) | RUNTIME_DESIGN 1장 |
+| 7 | **Connector OAuth 흐름** | OAuth 2.0 Authorization Code Flow. **범위는 확정 이후 크게 확장됨**(2026-07-08 정정) — Gmail 단일이 아니라 Google 3종(Gmail·Calendar·Drive) + 로컬 MCP + 커스텀 원격 MCP | RUNTIME_DESIGN 9장 · CONTRACTS 4장 |
 
 ---
 

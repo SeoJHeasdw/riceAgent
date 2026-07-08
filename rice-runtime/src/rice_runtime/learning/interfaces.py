@@ -8,7 +8,7 @@ retrieval backend — without the agent or server knowing (RUNTIME_DESIGN §3,
 Two surfaces:
   1. TURN-CRITICAL (called by the orchestrator every turn):
        prefetch(...)  → context to inject before the LLM call
-       observe(...)   → *cheap, synchronous* effects (memory fact/pref, use++)
+       observe(...)   → *cheap, synchronous* effects (skill use++, staged T5 proposals)
        apply_patch(...) → commit a patch once HITL approval is decided
      Note the **approval dance is NOT here**: learning *proposes*; the orchestrator
      owns the `IApprovalGate` + SSE stream and calls `apply_patch` with the verdict.

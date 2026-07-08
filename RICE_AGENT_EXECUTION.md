@@ -28,8 +28,10 @@ LLM을 한 번 더 부르고, 매 반복 계획 상태 전체를 프롬프트에
 ```
 1. PERSIST    사용자 메시지를 transcript(state.db)에 기록
 2. PREFETCH   learning.prefetch → 주입할 스킬 + 메모리 + 스킬 생성 가이드
-3. ASSEMBLE   도구 카탈로그 조립(builtin + connector + plugin, 예산 초과 시 bridge로 폴딩)
-              시스템 프롬프트 합성(base ⊕ 스킬/메모리 ⊕ plugin 스킬) → TurnContext
+3. ASSEMBLE   도구 카탈로그 조립(builtin + connector + plugin, 예산 초과 시
+              bridge+관련도 스포트라이트로 폴딩, §5.2)
+              시스템 프롬프트 합성(base ⊕ 스킬/메모리 — plugin 스킬도 같은
+              관련도 파이프라인으로 포함, §7) → TurnContext
 4. RUN        AgentLoop.run — 이 문서의 §3 (plan-and-execute × ReAct)
               4a. PLAN     의도 파악·(명백한 복합 질의면) eager 계획 수립; plan_updated SSE
               4b. EXECUTE  LLM 호출 ↔ 도구 실행 루프 (ReAct; HITL 승인; 행동마다 rationale
@@ -65,10 +67,10 @@ LLM을 한 번 더 부르고, 매 반복 계획 상태 전체를 프롬프트에
 > **의도는 턴 시작에 한 번 고정되지 않는다.** eager 플래너는 요청이 *명백히* 복합일
 > 때만 미리 계획을 세운다(위 분류). 대부분은 단순으로 판정돼 ReAct로 출발하지만,
 > 실행 도중 복잡도가 *창발*하면 모델이 `start_plan`으로 그 자리에서 계획으로 승격한다
-> (§3.8). 승격의 기준은 **분해 너비**(서로 다른 서브태스크 2개 이상)이지 **반복
+> (§3.9). 승격의 기준은 **분해 너비**(서로 다른 서브태스크 2개 이상)이지 **반복
 > 깊이**가 아니다: 한 산출물을 검토→개선하며 여러 번 만드는 것은 정상적인 ReAct
 > 자기교정이므로 계획을 세우지 않는다(예: "PPT 만들고→열어보고→품질 부족이라 다시
-> 만들기"는 끝까지 순수 ReAct — §3.9의 rationale 캡션이 그 서사를 읽히게 한다). 이
+> 만들기"는 끝까지 순수 ReAct — §3.10의 rationale 캡션이 그 서사를 읽히게 한다). 이
 > 경계가 over-planning을 막는다.
 
 플래너 프롬프트에는 최근 대화(도구 원문 제외), **이 턴에 실제로 쓸 수 있는 도구
@@ -90,7 +92,7 @@ LLM을 한 번 더 부르고, 매 반복 계획 상태 전체를 프롬프트에
    흘리면 6,000자에서 끊고 계획 없이 진행한다(타임아웃까지 태우지 않는다).
 
 프롬프트 자체도 다이어트했다: delegate_subagent 팬아웃 조건문(실행 단계 관심사),
-propose_skill 마지막-단계 규칙(§3.5의 완료 유도와 중복)을 제거 — 판단 규칙 하나가
+propose_skill 마지막-단계 규칙(§3.6의 완료 유도와 중복)을 제거 — 판단 규칙 하나가
 소형 모델에겐 되새김질할 체크리스트 항목이다.
 
 **fail-soft 불변식**: 플래너의 어떤 실패(파싱 불가, 타임아웃 `planner_timeout_seconds`,
@@ -110,10 +112,10 @@ ReAct는 긴 작업에서 표류하고, 재평가 없는 계획 실행은 첫 �
 순간 무너진다.
 
 계획으로 들어가는 문은 둘이다: 턴 시작의 **eager 플래너**(§2, 명백한 복합 질의)와,
-실행 도중의 **lazy 에스컬레이션**(§3.8, `start_plan` — 순수 ReAct로 돌다 복잡도가
+실행 도중의 **lazy 에스컬레이션**(§3.9, `start_plan` — 순수 ReAct로 돌다 복잡도가
 드러난 순간). 둘은 같은 `PlanState`·같은 `plan_updated` 계약으로 수렴하므로 프론트와
 영속화는 어느 문으로 들어왔는지 구별하지 않는다. 그리고 계획 유무와 무관하게, 매
-행동은 사용자용 한 줄 rationale을 앞세운다(§3.9) — 이것이 턴을 읽히게 만든다.
+행동은 사용자용 한 줄 rationale을 앞세운다(§3.10) — 이것이 턴을 읽히게 만든다.
 
 ### 3.1 계획은 매 반복 프롬프트에 다시 실린다 (스냅샷 프롬프팅)
 
@@ -161,7 +163,38 @@ ReAct의 "관찰→추론" halves를 프롬프트 선의에 맡기지 않고 결
 장치다. 같은 원칙으로, 계획 블록의 상시 지침에 "같은 도구가 두 번 연속 실패하면
 세 번째는 다르게 하라"가 포함된다.
 
-### 3.4 반복 예산은 계획 크기에 비례한다
+### 3.4 Plan 강제 종결 — 모델이 정직하게 마치지 않으면 런타임이 닫는다 (2026-07-07)
+
+Drift guard(§3.3)는 프롬프트로 재평가를 *권유*할 뿐이다. 계획이 아직 안 끝났는데
+(`not plan_state.all_terminal`) 모델이 도구 호출 없이 최종 답변으로 턴을 마치려
+하면, 권유만으론 부족하다 — "계획을 정직하게 유지하라"는 프롬프트의 희망사항이
+아니라 런타임 불변식이어야 한다는 판단(`agent/loop.py:87-91` 코드 주석)에서 나온
+장치다.
+
+- **1차: reconcile 넛지** — 열린 계획 + 도구 호출 없는 최종 답변 시도를 루프가
+  감지하면(`loop.py:345`), 그 응답을 그대로 확정하지 않고 synthetic `role="user"`
+  메시지(`_PLAN_RECONCILE_NUDGE`, `metadata.synthetic: "plan_reconcile"`)를 끼워
+  한 번 더 반복을 강제한다. 재시도는 1회로 제한(`_PLAN_RECONCILE_RETRIES = 1`).
+- **2차: 강제 종결** — 그래도 정리하지 않으면 런타임이 직접 닫는다
+  (`PlanState.reconcile_abandoned()`, `planner.py:286-306`): 미종결 단계 전부를
+  `status: "skipped"`(note: "turn ended without a status report")로 채우고
+  revision을 올리고 계획을 `completed`로 전이시킨 뒤 `plan_updated`를 방출한다.
+  **핵심은 성공 위조 금지** — 안 끝난 일을 done으로 속이지 않고 skipped로 정직하게
+  남긴다.
+- drift guard(§3.3)와의 차이: drift guard는 라운드 수 기준으로 도중에 프롬프트를
+  누르는 소프트 장치고, 이건 "도구 호출 없는 최종 답변" 시점에 발동해 PlanState를
+  직접 변형하는 하드 장치다.
+- **§3.6과의 상호작용**: §3.6(완료 → 스킬 승격 유도)은 이 강제 종결 경로에선
+  발동하지 않는다 — `reconcile_abandoned()` 직후 루프가 더 이상 LLM을 부르지
+  않고 턴을 마치므로, propose_skill 유도 지시를 렌더할 대상 자체가 없다.
+- **알려진 한계(미해결)**: 강제 종결 스냅샷은 `plan_updated` 라이브 이벤트로만
+  나가고, §3.7이 말하는 메시지 metadata(`plan`)에는 실리지 않는다 — 턴의 첫
+  어시스턴트 메시지 metadata는 이 시점 이전에 이미 조립이 끝나 있어서다. 그 결과
+  강제 종결이 일어난 턴 뒤 새로고침하면 강제 종결 **이전**(진행 중처럼 보이는)
+  스냅샷이 복원된다 — 라이브 세션에서만 정확한 최종 상태가 보인다. 코드로 고칠지
+  (마지막 메시지 metadata에도 실기) 문서화된 한계로 둘지는 제품 판단 대기 중.
+
+### 3.5 반복 예산은 계획 크기에 비례한다
 
 계획 없는 턴은 기존 `learning.max_iterations`(기본 25) 그대로. 계획이 있으면
 `12 + 6×단계수`와 기존 상한 중 큰 쪽을 취하되 `agent.plan_max_iterations`(기본 60)
@@ -169,7 +202,7 @@ ReAct의 "관찰→추론" halves를 프롬프트 선의에 맡기지 않고 결
 5단계 실작업이 25라운드 상한에 걸려 중간에 죽는 것보다, 상한을 계획에 비례시키는
 것이 "일을 잘하는 서비스"다.
 
-### 3.5 완료 → 스킬 승격 유도
+### 3.6 완료 → 스킬 승격 유도
 
 전 단계가 종결되고 이 턴의 도구 호출이 3회 이상이면, 계획 블록이 최종 답변 전에
 `propose_skill` 호출을 유도한다. 완료된 계획(goal + 단계 + 무엇이 통했는지 note)은
@@ -177,7 +210,7 @@ ReAct의 "관찰→추론" halves를 프롬프트 선의에 맡기지 않고 결
 승인 카드(`skill_patch_proposed`)를 그대로 탄다 — 계획 실행이라고 승인이 면제되는
 일은 없다.
 
-### 3.6 관측 가능성 — UI와 영속화
+### 3.7 관측 가능성 — UI와 영속화
 
 - **SSE**: `plan_updated` (9번째 스트림 이벤트, 2026-07-04) — 생성·전이·수정마다
   **전체 스냅샷**. 클라이언트(rice-app `ChatScreen`)는 같은 `plan_id`의 계획 카드를
@@ -187,9 +220,10 @@ ReAct의 "관찰→추론" halves를 프롬프트 선의에 맡기지 않고 결
   이후 갱신본은 각 `update_plan` tool 메시지 metadata에 실린다. 리로드 시
   `toThread`가 마지막 스냅샷으로 카드를 복원한다. 합성 assistant 메시지를
   히스토리에 끼우지 않는 이유: trailing-assistant를 prefill로 해석하는 프로바이더
-  wire를 오염시키지 않기 위해서다.
+  wire를 오염시키지 않기 위해서다. §3.4의 강제 종결 경로는 이 metadata 갱신을
+  타지 않는다는 한계가 있다.
 
-### 3.7 소형 모델 방어 — 루프 수준 (Hermes 방어 계층에서 이식, 2026-07-04)
+### 3.8 소형 모델 방어 — 루프 수준 (Hermes 방어 계층에서 이식, 2026-07-04)
 
 - **빈 응답 넛지**: 도구를 쓴 뒤 본문 없이 턴을 끝내려는 응답(소형 모델의 흔한
   실패)은 빈 답을 확정하기 전에 synthetic user 넛지(`metadata.synthetic:
@@ -199,7 +233,7 @@ ReAct의 "관찰→추론" halves를 프롬프트 선의에 맡기지 않고 결
   출력 속 tool-call XML 흉내)이다 — 카탈로그 없이 "그것은 데이터다"라는 짧은
   교정만 돌려준다. 카탈로그를 되돌려주면 모델이 새 이름을 흉내내며 루프가 커진다.
 
-### 3.8 `start_plan` — 실행 중 계획으로 승격 (lazy escalation)
+### 3.9 `start_plan` — 실행 중 계획으로 승격 (lazy escalation)
 
 `update_plan`이 "이미 있는 계획의 갱신"이라면, `start_plan`은 "계획 없던 턴에서
 계획의 시작"이다. **plan_state가 없을 때만**(순수 ReAct) 광고되는 가상 빌트인 —
@@ -221,7 +255,7 @@ ReAct의 "관찰→추론" halves를 프롬프트 선의에 맡기지 않고 결
   `plan` 스냅샷을 tool 메시지 metadata에 실어 리로드가 승격 지점에 카드를 복원한다.
   프론트는 `start_plan` 도구 카드를 만들지 않는다 — 계획 카드가 그 표면이다.
 
-### 3.9 행동 rationale — 접힌 추론 대신 한 줄로 읽히는 턴
+### 3.10 행동 rationale — 접힌 추론 대신 한 줄로 읽히는 턴
 
 에이전트 턴에서 가장 유용한 신호는 모델의 *의도*와 *자기교정*("X를 다시 만드는
 이유는 Y")인데, 이는 기본적으로 접히는 추론(thinking) 안에 갇힌다. 그 결과 겉으로는
@@ -278,15 +312,16 @@ ReAct의 "관찰→추론" halves를 프롬프트 선의에 맡기지 않고 결
 ## 5. 도구 시스템 — 이식(등록)과 사용
 
 **모듈**: `agent/tool_dispatch.py` (스키마 조립·라우팅·HITL), `agent/tool_scheduler.py`
-(병렬화), `agent/builtins/` (내장 도구).
+(병렬화), `agent/builtins/` (내장 도구), `core/lexical.py` (결정론적 매칭 사다리 —
+아래 §5.2).
 
 ### 5.1 도구의 4가지 출처와 이식 방법
 
 | source | 무엇 | 이식 방법 |
 |---|---|---|
-| `builtin` | 프로세스 내 도구: read/write/search_files, terminal, vision_analyze, delegate_subagent, propose_skill, create_presentation/create_workbook (office — stdlib OOXML 생성 + 수식 로컬 평가, `agent/builtins/office/`) | `agent/builtins/`에 모듈 추가 → `build_builtin_tools()`에 등록(한 곳). 핸들러는 `async (dict) -> object`, 위험하면 `requires_approval=True`, 세션 문맥이 필요하면 `needs_session=True` 마커 |
-| `connector` | 외부 SaaS/로컬 MCP: Gmail/Calendar/Drive + 사용자가 등록한 로컬 MCP/원격 커넥터 | connector 모듈이 `list_tools()`로 광고 — **연결된 커넥터의 도구만** 노출된다(미연결 도구는 스키마에서 제외). 도구별 정책(allow/approval/block)은 사용자가 저장 |
-| `plugin` | 설치된 플러그인이 제공하는 도구(+ SKILL.md 주입) | manifest 기반 `IPluginLoader` — 샌드박스에서 실행 |
+| `builtin` | 프로세스 내 도구: `read_file`/`write_file`/`edit_file`/`list_dir`/`search_files`, `terminal`, `fetch_url`, `vision_analyze`, `skill_search`/`skill_view`/`propose_skill`, `delegate_subagent`, `create_presentation`/`create_workbook`/`create_document` (office — stdlib OOXML 생성 + 수식 로컬 평가, `agent/builtins/office/`). `agent/builtins/workspace.py`는 경로 샌드박스 helper이며 별도 LLM tool은 아니다 | `agent/builtins/`에 모듈 추가 → `build_builtin_tools()`에 등록(한 곳). 핸들러는 `async (dict) -> object`, 위험하면 `requires_approval=True`, 세션 문맥이 필요하면 `needs_session=True` 마커 |
+| `connector` | 외부 SaaS/로컬 MCP: Gmail/Calendar/Drive + 사용자가 등록한 로컬 MCP/커스텀 원격 커넥터(OAuth 자동 디스커버리) | connector 모듈이 `list_tools()`로 광고 — **연결된 커넥터의 도구만** 노출된다(미연결 도구는 스키마에서 제외). 도구별 정책(allow/approval/block)은 사용자가 저장. 프로토콜·엔드포인트 상세는 RUNTIME_DESIGN·RUNTIME_DIRECTORY·CONTRACTS 정본 |
+| `plugin` | 설치된 플러그인이 제공하는 도구 + SKILL.md(학습된 스킬과 동일한 관련도 파이프라인으로 주입 — 전량 주입 아님, §7) | manifest 기반 `IPluginLoader` — 샌드박스에서 실행 |
 | `bridge` | `tool_search`/`tool_describe`/`tool_call` 3종 | 직접 이식 대상이 아님 — 아래 폴딩의 산물 |
 
 `update_plan`(§3.2)은 예외적인 **가상 빌트인**이다: 계획이 있는 턴에만 루프가
@@ -294,11 +329,31 @@ ReAct의 "관찰→추론" halves를 프롬프트 선의에 맡기지 않고 결
 
 ### 5.2 조립과 폴딩 (progressive disclosure)
 
-매 턴 `fold_tools_for_budget()`: builtin("core")은 항상 그대로 노출. connector+plugin
-("non-core")의 스키마 합이 예산(~15K tokens)을 넘으면 전부를 매 턴 싣는 대신
-**bridge 3종으로 접는다** — 모델은 `tool_search`로 찾고 `tool_describe`로 파라미터를
-확인한 뒤 `tool_call`로 실행한다. 접혀도 실제 도구의 승인/차단 정책은 재귀
-디스패치로 그대로 적용된다(노출 방식과 실행 정책은 별개의 방어선).
+매 턴 `fold_tools_for_budget()`(`agent/tool_dispatch.py`): builtin("core")은 항상
+그대로 노출. connector+plugin("non-core")의 스키마 합이 예산(~15K tokens)을
+넘으면, 전부를 매 턴 싣는 대신 두 겹으로 접는다(2026-07-07 개편 — 순수
+bridge-only 폴딩은 폐기):
+
+- **bridge 3종은 항상 노출**: `tool_search`로 찾고 `tool_describe`로 파라미터를
+  확인한 뒤 `tool_call`로 실행.
+- **관련도 스포트라이트**: 이번 턴 사용자 메시지를 기준으로 접힌 도구를 전부
+  스코어링(이름 토큰×2.0 + 설명×1.0)해, 점수가 있는 상위 도구를
+  `_SPOTLIGHT_MAX_TOOLS`(기본 8개)·`_SPOTLIGHT_BUDGET_TOKENS`(기본 4,000 토큰)
+  한도 안에서 bridge 3종 옆에 **스키마 그대로** 얹는다. 전부 접기만 하면 소형
+  모델이 `tool_search`를 부를 줄 몰라 도구를 못 쓰는 실패가 잦았던 것이 이유 —
+  자주 맞는 도구는 애초에 안 접혀 보이게 한다.
+- 스코어링은 `core/lexical.py`의 결정론적 매칭 사다리를 쓴다: 정확 토큰 일치(1.0)
+  → 부분 문자열 포함(0.5) → char-bigram Dice 유사도(0.25, threshold 0.6) → 작은
+  ko→en 의도어 확장 테이블(만들→create/make/build, 메일→mail/email 등, 쿼리
+  쪽에만 적용). 이 모듈은 스킬 관련도(`learning/skill/relevance.py`)와도
+  공유된다 — "무엇이 매치인가"가 두 군데서 따로 정의돼 드리프트하는 걸 막기
+  위해서다. **시멘틱(임베딩) 매칭은 의도적으로 채택하지 않았다**(2026-07-07
+  적대적 리뷰 최종 결론): 8GB 노트북이 바닥 사양인 로컬 우선 제품에서 임베딩
+  스택(모델 다운로드·RAM·인덱스 빌드·콜드스타트)은 이 정도 recall 이득에 비해
+  비싸다.
+- 접혀도 실제 도구의 승인/차단 정책은 재귀 디스패치로 그대로 적용된다(노출
+  방식과 실행 정책은 별개의 방어선). `tool_search` 자체도 같은 사다리로 랭킹된
+  최대 12개 결과(`score` 필드 포함)를 반환하도록 함께 개편됐다.
 
 ### 5.3 디스패치와 HITL 승인
 
@@ -348,11 +403,18 @@ recommended_next_action, tools_used}`로 구조화된다 — 메인 모델과 �
 
 실행 모델은 세 지점에서 학습 루프에 접속한다(상세는 LEARNING_LOOP 문서):
 
-1. **주입(턴 시작)**: prefetch가 활성 스킬 전체(예산 내)와 관련 메모리를 시스템
-   프롬프트에 싣는다. 플러그인 SKILL.md도 같은 형식으로 실린다.
-2. **미드턴 제안**: `propose_skill` builtin — 스테이징만 하고, 턴 종료 시
-   `skill_patch_proposed` HITL 카드로 서피싱된다(생성도 from_version=0의 패치로
-   통일). §3.5의 계획 완료 유도가 이 경로의 주 트리거 중 하나다.
+1. **주입(턴 시작)**: prefetch가 학습된 스킬과 **플러그인 SKILL.md를 같은 관련도
+   파이프라인으로 합쳐**(2026-07-07 개편 — 플러그인 스킬 전량 주입은 폐기)
+   채점한다: 관련도 상위(기본 임계 3.0, 최대 2개)만 본문 그대로 자동 주입되고,
+   나머지는 이름+한줄 설명의 인덱스로만 실려 모델이 필요하면 `skill_view`로
+   온디맨드 로드한다. 관련 메모리도 같은 턴에 함께 실린다. 상세 스코어링·인덱스
+   포맷은 [RICE_LEARNING_LOOP_DESIGN.md](RICE_LEARNING_LOOP_DESIGN.md)가 정본.
+2. **미드턴 제안**: `propose_skill` builtin — 스테이징 전에 결정론적 검증 게이트
+   (`learning/skill/verifier.py`, LLM 재채점 없음 — 프론트matter·코드펜스
+   무결성 같은 객관적 위반은 즉시 반려해 같은 턴에 모델이 고쳐 재제안하게 함)를
+   통과해야 하고, 통과분만 턴 종료 시 `skill_patch_proposed` HITL 카드로
+   서피싱된다(생성도 from_version=0의 패치로 통일). §3.6의 계획 완료 유도가 이
+   경로의 주 트리거 중 하나다. 검증 게이트 상세는 LEARNING_LOOP_DESIGN 정본.
 3. **사후 관찰**: `learning.observe`(값싼 효과) + 게이트된 `/learning-review`(LLM
    리뷰). 계획 턴의 update_plan 호출·note들은 히스토리에 남아 리뷰 LLM이 "무엇이
    통했는지"를 읽는 상질의 원료가 된다.
@@ -367,11 +429,11 @@ recommended_next_action, tools_used}`로 구조화된다 — 메인 모델과 �
 
 | 키 | 기본 | 의미 |
 |---|---|---|
-| `planning_enabled` | `true` | false면 eager 플래너 off — 단, 실행 중 lazy 승격(`start_plan`, §3.8)은 항상 유효 |
+| `planning_enabled` | `true` | false면 eager 플래너 off — 단, 실행 중 lazy 승격(`start_plan`, §3.9)은 항상 유효 |
 | `planner_recent_messages` | 12 | 플래너에 보여줄 최근 대화 수 |
 | `planner_timeout_seconds` | 90 | 플래너 호출 타임아웃(초과 시 계획 없이 진행) |
 | `plan_max_steps` | 8 | 계획 단계 수 상한(프롬프트 지시; 코드 하드캡 12) |
-| `plan_max_iterations` | 60 | 계획 턴의 반복 예산 상한(§3.4) |
+| `plan_max_iterations` | 60 | 계획 턴의 반복 예산 상한(§3.5) |
 | `plan_drift_guard_rounds` | 4 | 이 횟수의 무보고 도구 라운드 후 재평가 강제(§3.3) |
 
 ---

@@ -1,12 +1,12 @@
 # RICE Learning Loop Design
 
-> 작성일: 2026-06-18 (개정: 2026-06-26, **2026-07-02 대개정 — Hermes learning_loop 이식**, **2026-07-03 v3 — Self-Improvement 리모델**) · 상태: **확정 (결정 완료)**
+> 작성일: 2026-06-18 (개정: 2026-06-26, **2026-07-02 대개정 — Hermes learning_loop 이식**, **2026-07-03 v3 — Self-Improvement 리모델**, **2026-07-08 — 소스 드리프트 동기화: 관련도 기반 스킬 선별·검증 게이트·빌트인 스킬·메모리 격리 반영**) · 상태: **확정 (결정 완료)**
 > 범위: RICE의 핵심 차별점인 learning loop의 **자체 스펙** — SKILL.md 포맷, usage 텔레메트리, 생성 트리거, **개선(patch)**, curator 규칙+LLM 통합, memory/user modeling, 안전장치(시크릿 스크러빙)
 > 관계: [HERMES_LEARNING_LOOP_REFERENCE.md](HERMES_LEARNING_LOOP_REFERENCE.md)는 *참조*(Hermes 코드 분석), 이 문서는 *RICE의 결정*이다. 런타임 통합은 [RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md) 3·4장, 모듈 위치는 [RICE_RUNTIME_DIRECTORY.md](RICE_RUNTIME_DIRECTORY.md) `learning/`. **학습이 실제로 일어났음을 측정·증명하는 방법**은 [RICE_LEARNING_EVAL.md](RICE_LEARNING_EVAL.md).
 >
-> **2026-07-02 대개정 요지**: 이 문서의 초판(§4·§5)이 서술한 "시스템 프롬프트 가이드로 LLM이 자율 판단" 트리거는 실제로는 **정규식/키워드 매칭**으로만 구현돼 있었다(스킬 생성 본문이 `final_message`를 그냥 500자 자르는 수준). 진짜 저작 지능(무엇을 스킬로 만들지, patch 본문에 뭘 쓸지)을 LLM에 맡기도록 학습 루프 전체를 다시 짰다 — Hermes의 `background_review.py`/`curator.py`를 참조해 RICE의 HITL 불변식(스킬은 항상 사람 승인 후 저장, §5.2.1)에 맞게 이식. 아래 §4·§5·§8은 전면 재작성됐다.
+> **2026-07-02 대개정 요지**: 이 문서의 초판(§4·§5)이 서술한 "시스템 프롬프트 가이드로 LLM이 자율 판단" 트리거는 실제로는 **정규식/키워드 매칭** 중심으로 구현돼 있었다(스킬 생성 본문도 `final_message` 일부를 잘라 쓰는 수준). 재사용 가치 판단과 patch 본문 저작을 LLM 리뷰 경로로 옮기기 위해 학습 루프를 재설계했다 — Hermes의 `background_review.py`/`curator.py`를 참조해 RICE의 HITL 불변식(스킬은 항상 사람 승인 후 저장, §5.2.1)에 맞게 이식. 아래 §4·§5·§8은 전면 재작성됐다.
 >
-> **2026-07-03 v3 (Self-Improvement 리모델) 요지**: v2까지의 루프는 제안을 잘 만들지만 **자기 결정 이력에서 아무것도 배우지 못했다** — 제안→결정이 in-memory 파킹에만 존재해 재시작·타임아웃과 함께 증발했고, 거부된 제안이 무한 재등장할 수 있었으며(§5.2.4의 "(향후) 반복 거부 시 하향"이 미구현), 리뷰는 프론트 호출 의존 + 단일 세션 시야였고, 메인 에이전트는 "SKILL.md로 저장하라"는 지시만 받고 도구가 없었다(공중 지시). v3는 **Learning Ledger**(제안/결정 영속 감사 로그 → 반복 거부 쿨다운 + 프롬프트 회피 목록)와 **Suggestion Inbox**(파킹 밖에서 살아남는 영속 제안함 — 타임아웃 이동 + 발굴 수신)를 중심으로 리모델했다. 신규: §9 (Ledger·Inbox·Discovery), §4/§5.2.2의 T5(미드턴 에이전트 발의), §6의 정규식 추출 제거 + 메모리 삭제.
+> **2026-07-03 v3 (Self-Improvement 리모델) 요지**: v2까지의 루프는 제안을 만들 수 있었지만 **자기 결정 이력을 학습 입력으로 사용하지 못했다**. 제안→결정이 in-memory 파킹에만 존재해 재시작·타임아웃과 함께 소실됐고, 거부된 제안이 반복 재등장할 수 있었으며(§5.2.4의 "(향후) 반복 거부 시 하향"이 미구현), 리뷰는 프론트 호출 의존 + 단일 세션 시야였다. 또한 메인 에이전트에는 "SKILL.md로 저장하라"는 지시만 있고 실제 저장 제안 도구가 없었다. v3는 **Learning Ledger**(제안/결정 영속 감사 로그 → 반복 거부 쿨다운 + 프롬프트 회피 목록)와 **Suggestion Inbox**(파킹 밖에서 살아남는 영속 제안함 — 타임아웃 이동 + 발굴 수신)를 중심으로 리모델했다. 신규: §9 (Ledger·Inbox·Discovery), §4/§5.2.2의 T5(미드턴 에이전트 발의), §6의 정규식 추출 제거 + 메모리 삭제.
 
 ---
 
@@ -18,9 +18,9 @@
    └──────────────────────────────────────────────────────────────────────────┘
 ```
 
-- 모든 단계는 **SSE 이벤트**(`memory_written`, `skill_patch_proposed`, `skill_patched` 등, [RICE_CONTRACTS.md](RICE_CONTRACTS.md) 1.3)로 ChatScreen에 실시간 가시화된다 — "쓸수록 똑똑해짐"을 *증명*하는 것이 데모 목표.
+- 학습 효과는 **SSE 이벤트**(`memory_written`, `skill_patch_proposed`, `skill_patched` 등, [RICE_CONTRACTS.md](RICE_CONTRACTS.md) 1.3)로 ChatScreen에 가시화된다 — "쓸수록 똑똑해짐"을 *증명*하는 것이 데모 목표.
 - 저장소: `~/.rice/skills/*.md` + `.usage.json` 사이드카, `state.db`(memories, FTS5).
-- **두 개의 SSE 스트림.** 메인 턴(`POST /sessions/{id}/messages`)은 memory fact/preference 통지만 낸다(정규식, 즉시·저비용, §6). 스킬 생성/개선(진짜 판단력이 필요한 부분)은 턴이 끝난 뒤 **별도 스트림** `POST /sessions/{id}/learning-review`에서 나온다(§4·§5.2) — LLM 호출이 메인 턴의 `done`을 지연시키지 않게 하기 위한 의도적 분리(제목 생성이 이미 같은 이유로 분리돼 있던 전례를 그대로 따름).
+- **두 개의 SSE 스트림.** 메인 턴(`POST /sessions/{id}/messages`)은 즉시·저비용 처리만 수행한다: 주입된 스킬의 use 카운터를 갱신하고, 대화 중 `propose_skill`로 스테이징된 T5 제안을 같은 턴의 `skill_patch_proposed` 카드로 서피싱한다. 메모리 작성과 사후 스킬 생성/개선처럼 판단이 필요한 작업은 턴이 끝난 뒤 **별도 스트림** `POST /sessions/{id}/learning-review`에서 처리한다(§4·§5.2·§6). LLM 호출이 메인 턴의 `done`을 지연시키지 않게 하기 위한 의도적 분리다.
 
 > **용어 — "개선"과 "전이"는 다르다.** 루프의 "개선" 화살표는 스킬 **본문 내용을 고치고 version을 올리는 patch**(§5.2, 신규 생성도 이 화살표에 통합됨 — §4)를 뜻한다. 이는 스킬 **상태(state: active/stale/archived)** 를 바꾸는 **전이(transition, §5.1)** 와 별개 관심사다. 전이는 freshness·생명주기 유지(curator), patch는 품질·정확성 개선이다. 두 개를 한 화살표로 뭉뚱그리지 않는다.
 
@@ -38,7 +38,7 @@ tags: [kubernetes, deploy, ci]        # 마켓/필터/검색용
 description: K8s 서비스 배포 절차       # 한 줄 요약 (목록·prefetch 매칭에 사용)
 created_at: 2026-06-18T10:00:00Z
 updated_at: 2026-06-20T09:00:00Z      # patch 시 갱신 (생성 시 = created_at)
-source: session:abc123 | plugin:wxo-expert | user | curator:consolidate  # 출처
+source: session:abc123 | plugin:wxo-expert | user | curator:consolidate | builtin  # 출처
 state: active                         # active | stale | archived
 absorbed_into: null                   # curator 통합으로 archived됐으면 흡수한 umbrella 이름 (§5.1)
 ---
@@ -49,7 +49,8 @@ absorbed_into: null                   # curator 통합으로 archived됐으면 �
 
 - ✅ frontmatter 필수: `name`, `version`, `description`, `state`. 선택: `tags`, `source`, `updated_at`, `absorbed_into`
 - **version**은 단조 증가 정수. patch(개선) 시 +1, 신규 생성은 1부터 시작(§4). 이전 버전은 `~/.rice/skills/<name>/.history/v<N>.md`에 **보관**한다(롤백·diff 가능, §5.2.4 — 신규 생성은 보관할 이전 버전이 없어 history를 만들지 않는다).
-- ★ `source`로 학습 생성(`session:<id>`)/​plugin 제공(`plugin:<id>`)/사용자 직접 작성(`user`)/curator 통합 산출(`curator:consolidate`)을 구분 → MySkillsScreen에서 출처 배지 표시. `plugin:`으로 시작하는 스킬은 curator 통합(§5.1)·review 엔진(§4·§5.2) 양쪽에서 patch 대상 후보로 보지 않는다(plugin이 소유한 콘텐츠 — 학습 루프 밖).
+- ★ `source`로 학습 생성(`session:<id>`)/​plugin 제공(`plugin:<id>`)/사용자 직접 작성(`user`)/curator 통합 산출(`curator:consolidate`)/**패키지 동봉(`builtin`, 2026-07-05 신규 — 아래)**을 구분 → MySkillsScreen에서 출처 배지 표시. `plugin:`으로 시작하는 스킬은 curator 통합(§5.1)·review 엔진(§4·§5.2) 양쪽에서 patch 대상 후보로 보지 않는다(plugin이 소유한 콘텐츠 — 학습 루프 밖).
+- **빌트인 스킬(`source: builtin`, 2026-07-05 신규)**: 앱 패키지에 동봉된 스킬(`learning/skill/builtin_skills/*.md`, 현재 `business-planning.md` — 스킬 개념을 처음부터 보여주는 교보재 목적). 원본은 사용자 디스크에 복사되지 않는다 — 상태(활성/비활성)만 `~/.rice/skills/.builtin-states.json`에 영속화. **예약 네임스페이스**: 같은 이름의 사용자 생성·patch·delete·rollback은 전부 `LearningService._ensure_not_builtin()`에서 거부(422). 상태 전이도 `active`/`archived`(활성/비활성) 두 가지만 허용 — `stale` 없음(curator가 애초에 안 봄, §5.1). Curator·통합(consolidate)·patch 제안 어디에서도 후보로 보지 않는다는 점은 `plugin:` 출처와 같다.
 - `absorbed_into`(2026-07-02 신규, Phase B): curator 통합으로 archived된 스킬이 어느 umbrella에 흡수됐는지 기록(순수 정리로 archived됐으면 `null`). 기존 파서가 미지 frontmatter 키를 관대하게 처리해서 순수 추가 — 마이그레이션 불필요.
 
 ---
@@ -64,6 +65,7 @@ absorbed_into: null                   # curator 통합으로 archived됐으면 �
   "use": 12,          // 시스템 프롬프트에 주입되어 실제 작업에 사용된 횟수
   "view": 3,          // 사용자가 MySkills에서 상세 열람한 횟수
   "patch": 2,         // 개선(본문 수정)된 횟수 → version과 동기
+  "tools": {"kubectl_apply": 5, "search_files": 2},  // 관측된 도구 호출 빈도(상한 40종, 2026-07-06 신규)
   "last_used_at": "2026-06-18T09:00:00Z",
   "created_at": "2026-06-10T00:00:00Z"
 }
@@ -71,6 +73,7 @@ absorbed_into: null                   # curator 통합으로 archived됐으면 �
 
 - 카운터 증가 시점: `use`=턴 종료 시 주입된 스킬에 가산, `view`=`GET /skills/{id}`, `patch`=본문 수정(승인) 시 (§5.2.4)
 - 상태 전이·curator 입력으로 사용 (§5.1). `use`·`patch`는 학습 측정 지표로도 사용된다([RICE_LEARNING_EVAL.md](RICE_LEARNING_EVAL.md) 2장).
+- **설명 사이드카(별개 파일, 2026-07-06 신규)**: `usage.json`이 텔레메트리라면, `learning/skill/analysis.py`+`analyzer.py`가 만드는 `SkillAnalysisData`는 "이 스킬이 뭘 하는지" 사람이 읽을 설명이다(휴리스틱+LLM 1회, `GET /skills/{id}`가 lazy-load, `POST /skills/{id}/analysis/refresh`로 재생성). **UI 설명 전용 — 권한/실행 판단에는 절대 쓰이지 않는다.**
 
 ---
 
@@ -191,7 +194,7 @@ patch로 표현되고(`from_version=0`), `skill_patch_proposed`가 diff 카드�
 - **T5 — 미드턴 에이전트 발의 (2026-07-03 신규, Self-Improvement v3).** 메인
   에이전트가 대화 **도중** `propose_skill` 빌트인 도구로 직접 발의한다("이걸
   스킬로 승격할까요?"). v2까지 SKILL_GUIDANCE는 "SKILL.md로 저장하라"고 지시만
-  하고 도구가 없었다(공중 지시 — 에이전트가 말만 하고 아무 일도 안 일어남).
+  하고 도구가 없었다(실행 경로가 없는 지시였기 때문에 실제 저장으로 이어지지 않았다).
   도구는 파일에 닿지 않는다: `LearningService.stage_proposal()`에 세션별로
   스테이징하고, `observe()`가 턴 종료 때 드레인해 **같은 턴의 스트림**에서 기존
   HITL diff 카드로 서피싱한다(`skill_patch_proposed`, trigger="T5" — 생성/개선
@@ -250,7 +253,7 @@ patch로 표현되고(`from_version=0`), `skill_patch_proposed`가 diff 카드�
 
 | 종류 | 추가 | 비고 |
 |------|------|------|
-| SSE 이벤트 | ~~`skill_created`~~ | **2026-07-02 제거.** §4 참고 — 신규 생성이 patch(from_version=0)로 통일되며 죽은 이벤트가 됐다. 스트림 이벤트 9종 → **8종**. |
+| SSE 이벤트 | ~~`skill_created`~~ | **2026-07-02 제거.** §4 참고 — 신규 생성이 patch(from_version=0)로 통일되며 별도 생성 이벤트가 사라졌다. 이후 2026-07-04에 `plan_updated`가 추가되어 현재 스트림 이벤트는 CONTRACTS §1.3의 9종이다. |
 | SSE 제어 이벤트 | `skill_patch_proposed` (skill_id, changelog, diff, trigger, from_version, to_version, **proposed_body**, **warnings**) | `tool_approval_required`과 동일 폴링형 제어 이벤트. proposed_body/warnings는 2026-07-02 추가(견고성 — 프론트가 diff 재구성에 의존하던 것을 서버 원문으로 대체) |
 | SSE 이벤트 | `skill_patched` (skill_id, version) | 적용 완료. version=1이면 신규 생성이었다는 뜻(프론트는 로컬 목록에 없으면 새로 추가해야 한다 — "없으면 그냥 무시" 버그 주의) |
 | 엔드포인트 | `POST /skills/{id}/patch` | 제안 응답 (approve/reject/edited_body) |
@@ -312,7 +315,7 @@ patch로 표현되고(`from_version=0`), `skill_patch_proposed`가 diff 카드�
 | preferences | `state.db` | 답변 스타일(간결/상세/기술형), 선호 모델/도구 |
 | 세션 히스토리 | `state.db` + FTS5 | 과거 대화 검색(session_search) |
 
-- **prefetch 기본값**: 턴 시작에 **최근 facts N=20** + **쿼리 FTS 매칭 상위 K=10(메모리)** + **active 스킬 전부 주입**(스킬 예산 내, §7). N·K는 `config.yaml`로 노출. 스킬은 예산 초과 시에만 FTS 랭킹으로 선별 — 그 구간이 retrieval 취약점이며([RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md) 3장), `skill_hit`으로 진단한다([RICE_LEARNING_EVAL.md](RICE_LEARNING_EVAL.md) 2장)
+- **prefetch 기본값(2026-07-07 정정 및 스킬 선별 방식 개편)**: 턴 시작에 **최근 facts**(`prefetch_recent_facts`, 기본 **8** — 기존 문서는 20으로 적었으나 실제 기본값은 8) + **쿼리 FTS 매칭 상위**(`prefetch_fts_top_k`, 기본 **5** — 기존 문서는 10) 메모리를 주입한다. **스킬은 더 이상 "예산 내 전체 주입"이 아니다** — 매 턴 관련도 스코어링(상세 §7 갱신)으로 상위만 자동 주입되고 나머지는 인덱스로만 실린다. `skill_hit`으로 매칭 실패를 진단하는 것은 여전히 유효([RICE_LEARNING_EVAL.md](RICE_LEARNING_EVAL.md) 2장).
 - ★ memory 기록 시 `memory_written` SSE 이벤트 → 개인화 가시화
 - **작성 주체 단일화 (2026-07-03, v3)**: `observe()`의 정규식 fact/preference
   추출(FACT_PREFIXES/PREF_PREFIXES 도입구 매칭)은 **제거됐다**. 리뷰 LLM의
@@ -320,6 +323,7 @@ patch로 표현되고(`from_version=0`), `skill_patch_proposed`가 diff 카드�
   노이즈 메모리를 만들었다 — 메모리는 HITL 없이 매 턴 주입되는 가장 위생에
   민감한 경로다. 이제 기록 판단은 리뷰 LLM 하나뿐이고, `observe()`는 use++와
   T5 스테이징 드레인만 한다.
+- **격리(quarantine, `review/engine.py` 소유, 이 문서 최초 반영)**: 외부 콘텐츠(connector/plugin/bridge 도구 결과)가 섞인 턴에서 나온 메모리는 `status: quarantined`로 저장되어 승인 전까지 prefetch·FTS 검색에 걸리지 않는다 — 프롬프트 인젝션이 메모리를 오염시켜 이후 턴에 조용히 재주입되는 경로를 막는 장치다(§8의 시크릿/위협 스캔과는 다른 방어선 — 이건 콘텐츠 자체가 아니라 **출처**로 판정한다). 판정 근거는 tool 메시지 `tool_source` metadata. 승인은 `POST /memories/{id}/approve`(CONTRACTS §6.7) → `active` 전환. 각 메모리의 `derived_from_external`/`evidence_message_ids` 필드가 판정 근거를 기록한다.
 - **사후 삭제 (2026-07-03, v3)**: `DELETE /memories/{id}` + LearningPanel
   신호 행의 제거 버튼. 메모리는 승인 게이트가 없는 유일한 학습 경로라, 잘못
   들어간 항목이 "매 턴 영구 주입"되지 않으려면 사후 제거 수단이 필수다. 삭제는
@@ -337,15 +341,15 @@ patch로 표현되고(`from_version=0`), `skill_patch_proposed`가 diff 카드�
 | 도구 정의(built-in tools, `execute_code` 포함) | ~12K | |
 | MCP 도구(Connector 노출 tool) | ~15K | 연결 수 비례 (MVP: Gmail) |
 | 규칙(rules) | ~5K | |
-| **스킬(active 주입)** | **~24K (상한, `skill_inject_token_budget`)** | 초과 시 `use` 상위 우선 주입, 나머지는 이번 턴 제외(문서 초판은 40K로 적었으나 실 구현 기본값은 24K — 2026-07-02 정정) |
-| 메모리(facts N=20 + FTS K=10) | ~10K | §6 |
+| **스킬(자동 주입 상위 + 인덱스)** | **작음 — 상위 소수 본문 + 짧은 인덱스** | 2026-07-07 개편: `skill_inject_token_budget`(24K) 상한 자체는 유지되지만 도달 방식이 바뀌었다 — 예산까지 채워 넣는 게 아니라 관련도 스코어 상위(기본 임계 3.0·최대 2개, `learning/skill/relevance.py`)만 본문 그대로 넣고 **나머지는 이름+한줄 설명 인덱스**로만 얹는다(아래 서술 갱신) |
+| 메모리(facts 8 + FTS 상위 5, §6 실 기본값) | ~10K | §6 |
 | 메시지(대화 히스토리) | ~160K (잔여) | 초과 시 오래된 턴부터 요약/절단 |
 | **모델 응답(출력 예약)** | **20K** | |
 | **합계** | **270K** | |
 
-- 활성 스킬은 시스템 프롬프트에 전체 주입 + prefix caching 의존(Claude `cache_control`, Hermes 검증 #6). Ollama는 caching 미지원 → 컨텍스트 재사용으로 대체([RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md) 6장).
-- **스킬 예산(~40K) 초과 구간에서만 검색이 스킬을 선별**하므로 retrieval 취약성이 노출된다(MVP 대응·진단: [RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md) 3장 + `skill_hit`).
-- **MCP 도구는 연결된 Connector 것만 주입**한다(미연결 Connector tool은 스키마에서 제외 — [RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md) 2.1). MCP 예산(~15K) 초과 시 progressive disclosure로 접는 것은 Phase 2([RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md) 11장).
+- **스킬 선별은 매 턴 관련도 매칭이 주경로다(2026-07-07 개편)**: `core/lexical.py`의 결정론적 사다리(exact→substring→char-bigram fuzzy→ko→en 의도어 확장)로 스코어링해, 상위(기본 임계 3.0·최대 2개)만 본문 그대로 자동 주입하고 나머지는 이름+한줄 설명의 인덱스만 실린다. 모델이 인덱스에서 필요를 느끼면 `skill_view` builtin으로 온디맨드 로드한다. prefix caching(Claude `cache_control`) 이점은 상위 스킬·인덱스가 매 턴 반복되는 한 유지된다. Ollama는 caching 미지원 → 컨텍스트 재사용으로 대체([RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md) 6장).
+- **매 턴이 매칭에 의존하므로 retrieval 정확도가 그만큼 더 중요해졌다** — 예산 초과 시에만 작동하던 안전장치가 아니라 상시 경로가 됐다는 것이 이전 서술과의 핵심 차이. `skill_hit`으로 매칭 실패를 계속 진단한다([RICE_LEARNING_EVAL.md](RICE_LEARNING_EVAL.md) 2장). 시멘틱(임베딩) 매칭은 2026-07-07 적대적 리뷰에서 최종 기각됐다(로컬 8GB 최소사양 트레이드오프).
+- **MCP 도구는 연결된 Connector 것만 주입**한다(미연결 Connector tool은 스키마에서 제외 — [RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md) 2.1). MCP 예산(~15K) 초과 시엔 bridge 3종 + 관련도 스포트라이트로 접는다(**구현 완료** — 기존 문서의 "Phase 2" 항목은 2026-07-01에 착수했고, 2026-07-07에 관련도 스포트라이트 방식으로 개편됐다. [RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md) 2.1).
 - **서브에이전트 컨텍스트 격리**: 서브에이전트 실행은 **새 대화를 여는 것과 동일하게** 독립된 컨텍스트(별도 270K 윈도)에서 작업시켜 부모 대화의 컨텍스트 오염을 막는다. 토큰 사용량은 늘지만 정확도를 우선하는 위 원칙과 일관된다.
 
 > 학습 측정(eval)은 [RICE_LEARNING_EVAL.md](RICE_LEARNING_EVAL.md) 참조.
@@ -356,11 +360,11 @@ patch로 표현되고(`from_version=0`), `skill_patch_proposed`가 diff 카드�
 
 LLM이 스킬/메모리 본문을 직접 저작하게 되면서(§4·§5.2·§5.3) 생긴 새 위협 모델
 하나를 막는다: **"LLM이 대화에서 본 시크릿(API 키, 토큰)을 스킬/메모리 본문에
-무심코 옮겨 적어, 그게 매 턴 시스템 프롬프트에 다시 주입되는 사고."** Hermes의
-`skills_guard.py`가 갖고 있는 훨씬 넓은 위협 분류체계(exfiltration/injection/
-persistence/network/obfuscation/traversal — 제3자 마켓플레이스 설치물을 못
-믿을 때 쓰는 것)는 **포팅하지 않는다** — RICE엔 마켓플레이스가 없다(범위 밖,
-아래 "다루지 않은 것" 참고).
+무심코 옮겨 적어, 그게 매 턴 시스템 프롬프트에 다시 주입되는 사고."** (**2026-07-03
+갱신, 2026-07-08 문서 정정**: 이 절이 애초에 "포팅 안 한다"고 선을 그었던 Hermes의
+더 넓은 위협 분류체계 — exfiltration/injection/persistence/network/obfuscation/
+traversal — 는 실제로는 이후 `learning/skill/guard.py::scan_risks()`로 **포팅됐다**.
+아래 "다루지 않은 것"을 정정한다.)
 
 **두 가지 체크** (`learning/skill/guard.py`):
 - **크기 상한**(`skill_max_body_chars`, 기본 20,000자) — 폭주한 LLM 응답에 대한 마지막 방어선. 넘으면 `ValidationError`로 거부(제안 자체가 버려짐 — §5.2.4).
@@ -373,10 +377,10 @@ persistence/network/obfuscation/traversal — 제3자 마켓플레이스 설치�
   `update_skill` 경로도 같이 보호받는다 — 이전엔 이 두 경로에 크기/시크릿
   검증이 전혀 없었다(이번에 같이 닫힌 기존 gap).
 - **메모리**: `MemoryStore.add()` 내부(저장소 경계 자체). 스킬과 다른 이유:
-  메모리는 `observe()`(정규식 경로)와 `ReviewEngine`(LLM 경로) **두 곳에서
-  직접 호출**되고, 무엇보다 메모리는 **HITL 승인이 없다**(§6 — 즉시 반영). 사람이
-  검토할 기회가 스킬보다도 적은 경로라 저장소 경계에서 막아, 호출부가 잊을
-  수 없게 한다.
+  메모리는 **HITL 승인이 없고**(§6), 승인 전 diff 검토 없이 저장 즉시 다음 턴
+  주입 후보가 된다. 현재 메모리 작성 판단은 `ReviewEngine`의 `propose_memory_write`
+  경로로 단일화됐지만, 저장소 경계에서 스크러빙을 적용하면 현재·향후 호출부가
+  검증을 누락할 수 없다.
 
 **제안 단계에서도 미리 적용**: `ReviewEngine`/`ConsolidationEngine`은 `PatchProposal`을
 만들 때 이미 스크러빙을 거친 본문을 `proposed_body`에 담고, 발견한 라벨을
@@ -385,11 +389,17 @@ persistence/network/obfuscation/traversal — 제3자 마켓플레이스 설치�
 쓰기 직전에 **다시** 스크러빙하는 것은 방어적 이중 체크(이미 클린한 본문에
 대해선 아무 일도 안 함)다.
 
-**다루지 않은 것(의도적, 범위 밖)**: Hermes의 제3자 스킬 설치 전 위협 스캔
-(`THREAT_PATTERNS` — 역쉘/난독화/영속성 탐지 등)은 마켓플레이스가 생기기 전까진
-포팅하지 않는다. `skill_preprocessing.py`의 inline shell 치환(스킬 로드 시점에
-쉘 커맨드 실행)도 포팅하지 않는다 — prefetch 시점에 임의 커맨드가 실행되는
-구조 자체가 RICE의 로컬-신뢰 모델에서도 과도한 위험이다.
+**실제로 포팅된 것(2026-07-03, 위 정정)**: `learning/skill/guard.py::scan_risks()`가 Hermes THREAT_PATTERNS에 준하는 탐지를 구현한다 — 프롬프트 인젝션(한/영)·시스템 프롬프트 override·hidden-instruction·자격증명 유출·파괴적 쉘(`rm -rf`/`mkfs`/`dd`/fork bomb)·원격 실행(`curl|sh`)·네트워크 리스너(`nc -l`)·역쉘(`/dev/tcp/`, `bash -i`)·SSH 키 영속성(`authorized_keys`)·zero-width 은닉 문자. 적용 경로는 두 갈래: 스킬 쪽은 `proposals.py::_build_warnings`(제안의 `warnings`에 실림, §5.2.3), 메모리 쪽은 `review/engine.py::_memory_effect`(메모리는 HITL이 없으므로 fail-closed로 즉시 차단 — §6의 격리(quarantine)와는 별개 방어선, 이건 콘텐츠 내용으로 판정하고 격리는 출처로 판정한다).
+
+**여전히 다루지 않은 것(의도적, 범위 밖)**: `skill_preprocessing.py`의 inline shell 치환(스킬 로드 시점에 쉘 커맨드 실행)은 포팅하지 않는다 — prefetch 시점에 임의 커맨드가 실행되는 구조 자체가 RICE의 로컬-신뢰 모델에서도 과도한 위험이다.
+
+**스킬 승격 검증(품질 게이트) — 별도 관심사, 2026-07-07 신규**: 위 두 체크(크기·시크릿)는 안전 문제를 막지만, "이 스킬 본문이 구조적으로 쓸만한가"는 다른 질문이다. `learning/skill/verifier.py::verify_candidate()`가 이를 결정론적 lint 사다리로 검사한다 — **LLM 재채점 없음**(같은 로컬 LLM이 자기가 쓴 걸 재검토해봐야 지연만 늘고 신호는 안 는다는 판단, `core/lexical.py`의 "시멘틱 매칭 기각"과 같은 결의 근거).
+- **fail(반려, 객관적 무결성만)**: 빈 본문(8자 미만), 코드펜스 미폐합, 본문이 SKILL.md frontmatter로 시작.
+- **warn(경고, 판단 항목 — 반려는 아님)**: 본문 60자 미만, 번호/불릿/헤딩/펜스가 하나도 없음(no-steps), 문장이 끊긴 채 끝남, TODO/TBD/placeholder 토큰, 백틱으로 언급한 도구가 실제 카탈로그에 없음(unknown-tool), 설명 누락(생성만), 기존 스킬과 근접중복(Jaccard≥0.6, 생성만), 패치가 원본을 30% 미만으로 줄임(원본 400자 이상일 때만).
+- **3중 관문**: ① `stage_proposal`(T5 미드턴) — fail 시 스테이징 자체를 거부하고 사유를 도구 결과로 모델에 돌려줘 같은 턴 재제안을 유도. ② `_screen_proposals` — review/learn/sweep/discovery가 만든 LLM 제안 전부의 단일 관문, fail은 드롭 + ledger `verifier_rejected` 기록(§9.1). ③ `apply_patch`/`create_skill`/`update_skill` 직전 — 사용자가 카드에서 직접 고친 `edited_body`까지 포함해 최종 관문(우회 불가).
+- warn은 새 채널을 만들지 않는다 — 기존 `PatchProposal.warnings`(§5.2.3, 시크릿 스크러빙 경고와 같은 필드)에 함께 실린다.
+- 도구 존재 확인은 `server/composition_root.py`의 `_known_tool_names()`(builtin+connector+plugin+bridge+가상 빌트인 전체를 late binding으로 조회)가 근거다.
+- rollback·마켓 설치 경로는 의도적으로 이 게이트를 적용하지 않는다(이미 신뢰된 콘텐츠거나 되돌리는 동작이라 새 검증이 필요 없다는 판단).
 
 ---
 
@@ -406,10 +416,15 @@ v2까지의 루프는 "무엇을 배울까"는 잘 판단했지만 **"내 제안
 
 모든 제안/결정/적용이 기록된다: `proposed`(리뷰·learn·T5·발굴), `approved`/
 `rejected`/`timeout`(HITL 결정 — `effect_surfacing`이 `resolve_proposal`로 위임),
-`memory_written`/`memory_deleted`, `discovery_run`, `suggestion_added`/
-`suggestion_decided`. `GET /learning/events`로 노출 — "루프가 실제로 무엇을
-배우고 무엇이 기각됐는가"의 단일 원천(편집가능·감사가능·롤백 원칙의 감사 축).
-기록은 전부 best-effort — 감사 실패가 턴을 깨지 않는다(usage 카운터와 동일 원칙).
+`memory_written`/`memory_deleted`, `discovery_run`, `suggestion_added`.
+제안함 결정에는 별도 `suggestion_decided` kind를 만들지 않는다. `LearningLedger.decide_suggestion()`은 inbox 행의 상태만 갱신하고, `LearningService.decide_suggestion()`이 일반 `approved`/`rejected` 이벤트를 기록하면서 `detail.suggestion_id`로 출처를 연결한다. 이 외 실제로 쓰이는 kind(**2026-07-08 문서 반영, 기존 문서 누락**):
+**`memory_quarantined`/`memory_blocked`/`memory_approved`**(§6 격리),
+**`conflict`**(낙관적 동시성 충돌), **`context_rendered`**(AGENT_EXECUTION §4의
+렌더 감사), **`analysis_refreshed`**(스킬 설명 사이드카 갱신),
+**`verifier_rejected`**(검증 게이트 반려, §8). `GET /learning/events`로 노출 —
+"루프가 실제로 무엇을 배우고 무엇이 기각됐는가"의 단일 원천(편집가능·감사가능·
+롤백 원칙의 감사 축). 기록은 전부 best-effort — 감사 실패가 턴을 깨지 않는다
+(usage 카운터와 동일 원칙).
 
 **메타학습 두 겹** (같은 데이터, 다른 방어선):
 1. **사전(프롬프트) 회피** — 최근 거부 목록(`recent_rejections`)이 리뷰·발굴
@@ -427,7 +442,7 @@ v2까지의 루프는 "무엇을 배울까"는 잘 판단했지만 **"내 제안
 payload는 SSE `skill_patch_proposed`와 **같은 어휘**(approval_id 제외) — 프론트가
 파킹 카드와 제안함 카드를 동일 렌더러로 그린다. 결정은
 `POST /skills/suggestions/{sid}/decision`(승인 시 create/patch → `apply_patch`,
-archive → `decide_archive`로 수렴, 거부는 ledger로 흘러 쿨다운을 먹인다).
+archive → `decide_archive`로 수렴, 거부는 ledger에 기록되어 쿨다운 입력으로 사용된다).
 위생: 같은 skill_id+kind의 pending 중복은 멱등 스킵, pending 총량 상한
 (`suggestion_pending_cap`, 기본 30). UI: LearningPanel "제안함" 섹션(실배선 —
 이전의 목업 proposals와 별개).
