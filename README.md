@@ -9,7 +9,7 @@
 
 | 도구 | 최소 버전 | 비고 |
 |------|-----------|------|
-| Python | **3.13+** | rice-runtime 요구사항. rice-platform은 3.11+ |
+| Python | **3.13+** | rice-runtime 및 rice-platform |
 | Node.js | **18+** | rice-app (Vite + Electron) |
 | Ollama | 최신 | `ollama serve` 로 데몬 실행 |
 
