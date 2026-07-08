@@ -27,20 +27,52 @@ LLM을 한 번 더 부르고, 매 반복 계획 상태 전체를 프롬프트에
 
 ```
 1. PERSIST    사용자 메시지를 transcript(state.db)에 기록
-2. PREFETCH   learning.prefetch → 주입할 스킬 + 메모리 + 스킬 생성 가이드
-3. ASSEMBLE   도구 카탈로그 조립(builtin + connector + plugin, 예산 초과 시
-              bridge+관련도 스포트라이트로 폴딩, §5.2)
-              시스템 프롬프트 합성(base ⊕ 스킬/메모리 — plugin 스킬도 같은
-              관련도 파이프라인으로 포함, §7) → TurnContext
-4. RUN        AgentLoop.run — 이 문서의 §3 (plan-and-execute × ReAct)
-              4a. PLAN     의도 파악·(명백한 복합 질의면) eager 계획 수립; plan_updated SSE
-              4b. EXECUTE  LLM 호출 ↔ 도구 실행 루프 (ReAct; HITL 승인; 행동마다 rationale
-                           한 줄). 복잡도가 창발하면 start_plan으로 계획 승격(lazy escalation)
+
+2. PREFETCH   learning.prefetch(session_id, user_message, extra_skills)
+              2a. 스킬 후보 수집: active 사용자/빌트인 스킬 + plugin SKILL.md.
+                  같은 이름이면 사용자/학습 스킬이 plugin 스킬보다 우선한다.
+              2b. 스킬 관련도 산정: 임베딩/벡터 검색 없이 결정론적 lexical router 사용.
+                  explicit mention → name/tag → description/body → substring →
+                  char-bigram fuzzy → ko→en 의도어 확장 → negative tag 감점.
+              2c. 자동 전문 주입: score >= 3.0인 상위 스킬만, 최대 2개, 24K token
+                  예산 안에서 SKILL.md 본문을 시스템 프롬프트에 넣는다.
+              2d. 나머지 스킬: 이름+한줄 설명의 짧은 index만 넣고, 필요 시 모델이
+                  skill_search/skill_view로 전문을 온디맨드 로드한다.
+              2e. 메모리: 최근 facts 기본 8개 + 현재 쿼리 FTS5 매칭 기본 5개.
+                  quarantined 메모리는 승인 전까지 주입하지 않는다.
+              2f. SKILL_GUIDANCE + 자동 주입 스킬 본문 + 스킬 index + 메모리 +
+                  사용자 preference block을 system_prompt_additions로 렌더한다.
+
+3. ASSEMBLE   도구 카탈로그 조립(builtin + connector + plugin)
+              3a. builtin은 항상 그대로 노출한다.
+              3b. connector/plugin 도구가 예산을 넘으면 bridge 3종
+                  (tool_search/tool_describe/tool_call)으로 접는다.
+              3c. 접힌 도구 중 현재 요청과 관련도 높은 상위 도구는 같은 lexical
+                  scorer로 spotlight해 bridge 옆에 스키마 그대로 노출한다.
+              3d. base prompt ⊕ prefetch additions ⊕ tool catalog → TurnContext.
+
+4. RUN        AgentLoop.run — 기본은 ReAct, 필요할 때 Plan-and-Execute가 얹힌다.
+              4a. EAGER PLAN: planning_enabled이면 TurnPlanner가 한 번 판단한다.
+                  명백한 복합 작업이면 PlanState를 만들고 plan_updated SSE를 보낸다.
+              4b. PURE ReAct: 계획이 없으면 LLM 호출 ↔ 도구 실행 ↔ 관찰을 반복한다.
+                  이때도 start_plan이 노출되어, 작업 중 복잡도가 드러나면 계획으로 승격한다.
+              4c. PLAN MODE: 계획이 있으면 각 step을 작은 ReAct 루프로 수행한다.
+                  update_plan으로 step 상태와 관찰을 반영하고, 필요하면 계획을 수정한다.
+              4d. 모든 도구 호출 전에는 사용자용 rationale 한 줄을 남기고,
+                  위험 도구는 HITL 승인 게이트를 통과한다.
+
 5. PERSIST    루프가 만든 모든 메시지(도구 라운드 포함)를 transcript에 기록
-6. OBSERVE    learning.observe → 메모리 기록 등 값싼 효과
+6. OBSERVE    learning.observe → 주입 스킬 use++ + 미드턴 T5 제안 드레인
 7. SURFACE    학습 효과를 SSE로 서피싱(스킬 제안은 HITL 승인 카드)
 8. DONE       스트림 종료 (실패 시에도 error → done)
 ```
+
+이 문서의 앞부분만 읽어도 흐름은 다음처럼 잡혀야 한다: **ReAct가 기본 실행 루프**이고,
+명백히 분해 가능한 복합 요청이면 턴 시작에 **eager Plan-and-Execute**가 켜진다. 처음엔
+단순해 보였지만 도구 관찰 뒤 여러 독립 서브태스크가 드러나면 순수 ReAct에서
+`start_plan`으로 **lazy 승격**한다. 계획 모드에서도 각 단계의 실제 수행은 여전히
+도구 호출→관찰→재평가의 ReAct다. §2는 이 모드 선택 기준, §3은 계획 상태가 루프 안에서
+어떻게 유지·수정되는지, §5.2는 도구 폴딩, §7은 실행과 학습 루프의 접점을 상세화한다.
 
 턴이 끝난 뒤 클라이언트가 별도 논블로킹 호출로 세션 제목 생성(`/title`)과 게이트된
 스킬/메모리 리뷰(`/learning-review`)를 트리거한다 — LLM 호출이 메인 스트림의
@@ -53,16 +85,29 @@ LLM을 한 번 더 부르고, 매 반복 계획 상태 전체를 프롬프트에
 **모듈**: `agent/planner.py::TurnPlanner`, 프롬프트는 `prompts/planning.py`.
 
 턴 시작 시 플래너가 LLM을 **1회** 호출해 최신 요청을 해석한다. 하나의 호출이
-분류(triage)와 계획 수립을 겸한다:
+분류(triage)와 계획 수립을 겸한다. 단, 판단 기준은 "도구를 몇 번 부를 것인가"가
+아니라 **작업이 서로 다른 서브태스크로 분해되어 중간 관찰을 계획에 반영해야 하는가**다.
+도구 호출이 여러 번이어도 단일 산출물을 만들고 검토·수정하는 흐름이면 순수 ReAct로
+충분하다. 반대로 도구 호출 수가 적어 보여도 수집→분석→작성→전달처럼 산출물과
+성공 기준이 다른 단계들이 의존 관계를 이루면 계획이 필요하다.
 
 - **단순 질의** (인사, 단일 질문/조회, 한 번의 도구 호출로 끝나는 요청, 직전 답변의
-  후속 질문) → `{"plan_needed": false}` — 몇 토큰으로 끝나고, 루프는 계획 없이
-  이전과 동일한 순수 ReAct로 진행한다. 분류 전용 호출을 따로 두지 않는 이유:
+  후속 질문, 하나의 산출물을 반복 개선하는 요청) → `{"plan_needed": false}`.
+  루프는 계획 없이 순수 ReAct로 진행한다. 분류 전용 호출을 따로 두지 않는 이유:
   같은 정보로 출력 길이만 달라지는데 왕복을 두 번 낼 이유가 없다.
 - **복합 질의** (여러 행동이 서로를 딛고 서는 요청 — 수집→분석→종합→전달) →
   `{"plan_needed": true, "goal": …, "steps": […]}` — 해석된 의도(goal) 한 문장과
   2~`plan_max_steps`(기본 8)개의 단계. 각 단계는 **어느 도구로 무엇을 만들며
   성공 기준이 무엇인지**(detail)까지 적게 지시된다.
+
+실행 모드는 이렇게 정리된다:
+
+| 상황 | 시작 모드 | 실행 방식 |
+|---|---|---|
+| `planning_enabled=false` | 순수 ReAct | eager 플래너는 건너뛰지만, 실행 중 `start_plan` lazy 승격은 유지된다. |
+| 플래너가 `plan_needed=false` 반환 | 순수 ReAct | 도구 호출→관찰→다음 행동을 반복한다. 복잡도가 창발하면 `start_plan`으로 계획을 만든다. |
+| 플래너가 `plan_needed=true` 반환 | Plan-and-Execute × ReAct | `PlanState`를 만들고, 각 step을 ReAct로 수행하며 `update_plan`으로 관찰을 되먹인다. |
+| 순수 ReAct 중 서로 다른 서브태스크가 드러남 | lazy 승격 | `start_plan`이 같은 `PlanState`·`plan_updated` 계약으로 계획 모드에 진입시킨다. |
 
 > **의도는 턴 시작에 한 번 고정되지 않는다.** eager 플래너는 요청이 *명백히* 복합일
 > 때만 미리 계획을 세운다(위 분류). 대부분은 단순으로 판정돼 ReAct로 출발하지만,
