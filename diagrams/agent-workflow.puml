@@ -1,0 +1,106 @@
+@startuml AgentWorkflowReadable
+title RICE Agent Workflow - One Turn
+
+top to bottom direction
+
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName "Apple SD Gothic Neo"
+skinparam shadowing false
+skinparam linetype ortho
+skinparam nodesep 45
+skinparam ranksep 35
+skinparam ArrowColor #475569
+skinparam ArrowThickness 1.2
+skinparam rectangle {
+  BorderColor #475569
+  FontColor #111827
+  RoundCorner 10
+}
+skinparam package {
+  BorderColor #64748B
+  FontColor #111827
+  BackgroundColor #F8FAFC
+}
+skinparam database {
+  BorderColor #64748B
+  BackgroundColor #FFF7ED
+}
+skinparam cloud {
+  BorderColor #7C3AED
+  BackgroundColor #F3E8FF
+}
+
+actor "사용자" as user
+rectangle "rice-app\nChatScreen" as app #E0F2FE
+
+package "rice-runtime (local API)" as runtime #E2E8F0 {
+  rectangle "1. API Route\nPOST /sessions/{id}/messages" as api #FFFFFF
+
+  rectangle "2. Orchestrator\nagent/orchestrator.py\nturn order + service wiring" as orch #DBEAFE
+
+  package "3. Context Assembly" as assembly #ECFDF5 {
+    rectangle "Prefetch\nskills + memories + preferences" as prefetch #D1FAE5
+    rectangle "Tool Catalog\nbuiltin direct\nconnector/plugin fold + spotlight" as tools #FEF3C7
+    rectangle "TurnContext\nsystem prompt + history + tools" as tc #E0E7FF
+  }
+
+  package "4. Agent Execution" as execution #FFF1F2 {
+    rectangle "AgentLoop\nDefault: ReAct\nact -> observe -> reassess" as loop #FEE2E2
+    rectangle "Plan Layer\noptional\nEager plan at turn start\nLazy start_plan during ReAct\nupdate_plan snapshots" as plan #FFEDD5
+  }
+
+  rectangle "5. Persist + Observe\npersist messages\nskill use++\nT5 proposal drain" as observe #FCE7F3
+
+  rectangle "6. SSE Result\nanswer stream\nplan/tool cards\nlearning cards" as sse #F8FAFC
+}
+
+cloud "LLM Provider\nOllama / OpenAI / Claude" as llm
+
+rectangle "Tool Sources\nBuiltins\nConnectors\nPlugins" as toolsrc #FFFFFF
+
+database "Runtime State\nstate.db\n~/.rice/skills\n~/.rice/memories" as storage
+
+user --> app : request
+app --> api : HTTP + SSE
+api --> orch : run_turn()
+orch --> prefetch : user message\n+ plugin SKILL.md
+orch --> tools : connected tools\n+ builtin catalog
+prefetch --> tc : prompt additions
+tools --> tc : ToolSpec catalog
+tc --> loop : start turn
+
+loop <--> llm : provider calls
+loop <--> toolsrc : tool dispatch
+plan --> loop : active plan block\nplan_updated
+loop --> observe : turn outcome
+observe --> sse : events
+sse --> app : live UI
+app --> user : final answer\n+ cards
+
+prefetch ..> storage : read skills\nand memories
+observe ..> storage : write messages\nusage / ledger
+
+note right of prefetch
+Skill injection is hybrid:
+- no embeddings / no vector DB
+- deterministic lexical relevance
+- top relevant skills: full body
+- others: short index + skill_view
+end note
+
+note right of loop
+Execution mode:
+- ReAct is the default loop
+- clear complex task -> eager plan
+- complexity discovered mid-turn -> start_plan
+- each plan step still runs as ReAct
+end note
+
+note right of tools
+Tool exposure:
+- builtins always visible
+- connector/plugin tools may fold behind bridge
+- relevant folded tools are spotlighted directly
+end note
+
+@enduml

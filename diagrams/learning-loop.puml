@@ -1,0 +1,115 @@
+@startuml LearningLoopReadable
+title RICE Learning Loop - How Experience Becomes Reuse
+
+top to bottom direction
+
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName "Apple SD Gothic Neo"
+skinparam shadowing false
+skinparam linetype ortho
+skinparam nodesep 45
+skinparam ranksep 35
+skinparam ArrowColor #475569
+skinparam ArrowThickness 1.2
+skinparam rectangle {
+  BorderColor #475569
+  FontColor #111827
+  RoundCorner 10
+}
+skinparam package {
+  BorderColor #64748B
+  FontColor #111827
+  BackgroundColor #F8FAFC
+}
+skinparam database {
+  BorderColor #64748B
+  BackgroundColor #FFF7ED
+}
+skinparam queue {
+  BorderColor #64748B
+  BackgroundColor #ECFEFF
+}
+skinparam cloud {
+  BorderColor #7C3AED
+  BackgroundColor #F3E8FF
+}
+
+actor "사용자" as user
+rectangle "rice-app UI\nChatScreen / LearningPanel\nMySkills / Transparency" as ui #E0F2FE
+cloud "LLM Provider\nmain + review" as llm
+
+package "rice-runtime learning subsystem" as learning #E2E8F0 {
+  rectangle "1. Prefetch\nselect reusable context\nskills + memories + preferences" as prefetch #D1FAE5
+
+  rectangle "2. Main Agent Turn\nuses injected context\ncan call skill_view\ncan stage propose_skill(T5)" as turn #FEE2E2
+
+  rectangle "3. Cheap Observe\nturn-end, no LLM\nskill use++\nview attribution\nT5 proposal drain" as observe #FCE7F3
+
+  rectangle "4. Post-turn Review\n/learning-review stream\nReviewGate first\nReviewEngine if needed" as review #F3E8FF
+
+  rectangle "5. Safety + Policy\nsecret scrub\nrisk scan\nskill verifier\ncooldown/source rules" as guard #FFE4E6
+
+  rectangle "6. Surface + Decide\nmemory_written\nskill_patch_proposed\napprove / reject / edit / timeout" as decide #DBEAFE
+}
+
+database "Memory Store\nactive facts/preferences\nquarantined external-derived memory" as memstore
+
+database "Skill Store\nSKILL.md\nhistory\nusage counters\nactive/stale/archived" as skillstore
+
+database "Learning Ledger\nGET /learning/events\nproposed / approved / rejected\ntimeout / blocked / verifier_rejected" as ledger
+
+queue "Suggestion Inbox\nGET /skills/suggestions\ntimeout/disconnect\ndiscovery suggestions" as inbox
+
+rectangle "Out-of-turn Learning\n/learn\n/skills/discover\n/skills/curate" as outofturn #ECFCCB
+
+user --> ui : conversation\nreview decisions
+ui --> turn : POST /sessions/{id}/messages
+
+prefetch --> turn : prompt additions\nreusable context
+turn --> llm : main model
+llm --> turn : answer + tool calls
+turn --> observe : turn outcome
+observe --> decide : staged T5 proposals
+
+ui --> review : POST /sessions/{id}/learning-review\nnon-blocking after done
+review <--> llm : review prompt
+review --> guard : memory writes\nskill proposals
+guard --> decide : safe effects only
+
+decide --> memstore : active or quarantined memory
+decide --> skillstore : approved skill create/patch/edit
+decide --> ledger : audit all outcomes
+decide --> inbox : timeout/disconnect suggestions
+decide --> ui : SSE cards\nand updates
+
+memstore --> prefetch : active memories\nnext turn
+skillstore --> prefetch : active skills\nnext turn
+ledger --> ui : transparency timeline
+inbox --> ui : persistent suggestions
+
+outofturn --> guard : proposals use\nsame safety path
+outofturn --> inbox : non-stream suggestions
+
+note right of prefetch
+Retrieval:
+- skills: lexical relevance, not embeddings
+- top matches: full body
+- others: index + skill_view
+- memories: recent + FTS5 active only
+end note
+
+note right of observe
+Important boundary:
+observe() no longer extracts
+facts/preferences with regex.
+Memory authoring happens in review.
+end note
+
+note right of decide
+HITL invariant:
+skills are never created or patched
+without user approval.
+Timeout preserves proposal in inbox.
+end note
+
+@enduml

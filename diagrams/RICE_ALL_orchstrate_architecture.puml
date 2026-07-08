@@ -1,0 +1,102 @@
+@startuml AgentWorkflowArchitectureALL
+title RICE Agent Workflow - One Turn Architecture (ALL)
+
+left to right direction
+
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName "Apple SD Gothic Neo"
+skinparam shadowing false
+skinparam ArrowColor #4A5568
+skinparam ArrowThickness 1
+skinparam rectangle {
+  BorderColor #4A5568
+  FontColor #1A202C
+  RoundCorner 8
+}
+skinparam database {
+  BorderColor #4A5568
+  BackgroundColor #FFF5F5
+}
+skinparam cloud {
+  BorderColor #6B46C1
+  BackgroundColor #F3E8FF
+}
+
+actor "사용자" as user
+
+rectangle "rice-app\nChatScreen" as app #E6FFFA
+
+cloud "LLM Provider\nOllama / OpenAI / Claude" as llm
+
+database "state.db\nsessions / messages\nlearning_events" as db
+folder "~/.rice\nskills / memories / config" as home
+
+rectangle "Builtins\nread/write/edit/list/search\nterminal / fetch_url / vision\nskill_search / skill_view / propose_skill\nsubagent / office create_*" as builtins #FFFFFF
+
+rectangle "Connectors\nGmail / Calendar / Drive\nlocal MCP / remote MCP\npolicy: allow / approval / block" as connectors #FFFFFF
+
+rectangle "Plugins\nplugin tools\nplugin SKILL.md\nmarket artifacts" as plugins #FFFFFF
+
+rectangle "SSE Stream\nthinking / plan_updated\ntool_call / tool_result / message\nmemory_written / skill_patched / done / error\n+ approval control events" as sse #F8FAFC
+
+rectangle "rice-runtime (local API)" as runtime #E2E8F0 {
+  rectangle "API Route\nPOST /sessions/{id}/messages\nserver/routes/messages.py" as route #F7FAFC
+
+  rectangle "Orchestrator\nagent/orchestrator.py\n- owns turn order\n- builds TurnContext\n- wires services" as orch #DBEAFE
+
+  rectangle "Prefetch\nLearningService.prefetch\n- active learned/builtin skills\n- plugin SKILL.md as extra_skills\n- memories + preferences\n- SKILL_GUIDANCE" as prefetch #D1FAE5
+
+  rectangle "Skill Relevance Router\ncore/lexical.py + skill/relevance.py\nno embeddings / no vector DB\nexplicit mention -> name/tag -> desc/body\nsubstring -> char-bigram -> ko/en intent\nscore >= 3.0: full body, max 2\nothers: index + skill_view" as relevance #BBF7D0
+
+  rectangle "Tool Assembly\nToolDispatcher\nfold_tools_for_budget\nbuiltin direct\nconnector/plugin bridge folded\nrelevance spotlight for folded tools" as toolasm #FEF3C7
+
+  rectangle "Context Manager\nagent/context_manager.py\nmask secrets -> distill long outputs\ncompress old turns -> wire repair\naudit rendered context" as ctx #E0E7FF
+
+  rectangle "AgentLoop\nagent/loop.py\nDefault execution: ReAct\nact -> observe -> reassess\nrationale before tool call\nHITL for risky tools" as loop #FEE2E2
+
+  rectangle "Plan Layer\nTurnPlanner + PlanState\nEager plan for clearly complex tasks\nLazy start_plan during ReAct\nupdate_plan virtual tool\nstep-level ReAct execution" as plan #FFEDD5
+
+  rectangle "Post-turn Hooks\nlearning.observe: skill use++ + T5 drain\n/title\n/learning-review" as hooks #FCE7F3
+}
+
+user --> app : request
+app --> route : HTTP POST\nSSE response
+route --> orch : run_turn()
+
+orch --> prefetch : (1) prefetch\nuser message + plugin skills
+plugins --> prefetch : bundled SKILL.md
+prefetch --> relevance : rank skill candidates
+relevance --> prefetch : full-body skills\n+ skill index
+prefetch --> home : read active skills\nand memories
+prefetch --> orch : system_prompt_additions\ninjected_skills / memories
+
+orch --> toolasm : (2) assemble tools
+builtins --> toolasm : core tools\nalways exposed
+connectors --> toolasm : connected tools
+plugins --> toolasm : plugin tools
+toolasm --> orch : ToolSpec catalog\nor bridge + spotlight
+
+orch --> loop : (3) TurnContext
+loop --> ctx : each provider call\nrender provider-facing view
+ctx --> llm : system prompt + history + tools
+llm --> loop : message / tool calls
+
+loop --> plan : create / update\nPlanState
+plan --> loop : active plan block\nplan_updated snapshots
+
+loop --> toolasm : dispatch tool calls
+toolasm --> builtins : execute builtin
+toolasm --> connectors : execute connector\nwith policy/HITL
+toolasm --> plugins : execute plugin tool\nsandboxed
+
+loop --> sse : thinking / tool events\nmessage / plan_updated
+loop --> db : persist assistant/tool\nmessages after turn
+
+loop --> hooks : turn outcome
+hooks --> sse : memory_written\nskill_patch_proposed\nskill_patched
+hooks --> db : learning ledger\nusage attribution
+
+sse --> app : live UI updates
+app --> user : final answer\nand cards
+
+@enduml

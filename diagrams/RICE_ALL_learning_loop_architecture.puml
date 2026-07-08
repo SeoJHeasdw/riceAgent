@@ -1,0 +1,119 @@
+@startuml LearningLoopArchitectureALL
+title RICE Learning Loop Architecture (ALL)
+
+left to right direction
+
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName "Apple SD Gothic Neo"
+skinparam shadowing false
+skinparam ArrowColor #4A5568
+skinparam ArrowThickness 1
+skinparam rectangle {
+  BorderColor #4A5568
+  FontColor #1A202C
+  RoundCorner 8
+}
+skinparam database {
+  BorderColor #4A5568
+  BackgroundColor #FFF5F5
+}
+skinparam folder {
+  BorderColor #4A5568
+  BackgroundColor #FFFBEB
+}
+skinparam cloud {
+  BorderColor #6B46C1
+  BackgroundColor #F3E8FF
+}
+skinparam queue {
+  BorderColor #4A5568
+  BackgroundColor #F0FDFA
+}
+
+actor "사용자" as user
+
+rectangle "rice-app UI\nChatScreen\nLearningPanel\nMySkillsScreen\nTransparencyPanel" as ui #E6FFFA
+
+rectangle "Main Agent Turn\nReAct / Plan mode\ninjected skills + memories\nskill_search / skill_view\npropose_skill(T5)" as turn #FEE2E2
+
+cloud "LLM Provider\nmain / review / discovery\nsame configured provider" as llm
+
+database "state.db\nmessages\nmemories\nlearning_events\nskill_suggestions" as db
+
+folder "~/.rice/skills\nSKILL.md\n.history/\nusage.json\nanalysis sidecar" as skillfs
+
+queue "Suggestion Inbox\nGET /skills/suggestions\ntimeout/disconnect\ndiscovery output" as inbox
+
+rectangle "rice-runtime learning subsystem" as learning #E2E8F0 {
+  rectangle "Prefetch\nLearningService.prefetch\n- collect learned/builtin/plugin skills\n- inject top relevant skill bodies\n- render skill index\n- inject active memories only" as prefetch #D1FAE5
+
+  rectangle "Relevance Router\ncore/lexical.py\nskill/relevance.py\nno semantic embeddings\nexplicit -> name/tag -> desc/body\nsubstring -> char-bigram -> ko/en intent" as relevance #BBF7D0
+
+  rectangle "Memory Search + Store\nmemory/search.py\nmemory/store.py\nrecent facts: 8\nFTS5 query hits: 5\nactive vs quarantined" as memory #E0E7FF
+
+  rectangle "Skill Store + Usage\nskill/store.py\nskill/usage.py\nskill/lifecycle.py\nactive / stale / archived\nuse / view / patch counters" as skills #FEF3C7
+
+  rectangle "Observe\nLearningService.observe\ncheap turn-end path\nskill use++\nview attribution\nT5 staged proposal drain\nno regex fact/pref extraction" as observe #FCE7F3
+
+  rectangle "Review Gate\nreview/gate.py\ncheap filter before LLM\ncadence + tool activity\nfailure/correction/skill intent signals" as gate #F7FAFC
+
+  rectangle "Review Engine\nreview/engine.py\nLLM-authored memory writes\nskill create/patch proposals\nuses session history + skill catalog\n+ known facts" as review #F3E8FF
+
+  rectangle "Guards + Verifier\nskill/guard.py\nskill/verifier.py\nsecret scrub\nprompt-injection/risk scan\ncandidate validation\ncooldown / source rules" as guards #FFE4E6
+
+  rectangle "Effect Surfacing\nagent/effect_surfacing.py\nmemory_written\nskill_patch_proposed\nskill_patched\napproval_id parking" as effects #DBEAFE
+
+  rectangle "Ledger\nlearning/ledger.py\nproposed / approved / rejected\ntimeout / memory_written\ncontext_rendered / verifier_rejected\nGET /learning/events" as ledger #F0FDFA
+
+  rectangle "Discovery + Curator\ndiscovery.py\ncurator/consolidate.py\ncross-session patterns\nmanual curate\numbrella skill proposals" as discovery #ECFCCB
+}
+
+user --> ui : conversation\napprove / reject / edit
+ui --> turn : POST /sessions/{id}/messages
+
+prefetch --> relevance : rank skills
+skills --> prefetch : active learned/builtin skills
+skillfs --> skills : skill bodies\nhistory / usage
+memory --> prefetch : active memories only
+prefetch --> turn : prompt additions\nfull skills + index + memories
+
+turn --> llm : main model calls
+llm --> turn : assistant output\ntool calls
+
+turn --> observe : turn outcome\ninjected/viewed skills\nstaged T5 proposals
+observe --> skills : use++ / view attribution
+observe --> effects : T5 proposal\nskill_patch_proposed
+observe --> ledger : usage-related audit\nproposal events
+
+ui --> gate : POST /sessions/{id}/learning-review\npost-turn, non-blocking
+gate --> review : only if review needed
+review --> llm : review prompt
+llm --> review : memory effects\nskill proposals
+
+review --> guards : screen skill/memory output
+guards --> memory : safe memory writes
+guards --> effects : safe skill proposals
+guards --> ledger : blocked / verifier_rejected
+
+memory --> db : active or quarantined memory
+memory --> effects : memory_written\nwith provenance
+memory --> ui : approve/delete memories\nLearningPanel
+
+effects --> ui : SSE cards\nskill_patch_proposed\nmemory_written
+ui --> effects : REST decision\napprove / reject / edit / timeout
+
+effects --> skills : approved create/patch/edit
+effects --> skillfs : write SKILL.md\nhistory snapshots
+effects --> ledger : approved / rejected / timeout
+effects --> inbox : timeout/disconnect\npreserve proposal
+
+discovery --> review : reuse proposal model
+discovery --> inbox : non-stream suggestions
+discovery --> skills : archive/consolidate decisions\nwhen approved
+
+ledger --> db : learning_events
+inbox --> db : skill_suggestions
+db --> ui : TransparencyPanel\nGET /learning/events
+inbox --> ui : MySkills/LearningPanel\nGET /skills/suggestions
+
+@enduml
