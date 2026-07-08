@@ -3,23 +3,105 @@
 > RICE: 사용자 경험을 축적하며 학습·진화하는 개인 에이전트 + 내부 마켓 생태계 (IBM 내부용 데스크톱 앱)
 > Claude Desktop · Hermes Agent를 벤치마킹한 애플리케이션
 
-## 로컬 실행 (개발)
+## 사전 준비 (Prerequisites)
+
+### 시스템 요구사항
+
+| 도구 | 최소 버전 | 비고 |
+|------|-----------|------|
+| Python | **3.13+** | rice-runtime 요구사항. rice-platform은 3.11+ |
+| Node.js | **18+** | rice-app (Vite + Electron) |
+| Ollama | 최신 | `ollama serve` 로 데몬 실행 |
+
+### 설치 — rice-runtime
 
 ```bash
-./dev.sh            # runtime(:8080) + platform(:7070) + 프론트(:5273) 한방 실행. Ctrl-C로 함께 종료
+cd rice-runtime
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .
 ```
 
-→ 브라우저에서 http://localhost:5273 열고 채팅 한 줄 보내면 end-to-end(렌더러→런타임→ollama qwen) 확인.
-모델 호출은 **Ollama 데몬(:11434)** 이 떠 있어야 함 (`ollama serve`, `ollama list` 로 `qwen3.5:9b-mlx` 확인).
+### 설치 — rice-platform
 
-수동으로 따로 띄우려면:
+```bash
+cd rice-platform
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .
+```
+
+### 설치 — rice-app
+
+```bash
+cd rice-app
+npm install
+```
+
+---
+
+## 로컬 실행 (개발)
+
+### 권장 모델 사양
+
+| 구분 | 모델 |
+|------|------|
+| 최소 | `gpt-oss:20b` |
+| 권장 | `qwen3.6:27b` 이상 |
+
+모델 호출은 **Ollama 데몬(:11434)** 이 떠 있어야 함 (`ollama serve`).
+
+### rice-marketplace 준비
+
+`rice-marketplace`는 Anthropic · OpenAI 마켓플레이스의 plugin/skill을 다운로드하여 보관하는 **별도 레포**이며, rice 레포와 **sibling** 위치에 클론해야 한다.
+
+```bash
+# rice 레포와 같은 부모 디렉토리에서 실행
+git clone git@github.ibm.com:JaeHo-Seo/rice-marketplace.git
+```
+
+결과 디렉토리 구조:
+
+```
+/your/workspace/
+├── rice/               ← 현재 레포
+└── rice-marketplace/   ← 여기에 클론
+```
+
+> `dev.sh` / `app.sh`는 `../rice-marketplace`를 자동으로 탐색하며,
+> marketplace의 artifacts를 **rice-platform(:7070)** 에 마운트하여 서빙한다.
+> marketplace 자체는 별도 포트를 띄우지 않는다.
+
+### 앱 실행 (Electron 데스크탑)
+
+```bash
+./app.sh
+# platform(:7070) + Electron 앱을 한방에 기동. Ctrl-C로 함께 종료
+# rice-runtime은 Electron main process가 내부에서 자동 spawn
+```
+
+### 개발 서버 실행 (브라우저 dev)
+
+```bash
+./dev.sh
+# runtime(:8080) + platform(:7070) + 프론트(:5273) 한방 실행. Ctrl-C로 함께 종료
+# ../rice-marketplace 디렉토리가 있으면 자동으로 platform에 연결
+```
+
+| 서비스 | 포트 | 비고 |
+|--------|------|------|
+| rice-app (Vite) | `:5273` | 브라우저 dev UI |
+| rice-runtime | `:8080` | 에이전트 백엔드 |
+| rice-platform | `:7070` | 마켓 API — marketplace artifacts 포함 |
+| Ollama | `:11434` | 별도 데몬, 사전 실행 필요 |
+
+→ 브라우저에서 http://localhost:5273 열고 채팅 한 줄 보내면 end-to-end(렌더러→런타임→ollama) 확인.
+
+### 수동으로 따로 띄우려면
 
 ```bash
 # 백엔드 (런타임 :8080)
 cd rice-runtime && source .venv/bin/activate && rice-runtime --port 8080 --token ""
 
-# 마켓 플랫폼 (rice-platform :7070)
-# sibling ../rice-marketplace가 있으면 app.sh/dev.sh/run.sh가 자동으로 연결한다.
+# 마켓 플랫폼 (rice-platform :7070) — ../rice-marketplace가 sibling에 있을 때
 cd rice-platform
 RICE_ARTIFACTS_DIR=../rice-marketplace/artifacts \
 RICE_PLUGIN_MARKETPLACES=../rice-marketplace \
