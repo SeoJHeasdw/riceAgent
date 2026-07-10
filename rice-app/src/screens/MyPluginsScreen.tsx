@@ -366,7 +366,7 @@ function MyPluginsScreen() {
         style={{ width: railPanel.width }}
       >
         <div className="p-4">
-          <div className="rounded-xl gradient-plugin p-4 text-white">
+          <div className="domain-summary domain-summary--plugin rounded-xl p-4 text-white">
             <div className="text-caption-01 text-white/70 mb-1">설치된 플러그인</div>
             <div className="text-heading-03 font-semibold text-white leading-none tabular-nums">
               {myPlugins.length}
@@ -396,7 +396,7 @@ function MyPluginsScreen() {
               >
                 {c}
                 {badge && (
-                  <span className="ml-auto inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 rounded-full bg-purple-60 text-white text-label-micro">
+                  <span className="ml-auto inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 rounded-full bg-purple-60/20 text-purple-30 text-label-micro">
                     {badge}
                   </span>
                 )}
@@ -427,7 +427,7 @@ function MyPluginsScreen() {
         style={{ width: listPanel.width }}
       >
         <div className="px-5 pt-5 pb-3">
-          <h1 className="text-heading-03 font-light text-text-primary">내 플러그인</h1>
+          <h1 className="text-heading-03 font-semibold text-text-primary">내 플러그인</h1>
         </div>
         {list.map((p) => {
           const on = p.id === effectiveSel;
@@ -440,9 +440,13 @@ function MyPluginsScreen() {
               } ${p.enabled ? '' : 'opacity-55'}`}
             >
               <div
-                className={`w-7 h-7 flex-shrink-0 flex items-center justify-center rounded mt-0.5 ${p.enabled ? 'bg-purple-60' : 'bg-layer-03'}`}
+                className={`w-7 h-7 flex-shrink-0 flex items-center justify-center rounded border mt-0.5 ${
+                  p.enabled
+                    ? 'border-purple-50/25 bg-purple-60/14 text-purple-40'
+                    : 'border-border-subtle-02 bg-layer-03 text-text-helper'
+                }`}
               >
-                <Icon name={p.icon} size={16} className="text-white" />
+                <Icon name={p.icon} size={16} />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5">

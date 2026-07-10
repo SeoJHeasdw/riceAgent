@@ -149,7 +149,7 @@ function SettingsScreen() {
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-[720px] mx-auto px-8 py-8 space-y-8">
           {/* About — hero card */}
-          <div className="relative overflow-hidden rounded-xl gradient-brand p-5 text-white">
+          <div className="domain-summary domain-summary--brand relative overflow-hidden rounded-xl p-5 text-white">
             <div className="relative flex items-center gap-4">
               <div
                 className="

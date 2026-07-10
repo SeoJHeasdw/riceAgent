@@ -51,15 +51,15 @@ export const PluginCard: React.FC<PluginCardProps> = ({
       padding="md"
       className={`group relative flex flex-col min-h-[176px] cursor-pointer overflow-hidden transition-colors duration-150 ${
         installed
-          ? 'border-purple-60/40 bg-purple-60/[0.035] hover:border-purple-50/70'
-          : 'border-border-subtle-01 hover:border-purple-50/50 hover:bg-purple-60/[0.025]'
+          ? 'plugin-card--installed'
+          : 'plugin-card--idle'
       }`}
       onClick={onOpenDetails}
     >
       <span
         aria-hidden="true"
         className={`absolute left-0 top-0 h-full w-0.5 bg-purple-60 transition-opacity ${
-          installed ? 'opacity-100' : 'opacity-0 group-hover:opacity-70'
+          installed ? 'opacity-70' : 'opacity-0 group-hover:opacity-50'
         }`}
       />
       {/* Header */}

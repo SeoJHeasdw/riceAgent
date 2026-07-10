@@ -858,7 +858,7 @@ const SourceLauncher: React.FC<{ skill: Skill; detail: SkillDetail; onOpen: () =
       }
       className="group relative flex items-center gap-3 rounded-xl border border-border-subtle-01 bg-layer-01 pl-3 pr-3.5 py-2.5 hover:border-blue-50/45 hover:bg-layer-hover-01 transition-colors flex-shrink-0"
     >
-      <div className="w-9 h-9 rounded-lg bg-blue-60 border border-blue-50/45 flex items-center justify-center flex-shrink-0 text-white">
+      <div className="w-9 h-9 rounded-lg bg-blue-60/14 border border-blue-50/30 flex items-center justify-center flex-shrink-0 text-blue-30">
         <Icon name="terminal" size={18} />
       </div>
       <div className="text-left">
@@ -1311,8 +1311,8 @@ const SkillDetailView: React.FC<{
         <div className="flex items-start gap-3.5">
           <div className={`w-11 h-11 flex-shrink-0 flex items-center justify-center rounded-lg border ${
             isInjected(skillStatus(skill))
-              ? 'bg-blue-60 border-blue-50/45 text-white'
-              : 'bg-layer-03 border-border-subtle-02 text-white/70'
+              ? 'bg-blue-60/14 border-blue-50/30 text-blue-30'
+              : 'bg-layer-03 border-border-subtle-02 text-text-helper'
           }`}>
             <Icon name="skill" size={22} />
           </div>
@@ -1761,7 +1761,7 @@ function MySkillsScreen() {
       >
         {/* 통계 카드 + "학습 효과" proof CTA — 숫자(현황)에서 정량 증명으로 자연히 이어지는 한 덩어리 */}
         <div className="p-4">
-          <div className="overflow-hidden rounded-xl gradient-skill text-white border border-blue-50/20 shadow-elevation-1">
+          <div className="domain-summary domain-summary--skill overflow-hidden rounded-xl text-white">
             <div className="p-4">
               <div className="flex items-center gap-1.5 mb-1">
                 <span className="text-caption-01 text-white/70">학습한 스킬</span>
@@ -1782,11 +1782,7 @@ function MySkillsScreen() {
             <button
               onClick={() => setShowImpact(true)}
               aria-pressed={showImpact}
-              className={`w-full flex items-center gap-2 px-4 py-2.5 border-t transition-colors ${
-                showImpact
-                  ? 'bg-white/20 border-white/25'
-                  : 'bg-white/10 border-white/20 hover:bg-white/15'
-              }`}
+              className="domain-summary__action w-full flex items-center gap-2 px-4 py-2.5 border-t transition-colors"
             >
               <Icon name="growth" size={15} className="text-white flex-shrink-0" />
               <div className="flex-1 min-w-0 text-left">
@@ -1916,7 +1912,7 @@ function MySkillsScreen() {
         style={{ width: listPanel.width }}
       >
         <div className="px-5 pt-5 pb-3">
-          <h1 className="text-heading-03 font-light text-text-primary">내 스킬</h1>
+          <h1 className="text-heading-03 font-semibold text-text-primary">내 스킬</h1>
         </div>
         {list.map((s) => {
           const on = s.id === effectiveSel;
@@ -1934,10 +1930,10 @@ function MySkillsScreen() {
               <div
                 className={`mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg border ${
                   on && !showImpact
-                    ? 'border-blue-50/45 bg-blue-60 text-white'
+                    ? 'border-blue-50/35 bg-blue-60/16 text-blue-30'
                     : isInjected(skillStatus(s))
-                      ? 'border-blue-50/35 bg-blue-70 text-white'
-                      : 'border-border-subtle-02 bg-layer-03 text-white/70'
+                      ? 'border-blue-50/25 bg-blue-60/10 text-blue-40'
+                      : 'border-border-subtle-02 bg-layer-03 text-text-helper'
                 }`}
               >
                 <Icon name="skill" size={15} />

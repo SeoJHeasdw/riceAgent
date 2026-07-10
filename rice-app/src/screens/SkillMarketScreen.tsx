@@ -147,9 +147,9 @@ function SkillMarketScreen() {
         className="flex-shrink-0 bg-layer-01 border-r border-border-subtle-01 flex flex-col min-w-0 overflow-hidden"
         style={{ width: railPanel.width }}
       >
-        {/* Blue Point Balance — Skill Market 전광판, gradient-skill로 3대 요소 색 언어 통일 */}
+        {/* Blue Point Balance — domain accent만 남겨 장시간 쓰는 작업 화면의 시각 소음을 줄인다. */}
         <div className="p-3">
-          <div className="rounded-xl gradient-skill p-4 text-white border border-blue-50/20 shadow-elevation-1">
+          <div className="domain-summary domain-summary--skill rounded-xl p-4 text-white">
             <div className="flex items-center gap-1.5 text-caption-01 text-white/70 mb-2">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M12 2l2.4 7.2H22l-6 4.8 2.4 7.2-6.4-4.8L5.6 21.2 8 14 2 9.2h7.6z" />

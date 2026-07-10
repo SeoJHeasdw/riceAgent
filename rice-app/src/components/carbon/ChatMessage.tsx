@@ -105,8 +105,10 @@ const Avatar: React.FC<{ kind: 'user' | 'agent' }> = ({ kind }) => {
   const agent = kind === 'agent';
   return (
     <div
-      className={`w-7 h-7 flex-shrink-0 flex items-center justify-center rounded-lg text-white text-caption-01 font-semibold font-mono ${
-        agent ? 'bg-blue-60' : 'bg-layer-03'
+      className={`w-7 h-7 flex-shrink-0 flex items-center justify-center rounded-lg border text-caption-01 font-semibold font-mono ${
+        agent
+          ? 'border-blue-50/25 bg-blue-60/15 text-blue-30'
+          : 'border-border-subtle-02 bg-layer-03 text-text-secondary'
       }`}
     >
       {agent ? 'R' : 'U'}
@@ -1462,8 +1464,8 @@ export const ChatTurn: React.FC<ChatTurnProps> = ({
     const timeLabel = formatTime(first.sentAt);
     return (
       <div className="group/user flex flex-col items-end py-2.5" data-msg-index={items[0].index}>
-        <div className="max-w-[80%]">
-          <div className="bg-layer-02 rounded-2xl px-4 py-2.5 text-body-short-02 text-text-primary leading-relaxed break-words whitespace-pre-wrap">
+        <div className="max-w-[76%]">
+          <div className="rounded-xl border border-border-subtle-01 bg-layer-02/80 px-4 py-2.5 text-body-short-02 text-text-primary leading-relaxed break-words whitespace-pre-wrap">
             {first.text}
           </div>
           <div className="mt-1 flex items-center justify-between gap-2 pr-1">

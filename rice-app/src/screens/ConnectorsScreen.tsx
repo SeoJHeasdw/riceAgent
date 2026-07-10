@@ -1217,7 +1217,7 @@ function ConnectorsScreen() {
         </div>
 
         <div className="p-4">
-          <div className="rounded-xl gradient-connector p-4 text-white">
+          <div className="domain-summary domain-summary--connector rounded-xl p-4 text-white">
             <div className="text-caption-01 text-white/70 mb-1">
               {isLocal ? '실행 중인 MCP 서버' : '연결된 커넥터'}
             </div>
@@ -1251,13 +1251,13 @@ function ConnectorsScreen() {
                 onClick={() => setFilter(c)}
                 className={`flex items-center w-full text-left px-4 py-2.5 text-body-short-01 border-l-2 transition-colors ${
                   isActive
-                    ? 'bg-layer-selected-01 border-l-blue-50 text-text-primary font-semibold'
+                    ? 'bg-layer-selected-01 border-l-teal-40 text-text-primary font-semibold'
                     : 'bg-transparent border-l-transparent text-text-secondary hover:bg-layer-hover-01'
                 }`}
               >
                 {c}
                 {badge && (
-                  <span className="ml-auto inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 rounded-full bg-blue-60 text-white text-label-micro">
+                  <span className="ml-auto inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 rounded-full bg-teal-60/20 text-teal-30 text-label-micro">
                     {badge}
                   </span>
                 )}
@@ -1290,7 +1290,7 @@ function ConnectorsScreen() {
         style={{ width: listPanel.width }}
       >
         <div className="px-5 pt-5 pb-3 flex items-center gap-2">
-          <h1 className="text-heading-03 font-light text-text-primary">{isLocal ? '로컬 MCP' : '커넥터'}</h1>
+          <h1 className="text-heading-03 font-semibold text-text-primary">{isLocal ? '로컬 MCP' : '커넥터'}</h1>
           {isLocal && (
             <Tag type="gray" size="sm">
               개발자
@@ -1316,11 +1316,15 @@ function ConnectorsScreen() {
               key={c.id}
               onClick={() => setSel(c.id)}
               className={`flex items-start gap-2.5 w-full text-left border-b border-border-subtle-01 border-l-2 px-[18px] py-3 transition-colors ${
-                on ? 'bg-layer-selected-01 border-l-blue-50' : 'bg-transparent border-l-transparent hover:bg-layer-hover-01'
+                on ? 'bg-layer-selected-01 border-l-teal-40' : 'bg-transparent border-l-transparent hover:bg-layer-hover-01'
               } ${connected ? '' : 'opacity-70'}`}
             >
-              <div className={`w-7 h-7 flex-shrink-0 flex items-center justify-center rounded mt-0.5 ${connected ? 'bg-blue-60' : 'bg-layer-03'}`}>
-                <Icon name={c.icon} size={16} className="text-white" />
+              <div className={`w-7 h-7 flex-shrink-0 flex items-center justify-center rounded border mt-0.5 ${
+                connected
+                  ? 'border-teal-40/25 bg-teal-60/14 text-teal-30'
+                  : 'border-border-subtle-02 bg-layer-03 text-text-helper'
+              }`}>
+                <Icon name={c.icon} size={16} />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5">

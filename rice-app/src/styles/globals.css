@@ -477,33 +477,33 @@
   /* Modernized border radius (departs from Carbon's flat 0px) */
   --cds-border-radius: 8px;
 
-  /* Surfaces */
-  --cds-background: #161616;
-  --cds-layer: #262626;
-  --cds-layer-01: #262626;
-  --cds-layer-02: #393939;
-  --cds-layer-03: #525252;
-  --cds-layer-accent: #393939;
-  --cds-layer-accent-01: #393939;
-  --cds-layer-accent-02: #525252;
-  --cds-layer-accent-03: #6f6f6f;
-  --cds-layer-hover-01: #333333;
-  --cds-layer-hover-02: #474747;
-  --cds-layer-active-01: #525252;
-  --cds-layer-selected-01: #393939;
-  --cds-field: #262626;
-  --cds-field-01: #262626;
-  --cds-field-02: #393939;
-  --cds-field-03: #525252;
-  --cds-overlay: rgba(0, 0, 0, 0.65);
+  /* Calm RICE surfaces — neutral obsidian with a restrained blue undertone. */
+  --cds-background: #0c0e13;
+  --cds-layer: #12151b;
+  --cds-layer-01: #12151b;
+  --cds-layer-02: #191d25;
+  --cds-layer-03: #232934;
+  --cds-layer-accent: #191d25;
+  --cds-layer-accent-01: #191d25;
+  --cds-layer-accent-02: #232934;
+  --cds-layer-accent-03: #303846;
+  --cds-layer-hover-01: #181c24;
+  --cds-layer-hover-02: #222833;
+  --cds-layer-active-01: #2a3240;
+  --cds-layer-selected-01: #202631;
+  --cds-field: #101319;
+  --cds-field-01: #101319;
+  --cds-field-02: #171b23;
+  --cds-field-03: #202630;
+  --cds-overlay: rgba(3, 5, 9, 0.74);
 
   /* Text */
-  --cds-text-primary: #f4f4f4;
-  --cds-text-secondary: #c6c6c6;
-  --cds-text-placeholder: #6f6f6f;
-  --cds-text-helper: #8d8d8d;
+  --cds-text-primary: #f0f3f8;
+  --cds-text-secondary: #b7bec9;
+  --cds-text-placeholder: #5c6675;
+  --cds-text-helper: #7d8796;
   --cds-text-error: #ff8389;
-  --cds-text-inverse: #161616;
+  --cds-text-inverse: #0c0e13;
   --cds-text-on-color: #ffffff;
   --cds-text-on-color-disabled: rgba(255, 255, 255, 0.25);
 
@@ -514,23 +514,23 @@
   --cds-link-inverse: #0f62fe;
 
   /* Icons */
-  --cds-icon-primary: #f4f4f4;
-  --cds-icon-secondary: #c6c6c6;
-  --cds-icon-inverse: #161616;
+  --cds-icon-primary: #e9edf4;
+  --cds-icon-secondary: #9ba5b4;
+  --cds-icon-inverse: #0c0e13;
   --cds-icon-on-color: #ffffff;
   --cds-icon-on-color-disabled: rgba(255, 255, 255, 0.25);
 
   /* Borders */
-  --cds-border-subtle: #393939;
-  --cds-border-subtle-00: #393939;
-  --cds-border-subtle-01: #393939;
-  --cds-border-subtle-02: #525252;
-  --cds-border-subtle-03: #525252;
-  --cds-border-strong: #525252;
-  --cds-border-strong-01: #525252;
-  --cds-border-strong-02: #6f6f6f;
-  --cds-border-strong-03: #8d8d8d;
-  --cds-border-inverse: #f4f4f4;
+  --cds-border-subtle: #242a34;
+  --cds-border-subtle-00: #1a1f27;
+  --cds-border-subtle-01: #242a34;
+  --cds-border-subtle-02: #303846;
+  --cds-border-subtle-03: #3b4555;
+  --cds-border-strong: #384251;
+  --cds-border-strong-01: #384251;
+  --cds-border-strong-02: #4b586a;
+  --cds-border-strong-03: #677488;
+  --cds-border-inverse: #f0f3f8;
   --cds-border-interactive: #4589ff;
 
   /* Support */
@@ -546,15 +546,15 @@
   --cds-support-warning-rgb: 241 194 27;
   --cds-support-info-rgb: 69 137 255;
   --cds-interactive-rgb: 15 98 254;
-  --cds-text-helper-rgb: 141 141 141;
-  --cds-layer-01-rgb: 38 38 38;
-  --cds-layer-02-rgb: 57 57 57;
-  --cds-border-strong-01-rgb: 82 82 82;
+  --cds-text-helper-rgb: 125 135 150;
+  --cds-layer-01-rgb: 18 21 27;
+  --cds-layer-02-rgb: 25 29 37;
+  --cds-border-strong-01-rgb: 56 66 81;
 
   /* Interaction */
   --cds-interactive: #0f62fe;
   --cds-focus: #0f62fe;
-  --cds-focus-inset: #161616;
+  --cds-focus-inset: #0c0e13;
   --cds-focus-inverse: #0f62fe;
 
   /* AI accent (g100 / dark) — brand blue → purple */
@@ -562,14 +562,24 @@
   --ai-gradient-end: #a56eff; /* purple-50 */
   --ai-border-gradient: linear-gradient(90deg, var(--ai-gradient-start), var(--ai-gradient-end));
   --ai-aura: radial-gradient(circle at 0% 0%, rgba(120, 169, 255, 0.22), rgba(165, 110, 255, 0.1) 40%, transparent 72%);
-  --ai-popover-bg: #262626;
+  --ai-popover-bg: #12151b;
 
   /* Brand shell — titlebar와 아이콘 레일이 공유하는 앱 껍데기.
      남색 기운이 도는 near-black으로, 회색 콘텐츠 표면과 분리되는
      "RICE 프레임"을 만든다 (예전 navy 레일의 브랜드 역할을 계승). */
-  --rice-shell: #0b0f1a;
-  --rice-shell-border: rgba(255, 255, 255, 0.07);
-  --rice-shell-muted: #8b93a5; /* shell 위 비활성 아이콘 */
+  --rice-shell: #070b14;
+  --rice-shell-border: rgba(146, 174, 215, 0.1);
+  --rice-shell-muted: #79869a;
+
+  /* Product-domain accents. Main surfaces consume these as low-opacity light,
+     while onboarding may use the same hues at cinematic intensity. */
+  --rice-skill-accent: #4589ff;
+  --rice-skill-accent-rgb: 69 137 255;
+  --rice-plugin-accent: #a56eff;
+  --rice-plugin-accent-rgb: 165 110 255;
+  --rice-connector-accent: #08bdb8;
+  --rice-connector-accent-rgb: 8 189 184;
+  --rice-brand-accent-rgb: 111 104 255;
 
   /* Interactive/danger 상태 토큰 — hover·active를 하드코딩 hex 대신 여기서.
      테마(라이트 등) 전환 시 이 네 줄만 바꾸면 모든 버튼이 따라온다. */
@@ -625,17 +635,72 @@ button,
    Vite path can miss classes such as bg-blue-60/[0.025] while renderer-only dev
    generates them correctly. */
 .skill-card--installed {
-  border-color: rgba(15, 98, 254, 0.55);
-  background-color: rgba(15, 98, 254, 0.025);
+  border-color: rgb(var(--rice-skill-accent-rgb) / 0.34);
+  background-color: rgba(15, 98, 254, 0.018);
 }
 
 .skill-card--installed:hover {
-  border-color: rgba(69, 137, 255, 0.7);
+  border-color: rgb(var(--rice-skill-accent-rgb) / 0.52);
 }
 
 .skill-card--idle:hover {
-  border-color: rgba(69, 137, 255, 0.45);
-  background-color: rgba(15, 98, 254, 0.025);
+  border-color: rgb(var(--rice-skill-accent-rgb) / 0.3);
+  background-color: rgba(15, 98, 254, 0.014);
+}
+
+.plugin-card--installed {
+  border-color: rgb(var(--rice-plugin-accent-rgb) / 0.3);
+  background-color: rgba(138, 63, 252, 0.018);
+}
+
+.plugin-card--installed:hover {
+  border-color: rgb(var(--rice-plugin-accent-rgb) / 0.48);
+}
+
+.plugin-card--idle:hover {
+  border-color: rgb(var(--rice-plugin-accent-rgb) / 0.28);
+  background-color: rgba(138, 63, 252, 0.014);
+}
+
+/* Domain summaries replace full-saturation hero blocks. The accent identifies
+   the domain while the surface stays quiet enough for an all-day workspace. */
+.domain-summary {
+  --domain-accent: 69 137 255;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgb(var(--domain-accent) / 0.22);
+  background:
+    radial-gradient(circle at 100% 0%, rgb(var(--domain-accent) / 0.13), transparent 48%),
+    linear-gradient(145deg, rgba(28, 33, 43, 0.96), rgba(17, 20, 27, 0.98));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+}
+
+.domain-summary::before {
+  content: '';
+  position: absolute;
+  inset-block: 12px;
+  left: 0;
+  width: 2px;
+  border-radius: 999px;
+  background: rgb(var(--domain-accent));
+  box-shadow: 0 0 14px rgb(var(--domain-accent) / 0.45);
+}
+
+.domain-summary--skill { --domain-accent: var(--rice-skill-accent-rgb); }
+.domain-summary--plugin { --domain-accent: var(--rice-plugin-accent-rgb); }
+.domain-summary--connector { --domain-accent: var(--rice-connector-accent-rgb); }
+.domain-summary--brand { --domain-accent: var(--rice-brand-accent-rgb); }
+
+.domain-summary__action {
+  position: relative;
+  background: rgb(var(--domain-accent) / 0.055);
+  border-color: rgb(var(--domain-accent) / 0.16);
+}
+
+.domain-summary__action:hover,
+.domain-summary__action[aria-pressed='true'] {
+  background: rgb(var(--domain-accent) / 0.1);
+  border-color: rgb(var(--domain-accent) / 0.24);
 }
 
 /* ── Model Core ────────────────────────────────────────────────────────────

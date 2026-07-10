@@ -73,7 +73,7 @@ export const SkillCard: React.FC<SkillCardProps> = ({
       <span
         aria-hidden="true"
         className={`absolute left-0 top-0 h-full w-0.5 bg-blue-60 transition-opacity ${
-          installed ? 'opacity-100' : 'opacity-0 group-hover:opacity-70'
+          installed ? 'opacity-70' : 'opacity-0 group-hover:opacity-50'
         }`}
       />
       {/* Header — 아이콘 · 이름/출처 · 받기 pill */}
@@ -81,7 +81,7 @@ export const SkillCard: React.FC<SkillCardProps> = ({
         <div
           className={`flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-lg border ${
             installed
-              ? 'bg-blue-60 border-blue-30/50 text-white'
+              ? 'bg-blue-60/14 border-blue-50/30 text-blue-30'
               : 'bg-blue-60/12 border-blue-50/25 text-blue-40'
           }`}
         >
