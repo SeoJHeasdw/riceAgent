@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { api } from './lib/api';
@@ -16,7 +16,6 @@ import { I18nProvider } from './lib/i18n/I18nContext';
 import { LearningProvider } from './lib/learning/LearningContext';
 import { MarketplaceProvider } from './lib/marketplace/MarketplaceContext';
 import { ToastProvider } from './lib/toast/ToastProvider';
-import { ModelOnboarding } from './components/carbon/ModelOnboarding';
 import { LanguageSelectDialog } from './components/carbon/LanguageSelectDialog';
 import { TourOverlay, TOUR_STEPS, TOUR_DONE_KEY } from './components/carbon/tour';
 import { CommandPalette } from './components/carbon/CommandPalette';
@@ -24,6 +23,12 @@ import { REPLAY_ONBOARDING_EVENT, REPLAY_TOUR_EVENT } from './lib/tutorial';
 import { defaultModelSettings } from './lib/mockData';
 import type { ModelSettings } from './components/carbon/ModelSettingsPanel';
 import type { RegisteredModel } from './components/carbon/ModelSettingsPanel';
+
+// The cinematic renderer includes Three.js. Load it only after language
+// selection so the everyday app shell stays lean and fast to reopen.
+const ModelOnboarding = lazy(() =>
+  import('./components/carbon/ModelOnboarding').then((module) => ({ default: module.ModelOnboarding })),
+);
 
 // 좌측 레일 항목은 공용 네비게이션 매니페스트에서 파생한다(홈 허브와 동일 출처).
 const railItems = toRailItems();
@@ -241,12 +246,14 @@ function App() {
                 }}
               />
               {onboardingOpen && (
-                <ModelOnboarding
-                  currentModel={currentModel}
-                  modelMode={modelMode}
-                  settings={modelSettings}
-                  onComplete={handleOnboardingComplete}
-                />
+                <Suspense fallback={<div className="cinematic-onboarding" aria-hidden="true" />}>
+                  <ModelOnboarding
+                    currentModel={currentModel}
+                    modelMode={modelMode}
+                    settings={modelSettings}
+                    onComplete={handleOnboardingComplete}
+                  />
+                </Suspense>
               )}
             </BrowserRouter>
           </ToastProvider>

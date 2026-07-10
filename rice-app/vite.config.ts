@@ -70,7 +70,8 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          'react-vendor': ['react', 'react-dom', 'react-router-dom']
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+          'cinematic-vendor': ['three', '@react-three/fiber']
         }
       }
     }
