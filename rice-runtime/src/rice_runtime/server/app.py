@@ -67,7 +67,13 @@ def create_app(container: Container):
         finally:
             if warm_task is not None and not warm_task.done():
                 warm_task.cancel()
-            await scheduler.stop()
+            try:
+                await scheduler.stop()
+            finally:
+                # Electron normally terminates the runtime with SIGTERM instead
+                # of calling POST /shutdown. ASGI lifespan is therefore the
+                # authoritative chance to unload Ollama and close resources.
+                await container.shutdown_async()
 
     app = FastAPI(title="rice-runtime", version="0.1.0", lifespan=lifespan)
     app.state.container = container
@@ -144,7 +150,7 @@ def create_app(container: Container):
     @app.post("/shutdown")
     async def shutdown():
         # Graceful stop is the supervisor's call; we tear down resources here.
-        container.shutdown()
+        await container.shutdown_async()
         return {"success": True}
 
     # ── routers (one per CONTRACTS surface) ───────────────────────────────────

@@ -13,4 +13,6 @@ office 빌트인 도구(create_presentation/create_workbook/create_document)와 
 
 **How to apply**: 새 빌트인 스킬 = `builtin_skills/*.md` 추가만으로 끝(카탈로그 자동 로드, pyproject package-data 포함됨). 새 빌트인 도구 = `agent/builtins/` 모듈 추가 + `build_builtin_tools` 등록.
 
+**2026-07-10 pptx v2(문서에 반영됨, 확장 시 주의점만)**: create_presentation은 원본 스펙을 `docProps/riceSpec.json`으로 임베드하고 edit_presentation이 그걸 읽어 슬라이드 단위 편집 후 재빌드한다 — pptx 산출 포맷을 바꿀 때 이 임베드 계약(SPEC_PART)을 깨면 편집 도구가 전부 "no embedded spec"으로 거절하게 된다. 새 레이아웃 추가 시 _RENDERERS + _guess_layout + office/__init__ 스키마 설명 3곳을 함께 갱신할 것(테스트: tests/test_pptx_v2.py).
+
 관련: [[rice-plan-execute-react-architecture]], [[rice-connector-and-frontend-state]]

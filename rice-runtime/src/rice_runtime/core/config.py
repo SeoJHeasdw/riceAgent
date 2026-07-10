@@ -62,10 +62,13 @@ class ProviderConfig:
     # 컨텍스트 예산을 역산해 클램프한다(잘림 대신 지능적 압축). qwen3 27b/gpt-oss
     # 20b급이 무리 없이 감당하는 32K를 기본으로 한다. SaaS는 사용하지 않는다.
     num_ctx: int = 32_768
-    # Ollama keep_alive — 모델을 메모리에 상주시키는 시간. 매 호출이 타이머를
-    # 리프레시하므로 턴 진행 중엔 항상 로드 상태다; 이 값은 승인 대기·턴 사이
-    # 간격에서 콜드 리로드(수십 초)를 막는 여유폭이다. SaaS는 사용하지 않는다.
-    keep_alive: str = "30m"
+    # Ollama request keep_alive — 비정상 종료로 명시적 unload를 못 보냈을 때도
+    # Ollama가 스스로 회수하는 crash-safety 상한. 정상 흐름은 아래 idle 유예 뒤
+    # keep_alive=0 unload를 보내므로 이 시간만큼 계속 상주하지 않는다.
+    keep_alive: str = "5m"
+    # 마지막 활성 lease 후 title/review 같은 즉시 후처리가 이미 로드된 모델을
+    # 재사용할 짧은 유예. 만료 시 /api/generate keep_alive=0으로 명시 해제한다.
+    idle_unload_seconds: float = 60.0
     # First-run gate: False until the user picks & connects a model in the
     # settings panel and saves (PUT /settings). The app shows the mandatory
     # model-onboarding flow while this is False, then trusts the saved provider.
@@ -310,7 +313,14 @@ def _merge(base: Config, raw: dict) -> Config:
         value = raw.get(name)
         return value if isinstance(value, dict) else {}
 
-    prov = {**asdict(base.provider), **_known_fields(ProviderConfig, section("provider"))}
+    provider_section = section("provider")
+    prov = {**asdict(base.provider), **_known_fields(ProviderConfig, provider_section)}
+    # 2026-07 lifecycle migration: the previous release wrote keep_alive=30m and
+    # had no explicit-idle field. Treat precisely that old schema/value pair as
+    # the legacy default, not as a deliberate 30m user override. Once a config is
+    # saved with idle_unload_seconds present, an explicit 30m remains untouched.
+    if provider_section.get("keep_alive") == "30m" and "idle_unload_seconds" not in provider_section:
+        prov["keep_alive"] = base.provider.keep_alive
     learn = {**asdict(base.learning), **_known_fields(LearningConfig, section("learning"))}
     context = {**asdict(base.context), **_known_fields(ContextConfig, section("context"))}
     agent = {**asdict(base.agent), **_known_fields(AgentConfig, section("agent"))}

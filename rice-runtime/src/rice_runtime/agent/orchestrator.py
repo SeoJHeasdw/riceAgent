@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from typing import AsyncIterator, Callable
 
@@ -84,6 +85,22 @@ log = logging.getLogger("rice.agent.orchestrator")
 
 # num_ctx 클램프 시 시스템/도구 스키마 밖 여유분(토큰) — 추정 오차 흡수용.
 _MODEL_WINDOW_MARGIN_TOKENS = 1_024
+
+
+@asynccontextmanager
+async def _provider_activity(provider: ILLMProvider) -> AsyncIterator[None]:
+    """Enter an optional provider-specific logical-work lease.
+
+    The normalized provider Protocol stays frozen; local providers may add this
+    optimization hook while SaaS/echo providers simply pass through.
+    """
+
+    activity = getattr(provider, "activity", None)
+    if activity is None:
+        yield
+        return
+    async with activity():
+        yield
 
 
 def effective_context_config(cfg: Config, profile: OrchestrationProfile) -> ContextConfig:
@@ -306,8 +323,13 @@ class Orchestrator:
                 profile=profile,
             )
             result = LoopResult()
-            async for event in loop.run(ctx, session_id, result, abort):
-                yield event
+            # Ollama uses this outer lease to stay loaded throughout planner +
+            # every ReAct/tool/approval round. Individual HTTP calls nest their
+            # own leases; only leaving this scope can start the post-turn unload
+            # grace. Other providers use the no-op path above.
+            async with _provider_activity(provider):
+                async for event in loop.run(ctx, session_id, result, abort):
+                    yield event
 
             # 5. PERSIST every message the loop produced this turn — assistant
             #    tool-call rounds + tool results + final answer (C-4), not just the

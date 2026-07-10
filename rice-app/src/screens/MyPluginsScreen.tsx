@@ -86,8 +86,12 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
       {/* header */}
       <div className="px-7 pt-6 pb-5 border-b border-border-subtle-01">
         <div className="flex items-start gap-3.5">
-          <div className="w-11 h-11 flex-shrink-0 flex items-center justify-center rounded-lg bg-purple-60/12 border border-purple-60/25">
-            <Icon name={plugin.icon} size={22} className={plugin.enabled ? 'text-purple-40' : 'text-icon-secondary'} />
+          <div className={`w-11 h-11 flex-shrink-0 flex items-center justify-center rounded-lg border ${
+            plugin.enabled
+              ? 'bg-purple-60/12 border-purple-60/25 text-purple-40'
+              : 'bg-layer-03 border-border-subtle-02 text-text-helper'
+          }`}>
+            <Icon name={plugin.icon} size={22} />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">

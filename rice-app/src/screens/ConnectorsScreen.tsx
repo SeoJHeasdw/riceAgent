@@ -590,8 +590,12 @@ const ConnectorDetailView: React.FC<{
       {/* header */}
       <div className="px-7 pt-6 pb-5 border-b border-border-subtle-01">
         <div className="flex items-start gap-3.5">
-          <div className="w-11 h-11 flex-shrink-0 flex items-center justify-center rounded-lg bg-layer-02 border border-border-subtle-02">
-            <Icon name={c.icon} size={22} className={connected ? 'text-icon-primary' : 'text-icon-secondary'} />
+          <div className={`w-11 h-11 flex-shrink-0 flex items-center justify-center rounded-lg border ${
+            connected
+              ? 'bg-teal-60/14 border-teal-40/30 text-teal-30'
+              : 'bg-layer-03 border-border-subtle-02 text-text-helper'
+          }`}>
+            <Icon name={c.icon} size={22} />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">

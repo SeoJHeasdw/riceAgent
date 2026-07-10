@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 import httpx
@@ -21,6 +22,7 @@ from ..composition_root import Container
 from .deps import get_container
 
 router = APIRouter(tags=["settings"])
+log = logging.getLogger("rice.routes.settings")
 
 
 class SettingsIn(BaseModel):
@@ -136,6 +138,15 @@ async def update_settings(body: SettingsIn, c: Container = Depends(get_container
 
     save_config(c.paths, new_cfg)
     c.config_store.update(new_cfg)  # live: 모든 영속화가 성공한 뒤에만 (C-1)
+    provider_changed = getattr(c.providers, "provider_changed", None)
+    if provider_changed is not None:
+        try:
+            # Retire an idle old Ollama model immediately. If its previous turn
+            # is still active, the lifecycle defers that unload until its lease
+            # exits, so a concurrent settings change cannot tear down inference.
+            await provider_changed(cfg.provider, new_cfg.provider)
+        except Exception:  # noqa: BLE001 — settings persistence already succeeded
+            log.warning("provider lifecycle transition failed", exc_info=True)
 
     data = new_cfg.to_dict()
     data["registered_models"] = _load_registered_models(c)

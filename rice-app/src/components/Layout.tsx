@@ -23,8 +23,9 @@ export const Layout: React.FC<LayoutProps> = ({
   activeRailId,
   onNavigate,
 }) => {
-  // 화면(최상위 경로 세그먼트) 전환 시에만 새로 mount해 크로스페이드를 재생한다.
-  // 같은 화면 안의 하위 경로 변화(예: /connectors/:id)는 key가 그대로라 remount되지 않는다.
+  // ChatScreen은 AppShell에서 항상 mount한 채 가시성만 바꾼다. 여기서 경로를
+  // key로 삼으면 숨겨진 ChatScreen까지 remount되어 진행 중 SSE 상태가 유실된다.
+  // 화면별 진입 애니메이션은 AppShell의 가시 wrapper가 담당한다.
   const location = useLocation();
   const screenKey = location.pathname.split('/')[1] || 'home';
   const isChatScreen = screenKey === 'chat';
@@ -67,7 +68,7 @@ export const Layout: React.FC<LayoutProps> = ({
           topInset={isChatScreen && isElectron}
         />
         <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
-          <div key={screenKey} className="flex-1 flex flex-col min-h-0 animate-fade-in">
+          <div className="flex-1 flex flex-col min-h-0">
             {children}
           </div>
         </main>

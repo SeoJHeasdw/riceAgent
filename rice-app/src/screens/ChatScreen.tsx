@@ -57,6 +57,12 @@ type RawMessage = {
   metadata?: { thinking?: string; tool_call_id?: string; plan?: PlanUpdatedEventData; synthetic?: string } | null;
 };
 
+type ThreadStateUpdate = ThreadMessage[] | ((previous: ThreadMessage[]) => ThreadMessage[]);
+
+type LiveTurnProgress = {
+  sessionId: string;
+};
+
 // Human-readable, per-tool copy for the HITL approval card — derived client-side
 // from the tool name + args, so the confirmation line is contextual with ZERO
 // added latency (no extra model call). Extend the map as builtins grow.
@@ -662,13 +668,56 @@ const ChatStarter: React.FC<{
   );
 };
 
+const ChatTaskProgress = () => (
+  <div
+    className="mb-2 flex h-6 items-center gap-1.5 px-0.5 text-caption-02 text-text-secondary"
+    role="status"
+    aria-live="polite"
+    aria-label="Pondering"
+  >
+    <Icon name="sparkle" size={14} className="flex-shrink-0 text-support-warning animate-pulse" />
+    <span>Pondering...</span>
+  </div>
+);
+
 function ChatScreen() {
   const { skills, signals, jumpToSkill, setSkills, setDetails, panelScrollRef, refreshSuggestions } = useLearning();
   const toast = useToast();
 
-  const [thread, setThread] = useState<ThreadMessage[]>([]);
+  const [thread, setThreadState] = useState<ThreadMessage[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState('');
+  // Live SSE events are session-scoped. Keeping a small per-session render cache
+  // prevents a turn that started in room A from mutating room B after selection.
+  // It also preserves the incremental thread while the ChatScreen is hidden.
+  const activeSessionIdRef = useRef('');
+  const threadRef = useRef<ThreadMessage[]>([]);
+  const threadCacheRef = useRef<Map<string, ThreadMessage[]>>(new Map([['', []]]));
+
+  const setThread = (update: ThreadStateUpdate) => {
+    const next = typeof update === 'function' ? update(threadRef.current) : update;
+    threadRef.current = next;
+    threadCacheRef.current.set(activeSessionIdRef.current, next);
+    setThreadState(next);
+  };
+
+  const updateThreadFor = (sessionId: string, update: ThreadStateUpdate) => {
+    const previous = threadCacheRef.current.get(sessionId) ?? [];
+    const next = typeof update === 'function' ? update(previous) : update;
+    threadCacheRef.current.set(sessionId, next);
+    if (activeSessionIdRef.current === sessionId) {
+      threadRef.current = next;
+      setThreadState(next);
+    }
+  };
+
+  const showSessionThread = (sessionId: string, next: ThreadMessage[]) => {
+    activeSessionIdRef.current = sessionId;
+    threadRef.current = next;
+    threadCacheRef.current.set(sessionId, next);
+    setActiveSessionId(sessionId);
+    setThreadState(next);
+  };
   // Reactive mirror of api.isEnabled. The connect probe (App bootstrap) is async,
   // so we subscribe rather than read once — when it flips on, we load the real
   // sessions persisted in state.db into the sidebar.
@@ -693,6 +742,7 @@ function ChatScreen() {
   // a live (runtime) turn is streaming — gates the composer so we can't double-send,
   // and drives the "생성 중" affordance on the send button.
   const [busy, setBusy] = useState(false);
+  const [workProgress, setWorkProgress] = useState<LiveTurnProgress | null>(null);
   // session pending delete-confirmation (ConfirmDialog target), null = closed
   const [confirmDelete, setConfirmDelete] = useState<Session | null>(null);
   const [modelMode, setModelMode] = useState<'saas' | 'local'>('saas');
@@ -716,9 +766,15 @@ function ChatScreen() {
   // the scripted demo sessions in the sidebar.
   const liveSessionId = useRef<string | null>(null);
   // 새 세션의 첫 턴 완료 후 제목 생성(POST /title)이 필요할 때만 true — 기존 세션 연속 전송 시 skip.
-  const needsTitleRefresh = useRef(false);
+  const needsTitleRefresh = useRef<Set<string>>(new Set());
   // handle to the in-flight SSE turn so the user can stop it (see stopTurn)
   const streamHandleRef = useRef<{ abort: () => void } | null>(null);
+  // Unlike liveSessionId (the room currently selected), this is immutable for
+  // the lifetime of the active request and is therefore the correct abort target.
+  const runningSessionIdRef = useRef<string | null>(null);
+  // Monotonic request identity prevents a late onClose/createSession resolution
+  // from clearing or starting a newer turn in the same room.
+  const turnRequestRef = useRef(0);
 
   const sessionPanel = useResizable({ initial: 264, min: 200, max: 420, storageKey: 'rice.panel.sessions' });
   const learningPanel = useResizable({ initial: 320, min: 240, max: 480, storageKey: 'rice.panel.learning', invert: true });
@@ -999,9 +1055,13 @@ function ChatScreen() {
   // 턴을 교체(delete_after)하므로, 화면에서도 직전 턴 블록을 걷어내고 새로 스트리밍한다.
   const regenerate = () => {
     if (busy || !api.isEnabled || !liveSessionId.current) return;
-    sealAnswer();
+    const sessionId = liveSessionId.current;
+    const requestId = ++turnRequestRef.current;
+    sealAnswer(sessionId);
     setBusy(true);
-    setThread((p) => {
+    runningSessionIdRef.current = sessionId;
+    setWorkProgress({ sessionId });
+    updateThreadFor(sessionId, (p) => {
       let end = p.length; // strip trailing assistant turn (blocks after the last user msg)
       for (let i = p.length - 1; i >= 0; i--) {
         if (p[i].kind === 'user') break;
@@ -1009,7 +1069,7 @@ function ChatScreen() {
       }
       return [...p.slice(0, end), { kind: 'thinking', duration: '', text: '', streaming: true, startedAt: Date.now() }];
     });
-    streamHandleRef.current = sseClient.regenerate(liveSessionId.current, buildStreamHandlers());
+    streamHandleRef.current = sseClient.regenerate(sessionId, buildStreamHandlers(sessionId, requestId));
   };
 
   // ── live-turn thread reducers (multi-round: thinking ↔ tool ↔ approval ↔ answer) ──
@@ -1017,8 +1077,8 @@ function ChatScreen() {
   // sequentially over SSE and mutate the trailing blocks.
 
   // Append to the trailing streaming thinking block, or start a new one.
-  const appendThinking = (delta: string) =>
-    setThread((p) => {
+  const appendThinking = (sessionId: string, delta: string) =>
+    updateThreadFor(sessionId, (p) => {
       const copy = [...p];
       const last = copy[copy.length - 1];
       if (last?.kind === 'thinking' && last.streaming) {
@@ -1030,8 +1090,8 @@ function ChatScreen() {
     });
 
   // Close the trailing thinking block (stamp duration); drop it if it stayed empty.
-  const finalizeThinking = () =>
-    setThread((p) => {
+  const finalizeThinking = (sessionId: string) =>
+    updateThreadFor(sessionId, (p) => {
       const copy = [...p];
       const last = copy[copy.length - 1];
       if (last?.kind === 'thinking' && last.streaming) {
@@ -1048,21 +1108,23 @@ function ChatScreen() {
   // 표시(빈 streaming thinking 블록)를 심는다 — 추론을 스트리밍하지 않는 상용
   // 모델도 경과 초 카운터가 계속 흐르게 하기 위함. 실제 콘텐츠(답변/도구/추론)가
   // 오면 finalizeThinking이 즉시 걷어낸다. 이미 streaming 중이면 no-op.
-  const seedWaiting = () =>
-    setThread((p) => {
+  const seedWaiting = (sessionId: string) =>
+    updateThreadFor(sessionId, (p) => {
       const last = p[p.length - 1];
       if (last?.kind === 'thinking' && last.streaming) return p;
       return [...p, { kind: 'thinking', duration: '', text: '', streaming: true, startedAt: Date.now() }];
     });
 
   // plan_updated: 같은 planId 카드를 스냅샷으로 통째 교체 (없으면 이 지점에 생성).
-  const upsertPlan = (d: PlanUpdatedEventData) => setThread((p) => upsertPlanBlock(p, d));
+  const upsertPlan = (sessionId: string, d: PlanUpdatedEventData) =>
+    updateThreadFor(sessionId, (p) => upsertPlanBlock(p, d));
 
   // ── smooth answer streaming ("typewriter") ────────────────────────────────
   // Deltas can arrive as either tiny character trickles or large bursts. Rendering
   // them verbatim makes the text shimmer; draining by a fixed, bounded chunk gives
   // a calmer reading rhythm while a short buffer groups one-character trickles.
-  const answerRef = useRef<{ target: string; shown: number; active: boolean; lastFeedAt: number }>({
+  const answerRef = useRef<{ sessionId: string; target: string; shown: number; active: boolean; lastFeedAt: number }>({
+    sessionId: '',
     target: '',
     shown: 0,
     active: false,
@@ -1088,7 +1150,7 @@ function ChatScreen() {
     const step = backlog > 260 ? 24 : backlog > 140 ? 16 : backlog > 64 ? 10 : backlog > 24 ? 6 : 3;
     a.shown = Math.min(a.target.length, a.shown + step);
     const text = a.target.slice(0, a.shown);
-    setThread((p) => {
+    updateThreadFor(a.sessionId, (p) => {
       const copy = [...p];
       const last = copy[copy.length - 1];
       if (last?.kind === 'agent') {
@@ -1113,14 +1175,15 @@ function ChatScreen() {
   };
 
   // Feed a streamed delta (or the authoritative final `content`) into the pump.
-  const feedAnswer = (d: { delta?: string; content?: string }) => {
+  const feedAnswer = (sessionId: string, d: { delta?: string; content?: string }) => {
     const a = answerRef.current;
     if (!a.active) {
       a.active = true;
+      a.sessionId = sessionId;
       a.target = '';
       a.shown = 0;
       a.lastFeedAt = Date.now();
-      setThread((p) => [...p, { kind: 'agent', text: '', sentAt: Date.now() }]);
+      updateThreadFor(sessionId, (p) => [...p, { kind: 'agent', text: '', sentAt: Date.now() }]);
     }
     if (typeof d.content === 'string') a.target = d.content;
     else a.target += d.delta ?? '';
@@ -1132,11 +1195,12 @@ function ChatScreen() {
   // reset so the next text starts a fresh bubble. Called at every interruption
   // (a tool round, a new user turn, stream error/close) — but NOT on `done`, so a
   // just-finished answer types its tail out smoothly instead of snapping to full.
-  const sealAnswer = () => {
+  const sealAnswer = (sessionId?: string) => {
     const a = answerRef.current;
+    if (sessionId != null && a.active && a.sessionId !== sessionId) return;
     if (a.active && a.shown < a.target.length) {
       const text = a.target;
-      setThread((p) => {
+      updateThreadFor(a.sessionId, (p) => {
         const copy = [...p];
         const idx = copy.map((b) => b.kind).lastIndexOf('agent');
         if (idx >= 0) copy[idx] = { ...(copy[idx] as { kind: 'agent'; text: string }), text };
@@ -1156,9 +1220,9 @@ function ChatScreen() {
   // typewriter hasn't caught up) and tear the pump down WITHOUT sealing a standalone
   // bubble; the caller re-homes it as the tool card's caption. Null if nothing was
   // streamed (model didn't narrate) → card renders with no caption, as before.
-  const takeStreamingAnswer = (): string | null => {
+  const takeStreamingAnswer = (sessionId: string): string | null => {
     const a = answerRef.current;
-    if (!a.active) return null;
+    if (!a.active || a.sessionId !== sessionId) return null;
     const text = a.target.trim();
     a.active = false;
     a.target = '';
@@ -1173,13 +1237,14 @@ function ChatScreen() {
   // about to replace.
   const resetLiveRender = () => {
     stopAnswerPump();
-    answerRef.current = { target: '', shown: 0, active: false, lastFeedAt: 0 };
+    answerRef.current = { sessionId: '', target: '', shown: 0, active: false, lastFeedAt: 0 };
   };
 
   // Stop the pump if the component unmounts mid-stream.
   useEffect(() => () => stopAnswerPump(), []);
 
-  const pushAgentText = (text: string) => setThread((p) => [...p, { kind: 'agent', text }]);
+  const pushAgentText = (sessionId: string, text: string) =>
+    updateThreadFor(sessionId, (p) => [...p, { kind: 'agent', text }]);
 
   // memory_written / skill_patch_proposed / skill_patched 렌더링 — 메인 턴 스트림과
   // /learning-review·/learn 스트림(Phase A) 양쪽에서 재사용한다. 어느 스트림에서
@@ -1203,11 +1268,11 @@ function ChatScreen() {
     toast.notify({ message: `💾 ${label}: ${d.content.slice(0, 60)}`, duration: 4000 });
   };
 
-  const handleSkillPatchProposed = (d: SkillPatchProposedData) => {
+  const handleSkillPatchProposed = (d: SkillPatchProposedData, sessionId = activeSessionIdRef.current) => {
     // HITL gate — diff 카드 렌더링. 스트림은 계속 흐르지만 사용자 결정은
     // POST /skills/{id}/patch 로 별도 전송 (pendingToThread 로직 재사용).
     const card = pendingToThread({ approval_id: d.approval_id, kind: 'skill_patch', payload: d });
-    if (card) setThread((p) => [...p, card]);
+    if (card) updateThreadFor(sessionId, (p) => [...p, card]);
   };
 
   const handleSkillPatched = (d: { skill_id: string; version: number }) => {
@@ -1294,35 +1359,44 @@ function ChatScreen() {
   // SSE event handlers for a live turn — shared by sendLive (new turn) and
   // regenerateLive (re-answer). The multi-round reducer (thinking ↔ tool ↔
   // approval ↔ answer) lives here so both entry points behave identically.
-  const buildStreamHandlers = () => ({
+  const finishLiveTurn = (sessionId: string, requestId: number) => {
+    if (turnRequestRef.current !== requestId || runningSessionIdRef.current !== sessionId) return;
+    runningSessionIdRef.current = null;
+    streamHandleRef.current = null;
+    setBusy(false);
+    setWorkProgress(null);
+  };
+
+  const buildStreamHandlers = (sessionId: string, requestId: number) => ({
     onEvent: (e: SSEEvent) => {
+      if (turnRequestRef.current !== requestId) return;
       if (e.type === 'thinking') {
         const d = e.data as { text?: string };
-        if (typeof d.text === 'string') appendThinking(d.text);
+        if (typeof d.text === 'string') appendThinking(sessionId, d.text);
       } else if (e.type === 'plan_updated') {
         // 계획 생성/전이/수정 — 진행 중이던 답변 세그먼트를 닫고, 플래너 생각 블록도
         // 닫은 뒤 계획 카드를 업서트한다. 계획→답변 생성 사이의 침묵 구간에도
         // 경과 카운터가 흐르도록 대기 표시를 심는다.
-        sealAnswer();
-        finalizeThinking();
+        sealAnswer(sessionId);
+        finalizeThinking(sessionId);
         const plan = e.data as PlanUpdatedEventData;
-        upsertPlan(plan);
-        seedWaiting();
+        upsertPlan(sessionId, plan);
+        seedWaiting(sessionId);
       } else if (e.type === 'tool_call') {
         // a tool round begins → close the reasoning block, push a running card.
-        finalizeThinking();
+        finalizeThinking(sessionId);
         const d = e.data as { tool_call_id: string; tool_name: string; arguments?: Record<string, unknown> };
         // update_plan·start_plan의 화면 표면은 계획 카드(plan_updated) — 도구 카드는
         // 만들지 않는다. 그 앞의 preamble은 평범한 답변 세그먼트로 흘려보낸다.
         if (d.tool_name === 'update_plan' || d.tool_name === 'start_plan') {
-          sealAnswer();
+          sealAnswer(sessionId);
           return;
         }
         // 이 행동 직전에 스트리밍된 본문 = 행동의 rationale(#1). 떠도는 버블 대신
         // 카드의 캡션으로 재배치한다: 버퍼를 걷어오고, 펌프가 만든 진행형 agent
         // 버블을 제거한 뒤, rationale을 실은 실행 카드를 append한다.
-        const rationale = takeStreamingAnswer();
-        setThread((p) => {
+        const rationale = takeStreamingAnswer(sessionId);
+        updateThreadFor(sessionId, (p) => {
           const base = rationale != null && p[p.length - 1]?.kind === 'agent' ? p.slice(0, -1) : p;
           return [
             ...base,
@@ -1339,10 +1413,10 @@ function ChatScreen() {
       } else if (e.type === 'tool_approval_required') {
         // HITL gate — render the approval card; the backend stream stays parked
         // until the user posts a decision (handleToolApproval), then resumes.
-        sealAnswer();
+        sealAnswer(sessionId);
         const d = e.data as { approval_id: string; tool_name: string; arguments?: Record<string, unknown>; reason?: string };
         const desc = describeTool(d.tool_name, d.arguments ?? {});
-        setThread((p) => [
+        updateThreadFor(sessionId, (p) => [
           ...p,
           {
             kind: 'approval',
@@ -1357,7 +1431,7 @@ function ChatScreen() {
         ]);
       } else if (e.type === 'tool_result') {
         const d = e.data as { tool_call_id: string; ok: boolean; result?: unknown; error?: string };
-        setThread((p) => {
+        updateThreadFor(sessionId, (p) => {
           const copy = [...p];
           for (let i = copy.length - 1; i >= 0; i--) {
             const b = copy[i];
@@ -1375,27 +1449,27 @@ function ChatScreen() {
         });
         // 도구 결과를 받은 뒤 모델이 다음 판단을 하는 침묵 구간에도 카운터가 흐르게
         // 대기 표시를 심는다(이미 streaming 중이면 no-op). 다음 콘텐츠가 걷어낸다.
-        seedWaiting();
+        seedWaiting(sessionId);
       } else if (e.type === 'message') {
-        finalizeThinking();
-        feedAnswer(e.data as { delta?: string; content?: string });
+        finalizeThinking(sessionId);
+        feedAnswer(sessionId, e.data as { delta?: string; content?: string });
       } else if (e.type === 'memory_written') {
         handleMemoryWritten(e.data as MemoryWrittenEventData);
       } else if (e.type === 'skill_patch_proposed') {
-        handleSkillPatchProposed(e.data as SkillPatchProposedData);
+        handleSkillPatchProposed(e.data as SkillPatchProposedData, sessionId);
       } else if (e.type === 'skill_patched') {
         handleSkillPatched(e.data as { skill_id: string; version: number });
       } else if (e.type === 'done') {
         // NOTE: no sealAnswer() here — let the typewriter finish its tail smoothly
         // after the network is done (that trailing type-out is the desired feel).
-        finalizeThinking();
-        setBusy(false);
-        const sid = liveSessionId.current;
+        finalizeThinking(sessionId);
+        finishLiveTurn(sessionId, requestId);
+        const sid = sessionId;
         // First turn of a new session → ask the runtime to name it from the opening
         // exchange. Separate, non-blocking call (POST /title): it does NOT hold up
         // this stream, and we patch just that row's title in place — no list refetch.
-        if (connected && needsTitleRefresh.current) {
-          needsTitleRefresh.current = false;
+        if (connected && needsTitleRefresh.current.has(sid)) {
+          needsTitleRefresh.current.delete(sid);
           if (sid)
             void api.generateTitle(sid).then((res) => {
               const title = res.success ? (res.data as { title?: string } | undefined)?.title : undefined;
@@ -1412,68 +1486,100 @@ function ChatScreen() {
           sseClient.reviewLearning(sid, {
             onEvent: (re: SSEEvent) => {
               if (re.type === 'memory_written') handleMemoryWritten(re.data as MemoryWrittenEventData);
-              else if (re.type === 'skill_patch_proposed') handleSkillPatchProposed(re.data as SkillPatchProposedData);
+              else if (re.type === 'skill_patch_proposed') handleSkillPatchProposed(re.data as SkillPatchProposedData, sid);
               else if (re.type === 'skill_patched') handleSkillPatched(re.data as { skill_id: string; version: number });
             },
           });
         }
       } else if (e.type === 'error') {
-        sealAnswer();
-        finalizeThinking();
+        sealAnswer(sessionId);
+        finalizeThinking(sessionId);
         const d = e.data as { message?: string };
-        pushAgentText(`⚠️ 오류: ${d.message ?? '실행 실패'}`);
-        setBusy(false);
+        pushAgentText(sessionId, `⚠️ 오류: ${d.message ?? '실행 실패'}`);
+        finishLiveTurn(sessionId, requestId);
       }
     },
     onError: (msg: string) => {
-      sealAnswer();
-      finalizeThinking();
-      pushAgentText(`⚠️ 연결 오류: ${msg}`);
-      setBusy(false);
+      if (turnRequestRef.current !== requestId) return;
+      sealAnswer(sessionId);
+      finalizeThinking(sessionId);
+      pushAgentText(sessionId, `⚠️ 연결 오류: ${msg}`);
+      finishLiveTurn(sessionId, requestId);
     },
     onClose: () => {
-      sealAnswer();
-      finalizeThinking();
-      setBusy(false);
+      if (turnRequestRef.current !== requestId) return;
+      sealAnswer(sessionId);
+      finalizeThinking(sessionId);
+      finishLiveTurn(sessionId, requestId);
     },
   });
 
-  const sendLive = async (q: string) => {
+  const sendLive = async (q: string, originSessionId: string, requestId: number) => {
+    let sessionId = liveSessionId.current;
     // Ensure a real backend session exists (lazy, reused across sends).
-    if (!liveSessionId.current) {
+    if (!sessionId) {
       const res = await api.createSession();
+      if (turnRequestRef.current !== requestId) {
+        // Stop was pressed while the session POST was pending. Remove the empty
+        // server row so it does not reappear as a ghost conversation on restart.
+        if (res.success && res.data?.id) void api.deleteSession(res.data.id);
+        return;
+      }
       if (res.success && res.data?.id) {
         const id = res.data.id;
-        liveSessionId.current = id;
-        setActiveSessionId(id); // highlight the new session in the sidebar
-        needsTitleRefresh.current = true; // 첫 턴 완료 후 제목 생성 필요
+        sessionId = id;
+        const pendingThread = threadCacheRef.current.get(originSessionId) ?? [];
+        threadCacheRef.current.delete(originSessionId);
+        threadCacheRef.current.set(id, pendingThread);
+        // A very fast room switch can happen while POST /sessions is pending.
+        // Only move the visible selection if this is still the originating room.
+        if (activeSessionIdRef.current === originSessionId) {
+          liveSessionId.current = id;
+          showSessionThread(id, pendingThread);
+        }
+        needsTitleRefresh.current.add(id); // 첫 턴 완료 후 제목 생성 필요
         // Show the new chat in the sidebar IMMEDIATELY (ChatGPT-style) with a
         // truncated first-message label instead of waiting for the turn to end.
         // The real LLM title (POST /title) replaces this once the first turn ends.
         const provisional = q.replace(/\s+/g, ' ').trim().slice(0, 40) || '제목 없는 대화';
         setSessions((prev) => [{ id, title: provisional, timestamp: new Date(), messageCount: 0 }, ...prev]);
       } else {
-        finalizeThinking();
-        pushAgentText(`⚠️ 런타임 세션 생성 실패: ${res.error ?? '알 수 없는 오류'}`);
+        finalizeThinking(originSessionId);
+        pushAgentText(originSessionId, `⚠️ 런타임 세션 생성 실패: ${res.error ?? '알 수 없는 오류'}`);
+        runningSessionIdRef.current = null;
         setBusy(false);
+        setWorkProgress(null);
         return;
       }
     }
-    streamHandleRef.current = sseClient.streamText(liveSessionId.current, q, buildStreamHandlers());
+    if (!sessionId) return;
+    runningSessionIdRef.current = sessionId;
+    setWorkProgress({ sessionId });
+    streamHandleRef.current = sseClient.streamText(sessionId, q, buildStreamHandlers(sessionId, requestId));
   };
 
   // Open a DB-backed session: load its persisted messages and make it the live
   // target so subsequent sends continue the same conversation.
   const openLiveSession = async (id: string) => {
-    resetLiveRender(); // a running typewriter must not bleed into the loaded thread
-    setActiveSessionId(id);
+    const cached = threadCacheRef.current.get(id);
+    showSessionThread(id, cached ?? []);
     liveSessionId.current = id;
-    needsTitleRefresh.current = false; // 기존 세션 — 제목 이미 있음
     setIsEmpty(false);
+    // The runtime persists a ReAct turn atomically at completion. While this room
+    // is streaming, its in-memory cache is newer than GET /messages and must win.
+    if (runningSessionIdRef.current === id && cached) {
+      setLoadedSession(id);
+      return;
+    }
     const res = await api.getMessages(id);
     const msgs = res.success ? ((res.data as { messages?: RawMessage[] })?.messages ?? []) : [];
-    setThread(toThread(msgs));
-    setLoadedSession(id);
+    const next = toThread(msgs);
+    threadCacheRef.current.set(id, next);
+    if (activeSessionIdRef.current === id) {
+      threadRef.current = next;
+      setThreadState(next);
+      setLoadedSession(id);
+    }
   };
 
   // Re-fetch approvals still parked on the server for a session and re-render their
@@ -1485,8 +1591,8 @@ function ChatScreen() {
   // while the request was in flight.
   const recoverPendingApprovals = async (sessionId: string) => {
     const res = await api.getPendingApprovals(sessionId);
-    if (!res.success || !res.data?.length || liveSessionId.current !== sessionId) return;
-    setThread((prev) => {
+    if (!res.success || !res.data?.length) return;
+    updateThreadFor(sessionId, (prev) => {
       const have = new Set(
         prev.flatMap((mm) => (mm.kind === 'approval' || mm.kind === 'patch' ? [mm.approvalId] : [])),
       );
@@ -1502,9 +1608,12 @@ function ChatScreen() {
   const handleSelectSession = (id: string) => {
     // 이미 열린 방을 다시 클릭하면 무시: 불필요한 재조회를 막고, 스트리밍 중이면
     // DB 히스토리가 진행 중인 라이브 thread를 덮어쓰는 것도 방지한다.
-    if (id === activeSessionId) return;
+    if (id === activeSessionIdRef.current) return;
     if (connected) void openLiveSession(id);
-    else setActiveSessionId(id);
+    else {
+      activeSessionIdRef.current = id;
+      setActiveSessionId(id);
+    }
   };
 
   // Delete: confirm first (ConfirmDialog), then remove server-side + locally.
@@ -1524,7 +1633,8 @@ function ChatScreen() {
     const remaining = sessions.filter((s) => s.id !== target.id);
     setSessions(remaining);
     // If the deleted session was open, move to the next most recent or a blank chat.
-    if (activeSessionId === target.id || liveSessionId.current === target.id) {
+    threadCacheRef.current.delete(target.id);
+    if (activeSessionIdRef.current === target.id || liveSessionId.current === target.id) {
       liveSessionId.current = null;
       if (connected && remaining.length > 0) void openLiveSession(remaining[0].id);
       else newChat();
@@ -1534,25 +1644,33 @@ function ChatScreen() {
   // Stop an in-flight turn: close the SSE stream client-side AND tell the runtime
   // to abort (orchestrator stops the loop + cancels parked approvals).
   const stopTurn = () => {
+    const runningSessionId = runningSessionIdRef.current;
     streamHandleRef.current?.abort();
     streamHandleRef.current = null;
-    if (liveSessionId.current) void api.abort(liveSessionId.current);
-    finalizeThinking();
+    turnRequestRef.current += 1;
+    if (runningSessionId) void api.abort(runningSessionId);
+    if (runningSessionId) finalizeThinking(runningSessionId);
+    runningSessionIdRef.current = null;
     setBusy(false);
+    setWorkProgress(null);
   };
 
   // Push the user bubble + a live "생각 중…" placeholder, then stream the turn.
   // Shared by send() and handleCorrect() (a correction is just a user turn).
   const runLiveTurn = (q: string) => {
+    const originSessionId = liveSessionId.current ?? activeSessionIdRef.current;
+    const requestId = ++turnRequestRef.current;
     setIsEmpty(false);
-    sealAnswer(); // flush any lingering typewriter tail from the previous turn
+    sealAnswer(originSessionId); // flush any lingering typewriter tail from the previous turn
     setBusy(true);
-    setThread((p) => [
+    runningSessionIdRef.current = originSessionId || null;
+    setWorkProgress({ sessionId: originSessionId });
+    updateThreadFor(originSessionId, (p) => [
       ...p,
       { kind: 'user', text: q, sentAt: Date.now() },
       { kind: 'thinking', duration: '', text: '', streaming: true, startedAt: Date.now() },
     ]);
-    void sendLive(q);
+    void sendLive(q, originSessionId, requestId);
   };
 
   // overrideText: 스타터 프롬프트 카드처럼 draft state를 거치지 않고 즉시 보낼 때 사용
@@ -1669,17 +1787,15 @@ function ChatScreen() {
   };
 
   const newChat = () => {
-    resetLiveRender();
+    if (!busy) resetLiveRender();
     setIsEmpty(true);
-    setThread([]);
+    showSessionThread('', []);
     // Start a fresh backend session — otherwise the next send reuses the previous
     // liveSessionId and the model still sees the whole prior history (the "새 대화가
     // 다 기억함" bug). A new session id is created lazily on the next send.
     liveSessionId.current = null;
-    setBusy(false);
-    // Clear the sidebar highlight so no existing session looks active (connected
-    // only — offline keeps activeSessionId so its scripted thread stays loadable).
-    if (connected) setActiveSessionId('');
+    // A running turn belongs to its captured session and continues in the
+    // background; the global progress surface remains visible above this draft.
   };
 
   const manageFromPopover = () => {
@@ -1688,7 +1804,11 @@ function ChatScreen() {
 
   // open the conversation a proposal's evidence came from, then scroll to + highlight it
   const openConversation = (conversationId: string, messageIndex?: number) => {
-    setActiveSessionId(conversationId);
+    if (connected) void openLiveSession(conversationId);
+    else {
+      activeSessionIdRef.current = conversationId;
+      setActiveSessionId(conversationId);
+    }
     if (messageIndex != null) setPendingScroll({ session: conversationId, index: messageIndex });
   };
 
@@ -1913,6 +2033,7 @@ function ChatScreen() {
           {/* Composer */}
           <div className="flex-shrink-0 px-5 pt-2 pb-5">
             <div className="w-full max-w-[920px] mx-auto relative">
+              {workProgress && <ChatTaskProgress />}
               {/* Inline slash-command popover — floats above the composer box */}
               {skillsOpen && isInlineSlash && (
                 <SkillsPopover

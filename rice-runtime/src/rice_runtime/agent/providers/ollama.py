@@ -9,8 +9,9 @@ kept behind `_stream_chat` so unit tests can replace network I/O with a small fa
     긴 턴에서 프롬프트 **앞**(시스템 프롬프트·도구 스키마)이 소리 없이 잘린다 —
     도구 호출 실패·지시 무시의 근본 원인. 예산 압축은 컨텍스트 매니저의 일이고,
     잘림은 버그다.
-  - `keep_alive`는 config에서 온다(기본 30m) — ReAct 반복·승인 대기 사이에
-    모델이 VRAM에서 내려가 콜드 리로드(수십 초)되는 것을 막는다.
+  - `keep_alive`는 config에서 온 유한 값(기본 5m)이다. 비정상 종료 시 Ollama
+    자체 회수 안전망이며, 정상 흐름에서는 registry 공유 lifecycle이 ReAct 전체를
+    lease하고 짧은 title/review 유예 뒤 keep_alive=0으로 즉시 해제한다.
   - HTTP 클라이언트는 이벤트 루프당 1개를 재사용한다(keep-alive 커넥션 풀).
     ReAct 루프는 같은 서버에 수십 번 연쇄 요청한다 — 매 호출 TCP 재수립은 낭비.
   - 프리픽스 KV 캐시는 이 어댑터가 아니라 **렌더링 규율**이 지킨다: 루프가
@@ -23,12 +24,14 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator, AsyncIterable, Sequence
+from contextlib import asynccontextmanager
 from typing import Any
 
 from ...core.config import ProviderConfig
 from ...core.errors import ProviderError
 from ...core.types import Message, ToolCall, ToolSpec
 from .interfaces import ILLMProvider, ProviderCapabilities, ProviderChunk
+from .ollama_lifecycle import OllamaLifecycleManager, OllamaModelKey
 
 # think:false is a request, not a guarantee: harmony-format reasoning models
 # (gpt-oss etc.) have no true off switch for their analysis pass and can burn the
@@ -50,10 +53,21 @@ def _shared_client() -> Any:
 
     global _client, _client_loop_id
     loop_id = id(asyncio.get_running_loop())
-    if _client is None or _client_loop_id != loop_id:
+    if _client is None or _client_loop_id != loop_id or getattr(_client, "is_closed", False):
         _client = httpx.AsyncClient(timeout=None)
         _client_loop_id = loop_id
     return _client
+
+
+async def close_shared_client() -> None:
+    """Close/reset the inference connection pool during ASGI shutdown."""
+
+    global _client, _client_loop_id
+    client = _client
+    _client = None
+    _client_loop_id = None
+    if client is not None and not getattr(client, "is_closed", False):
+        await client.aclose()
 
 
 def _to_ollama_tools(tools: Sequence[ToolSpec]) -> list[dict[str, Any]]:
@@ -124,8 +138,16 @@ def _extract_tool_calls(message: dict[str, Any]) -> list[ToolCall]:
 class OllamaProvider(ILLMProvider):
     name = "ollama"
 
-    def __init__(self, cfg: ProviderConfig, *, think: bool = True) -> None:
+    def __init__(
+        self,
+        cfg: ProviderConfig,
+        *,
+        think: bool = True,
+        lifecycle: OllamaLifecycleManager | None = None,
+    ) -> None:
         self._cfg = cfg
+        self._lifecycle = lifecycle
+        self._model_key = OllamaModelKey.create(cfg.base_url, cfg.model)
         # think=False: disable reasoning tokens — used by the session titler so a
         # short title generation doesn't pay for a full reasoning pass (and avoids
         # the httpx stream-drain stall that occurs when the caller breaks early).
@@ -137,23 +159,67 @@ class OllamaProvider(ILLMProvider):
     def _chat_url(self) -> str:
         return (self._cfg.base_url or "http://localhost:11434").rstrip("/") + "/api/chat"
 
+    @property
+    def lifecycle(self) -> OllamaLifecycleManager | None:
+        """Shared registry-owned lifecycle, reused by the utility/titler variant."""
+
+        return self._lifecycle
+
+    def _idle_unload_seconds(self) -> float:
+        try:
+            return max(0.0, float(getattr(self._cfg, "idle_unload_seconds", 60.0)))
+        except (TypeError, ValueError):
+            return 60.0
+
+    @asynccontextmanager
+    async def activity(self) -> AsyncIterator[None]:
+        """Outer logical-work lease used by the orchestrator's complete ReAct turn."""
+
+        if self._lifecycle is None:
+            yield
+            return
+        async with self._lifecycle.lease(
+            self._model_key,
+            idle_seconds=self._idle_unload_seconds(),
+            touches_model=False,
+            request_keep_alive=self._keep_alive(),
+        ):
+            yield
+
+    @asynccontextmanager
+    async def _request_activity(self) -> AsyncIterator[None]:
+        """Inner lease marking that an HTTP request may have loaded the model."""
+
+        if self._lifecycle is None:
+            yield
+            return
+        async with self._lifecycle.lease(
+            self._model_key,
+            idle_seconds=self._idle_unload_seconds(),
+            touches_model=True,
+            request_keep_alive=self._keep_alive(),
+        ):
+            yield
+
     async def _stream_chat(self, payload: dict[str, Any]) -> AsyncIterable[dict[str, Any]]:
         timeout = getattr(self._cfg, "timeout_seconds", 300)
-        client = _shared_client()
-        async with client.stream("POST", self._chat_url(), json=payload, timeout=timeout) as response:
-            response.raise_for_status()
-            async for line in response.aiter_lines():
-                if line:
-                    yield json.loads(line)
+        async with self._request_activity():
+            client = _shared_client()
+            async with client.stream("POST", self._chat_url(), json=payload, timeout=timeout) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if line:
+                        yield json.loads(line)
 
     async def _post_chat(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Single non-streaming POST — used when streaming is unnecessary (titler).
         No iterator, no drain stall: the full response arrives in one round-trip."""
         timeout = getattr(self._cfg, "timeout_seconds", 300)
-        client = _shared_client()
-        response = await client.post(self._chat_url(), json=payload, timeout=timeout)
-        response.raise_for_status()
-        return response.json()
+        async with self._request_activity():
+            client = _shared_client()
+            response = await client.post(self._chat_url(), json=payload, timeout=timeout)
+            response.raise_for_status()
+            return response.json()
 
     def _base_options(self) -> dict[str, Any]:
         """모든 호출에 공통인 options — num_ctx는 항상 명시한다(모듈 docstring 참고)."""
@@ -164,7 +230,7 @@ class OllamaProvider(ILLMProvider):
         return options
 
     def _keep_alive(self) -> str:
-        return str(getattr(self._cfg, "keep_alive", "") or "30m")
+        return str(getattr(self._cfg, "keep_alive", "") or "5m")
 
     async def stream(
         self,

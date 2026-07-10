@@ -41,6 +41,7 @@ interface AppShellProps {
 function AppShell({ tourActive, onTourDone }: AppShellProps) {
   const location = useLocation();
   const navigate = useNavigate();
+  const isChatRoute = location.pathname === '/chat';
 
   const activeRailId =
     railItems.find((item) => location.pathname === item.path || location.pathname.startsWith(`${item.path}/`))?.id ??
@@ -53,19 +54,29 @@ function AppShell({ tourActive, onTourDone }: AppShellProps) {
         activeRailId={activeRailId}
         onNavigate={(_, path) => navigate(path)}
       >
-        <Routes>
-          <Route path="/" element={<Navigate to="/chat" replace />} />
-          <Route path="/home" element={<HomeScreen />} />
-          <Route path="/chat" element={<ChatScreen />} />
-          <Route path="/my-skills" element={<MySkillsScreen />} />
-          <Route path="/my-plugins" element={<MyPluginsScreen />} />
-          <Route path="/skills" element={<SkillMarketScreen />} />
-          <Route path="/plugins" element={<PluginMarketScreen />} />
-          <Route path="/connectors" element={<ConnectorsScreen />} />
-          <Route path="/connectors/:id" element={<ConnectorsScreen />} />
-          <Route path="/settings" element={<SettingsScreen />} />
-          <Route path="*" element={<Navigate to="/chat" replace />} />
-        </Routes>
+        {/* Keep ChatScreen mounted while another top-level screen is open. Its
+            SSE handlers own the in-progress turn renderer; unmounting it used to
+            discard every incremental event even though the runtime kept working. */}
+        <div className={isChatRoute ? 'flex flex-1 min-h-0 animate-fade-in' : 'hidden'}>
+          <ChatScreen />
+        </div>
+
+        {!isChatRoute && (
+          <div key={activeRailId} className="flex flex-1 flex-col min-h-0 animate-fade-in">
+            <Routes>
+              <Route path="/" element={<Navigate to="/chat" replace />} />
+              <Route path="/home" element={<HomeScreen />} />
+              <Route path="/my-skills" element={<MySkillsScreen />} />
+              <Route path="/my-plugins" element={<MyPluginsScreen />} />
+              <Route path="/skills" element={<SkillMarketScreen />} />
+              <Route path="/plugins" element={<PluginMarketScreen />} />
+              <Route path="/connectors" element={<ConnectorsScreen />} />
+              <Route path="/connectors/:id" element={<ConnectorsScreen />} />
+              <Route path="/settings" element={<SettingsScreen />} />
+              <Route path="*" element={<Navigate to="/chat" replace />} />
+            </Routes>
+          </div>
+        )}
       </Layout>
 
       <CommandPalette />

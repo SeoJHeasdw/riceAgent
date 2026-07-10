@@ -15,8 +15,9 @@ else — that is the entire point of the seam discipline.
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 
 from ..agent.builtins import build_builtin_tools, build_subagent_toolset, scratch_tool_factory
@@ -66,6 +67,9 @@ class Container:
     agent: IAgent
     titler: ISessionTitler
     token_calibrator: TokenCalibrator
+    _shutdown_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
+    _async_shutdown_complete: bool = field(default=False, init=False, repr=False)
+    _db_closed: bool = field(default=False, init=False, repr=False)
 
     @property
     def config(self) -> Config:
@@ -73,17 +77,46 @@ class Container:
         return self.config_store.config
 
     def shutdown(self) -> None:
-        """Graceful teardown (POST /shutdown): 활성 턴 abort + 파킹된 승인 취소
-        → DB close. 이전엔 DB만 닫아서, 파킹된 HITL 승인이 스트림을 계속 물고
-        있었고 진행 중 턴은 닫힌 DB를 만졌다. abort_all 은 sync best-effort 다 —
-        drain 까지는 하지 않는다(직후 supervisor 가 프로세스를 내린다)."""
+        """Legacy synchronous teardown used by CLI/tests.
+
+        Production ASGI shutdown uses :meth:`shutdown_async` so Ollama can receive
+        its explicit unload command before the process exits.  This fallback still
+        aborts work, cancels delayed timers, and relies on finite keep_alive if it
+        cannot perform network I/O.
+        """
+        self._abort_all()
+        cancel_pending = getattr(self.providers, "cancel_pending", None)
+        if cancel_pending is not None:
+            cancel_pending()
+        if not self._db_closed:
+            self.db.close()
+            self._db_closed = True
+
+    def _abort_all(self) -> None:
         abort_all = getattr(self.agent, "abort_all", None)
         if abort_all is not None:
             try:
                 abort_all()
             except Exception:  # noqa: BLE001 — teardown 은 어떤 경우에도 진행돼야 한다
                 log.warning("abort_all during shutdown failed", exc_info=True)
-        self.db.close()
+
+    async def shutdown_async(self) -> None:
+        """Idempotent ASGI teardown: abort, unload local models, close DB."""
+
+        async with self._shutdown_lock:
+            if self._async_shutdown_complete:
+                return
+            self._abort_all()
+            shutdown_providers = getattr(self.providers, "shutdown", None)
+            if shutdown_providers is not None:
+                try:
+                    await shutdown_providers()
+                except Exception:  # noqa: BLE001 — DB/process teardown must continue
+                    log.warning("provider shutdown failed", exc_info=True)
+            if not self._db_closed:
+                self.db.close()
+                self._db_closed = True
+            self._async_shutdown_complete = True
 
 
 def build_container(
@@ -163,7 +196,9 @@ def build_container(
         if kind == "ollama":
             from ..agent.providers.ollama import OllamaProvider  # noqa: PLC0415
             cfg = config_store.config.provider
-            return OllamaProvider(cfg, think=False)
+            lifecycle_factory = getattr(providers, "ollama_lifecycle", None)
+            lifecycle = lifecycle_factory() if lifecycle_factory is not None else None
+            return OllamaProvider(cfg, think=False, lifecycle=lifecycle)
         return provider
 
     # `learning` now depends on `resolve_provider` (Phase A.3 — review()/learn()
