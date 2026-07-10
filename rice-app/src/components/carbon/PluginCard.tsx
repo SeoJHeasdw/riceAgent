@@ -69,7 +69,13 @@ export const PluginCard: React.FC<PluginCardProps> = ({
         </div>
         <div className="flex-1 min-w-0">
           <h3 className="text-heading-02 font-semibold text-text-primary leading-tight">
-            {name}
+            <button
+              type="button"
+              onClick={(event) => { event.stopPropagation(); onOpenDetails?.(); }}
+              className="max-w-full truncate text-left rounded-sm hover:text-link-primary transition-colors duration-150"
+            >
+              {name}
+            </button>
           </h3>
           <p className="text-caption-01 text-text-helper">{author}</p>
         </div>
@@ -136,7 +142,12 @@ export const PluginCard: React.FC<PluginCardProps> = ({
       {/* Installed footer — 사용 상태 토글 (카드 자체가 상세로 연결되므로 별도 링크 없음) */}
       {installed && (
         <div className="relative flex items-center gap-2.5 pt-3 mt-2 border-t border-border-subtle-01" onClick={(e) => e.stopPropagation()}>
-          <Toggle checked={enabled} onChange={onToggle} tone="purple" />
+          <Toggle
+            checked={enabled}
+            onChange={onToggle}
+            tone="purple"
+            aria-label={`${name} ${enabled ? '비활성화' : '활성화'}`}
+          />
           <span className="flex items-center gap-1.5 flex-1 min-w-0">
             <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${enabled ? 'bg-support-success' : 'bg-text-helper'}`} />
             <span className="text-caption-01 text-text-secondary truncate">

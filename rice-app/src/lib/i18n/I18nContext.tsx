@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useState, ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, ReactNode } from 'react';
 import { translations, Language } from './translations';
 
 interface I18nContextType {
@@ -20,7 +20,7 @@ function loadLanguage(): Language {
   } catch {
     // fall through to default
   }
-  return 'en';
+  return navigator.language.toLowerCase().startsWith('ko') ? 'ko' : 'en';
 }
 
 export function I18nProvider({ children }: { children: ReactNode }) {
@@ -32,6 +32,10 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const t = translations[language];
+
+  useEffect(() => {
+    document.documentElement.lang = language;
+  }, [language]);
 
   return (
     <I18nContext.Provider value={{ language, setLanguage, t }}>

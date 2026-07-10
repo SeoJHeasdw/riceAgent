@@ -218,7 +218,11 @@ const InstalledRow: React.FC<{ t: InstalledTool; onToggle: () => void; onRemove:
       </div>
       <div className="text-caption-01 text-text-helper leading-tight">{t.meta}</div>
     </div>
-    <Toggle checked={t.enabled} onChange={() => onToggle()} />
+    <Toggle
+      checked={t.enabled}
+      onChange={() => onToggle()}
+      aria-label={`${t.name} ${t.enabled ? '비활성화' : '활성화'}`}
+    />
     <RowMenu items={[{ icon: 'trash', label: '제거', danger: true, onClick: onRemove }]} />
   </div>
 );

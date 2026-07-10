@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useId } from 'react';
 
 /**
  * Tooltip — 아이콘 전용 버튼의 hover 라벨.
@@ -24,11 +24,15 @@ export interface TooltipProps {
 }
 
 export const Tooltip: React.FC<TooltipProps> = ({ label, side = 'top', disabled, children }) => {
+  const id = useId();
   if (disabled || !label) return children;
+  const child = children as React.ReactElement<{ 'aria-describedby'?: string }>;
+  const describedBy = [child.props['aria-describedby'], id].filter(Boolean).join(' ');
   return (
     <span className="relative inline-flex group/tooltip">
-      {children}
+      {React.cloneElement(child, { 'aria-describedby': describedBy })}
       <span
+        id={id}
         role="tooltip"
         className={`absolute z-50 px-2 py-1 bg-layer-02 text-text-primary text-caption-01 font-medium
           whitespace-nowrap rounded-md border border-border-subtle-01 shadow-elevation-2

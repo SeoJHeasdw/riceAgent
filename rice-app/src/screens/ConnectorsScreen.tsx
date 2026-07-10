@@ -1285,6 +1285,7 @@ function ConnectorsScreen() {
         onPointerDown={railPanel.startResize}
         onDoubleClick={railPanel.resetWidth}
         isResizing={railPanel.isResizing}
+        value={railPanel.width} min={railPanel.min} max={railPanel.max} onResizeBy={railPanel.resizeBy}
         aria-label="Resize filters panel"
       />
 
@@ -1375,6 +1376,7 @@ function ConnectorsScreen() {
         onPointerDown={listPanel.startResize}
         onDoubleClick={listPanel.resetWidth}
         isResizing={listPanel.isResizing}
+        value={listPanel.width} min={listPanel.min} max={listPanel.max} onResizeBy={listPanel.resizeBy}
         aria-label="Resize connectors list panel"
       />
 

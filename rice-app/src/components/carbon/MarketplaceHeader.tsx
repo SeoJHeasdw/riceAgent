@@ -33,7 +33,7 @@ export const MarketplaceHeader: React.FC<MarketplaceHeaderProps> = ({
     <div className="px-8 pt-7 pb-1">
       {/* Title and subtitle */}
       <div className="flex flex-col items-start gap-1 mb-1">
-        <h1 className="text-heading-03 font-semibold text-text-primary leading-tight">
+        <h1 className="text-heading-03 font-light text-text-primary leading-tight">
           {title}
         </h1>
         {subtitle && (
@@ -53,6 +53,7 @@ export const MarketplaceHeader: React.FC<MarketplaceHeaderProps> = ({
           </svg>
           <input
             type="text"
+            aria-label={`${title} 검색`}
             value={searchValue}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder="검색"
@@ -62,7 +63,7 @@ export const MarketplaceHeader: React.FC<MarketplaceHeaderProps> = ({
             <button
               onClick={() => onSearchChange('')}
               className="p-0.5 rounded hover:bg-layer-hover-01 transition-colors"
-              aria-label="Clear search"
+              aria-label="검색어 지우기"
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="text-icon-secondary">
                 <path d="M18 6 6 18M6 6l12 12" />
@@ -72,7 +73,7 @@ export const MarketplaceHeader: React.FC<MarketplaceHeaderProps> = ({
         </div>
 
         {/* Sort — segmented control */}
-        <div className="ml-auto flex items-center gap-0.5 p-1 bg-field-01 border border-border-subtle-01 rounded-xl">
+        <div role="group" aria-label="정렬 기준" className="ml-auto flex items-center gap-0.5 p-1 bg-field-01 border border-border-subtle-01 rounded-xl">
           {sortOptions.map((option) => {
             const isActive = sortValue === option.value;
             return (
@@ -80,10 +81,10 @@ export const MarketplaceHeader: React.FC<MarketplaceHeaderProps> = ({
                 key={option.value}
                 onClick={() => onSortChange(option.value)}
                 aria-pressed={isActive}
-                className={`px-3 h-7 text-label-01 font-medium rounded-lg whitespace-nowrap transition-all duration-150 ${
+                className={`px-3 h-7 text-label-01 font-medium rounded-lg whitespace-nowrap border transition-colors duration-150 ${
                   isActive
-                    ? 'bg-layer-02 text-text-primary shadow-elevation-1'
-                    : 'bg-transparent text-text-secondary hover:text-text-primary'
+                    ? 'bg-layer-selected-01 text-text-primary border-interactive'
+                    : 'bg-transparent text-text-secondary border-transparent hover:text-text-primary hover:bg-layer-hover-01'
                 }`}
               >
                 {option.label}
@@ -95,7 +96,7 @@ export const MarketplaceHeader: React.FC<MarketplaceHeaderProps> = ({
 
       {/* Filter tags */}
       {filterTags && filterTags.length > 0 && onTagToggle && (
-        <div className="flex flex-wrap gap-2 mt-4">
+        <div role="group" aria-label="태그 필터" className="flex flex-wrap gap-2 mt-4">
           {filterTags.map((tag) => {
             const isSelected = selectedTags.includes(tag);
             return (

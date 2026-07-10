@@ -18,11 +18,15 @@ export interface UseResizableOptions {
 
 export interface UseResizableResult {
   width: number;
+  min: number;
+  max: number;
   isResizing: boolean;
   /** Attach to the handle's onPointerDown */
   startResize: (e: React.PointerEvent) => void;
   /** Reset to the initial width (e.g. on double-click) */
   resetWidth: () => void;
+  /** Keyboard-accessible width adjustment. */
+  resizeBy: (delta: number) => void;
 }
 
 export function useResizable({
@@ -57,6 +61,7 @@ export function useResizable({
   );
 
   const resetWidth = useCallback(() => setWidth(clamp(initial)), [clamp, initial]);
+  const resizeBy = useCallback((delta: number) => setWidth((current) => clamp(current + delta)), [clamp]);
 
   useEffect(() => {
     if (!isResizing) return;
@@ -86,7 +91,7 @@ export function useResizable({
     }
   }, [width, isResizing, storageKey]);
 
-  return { width, isResizing, startResize, resetWidth };
+  return { width, min, max, isResizing, startResize, resetWidth, resizeBy };
 }
 
 // Made with Bob

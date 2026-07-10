@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Button, Card, Input, Tag, Toggle } from '../components/ui';
 import { useI18n } from '../lib/i18n/I18nContext';
 import { replayOnboarding, replayTour } from '../lib/tutorial';
+import { applyAppearance } from '../lib/appearance';
 
 /**
  * SettingsScreen - Application preferences
@@ -100,6 +101,10 @@ function SettingsScreen() {
     }
   }, [settings.language, language, setLanguage]);
 
+  useEffect(() => {
+    applyAppearance({ font: settings.font, theme: settings.theme });
+  }, [settings.font, settings.theme]);
+
   const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
     setSettings((prev) => ({ ...prev, [key]: value }));
     setHasChanges(true);
@@ -130,8 +135,13 @@ function SettingsScreen() {
       <header className="h-[52px] flex-shrink-0 bg-layer-01 border-b border-border-subtle-01 flex items-center gap-3 px-5">
         <h1 className="text-body-short-02 font-semibold text-text-primary">{t.settings.title}</h1>
         {saved && (
-          <Tag type="green" size="sm" className="animate-fade-in">
+          <Tag type="green" size="sm" className="animate-fade-in" role="status">
             {t.settings.saved}
+          </Tag>
+        )}
+        {hasChanges && !saved && (
+          <Tag type="yellow" size="sm" role="status">
+            {language === 'ko' ? '저장 안 됨' : 'Unsaved'}
           </Tag>
         )}
         <div className="flex-1" />
@@ -194,7 +204,7 @@ function SettingsScreen() {
               <div className="grid grid-cols-2 gap-1 p-1 bg-field-01 border border-border-subtle-01 rounded-xl max-w-[320px]">
                 {([
                   { value: 'dark' as const, label: t.settings.appearance.themeDark, enabled: true },
-                  { value: 'light' as const, label: t.settings.appearance.themeLight, enabled: false },
+                  { value: 'light' as const, label: t.settings.appearance.themeLight, enabled: true },
                 ]).map(({ value, label, enabled }) => {
                   const isActive = settings.theme === value;
                   return (

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useId } from 'react';
 
 /**
  * Toggle - iOS-style toggle switch.
@@ -14,6 +14,8 @@ export interface ToggleProps {
   description?: string;
   /** Accent color when checked. */
   tone?: 'blue' | 'green' | 'purple';
+  /** Required for icon-only/bare switches. */
+  'aria-label'?: string;
 }
 
 const toneStyles = {
@@ -29,30 +31,36 @@ export const Toggle: React.FC<ToggleProps> = ({
   label,
   description,
   tone = 'blue',
+  'aria-label': ariaLabel,
 }) => {
   const accent = toneStyles[tone];
+  const id = useId();
+  const labelId = label ? `${id}-label` : undefined;
+  const descriptionId = description ? `${id}-description` : undefined;
   const switchEl = (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
+      aria-label={label ? undefined : ariaLabel ?? '상태 전환'}
+      aria-labelledby={labelId}
+      aria-describedby={descriptionId}
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={`
-        relative inline-flex items-center flex-shrink-0 h-[22px] w-[40px] rounded-full
-        transition-colors duration-300 ease-out
-        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-layer-01 focus-visible:ring-focus
+        relative inline-flex items-center flex-shrink-0 h-6 w-10 rounded-full
+        transition-colors duration-150
         ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
         ${checked
-          ? `${accent.track} shadow-[inset_0_1px_2px_rgba(0,0,0,0.25)]`
+          ? accent.track
           : 'bg-layer-03 ring-1 ring-inset ring-border-strong-01'}
       `}
     >
       <span
         className={`
-          absolute top-1/2 -translate-y-1/2 h-[18px] w-[18px] rounded-full bg-white shadow-elevation-1
-          flex items-center justify-center transition-all duration-300 ease-out
-          ${checked ? 'left-[20px]' : 'left-0.5'}
+          absolute top-1/2 -translate-y-1/2 h-5 w-5 rounded-full bg-white shadow-elevation-1
+          flex items-center justify-center transition-[left] duration-150
+          ${checked ? 'left-[18px]' : 'left-0.5'}
         `}
       >
         {checked ? (
@@ -60,7 +68,7 @@ export const Toggle: React.FC<ToggleProps> = ({
             <path d="M13 21.5l-6-6 1.8-1.8 4.2 4.2 9.4-9.4L24.2 10z" fill="currentColor" />
           </svg>
         ) : (
-          <span className="w-[7px] h-[7px] rounded-full border-[1.5px] border-text-helper" />
+          <span className="w-2 h-2 rounded-full border border-text-helper" />
         )}
       </span>
     </button>
@@ -69,17 +77,15 @@ export const Toggle: React.FC<ToggleProps> = ({
   if (!label) return switchEl;
 
   return (
-    <label
-      className={`flex items-center gap-3 ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-    >
-      <div className="flex-1">
-        <div className="text-body-short-02 text-text-primary">{label}</div>
+    <div className={`flex items-center gap-3 ${disabled ? 'opacity-50' : ''}`}>
+      <div className="flex-1 min-w-0">
+        <div id={labelId} className="text-body-short-02 text-text-primary">{label}</div>
         {description && (
-          <div className="text-caption-01 text-text-helper">{description}</div>
+          <div id={descriptionId} className="text-caption-01 text-text-helper">{description}</div>
         )}
       </div>
       {switchEl}
-    </label>
+    </div>
   );
 };
 

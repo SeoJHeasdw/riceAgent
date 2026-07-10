@@ -175,8 +175,8 @@ export default {
         'focus-inverse': 'var(--cds-focus-inverse)',
       },
       fontFamily: {
-        sans: ['IBM Plex Sans', 'system-ui', '-apple-system', 'sans-serif'],
-        mono: ['IBM Plex Mono', 'Menlo', 'Monaco', 'Courier New', 'monospace'],
+        sans: ['var(--font-sans)'],
+        mono: ['var(--font-mono)'],
         serif: ['IBM Plex Serif', 'Georgia', 'Times New Roman', 'serif'],
       },
       spacing: {

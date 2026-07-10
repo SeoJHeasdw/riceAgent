@@ -217,6 +217,7 @@ function SkillMarketScreen() {
         onPointerDown={railPanel.startResize}
         onDoubleClick={railPanel.resetWidth}
         isResizing={railPanel.isResizing}
+        value={railPanel.width} min={railPanel.min} max={railPanel.max} onResizeBy={railPanel.resizeBy}
         aria-label="Resize categories panel"
       />
 

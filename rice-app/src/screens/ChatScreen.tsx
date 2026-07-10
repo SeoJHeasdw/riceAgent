@@ -7,7 +7,7 @@ import { useResizable } from '../hooks/useResizable';
 import { useLearning } from '../lib/learning/LearningContext';
 import type { Skill, ThreadMessage, UserSignal } from '../lib/learningData';
 import { defaultModelSettings } from '../lib/mockData';
-import { RUN_SKILL_EVENT, NEW_CHAT_EVENT } from '../lib/commandBridge';
+import { RUN_SKILL_EVENT, NEW_CHAT_EVENT, openCommandPalette } from '../lib/commandBridge';
 import { api } from '../lib/api';
 import { sseClient } from '../lib/sse';
 import type { PatchTrigger, PendingApproval, PlanUpdatedEventData, ToolApprovalRequiredData, SkillPatchProposedData, MemoryWrittenEventData, SSEEvent } from '../lib/types';
@@ -676,7 +676,7 @@ const ChatTaskProgress = () => (
     aria-label="Pondering"
   >
     <Icon name="sparkle" size={14} className="flex-shrink-0 text-support-warning animate-pulse" />
-    <span>Pondering...</span>
+    <span>Pondering<span className="rice-ellipsis" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></span>
   </div>
 );
 
@@ -1945,6 +1945,7 @@ function ChatScreen() {
             onPointerDown={sessionPanel.startResize}
             onDoubleClick={sessionPanel.resetWidth}
             isResizing={sessionPanel.isResizing}
+            value={sessionPanel.width} min={sessionPanel.min} max={sessionPanel.max} onResizeBy={sessionPanel.resizeBy}
             aria-label="Resize sessions panel"
           />
         )}
@@ -1963,6 +1964,16 @@ function ChatScreen() {
             </span>
 
             <div className="ml-auto flex items-center gap-1">
+              <Tooltip label="빠른 실행 (⌘K)">
+                <button
+                  type="button"
+                  onClick={openCommandPalette}
+                  className="electron-no-drag flex h-7 w-7 items-center justify-center rounded-md text-icon-secondary transition-colors duration-150 hover:bg-layer-hover-01 hover:text-icon-primary"
+                  aria-label="빠른 실행 열기"
+                >
+                  <Icon name="search" size={14} />
+                </button>
+              </Tooltip>
               {/* 패널이 열려 있으면 제목이 패널 헤더에 이미 있으므로 아이콘으로 축약 — 같은 라벨 이중 표기 방지 */}
               <button
                 onClick={() => setLearningPanelOpen((o) => !o)}
@@ -2114,8 +2125,13 @@ function ChatScreen() {
                   className="w-full resize-none border-none outline-none bg-transparent text-text-primary text-body-short-02 leading-5 px-4 pt-3.5 pb-1 min-h-[56px] max-h-[200px]"
                 />
                 <div className="flex items-center gap-1.5 px-2.5 pb-2.5">
-                  <Tooltip label="첨부">
-                    <button className="p-1.5 rounded-lg text-icon-secondary hover:text-icon-primary hover:bg-layer-hover-01 transition-colors">
+                  <Tooltip label="파일 첨부 · 준비 중">
+                    <button
+                      type="button"
+                      disabled
+                      aria-label="파일 첨부 (준비 중)"
+                      className="p-1.5 rounded-lg text-icon-secondary opacity-40 cursor-not-allowed"
+                    >
                       <Icon name="attachment" size={16} />
                     </button>
                   </Tooltip>
@@ -2245,6 +2261,7 @@ function ChatScreen() {
               onPointerDown={learningPanel.startResize}
               onDoubleClick={learningPanel.resetWidth}
               isResizing={learningPanel.isResizing}
+              value={learningPanel.width} min={learningPanel.min} max={learningPanel.max} onResizeBy={learningPanel.resizeBy}
               aria-label="Resize learning loop panel"
             />
             <LearningPanel width={learningPanel.width} onOpenConversation={openConversation} />

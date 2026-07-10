@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useId } from 'react';
 
 /**
  * IconRail - left navigation rail
@@ -29,7 +29,9 @@ const RailButton: React.FC<{
   item: IconRailItem;
   isActive: boolean;
   onNavigate: (id: string, path: string) => void;
-}> = ({ item, isActive, onNavigate }) => (
+}> = ({ item, isActive, onNavigate }) => {
+  const tooltipId = useId();
+  return (
   <div className="relative group flex justify-center w-full">
     {/* Active indicator pill */}
     <span
@@ -55,33 +57,36 @@ const RailButton: React.FC<{
       `}
       aria-label={item.label}
       aria-current={isActive ? 'page' : undefined}
+      aria-describedby={tooltipId}
     >
       {item.icon}
     </button>
 
     {/* Tooltip */}
     <span
+      id={tooltipId}
       className="
         absolute left-full top-1/2 -translate-y-1/2 ml-1.5 px-2 py-1
         bg-layer-02 text-text-primary text-caption-01 font-medium
         whitespace-nowrap rounded-md border border-border-subtle-01 shadow-elevation-2
-        opacity-0 -translate-x-1 pointer-events-none
-        group-hover:opacity-100 group-hover:translate-x-0
-        transition-all duration-150 delay-75 z-50
+        opacity-0 pointer-events-none
+        group-hover:opacity-100 group-focus-within:opacity-100
+        transition-opacity duration-150 delay-75 z-50
       "
       role="tooltip"
     >
       {item.label}
     </span>
   </div>
-);
+  );
+};
 
 export const IconRail: React.FC<IconRailProps> = ({ items, activeId, onNavigate, topInset = false }) => {
   const topItems = items.filter((item) => !item.pinBottom);
   const bottomItems = items.filter((item) => item.pinBottom);
 
   return (
-    <nav className="w-[52px] h-full bg-shell border-r border-shell-border flex flex-col items-center py-2 electron-drag">
+    <nav aria-label="주요 메뉴" className="w-[52px] h-full bg-shell border-r border-shell-border flex flex-col items-center py-2 electron-drag">
       {/* Traffic-light clearance — mirrors the h-11 titlebar the other screens reserve,
           so the first rail icon sits below the macOS window buttons instead of under them. */}
       {topInset && <div className="h-11 flex-shrink-0" aria-hidden="true" />}

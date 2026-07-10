@@ -1,8 +1,9 @@
-import React, { useEffect } from 'react';
+import React, { useId, useRef } from 'react';
 import { Button } from './Button';
 import { Icon } from './Icon';
 import type { IconName } from './Icon';
 import { dialogBackdropCls, dialogSurfaceCls } from './surfaces';
+import { useDialogA11y } from '../../hooks/useDialogA11y';
 
 /**
  * ConfirmDialog — 재사용 확인 팝업.
@@ -42,15 +43,11 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   onConfirm,
   onClose,
 }) => {
-  // Esc 로 닫기
-  useEffect(() => {
-    if (!open) return;
-    const h = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', h);
-    return () => document.removeEventListener('keydown', h);
-  }, [open, onClose]);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const titleId = useId();
+  const descriptionId = useId();
+  useDialogA11y({ open, dialogRef, onClose, initialFocusRef: cancelRef });
 
   if (!open) return null;
 
@@ -61,8 +58,12 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
 
       {/* dialog */}
       <div
+        ref={dialogRef}
         role="alertdialog"
         aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={description ? descriptionId : undefined}
+        tabIndex={-1}
         className={`relative w-full max-w-[420px] mx-4 overflow-hidden ${dialogSurfaceCls}`}
       >
         <div className="px-5 pt-4 pb-1">
@@ -73,9 +74,9 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
               </span>
             )}
             <div className="flex-1 min-w-0 pt-0.5">
-              <h2 className="text-body-short-01 font-semibold text-text-primary">{title}</h2>
+              <h2 id={titleId} className="text-body-short-01 font-semibold text-text-primary">{title}</h2>
               {description && (
-                <div className="mt-1.5 text-body-short-01 leading-5 text-text-secondary">{description}</div>
+                <div id={descriptionId} className="mt-1.5 text-body-short-01 leading-5 text-text-secondary">{description}</div>
               )}
             </div>
           </div>
@@ -84,6 +85,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
         {/* actions — 같은 표면 위 우측 정렬. 취소는 텍스트 버튼, 확인만 채워 위계를 만든다 */}
         <div className="flex items-center justify-end gap-1.5 px-4 py-3">
           <button
+            ref={cancelRef}
             onClick={onClose}
             className="h-8 px-3 rounded-lg text-body-short-01 font-medium text-text-secondary hover:text-text-primary hover:bg-layer-hover-01 transition-colors"
           >

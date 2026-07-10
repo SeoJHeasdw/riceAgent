@@ -226,7 +226,11 @@ const BuiltinStatusToggle: React.FC<{
       <span className={`text-caption-01 font-semibold ${on ? 'text-support-success' : 'text-text-helper'}`}>
         {on ? '활성' : '비활성'}
       </span>
-      <Toggle checked={on} onChange={() => onSet(on ? 'archived' : 'active')} />
+      <Toggle
+        checked={on}
+        onChange={() => onSet(on ? 'archived' : 'active')}
+        aria-label={`${skill.name} ${on ? '비활성화' : '활성화'}`}
+      />
     </span>
   );
 };
@@ -1903,6 +1907,7 @@ function MySkillsScreen() {
         onPointerDown={railPanel.startResize}
         onDoubleClick={railPanel.resetWidth}
         isResizing={railPanel.isResizing}
+        value={railPanel.width} min={railPanel.min} max={railPanel.max} onResizeBy={railPanel.resizeBy}
         aria-label="Resize filters panel"
       />
 
@@ -1983,6 +1988,7 @@ function MySkillsScreen() {
         onPointerDown={listPanel.startResize}
         onDoubleClick={listPanel.resetWidth}
         isResizing={listPanel.isResizing}
+        value={listPanel.width} min={listPanel.min} max={listPanel.max} onResizeBy={listPanel.resizeBy}
         aria-label="Resize skills list panel"
       />
 

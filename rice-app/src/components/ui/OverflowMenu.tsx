@@ -30,6 +30,22 @@ export interface OverflowMenuProps {
 export const OverflowMenu: React.FC<OverflowMenuProps> = ({ items, align = 'right', direction = 'down', label = '더보기' }) => {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+
+  const focusItem = (index: number) => {
+    const enabled = itemRefs.current.filter((item): item is HTMLButtonElement => !!item && !item.disabled);
+    if (enabled.length === 0) return;
+    enabled[(index + enabled.length) % enabled.length]?.focus();
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const frame = requestAnimationFrame(() => {
+      itemRefs.current.find((item) => item && !item.disabled)?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [open]);
 
   // 외부 클릭 닫기
   useEffect(() => {
@@ -45,7 +61,10 @@ export const OverflowMenu: React.FC<OverflowMenuProps> = ({ items, align = 'righ
   useEffect(() => {
     if (!open) return;
     const h = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
+      if (e.key === 'Escape') {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
     };
     document.addEventListener('keydown', h);
     return () => document.removeEventListener('keydown', h);
@@ -54,6 +73,7 @@ export const OverflowMenu: React.FC<OverflowMenuProps> = ({ items, align = 'righ
   return (
     <div ref={ref} className="relative flex-shrink-0">
       <button
+        ref={triggerRef}
         onClick={() => setOpen((o) => !o)}
         aria-label={label}
         aria-haspopup="menu"
@@ -67,6 +87,22 @@ export const OverflowMenu: React.FC<OverflowMenuProps> = ({ items, align = 'righ
       {open && (
         <div
           role="menu"
+          onKeyDown={(event) => {
+            const enabled = itemRefs.current.filter((item): item is HTMLButtonElement => !!item && !item.disabled);
+            const current = enabled.indexOf(document.activeElement as HTMLButtonElement);
+            if (event.key === 'ArrowDown') {
+              event.preventDefault();
+              focusItem(current + 1);
+            } else if (event.key === 'ArrowUp') {
+              event.preventDefault();
+              focusItem(current - 1);
+            } else if (event.key === 'Home' || event.key === 'End') {
+              event.preventDefault();
+              focusItem(event.key === 'Home' ? 0 : -1);
+            } else if (event.key === 'Tab') {
+              setOpen(false);
+            }
+          }}
           className={`absolute z-50 min-w-[200px] bg-background border border-border-subtle-01 rounded-lg shadow-elevation-2 overflow-hidden py-1 ${
             direction === 'up' ? 'bottom-full mb-1.5' : 'top-full mt-1.5'
           } ${align === 'right' ? 'right-0' : 'left-0'}`}
@@ -79,7 +115,9 @@ export const OverflowMenu: React.FC<OverflowMenuProps> = ({ items, align = 'righ
               <React.Fragment key={item.label}>
                 {divider && <div className="my-1 border-t border-border-subtle-01" />}
                 <button
+                  ref={(node) => { itemRefs.current[i] = node; }}
                   role="menuitem"
+                  tabIndex={-1}
                   disabled={item.disabled}
                   onClick={() => {
                     if (item.disabled) return;

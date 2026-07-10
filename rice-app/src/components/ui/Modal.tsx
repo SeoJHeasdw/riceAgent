@@ -1,5 +1,6 @@
-import React, { useEffect } from 'react';
+import React, { useId, useRef } from 'react';
 import { dialogBackdropCls, dialogSurfaceCls } from './surfaces';
+import { useDialogA11y } from '../../hooks/useDialogA11y';
 
 /**
  * Modal component — Carbon color tokens with modernized shape
@@ -39,31 +40,9 @@ export const Modal: React.FC<ModalProps> = ({
   compactFooter = true,
   className = '',
 }) => {
-  // Close on Escape key
-  useEffect(() => {
-    if (!open) return;
-    
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      }
-    };
-
-    document.addEventListener('keydown', handleEscape);
-    return () => document.removeEventListener('keydown', handleEscape);
-  }, [open, onClose]);
-
-  // Prevent body scroll when modal is open
-  useEffect(() => {
-    if (open) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = '';
-    }
-    return () => {
-      document.body.style.overflow = '';
-    };
-  }, [open]);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  useDialogA11y({ open, dialogRef, onClose });
 
   if (!open) return null;
 
@@ -80,21 +59,24 @@ export const Modal: React.FC<ModalProps> = ({
 
       {/* Modal */}
       <div
+        ref={dialogRef}
         className={`relative ${dialogSurfaceCls} w-full mx-4 flex flex-col max-h-[90vh] ${sizeStyles[size]} ${className}`}
         role="dialog"
         aria-modal="true"
-        aria-labelledby={title ? 'modal-title' : undefined}
+        aria-labelledby={title ? titleId : undefined}
+        aria-label={title ? undefined : '대화상자'}
+        tabIndex={-1}
       >
         {/* Header */}
         {title && (
           <div className="flex items-center justify-between px-5 py-3 border-b border-border-subtle-01">
-            <h2 id="modal-title" className="text-heading-01 text-text-primary font-sans font-semibold">
+            <h2 id={titleId} className="text-heading-01 text-text-primary font-sans font-semibold">
               {title}
             </h2>
             <button
               onClick={onClose}
               className="flex items-center justify-center w-7 h-7 rounded-lg text-icon-secondary hover:text-icon-primary hover:bg-layer-hover-01 transition-colors"
-              aria-label="Close modal"
+              aria-label="대화상자 닫기"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                 <path d="M18 6 6 18M6 6l12 12" />

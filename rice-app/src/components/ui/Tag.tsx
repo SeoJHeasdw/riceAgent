@@ -6,7 +6,7 @@ import React from 'react';
  * - Multiple color variants: blue, green, purple, gray, teal, red, yellow
  */
 
-export interface TagProps {
+export interface TagProps extends React.HTMLAttributes<HTMLSpanElement> {
   /** Tag content */
   children: React.ReactNode;
   /** Tag color variant */
@@ -25,6 +25,7 @@ export const Tag: React.FC<TagProps> = ({
   size = 'md',
   dot = false,
   className = '',
+  ...props
 }) => {
   const baseStyles = 'inline-flex items-center gap-1.5 font-sans font-normal rounded-full whitespace-nowrap';
 
@@ -46,7 +47,7 @@ export const Tag: React.FC<TagProps> = ({
   };
 
   return (
-    <span className={`${baseStyles} ${typeStyles[type]} ${sizeStyles[size]} ${className}`}>
+    <span className={`${baseStyles} ${typeStyles[type]} ${sizeStyles[size]} ${className}`} {...props}>
       {dot && (
         <span
           className="w-1.5 h-1.5 rounded-full"

@@ -8,6 +8,7 @@
 
 export const RUN_SKILL_EVENT = 'rice:run-skill';
 export const NEW_CHAT_EVENT = 'rice:new-chat';
+export const OPEN_COMMAND_PALETTE_EVENT = 'rice:open-command-palette';
 
 /** 채팅 컴포저에 "/command"를 주입한다 (ChatScreen이 리스닝). */
 export const runSkillCommand = (command: string) =>
@@ -15,5 +16,8 @@ export const runSkillCommand = (command: string) =>
 
 /** 현재 세션을 접고 새 대화를 시작한다 (ChatScreen이 리스닝). */
 export const startNewChat = () => window.dispatchEvent(new CustomEvent(NEW_CHAT_EVENT));
+
+/** Open the global command palette from visible UI affordances. */
+export const openCommandPalette = () => window.dispatchEvent(new CustomEvent(OPEN_COMMAND_PALETTE_EVENT));
 
 // Made with Bob

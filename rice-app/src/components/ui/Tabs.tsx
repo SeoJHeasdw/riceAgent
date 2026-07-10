@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useId, useRef, useState } from 'react';
 
 /**
  * Tabs component following IBM Carbon design principles
@@ -35,6 +35,8 @@ export const Tabs: React.FC<TabsProps> = ({
   className = '',
 }) => {
   const [internalActiveTab, setInternalActiveTab] = useState(defaultTab || tabs[0]?.id);
+  const baseId = useId();
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   
   const activeTab = controlledActiveTab !== undefined ? controlledActiveTab : internalActiveTab;
 
@@ -48,6 +50,16 @@ export const Tabs: React.FC<TabsProps> = ({
   };
 
   const activeTabContent = tabs.find(tab => tab.id === activeTab)?.content;
+  const enabledTabs = tabs.filter((tab) => !tab.disabled);
+
+  const moveFocus = (currentId: string, direction: 1 | -1) => {
+    const current = enabledTabs.findIndex((tab) => tab.id === currentId);
+    if (current < 0 || enabledTabs.length === 0) return;
+    const next = enabledTabs[(current + direction + enabledTabs.length) % enabledTabs.length];
+    handleTabClick(next.id);
+    const nextIndex = tabs.findIndex((tab) => tab.id === next.id);
+    tabRefs.current[nextIndex]?.focus();
+  };
 
   return (
     <div className={`flex flex-col ${className}`}>
@@ -63,11 +75,31 @@ export const Tabs: React.FC<TabsProps> = ({
           return (
             <button
               key={tab.id}
+              ref={(node) => { tabRefs.current[tabs.indexOf(tab)] = node; }}
+              id={`${baseId}-tab-${tab.id}`}
               role="tab"
               aria-selected={isActive}
               aria-disabled={isDisabled}
+              aria-controls={`${baseId}-panel-${tab.id}`}
+              tabIndex={isActive ? 0 : -1}
               disabled={isDisabled}
               onClick={() => handleTabClick(tab.id, isDisabled)}
+              onKeyDown={(event) => {
+                if (event.key === 'ArrowRight') {
+                  event.preventDefault();
+                  moveFocus(tab.id, 1);
+                } else if (event.key === 'ArrowLeft') {
+                  event.preventDefault();
+                  moveFocus(tab.id, -1);
+                } else if (event.key === 'Home' || event.key === 'End') {
+                  event.preventDefault();
+                  const target = event.key === 'Home' ? enabledTabs[0] : enabledTabs[enabledTabs.length - 1];
+                  if (target) {
+                    handleTabClick(target.id);
+                    tabRefs.current[tabs.findIndex((item) => item.id === target.id)]?.focus();
+                  }
+                }
+              }}
               className={`
                 relative px-4 py-2.5 font-sans text-body-short-01 font-medium
                 transition-colors rounded-t-md border-0 outline-none
@@ -92,7 +124,13 @@ export const Tabs: React.FC<TabsProps> = ({
 
       {/* Tab Panel */}
       {activeTabContent && (
-        <div role="tabpanel" className="py-4">
+        <div
+          id={`${baseId}-panel-${activeTab}`}
+          role="tabpanel"
+          aria-labelledby={`${baseId}-tab-${activeTab}`}
+          tabIndex={0}
+          className="py-4 focus-visible:outline-offset-4"
+        >
           {activeTabContent}
         </div>
       )}

@@ -56,6 +56,16 @@ IBM Carbon 토큰 위에 얹는 RICE의 시각 규칙. 목표는 "더 꾸미기"
 - 전역 `:focus-visible { outline: 2px solid var(--cds-focus); outline-offset: 2px }`가
   기본값 — 개별 컴포넌트에 focus 클래스를 살포하지 않는다.
 - `outline-none`은 **부모가 `focus-within`으로 포커스를 표시하는 내장 input**에만 허용.
+- 모달·확인창·드로어는 열릴 때 내부 첫 컨트롤로 포커스를 옮기고, Tab을 가두며,
+  닫힐 때 원래 트리거로 포커스를 돌려준다.
+- 리사이즈 구분선은 포인터뿐 아니라 `←`/`→`(8px), `Shift` 조합(32px), `Home`(기본값 복원)으로 조절한다.
+
+## 4e. 테마·글꼴
+
+- 모든 콘텐츠 표면은 시맨틱 Carbon 토큰만 사용해 `[data-theme='dark|light']`를 함께 지원한다.
+- brand shell은 테마와 관계없이 어둡게 유지해 앱의 고정 프레임 역할을 한다.
+- UI 글꼴은 `--font-sans`를 단일 진입점으로 사용한다. 시스템·IBM Plex Sans·Mono 선택이
+  화면별 하드코딩 없이 전체 앱에 적용돼야 한다.
 
 ## 4d. 화면 헤더 리듬
 

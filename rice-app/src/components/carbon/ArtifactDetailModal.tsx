@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { Button, Icon, Tag, Toggle } from '../ui';
 import { dialogBackdropCls } from '../ui/surfaces';
 import { Skill, Plugin, SkillFile, PlatformArtifact } from '../../lib/types';
 import { getSkillFiles } from '../../lib/skillFiles';
 import { platform } from '../../lib/api';
 import { SkillFileBrowser } from './SkillFileBrowser';
+import { useDialogA11y } from '../../hooks/useDialogA11y';
 
 /**
  * ArtifactDetailModal - Detailed view for skills and plugins
@@ -31,6 +32,9 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
   onSponsor,
   onToggle,
 }) => {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  useDialogA11y({ open: isOpen && !!artifact, dialogRef, onClose });
   const isSkill = type === 'skill';
   const skill = isSkill && artifact ? (artifact as Skill) : null;
   // 플랫폼 스킬(id: "platform-{id}")은 실제 SKILL.md를 platform 서버에서 가져온다.
@@ -74,10 +78,17 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
       {/* Overlay */}
-      <div onClick={onClose} className={dialogBackdropCls} />
+      <div onClick={onClose} className={dialogBackdropCls} aria-hidden="true" />
 
       {/* Modal */}
-      <div className={`relative ${isSkill ? 'w-[820px]' : 'w-[680px]'} max-w-full max-h-[82vh] bg-layer-01 border border-border-subtle-01 rounded-xl z-[61] shadow-elevation-3 animate-scale-in overflow-hidden flex flex-col`}>
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className={`relative ${isSkill ? 'w-[820px]' : 'w-[680px]'} max-w-full max-h-[82vh] bg-layer-01 border border-border-subtle-01 rounded-xl z-[61] shadow-elevation-3 animate-scale-in overflow-hidden flex flex-col`}
+      >
         <span
           aria-hidden="true"
           className={`absolute left-0 right-0 top-0 h-0.5 ${isSkill ? 'bg-blue-60' : 'bg-purple-60'}`}
@@ -104,9 +115,9 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1">
-              <span className={`${isSkill ? 'text-heading-03' : 'text-heading-04'} font-semibold text-text-primary`}>
+              <h2 id={titleId} className={`${isSkill ? 'text-heading-03' : 'text-heading-04'} font-semibold text-text-primary`}>
                 {artifact.name}
-              </span>
+              </h2>
               {!isSkill && (
                 <Tag type="purple" size="sm">
                   솔루션 전문가
@@ -130,7 +141,7 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
           <button
             onClick={onClose}
             className="w-8 h-8 flex items-center justify-center rounded-lg text-icon-secondary hover:text-icon-primary hover:bg-layer-hover-01 transition-colors flex-shrink-0"
-            aria-label="Close"
+            aria-label="상세 정보 닫기"
           >
             <Icon name="close" size={16} />
           </button>
@@ -365,7 +376,12 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
               {/* Plugin toggle */}
               {!isSkill && onToggle && (
                 <>
-                  <Toggle checked={artifact.enabled} onChange={onToggle} tone="purple" />
+                  <Toggle
+                    checked={artifact.enabled}
+                    onChange={onToggle}
+                    tone="purple"
+                    aria-label={`${artifact.name} ${artifact.enabled ? '비활성화' : '활성화'}`}
+                  />
                   <span className="flex items-center gap-1.5 flex-1 min-w-0">
                     <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${artifact.enabled ? 'bg-support-success' : 'bg-text-helper'}`} />
                     <span className="text-body-short-01 text-text-secondary truncate">

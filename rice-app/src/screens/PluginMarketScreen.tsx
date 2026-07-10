@@ -207,6 +207,7 @@ function PluginMarketScreen() {
         onPointerDown={railPanel.startResize}
         onDoubleClick={railPanel.resetWidth}
         isResizing={railPanel.isResizing}
+        value={railPanel.width} min={railPanel.min} max={railPanel.max} onResizeBy={railPanel.resizeBy}
         aria-label="Resize solutions panel"
       />
 
@@ -240,7 +241,9 @@ function PluginMarketScreen() {
             </div>
           ) : (
             <div className="text-center py-16 text-text-helper">
-              <div className="text-heading-06 mb-4">🔍</div>
+              <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl border border-purple-50/20 bg-purple-60/10 text-purple-30">
+                <Icon name="search" size={22} />
+              </div>
               <div className="text-body-long-01">
                   {selectedCategory === '설치됨'
                     ? '아직 설치된 전문가가 없습니다'

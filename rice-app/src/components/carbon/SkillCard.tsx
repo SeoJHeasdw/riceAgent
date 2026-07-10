@@ -69,6 +69,7 @@ export const SkillCard: React.FC<SkillCardProps> = ({
           ? 'skill-card--installed'
           : 'skill-card--idle'
       }`}
+      onClick={onInstall}
     >
       <span
         aria-hidden="true"
@@ -89,7 +90,13 @@ export const SkillCard: React.FC<SkillCardProps> = ({
         </div>
         <div className="flex-1 min-w-0 pt-0.5">
           <h3 className="text-heading-02 font-semibold text-text-primary leading-tight truncate">
-            {name}
+            <button
+              type="button"
+              onClick={(event) => { event.stopPropagation(); onInstall(); }}
+              className="max-w-full truncate text-left rounded-sm hover:text-link-primary transition-colors duration-150"
+            >
+              {name}
+            </button>
           </h3>
           <p className="text-caption-01 text-text-helper truncate">
             by {author}{team && ` · ${team}`}{version && ` · v${version}`}

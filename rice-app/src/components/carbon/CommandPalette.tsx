@@ -6,6 +6,8 @@ import { navDestinations } from '../../lib/navigation';
 import { useLearning } from '../../lib/learning/LearningContext';
 import { replayOnboarding, replayTour } from '../../lib/tutorial';
 import { runSkillCommand, startNewChat } from '../../lib/commandBridge';
+import { OPEN_COMMAND_PALETTE_EVENT } from '../../lib/commandBridge';
+import { useDialogA11y } from '../../hooks/useDialogA11y';
 
 /**
  * CommandPalette — 앱 전역 Cmd/Ctrl+K 팔레트.
@@ -27,8 +29,8 @@ interface Row {
 }
 
 const TINT = {
-  action: '#a855f7',
-  nav: '#4589ff',
+  action: 'var(--ai-gradient-end)',
+  nav: 'var(--accent-skill)',
   skill: 'var(--accent-skill)',
 } as const;
 
@@ -42,8 +44,8 @@ export const CommandPalette: React.FC = () => {
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-
   const close = () => setOpen(false);
+  useDialogA11y({ open, dialogRef: panelRef, onClose: close, initialFocusRef: inputRef });
 
   // 다른 화면에 있으면 /chat으로 이동 후, ChatScreen이 마운트되어 리스너가
   // 붙을 시간을 주고서 이벤트를 쏜다(같은 틱 dispatch는 유실될 수 있다).
@@ -69,10 +71,15 @@ export const CommandPalette: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    const openPalette = () => setOpen(true);
+    window.addEventListener(OPEN_COMMAND_PALETTE_EVENT, openPalette);
+    return () => window.removeEventListener(OPEN_COMMAND_PALETTE_EVENT, openPalette);
+  }, []);
+
+  useEffect(() => {
     if (!open) return;
     setQ('');
     setActive(0);
-    requestAnimationFrame(() => inputRef.current?.focus());
   }, [open]);
 
   const groups = useMemo(() => {
@@ -161,6 +168,9 @@ export const CommandPalette: React.FC = () => {
     return (
       <button
         key={r.key}
+        id={`command-${r.key}`}
+        role="option"
+        aria-selected={isActive}
         data-active={isActive || undefined}
         onClick={() => select(r)}
         onMouseEnter={() => setActive(idx)}
@@ -218,6 +228,11 @@ export const CommandPalette: React.FC = () => {
           <input
             ref={inputRef}
             value={q}
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded="true"
+            aria-controls="command-palette-results"
+            aria-activedescendant={flat[activeIdx] ? `command-${flat[activeIdx].key}` : undefined}
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'ArrowDown') {
@@ -242,7 +257,7 @@ export const CommandPalette: React.FC = () => {
         </div>
 
         {/* Results */}
-        <div ref={listRef} className="flex-1 overflow-y-auto py-1">
+        <div id="command-palette-results" ref={listRef} role="listbox" className="flex-1 overflow-y-auto py-1">
           {empty && <div className="px-3 py-8 text-center text-caption-01 text-text-helper">검색 결과가 없어요</div>}
 
           {groups.actions.length > 0 && (

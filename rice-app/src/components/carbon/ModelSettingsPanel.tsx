@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Icon } from '../ui';
 import { ModelPicker, ModelDraft, ModelSettings } from './ModelPicker';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
+import { useDialogA11y } from '../../hooks/useDialogA11y';
 
 /**
  * ModelSettingsPanel — 모델 설정 슬라이드 패널.
@@ -102,6 +103,13 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
     }
   }, [isDirty, doClose]);
 
+  const panelRef = useRef<HTMLDivElement>(null);
+  useDialogA11y({
+    open: isOpen && !confirmOpen && !closing,
+    dialogRef: panelRef,
+    onClose: requestClose,
+  });
+
   // 패널이 다시 열릴 때 저장 기준값 · dirty 상태 초기화
   useEffect(() => {
     if (isOpen) {
@@ -112,16 +120,6 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
       setConfirmOpen(false);
     }
   }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ESC로 닫기
-  useEffect(() => {
-    if (!isOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') requestClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [isOpen, requestClose]);
 
   // 본문이 푸터 아래로 이어질 때만 푸터에 스크롤 그림자
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -154,6 +152,7 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
     <>
       <div
         onClick={requestClose}
+        aria-hidden="true"
         className="rice-model-core-backdrop fixed inset-0 bg-black/60 backdrop-blur-sm z-40"
         style={{
           animation: closing
@@ -163,6 +162,7 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
       />
 
       <div
+        ref={panelRef}
         className="rice-model-core-panel rice-model-theme fixed top-0 right-0 bottom-0 w-[440px] max-w-[calc(100vw-24px)] bg-layer-01 border-l border-border-subtle-01 z-50 flex flex-col shadow-elevation-3"
         style={{
           animation: closing
@@ -172,6 +172,7 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
         role="dialog"
         aria-modal="true"
         aria-label="Model settings"
+        tabIndex={-1}
       >
         <div className="rice-model-core-hero flex items-center gap-3.5 px-5 py-5 border-b border-border-subtle-01 flex-shrink-0">
           <div className="rice-model-core-emblem" aria-hidden="true">

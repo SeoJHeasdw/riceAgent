@@ -109,7 +109,12 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             <span className="text-caption-01 text-text-helper">{plugin.enabled ? '활성' : '비활성'}</span>
-            <Toggle checked={plugin.enabled} onChange={toggle} tone="purple" />
+            <Toggle
+              checked={plugin.enabled}
+              onChange={toggle}
+              tone="purple"
+              aria-label={`${plugin.name} ${plugin.enabled ? '비활성화' : '활성화'}`}
+            />
           </div>
         </div>
 
@@ -422,6 +427,7 @@ function MyPluginsScreen() {
         onPointerDown={railPanel.startResize}
         onDoubleClick={railPanel.resetWidth}
         isResizing={railPanel.isResizing}
+        value={railPanel.width} min={railPanel.min} max={railPanel.max} onResizeBy={railPanel.resizeBy}
         aria-label="Resize filters panel"
       />
 
@@ -504,6 +510,7 @@ function MyPluginsScreen() {
         onPointerDown={listPanel.startResize}
         onDoubleClick={listPanel.resetWidth}
         isResizing={listPanel.isResizing}
+        value={listPanel.width} min={listPanel.min} max={listPanel.max} onResizeBy={listPanel.resizeBy}
         aria-label="Resize plugins list panel"
       />
 

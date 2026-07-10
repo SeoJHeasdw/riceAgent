@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useId, useMemo, useRef } from 'react';
 import { Button, Icon } from '../ui';
 import { dialogBackdropCls } from '../ui/surfaces';
 import type { Skill, SkillDetail } from '../../lib/learningData';
 import { ownedSkillFiles } from '../../lib/skillBridge';
+import { useDialogA11y } from '../../hooks/useDialogA11y';
 
 /**
  * SkillPublishDialog — Skill Market 공개 전용 흐름.
@@ -18,15 +19,9 @@ export interface SkillPublishDialogProps {
 }
 
 export const SkillPublishDialog: React.FC<SkillPublishDialogProps> = ({ open, skill, detail, onConfirm, onClose }) => {
-  // Esc 로 닫기
-  useEffect(() => {
-    if (!open) return;
-    const h = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', h);
-    return () => document.removeEventListener('keydown', h);
-  }, [open, onClose]);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  useDialogA11y({ open, dialogRef, onClose });
 
   // 학습형(synthesized) 스킬은 파일이 자동 합성된 SKILL.md 한 장뿐이라 "파일 1"은 빈약해 보인다.
   // 이 경우 파일 수를 숨기고, 실제 번들 파일을 가진 스킬에서만 노출한다.
@@ -49,8 +44,11 @@ export const SkillPublishDialog: React.FC<SkillPublishDialogProps> = ({ open, sk
 
       {/* dialog */}
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
         className="relative w-full max-w-md mx-4 bg-layer-01 border border-border-subtle-01 rounded-xl shadow-elevation-3 animate-scale-in overflow-hidden"
       >
         {/* header */}
@@ -59,7 +57,7 @@ export const SkillPublishDialog: React.FC<SkillPublishDialogProps> = ({ open, sk
             <Icon name="share" size={16} className="text-purple-60" />
           </span>
           <div className="min-w-0">
-            <h2 className="text-body-short-02 font-semibold text-text-primary">Skill Market에 공개</h2>
+            <h2 id={titleId} className="text-body-short-02 font-semibold text-text-primary">Skill Market에 공개</h2>
             <p className="text-caption-01 text-text-helper">아래 내용이 마켓에 이렇게 보여요</p>
           </div>
         </div>
