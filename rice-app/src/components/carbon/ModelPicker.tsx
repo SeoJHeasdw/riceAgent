@@ -200,7 +200,7 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
   };
 
   return (
-    <div className="space-y-4">
+    <div className="rice-model-picker space-y-4">
       {/* ── 실행 위치 ── */}
       <div>
         <div className="text-label-01 text-text-secondary mb-2">실행 위치</div>

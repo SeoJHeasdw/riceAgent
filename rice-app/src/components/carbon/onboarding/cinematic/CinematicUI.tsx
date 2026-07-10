@@ -106,6 +106,14 @@ export const LoopOverlay = ({ copy, onNext }: { copy: CinematicCopy; onNext: () 
         </div>
       ))}
     </div>
+    <div className="loop-drag-hint" aria-hidden="true">
+      <span>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M8 11V7a2 2 0 1 1 4 0v3-5a2 2 0 1 1 4 0v6-3a2 2 0 1 1 4 0v6c0 4.4-3.6 8-8 8h-1.2a8 8 0 0 1-6.6-3.5L2.7 16a2 2 0 0 1 3.2-2.4L8 16" />
+        </svg>
+      </span>
+      {copy.loop.dragHint}
+    </div>
     <button type="button" className="cinematic-primary cinematic-primary--floating" onClick={onNext}>
       <span>{copy.loop.next}</span><ArrowIcon />
     </button>
@@ -181,7 +189,7 @@ export const ModelOverlay = ({
   onConnect: () => void;
 }) => (
   <section className="model-overlay cinematic-enter">
-    <div className="model-dock">
+    <div className="model-dock rice-model-theme">
       <div className="model-dock__header">
         <div>
           <span className="cinematic-eyebrow">{copy.model.eyebrow}</span>

@@ -1,6 +1,7 @@
-import { useMemo, useRef } from 'react';
+import { useMemo, useRef, type MutableRefObject } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
+import type { CinematicPhase, SceneDragState } from '../sequences/types';
 
 const seededRandom = (seed: number) => {
   let value = seed % 2147483647;
@@ -10,7 +11,7 @@ const seededRandom = (seed: number) => {
   };
 };
 
-export const StarField = () => {
+export const StarField = ({ phase, drag }: { phase: CinematicPhase; drag: MutableRefObject<SceneDragState> }) => {
   const pointsRef = useRef<THREE.Points>(null);
   const positions = useMemo(() => {
     const random = seededRandom(8719);
@@ -28,8 +29,20 @@ export const StarField = () => {
 
   useFrame((state, delta) => {
     if (!pointsRef.current) return;
-    pointsRef.current.rotation.y += delta * 0.008;
-    pointsRef.current.rotation.x = Math.sin(state.clock.elapsedTime * 0.05) * 0.03;
+    if (phase === 'loop' && !drag.current.dragging) {
+      drag.current.rotationY += drag.current.velocityY * delta * 60;
+      drag.current.rotationX = THREE.MathUtils.clamp(
+        drag.current.rotationX + drag.current.velocityX * delta * 60,
+        -0.72,
+        0.72,
+      );
+      drag.current.velocityX *= Math.pow(0.935, delta * 60);
+      drag.current.velocityY *= Math.pow(0.935, delta * 60);
+    }
+    const targetY = state.clock.elapsedTime * 0.008 + (phase === 'loop' ? drag.current.rotationY : 0);
+    const targetX = Math.sin(state.clock.elapsedTime * 0.05) * 0.03 + (phase === 'loop' ? drag.current.rotationX : 0);
+    pointsRef.current.rotation.y = THREE.MathUtils.damp(pointsRef.current.rotation.y, targetY, 7, delta);
+    pointsRef.current.rotation.x = THREE.MathUtils.damp(pointsRef.current.rotation.x, targetX, 7, delta);
   });
 
   return (
@@ -49,4 +62,3 @@ export const StarField = () => {
     </points>
   );
 };
-

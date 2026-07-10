@@ -16,6 +16,7 @@ export interface CinematicCopy {
     title: string;
     description: string;
     nodes: Array<{ label: string; caption: string }>;
+    dragHint: string;
     next: string;
   };
   ecosystem: {
@@ -64,6 +65,7 @@ const copy: Record<Language, CinematicCopy> = {
         { label: '스킬', caption: '능력으로 저장해' },
         { label: '개선', caption: '다음엔 더 잘합니다' },
       ],
+      dragHint: '드래그해서 학습 우주를 움직여보세요',
       next: '능력 확장하기',
     },
     ecosystem: {
@@ -135,6 +137,7 @@ const copy: Record<Language, CinematicCopy> = {
         { label: 'Build', caption: 'Save an ability' },
         { label: 'Improve', caption: 'Do it better next time' },
       ],
+      dragHint: 'Drag to move through the learning field',
       next: 'Expand its abilities',
     },
     ecosystem: {
@@ -189,4 +192,3 @@ const copy: Record<Language, CinematicCopy> = {
 };
 
 export const getCinematicCopy = (language: Language) => copy[language];
-

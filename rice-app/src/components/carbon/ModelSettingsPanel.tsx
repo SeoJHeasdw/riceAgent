@@ -154,7 +154,7 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
     <>
       <div
         onClick={requestClose}
-        className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40"
+        className="rice-model-core-backdrop fixed inset-0 bg-black/60 backdrop-blur-sm z-40"
         style={{
           animation: closing
             ? `panelFadeOut ${CLOSE_MS}ms ease forwards`
@@ -163,7 +163,7 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
       />
 
       <div
-        className="fixed top-0 right-0 bottom-0 w-[380px] bg-layer-01 border-l border-border-subtle-01 z-50 flex flex-col shadow-elevation-3"
+        className="rice-model-core-panel rice-model-theme fixed top-0 right-0 bottom-0 w-[440px] max-w-[calc(100vw-24px)] bg-layer-01 border-l border-border-subtle-01 z-50 flex flex-col shadow-elevation-3"
         style={{
           animation: closing
             ? `panelSlideOut ${CLOSE_MS}ms cubic-bezier(0.4, 0, 1, 1) forwards`
@@ -173,13 +173,19 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
         aria-modal="true"
         aria-label="Model settings"
       >
-        {/* Header — 사이드바·채팅 헤더와 같은 52px 라인 */}
-        <div className="flex items-center gap-2 px-4 h-[52px] border-b border-border-subtle-01 flex-shrink-0">
-          <div className="flex items-baseline gap-2 min-w-0">
-            <span className="text-body-short-02 font-semibold text-text-primary flex-shrink-0">모델 설정</span>
-            <span className="text-caption-01 font-mono text-text-helper truncate">
-              {currentModel || '미설정'}
-            </span>
+        <div className="rice-model-core-hero flex items-center gap-3.5 px-5 py-5 border-b border-border-subtle-01 flex-shrink-0">
+          <div className="rice-model-core-emblem" aria-hidden="true">
+            <span /><span />
+            <Icon name="model" size={17} />
+          </div>
+          <div className="min-w-0">
+            <span className="rice-model-core-eyebrow">RICE / MODEL CORE</span>
+            <div className="flex items-baseline gap-2 mt-1.5 min-w-0">
+              <h2 className="text-heading-02 font-semibold text-text-primary flex-shrink-0">AI 엔진 연결</h2>
+              <span className="text-caption-01 font-mono text-text-helper truncate">
+                {currentModel || '미설정'}
+              </span>
+            </div>
           </div>
           <button
             onClick={requestClose}
@@ -190,8 +196,13 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
           </button>
         </div>
 
+        <div className="rice-model-core-status" aria-hidden="true">
+          <span><i /> CORE LINK</span>
+          <span><Icon name="lock" size={11} /> LOCAL CREDENTIAL VAULT</span>
+        </div>
+
         {/* Content — 열릴 때마다 최신 prop으로 새로 초기화하도록 key로 remount */}
-        <div ref={scrollRef} onScroll={updateFooterShadow} className="flex-1 overflow-y-auto px-5 py-4">
+        <div ref={scrollRef} onScroll={updateFooterShadow} className="rice-model-core-content flex-1 overflow-y-auto px-5 py-5">
           <ModelPicker
             key={`${currentModel}|${modelMode}`}
             currentModel={currentModel}
@@ -203,10 +214,13 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
 
         {/* Footer — 우측 정렬 자연폭. 취소는 조용한 텍스트 버튼, 저장만 primary로 위계를 만든다 */}
         <div
-          className={`px-4 py-3 border-t border-border-subtle-01 flex items-center justify-end gap-1.5 flex-shrink-0 transition-shadow duration-200 ${
+          className={`rice-model-core-footer px-4 py-3 border-t border-border-subtle-01 flex items-center gap-1.5 flex-shrink-0 transition-shadow duration-200 ${
             footerLifted ? 'shadow-[0_-10px_18px_-10px_rgba(0,0,0,0.55)]' : ''
           }`}
         >
+          <span className="hidden sm:flex items-center gap-1.5 text-caption-01 text-text-helper mr-auto">
+            <Icon name="lock" size={12} /> 키와 설정은 이 기기에 저장됩니다
+          </span>
           <button
             onClick={requestClose}
             className="h-8 px-3 rounded-lg text-body-short-01 font-medium text-text-secondary hover:text-text-primary hover:bg-layer-hover-01 transition-colors"
