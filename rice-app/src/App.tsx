@@ -17,6 +17,7 @@ import { LearningProvider } from './lib/learning/LearningContext';
 import { MarketplaceProvider } from './lib/marketplace/MarketplaceContext';
 import { ToastProvider } from './lib/toast/ToastProvider';
 import { ModelOnboarding } from './components/carbon/ModelOnboarding';
+import { LanguageSelectDialog } from './components/carbon/LanguageSelectDialog';
 import { TourOverlay, TOUR_STEPS, TOUR_DONE_KEY } from './components/carbon/tour';
 import { CommandPalette } from './components/carbon/CommandPalette';
 import { REPLAY_ONBOARDING_EVENT, REPLAY_TOUR_EVENT } from './lib/tutorial';
@@ -98,6 +99,7 @@ const providerKind = (provider?: string): 'claude' | 'openai' | 'watsonx' => {
 };
 
 function App() {
+  const [langSelectOpen, setLangSelectOpen] = useState(false);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [tourActive, setTourActive] = useState(false);
   const [modelMode, setModelMode] = useState<'saas' | 'local'>('saas');
@@ -179,7 +181,7 @@ function App() {
           ...(prov.base_url ? { endpoint: prov.base_url } : {}),
           ...(prov.temperature !== undefined ? { temperature: prov.temperature } : {}),
         }));
-        setOnboardingOpen(true);
+        setLangSelectOpen(true);
       });
     });
   }, []);
@@ -214,7 +216,7 @@ function App() {
 
   // 설정 화면에서 "다시 보기"를 누르면 온보딩/투어를 재실행한다(tutorial.ts 브리지).
   useEffect(() => {
-    const onReplayOnboarding = () => setOnboardingOpen(true);
+    const onReplayOnboarding = () => setLangSelectOpen(true);
     const onReplayTour = () => setTourActive(true);
     window.addEventListener(REPLAY_ONBOARDING_EVENT, onReplayOnboarding);
     window.addEventListener(REPLAY_TOUR_EVENT, onReplayTour);
@@ -231,6 +233,13 @@ function App() {
           <ToastProvider>
             <BrowserRouter>
               <AppShell tourActive={tourActive} onTourDone={handleTourDone} />
+              <LanguageSelectDialog
+                open={langSelectOpen}
+                onConfirm={() => {
+                  setLangSelectOpen(false);
+                  setOnboardingOpen(true);
+                }}
+              />
               {onboardingOpen && (
                 <ModelOnboarding
                   currentModel={currentModel}
