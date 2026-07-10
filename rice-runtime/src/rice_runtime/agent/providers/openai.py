@@ -69,6 +69,12 @@ class OpenAIProvider(ILLMProvider):
             "stream": True,
             "temperature": temperature,
         }
+        # 공식 API는 stream_options 없이는 usage를 절대 안 보낸다 → 요청해서
+        # TokenCalibrator가 실측 보정을 받게 한다. 커스텀 호환 엔드포인트(vLLM/
+        # 게이트웨이 등)는 미지원 필드에 400을 내는 서버가 있어 보내지 않는다 —
+        # 그런 서버가 usage를 상시 싣는 경우는 assemble_stream이 알아서 줍는다.
+        if self._base_url == _DEFAULT_BASE_URL:
+            payload["stream_options"] = {"include_usage": True}
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
         if response_schema is not None:

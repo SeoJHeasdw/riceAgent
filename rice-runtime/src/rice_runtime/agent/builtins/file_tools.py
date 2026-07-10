@@ -274,6 +274,7 @@ def tools(paths: RicePaths) -> list[tuple[ToolSpec, BuiltinTool]]:
                 },
                 source="builtin",
                 requires_approval=True,  # external effect → HITL gate
+                parallel_safe=False,  # 파일 쓰기는 모델 호출 순서대로 직렬 실행
             ),
             _make_write(root),
         ),
@@ -297,6 +298,7 @@ def tools(paths: RicePaths) -> list[tuple[ToolSpec, BuiltinTool]]:
                 },
                 source="builtin",
                 requires_approval=True,  # external effect → HITL gate (write_file과 동일 기준)
+                parallel_safe=False,  # 같은 파일 동시 편집 레이스 방지 — 직렬 실행
             ),
             _make_edit(root),
         ),

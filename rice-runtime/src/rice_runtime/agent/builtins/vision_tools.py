@@ -1,28 +1,21 @@
-"""Builtin vision tool: analyze an image via the current LLM provider.
+"""Builtin vision tool: attach an image to the conversation for visual analysis.
 
 Adapted from Hermes copy/tools/vision_tools.py.
 Hermes-specific imports (agent.auxiliary_client, hermes_constants, tools.website_policy,
 tools.debug_helpers) have been removed and replaced with RICE-native stdlib + httpx.
 
-KNOWN LIMITATION — MULTIMODAL NOT YET WIRED INTO ILLMProvider:
-  The current `ILLMProvider.stream()` accepts `messages: Sequence[Message]` where
-  `Message.content` is `str`. There is NO standard mechanism in the RICE provider
-  interface to pass image data (base64 or URL) as a structured multimodal content
-  block to the model.
-
-  `ClaudeProvider.capabilities()` already returns `vision=True`, and the wire format
-  for Claude vision (image content blocks) is known — but composing them from a
-  builtin tool result string is a workaround, not a real multimodal path.
-
-  WHAT THIS TOOL DOES INSTEAD:
-    1. Downloads the image and converts it to a base64 data-URL string.
-    2. Returns that data-URL as the tool result text.
-    3. The LLM provider receives the base64 string as a tool result in the
-       conversation history, which works for Claude (it reads base64 inline)
-       but may silently produce poor results for non-vision providers.
-
-  TODO: widen ILLMProvider / Message to carry structured image content blocks
-  so vision is handled cleanly at the provider seam.
+MULTIMODAL PATH (2026-07-10 — the old KNOWN LIMITATION is resolved):
+  이 도구는 이미지를 base64 텍스트로 본문에 싣지 않는다. 결과 dict의 `_images`
+  (core.types 이미지 첨부 계약)에 실으면:
+    1. 디스패처가 `_images`를 분리해 `ToolResult.images`로 나른다
+       (SSE payload에 base64가 새지 않는다).
+    2. 루프가 tool Message의 `metadata["images"]`에 부착한다
+       (transcript metadata JSON에 그대로 영속 — 스키마 변경 없음).
+    3. provider 어댑터가 각자의 wire 이미지 블록으로 렌더한다:
+       Claude tool_result image block / Ollama message.images(qwen-vl·llava) /
+       OpenAI-compat image_url 파트(tool 블록 직후 합성 user 메시지).
+  비전 없는 모델은 첨부를 무시한다(텍스트 요약만 보게 된다) — 결과의 note가
+  그 경우를 모델에게 알린다.
 """
 
 from __future__ import annotations
@@ -34,7 +27,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from ...core.paths import RicePaths
-from ...core.types import ToolSpec
+from ...core.types import TOOL_RESULT_IMAGES_KEY, ToolSpec
 from ..tool_dispatch import BuiltinTool
 
 # httpx is already a dependency of rice-runtime (anthropic SDK pulls it in).
@@ -44,7 +37,10 @@ try:
 except ImportError:
     _HTTPX_AVAILABLE = False
 
-_VISION_MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024   # 50 MB hard cap
+# 5 MB — Claude API의 이미지당 상한(가장 엄격한 wire)에 맞춘다. 이보다 큰
+# 이미지는 어차피 provider에서 400으로 죽으므로 여기서 명확한 에러로 끊는 편이
+# 낫다(구 50MB 상한은 base64 텍스트 시절의 잔재).
+_VISION_MAX_DOWNLOAD_BYTES = 5 * 1024 * 1024
 _VISION_DOWNLOAD_TIMEOUT = float(os.getenv("RICE_VISION_DOWNLOAD_TIMEOUT", "30"))
 
 _SUPPORTED_MIME_TYPES: frozenset[str] = frozenset({
@@ -123,12 +119,9 @@ def _local_image_to_base64(path_str: str) -> tuple[str, str]:
 
 def _make_vision_analyze(workspace: Path) -> BuiltinTool:
     async def vision_analyze(args: dict) -> object:
-        """
-        ⚠️  MULTIMODAL WORKAROUND — see module docstring.
-        Returns a base64 data-URL string as the tool result. The LLM provider
-        receives this as a text string in the tool result history. Claude reads
-        base64 inline; other providers may ignore it or produce degraded output.
-        """
+        """이미지를 이 도구 결과에 **첨부**한다(모듈 docstring의 멀티모달 경로).
+        본문에는 요약 메타데이터만 남고, 이미지는 provider의 이미지 블록으로
+        모델에게 전달된다."""
         image_source: str = args.get("image_url") or args.get("image_path", "")
         question: str = args.get("question", "Describe this image in detail.")
 
@@ -142,27 +135,25 @@ def _make_vision_analyze(workspace: Path) -> BuiltinTool:
         if is_url:
             raw_bytes, mime = await _download_image(image_source)
             b64 = base64.standard_b64encode(raw_bytes).decode("ascii")
+            size = len(raw_bytes)
         else:
             # Treat as a path relative to workspace.
             abs_path = image_source if os.path.isabs(image_source) else str(workspace / image_source)
             b64, mime = _local_image_to_base64(abs_path)
+            size = len(base64.b64decode(b64))
 
-        data_url = f"data:{mime};base64,{b64}"
-
-        # Return the structured result that Claude can consume as an image.
-        # NOTE: This relies on the LLM provider being Claude (or a compatible
-        # model that handles base64 inline) and on the provider adapter being
-        # extended in future to forward image content blocks properly.
         return {
             "question": question,
-            "image_data_url": data_url,
             "mime_type": mime,
-            "size_bytes": len(base64.b64decode(b64)),
-            "_warning": (
-                "This result contains a base64 image. Vision analysis requires "
-                "a provider with vision=True capability (e.g. Claude). "
-                "The model should describe the image in response to the question."
+            "size_bytes": size,
+            "note": (
+                "The image is attached to this tool result. Look at it and answer "
+                "the question. If you cannot see any image, say so — your current "
+                "model may not support vision."
             ),
+            # core.types 이미지 첨부 계약 — 디스패처가 분리해 provider 이미지
+            # 블록으로 나른다. base64를 본문/SSE에 싣지 않는 것이 핵심.
+            TOOL_RESULT_IMAGES_KEY: [{"mime_type": mime, "data_b64": b64}],
         }
 
     return vision_analyze
@@ -177,11 +168,11 @@ def tools(paths: RicePaths) -> list[tuple[ToolSpec, BuiltinTool]]:
             ToolSpec(
                 name="vision_analyze",
                 description=(
-                    "Download or read an image and return its base64-encoded data for visual analysis. "
-                    "Works with image URLs (http/https) or workspace-relative file paths. "
-                    "Supported formats: JPEG, PNG, GIF, WebP. "
-                    "IMPORTANT: Requires a vision-capable provider (e.g. Claude). "
-                    "After calling this tool, analyze the returned image_data_url to answer the question."
+                    "Load an image (http/https URL or workspace-relative path) and attach it to the "
+                    "conversation so you can SEE it and answer questions about it. "
+                    "Supported formats: JPEG, PNG, GIF, WebP (max 5 MB). "
+                    "Requires a vision-capable model (Claude, qwen-vl, llava, gpt-4o, ...). "
+                    "After calling this tool, look at the attached image and answer the question."
                 ),
                 parameters={
                     "type": "object",

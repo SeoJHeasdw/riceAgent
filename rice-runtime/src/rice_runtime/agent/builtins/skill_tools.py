@@ -152,6 +152,7 @@ def tools(learning: "ILearningService") -> list[tuple[ToolSpec, BuiltinTool]]:
             "required": ["name", "body"],
         },
         source="builtin",
+        parallel_safe=False,  # 사용자 가시 효과(승인 카드) 스테이징 — 직렬 실행
     )
     return [
         (search_spec, skill_search),

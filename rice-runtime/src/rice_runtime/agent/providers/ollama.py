@@ -29,7 +29,7 @@ from typing import Any
 
 from ...core.config import ProviderConfig
 from ...core.errors import ProviderError
-from ...core.types import Message, ToolCall, ToolSpec
+from ...core.types import IMAGES_METADATA_KEY, Message, ToolCall, ToolSpec
 from .interfaces import ILLMProvider, ProviderCapabilities, ProviderChunk
 from .ollama_lifecycle import OllamaLifecycleManager, OllamaModelKey
 
@@ -84,6 +84,17 @@ def _to_ollama_tools(tools: Sequence[ToolSpec]) -> list[dict[str, Any]]:
     ]
 
 
+def _message_images(message: Message) -> list[str]:
+    """metadata["images"] 첨부(core.types 계약) → Ollama의 per-message `images`
+    배열(bare base64). 멀티모달 모델(qwen-vl/llava 등)이 소비하고, 비전 없는
+    모델은 서버가 무시한다."""
+    return [
+        item["data_b64"]
+        for item in (message.metadata.get(IMAGES_METADATA_KEY) or ())
+        if isinstance(item, dict) and item.get("data_b64")
+    ]
+
+
 def _to_ollama_messages(messages: Sequence[Message]) -> list[dict[str, Any]]:
     native: list[dict[str, Any]] = []
     for message in messages:
@@ -111,9 +122,16 @@ def _to_ollama_messages(messages: Sequence[Message]) -> list[dict[str, Any]]:
             entry = {"role": "tool", "content": message.content}
             if tool_call_id:
                 entry["tool_call_id"] = tool_call_id
+            images = _message_images(message)
+            if images:
+                entry["images"] = images
             native.append(entry)
             continue
-        native.append({"role": message.role, "content": message.content})
+        entry = {"role": message.role, "content": message.content}
+        images = _message_images(message)
+        if images:
+            entry["images"] = images
+        native.append(entry)
     return native
 
 

@@ -297,6 +297,7 @@ def tools(paths: RicePaths) -> list[tuple[ToolSpec, BuiltinTool]]:
                 },
                 source="builtin",
                 requires_approval=True,  # shell commands are arbitrary external effects — HITL gate (§5.1)
+                parallel_safe=False,  # 임의 부작용 — 모델 호출 순서대로 직렬 실행
             ),
             _make_terminal(workspace),
         ),

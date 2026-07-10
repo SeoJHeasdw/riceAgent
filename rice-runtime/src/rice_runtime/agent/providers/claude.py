@@ -9,6 +9,7 @@ most fragile part of the seam and needs isolated tests.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
@@ -16,8 +17,10 @@ from typing import Any
 
 from ...core.config import ProviderConfig
 from ...core.errors import ProviderError
-from ...core.types import Message, ToolCall, ToolSpec
+from ...core.types import IMAGES_METADATA_KEY, Message, ToolCall, ToolSpec
 from .interfaces import ILLMProvider, ProviderCapabilities, ProviderChunk
+
+log = logging.getLogger("rice.provider.claude")
 
 _CLAUDE_KEY_SERVICE = "rice.provider.claude"
 _CLAUDE_KEY_USERNAME = "api_key"
@@ -69,13 +72,39 @@ def _apply_rolling_cache(native: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return native
 
 
+def _image_blocks(message: Message) -> list[dict[str, Any]]:
+    """metadata["images"] 첨부(core.types 계약)를 Claude image 콘텐츠 블록으로.
+    잘못된 항목은 조용히 건너뛴다 — 첨부 하나가 턴을 깨면 안 된다."""
+    blocks: list[dict[str, Any]] = []
+    for item in message.metadata.get(IMAGES_METADATA_KEY) or ():
+        if isinstance(item, dict) and item.get("data_b64"):
+            blocks.append(
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": item.get("mime_type") or "image/png",
+                        "data": item["data_b64"],
+                    },
+                }
+            )
+    return blocks
+
+
 def _to_claude_messages(messages: Sequence[Message]) -> list[dict[str, Any]]:
     native: list[dict[str, Any]] = []
     for message in messages:
         if message.role == "system":
             continue
         if message.role == "user":
-            native.append({"role": "user", "content": message.content})
+            images = _image_blocks(message)
+            if images:
+                content: list[dict[str, Any]] = list(images)
+                if message.content:
+                    content.append({"type": "text", "text": message.content})
+                native.append({"role": "user", "content": content})
+            else:
+                native.append({"role": "user", "content": message.content})
             continue
         if message.role == "assistant":
             blocks: list[dict[str, Any]] = []
@@ -96,6 +125,14 @@ def _to_claude_messages(messages: Sequence[Message]) -> list[dict[str, Any]]:
             tool_call_id = message.metadata.get("tool_call_id")
             if not tool_call_id:
                 raise ProviderError("tool message missing tool_call_id metadata")
+            images = _image_blocks(message)
+            # 이미지 첨부가 있으면 tool_result content를 블록 리스트로 승격 —
+            # 모델이 이 도구 결과의 이미지를 실제로 "본다"(vision_analyze 경로).
+            # 빈 text 블록은 API가 거부하므로 본문이 있을 때만 싣는다.
+            result_content: Any = message.content
+            if images:
+                text_part = [{"type": "text", "text": message.content}] if message.content else []
+                result_content = [*text_part, *images]
             native.append(
                 {
                     "role": "user",
@@ -103,7 +140,7 @@ def _to_claude_messages(messages: Sequence[Message]) -> list[dict[str, Any]]:
                         {
                             "type": "tool_result",
                             "tool_use_id": tool_call_id,
-                            "content": message.content,
+                            "content": result_content,
                         }
                     ],
                 }
@@ -131,6 +168,9 @@ def _load_api_key() -> str:
 def _map_stop_reason(stop_reason: str | None) -> str:
     return {
         "end_turn": "end_turn",
+        # stop_sequence도 정상 종료다 — "error"로 오분류하면 관측/레저가 멀쩡한
+        # 턴을 실패로 기록한다.
+        "stop_sequence": "end_turn",
         "tool_use": "tool_use",
         "max_tokens": "max_tokens",
     }.get(stop_reason or "", "error")
@@ -230,11 +270,23 @@ class ClaudeProvider(ILLMProvider):
                     elif event_type == "content_block_stop":
                         state = tool_states.pop(event.index, None)
                         if state is not None and state.partial_json:
+                            # malformed 인자 JSON은 fail-soft — {}로 폴백해 도구
+                            # 검증 에러(모델이 보고 교정할 수 있는 데이터)로 흐르게
+                            # 한다. raise 하면 스트림 전체가 죽어 턴이 실패한다
+                            # (_openai_compat.assemble_stream과 같은 정책).
+                            try:
+                                arguments = json.loads(state.partial_json)
+                            except (json.JSONDecodeError, ValueError):
+                                log.warning(
+                                    "malformed tool_use input JSON for %s — falling back to {}",
+                                    state.name,
+                                )
+                                arguments = {}
                             yield ProviderChunk(
                                 kind="tool_call",
                                 tool_call=ToolCall(
                                     tool_name=state.name,
-                                    arguments=json.loads(state.partial_json),
+                                    arguments=arguments,
                                     id=state.id,
                                 ),
                             )

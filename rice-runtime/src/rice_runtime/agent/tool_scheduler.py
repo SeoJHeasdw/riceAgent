@@ -146,8 +146,7 @@ def _is_parallelizable(req: ScheduledToolRequest) -> bool:
         return False
     if req.call.arguments.get("wait_for_previous") is True:
         return False
-    # These builtin names either mutate state or intentionally stage user-visible
-    # effects. Keep them ordered even if they do not require the first HITL gate.
-    if req.call.tool_name in {"write_file", "terminal", "propose_skill"}:
-        return False
-    return True
+    # 상태 변경/사용자 가시 효과 스테이징 여부는 도구 선언(ToolSpec.parallel_safe)이
+    # 말한다 — 이전의 하드코딩 이름 목록은 도구가 늘 때마다 여기가 함께 늘어야
+    # 하는 숨은 결합이었다(edit_file이 빠져 있던 것이 그 증거).
+    return req.spec.parallel_safe

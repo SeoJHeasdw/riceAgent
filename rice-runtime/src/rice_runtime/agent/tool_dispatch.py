@@ -41,6 +41,7 @@ from ..core.types import (
     ev_tool_approval_required,
     ev_tool_call,
     ev_tool_result,
+    split_image_attachments,
 )
 from ..execution.interfaces import IPluginLoader
 from .interfaces import IApprovalGate, TurnView
@@ -283,6 +284,15 @@ class ToolDispatcher:
             log.exception("tool %s failed", call.tool_name)
             res = ToolResult(call.id, ok=False, error=str(exc))
 
+        # 이미지 첨부 분리(core.types 계약): 도구 소스와 무관하게 결과 dict의
+        # `_images`를 ToolResult.images로 옮긴다 — base64가 SSE payload와 텍스트
+        # 본문(다음 반복의 컨텍스트)으로 새지 않고, provider 어댑터의 이미지
+        # 블록으로만 흐른다.
+        if res.ok and res.images == ():
+            cleaned, images = split_image_attachments(res.result)
+            if images:
+                res = ToolResult(res.tool_call_id, ok=res.ok, result=cleaned, images=images)
+
         self._results[call.id] = res
         yield ev_tool_result(res)
 
@@ -344,7 +354,11 @@ class ToolDispatcher:
                 async for ev in self.dispatch(session_id, inner_call, target):
                     yield ev
                 inner_res = await self.result_for(inner_call)
-                res = ToolResult(call.id, ok=inner_res.ok, result=inner_res.result, error=inner_res.error)
+                # 이미지 첨부도 함께 전파 — 접힌 도구가 vision류여도 계약 유지.
+                res = ToolResult(
+                    call.id, ok=inner_res.ok, result=inner_res.result,
+                    error=inner_res.error, images=inner_res.images,
+                )
         else:  # pragma: no cover - only reachable if BRIDGE_TOOL_SPECS grows without a handler here
             res = ToolResult(call.id, ok=False, error=f"unknown bridge tool: {call.tool_name}")
 

@@ -86,6 +86,12 @@ class ToolSpec:
     owner_id: str | None = None
     # Whether a successful call needs HITL approval (RUNTIME_DESIGN §5).
     requires_approval: bool = False
+    # 같은 라운드의 다른 도구와 동시 실행해도 안전한가 — ToolScheduler의 병렬 배치
+    # 판정 근거. False = 상태를 변경하거나 사용자 가시 효과를 스테이징하는 도구
+    # (write_file/edit_file/terminal/propose_skill 등)로, 모델 호출 순서대로 직렬
+    # 실행된다. 판정 기준이 스케줄러의 하드코딩 이름 목록이 아니라 도구 선언
+    # 자신에게 있다(2026-07-10).
+    parallel_safe: bool = True
 
 
 @dataclass(frozen=True)
@@ -97,12 +103,44 @@ class ToolCall:
     id: str = field(default_factory=lambda: new_id("call"))
 
 
+# ── 이미지 첨부 계약 (2026-07-10, 멀티모달 provider seam) ─────────────────────
+# 도구가 결과 dict에 `_images: [{"mime_type": str, "data_b64": str}]`를 실으면
+# 디스패처가 분리해 `ToolResult.images`로 나르고, 루프가 tool Message의
+# `metadata["images"]`에 부착한다(транscript metadata JSON에 그대로 영속 —
+# 스키마 변경 없음). provider 어댑터는 이 metadata를 각자의 wire 이미지 블록으로
+# 렌더한다(Claude tool_result image block / Ollama message.images / OpenAI-compat
+# image_url 파트). base64가 텍스트 본문·SSE payload로 새지 않는 것이 계약의 핵심.
+TOOL_RESULT_IMAGES_KEY = "_images"
+IMAGES_METADATA_KEY = "images"
+
+
+def split_image_attachments(result: Any) -> tuple[Any, tuple[dict[str, str], ...]]:
+    """도구 결과에서 `_images` 첨부를 분리한다 → (본문 결과, 검증된 첨부 튜플).
+
+    첨부가 없거나 dict가 아니면 결과를 그대로 돌려준다. 항목 검증은 관대하게 —
+    mime_type/data_b64가 둘 다 비지 않은 dict만 남긴다(잘못된 항목이 턴을 깨면
+    안 된다)."""
+    if not isinstance(result, dict) or TOOL_RESULT_IMAGES_KEY not in result:
+        return result, ()
+    raw = result.get(TOOL_RESULT_IMAGES_KEY)
+    images = tuple(
+        {"mime_type": str(item["mime_type"]), "data_b64": str(item["data_b64"])}
+        for item in (raw if isinstance(raw, list) else ())
+        if isinstance(item, dict) and item.get("mime_type") and item.get("data_b64")
+    )
+    cleaned = {k: v for k, v in result.items() if k != TOOL_RESULT_IMAGES_KEY}
+    return cleaned, images
+
+
 @dataclass(frozen=True)
 class ToolResult:
     tool_call_id: str
     ok: bool
     result: Any = None
     error: str | None = None
+    # 도구가 첨부한 이미지(위 계약) — SSE payload(`ev_tool_result`)에는 싣지 않고
+    # 루프가 tool Message metadata로 옮긴다. 빈 튜플 = 첨부 없음.
+    images: tuple[dict[str, str], ...] = ()
 
 
 # ─────────────────────────────────────────────────────────────────────────────

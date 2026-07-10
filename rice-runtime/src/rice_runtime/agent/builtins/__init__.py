@@ -19,7 +19,8 @@ Registered builtin modules (add new ones here — one place):
                   create_document (.docx); 전부 requires_approval=True
   terminal_tool — terminal (shell command execution; requires_approval=True)
   web_tools     — fetch_url (public web page → readable text; SSRF-guarded)
-  vision_tools  — vision_analyze (image download + base64; requires vision provider)
+  vision_tools  — vision_analyze (이미지를 도구 결과에 첨부 → provider 이미지
+                  블록으로 모델이 직접 본다; 비전 모델 필요)
   subagent_tools — delegate_subagent (parallel focused worker threads)
   skill_tools   — skill_search + skill_view (스킬 인덱스 검색 · 전문 온디맨드
                   로딩) + propose_skill (미드턴 스킬 승격 제안); learning 서비스가

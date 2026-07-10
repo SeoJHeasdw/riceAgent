@@ -35,7 +35,24 @@ _MASK_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"(?i)(api[_-]?key|token|secret|password)\s*[:=]\s*['\"]?([A-Za-z0-9_\-./+=]{12,})"), r"\1=[REDACTED]"),
     (re.compile(r"sk-[A-Za-z0-9_\-]{16,}"), "sk-[REDACTED]"),
     (re.compile(r"ghp_[A-Za-z0-9_]{20,}"), "ghp_[REDACTED]"),
+    (re.compile(r"github_pat_[A-Za-z0-9_]{20,}"), "github_pat_[REDACTED]"),
+    (re.compile(r"glpat-[A-Za-z0-9_\-]{20,}"), "glpat-[REDACTED]"),
     (re.compile(r"xox[baprs]-[A-Za-z0-9-]{20,}"), "xox-[REDACTED]"),
+    # AWS access key id — 접두사+16자 대문자/숫자 고정 포맷(오탐 여지 낮음).
+    (re.compile(r"\b(?:AKIA|ASIA|ABIA|ACCA)[0-9A-Z]{16}\b"), "[REDACTED-AWS-KEY]"),
+    # Google API key — AIza 접두사 + 35자 고정.
+    (re.compile(r"\bAIza[0-9A-Za-z_\-]{35}\b"), "[REDACTED-GOOGLE-KEY]"),
+    # Authorization 헤더의 bearer 토큰(도구가 HTTP 요청/응답 덤프를 돌려줄 때).
+    (re.compile(r"(?i)\bbearer\s+[A-Za-z0-9_\-.~+/]{16,}=*"), "Bearer [REDACTED]"),
+    # JWT — header.payload.signature 3분절(각 분절 base64url).
+    (re.compile(r"\beyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\b"), "[REDACTED-JWT]"),
+    # Slack incoming webhook — URL 자체가 자격증명이다.
+    (re.compile(r"https://hooks\.slack\.com/services/[A-Za-z0-9/_\-]+"), "https://hooks.slack.com/services/[REDACTED]"),
+    # PEM 개인키 블록 — 파일을 read_file로 읽어온 경우.
+    (
+        re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[A-Za-z0-9+/=\s]+?-----END [A-Z ]*PRIVATE KEY-----"),
+        "[REDACTED PRIVATE KEY]",
+    ),
 )
 
 
@@ -100,11 +117,19 @@ def estimate_tokens(text: str) -> int:
     return _cjk_estimate_tokens(text)
 
 
+# 이미지 첨부 1장의 보수적 토큰 추정 — Claude 기준 최대 해상도(1568px) 이미지가
+# ~1,600토큰이다. 크기를 디코드하지 않으므로 상한으로 잡는다(과대추정이 안전한
+# 방향 — core/tokens.py의 철학과 동일). 예산이 이 무게를 보므로 이미지가 쌓이면
+# 압축이 오래된 이미지 메시지를 먼저 접는다.
+_IMAGE_TOKEN_ESTIMATE = 1_600
+
+
 def estimate_message_tokens(message: Message, estimate: Callable[[str], int] = _cjk_estimate_tokens) -> int:
     tool_cost = 0
     if message.tool_calls:
         tool_cost = estimate(json.dumps([c.__dict__ for c in message.tool_calls], ensure_ascii=False, default=str))
-    return estimate(message.content) + tool_cost + 4
+    image_cost = _IMAGE_TOKEN_ESTIMATE * len(message.metadata.get("images") or ())
+    return estimate(message.content) + tool_cost + image_cost + 4
 
 
 def estimate_context_tokens(

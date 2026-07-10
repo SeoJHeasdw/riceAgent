@@ -7,6 +7,8 @@
   1. 계획 활성 + 영원한 빈 응답  → 넛지 예산 소진 후 런타임이 계획을 강제 종결
   2. 빈 응답 ↔ 도구 호출 교대     → 넛지 카운터는 리셋되지 않고 소진된다
   3. 영원한 침묵 도구 호출        → 서사 넛지 상한 후 반복 상한이 최종 방벽
+  4. 매 반복 transient 에러 + 침묵 도구 호출 → 재시도 예산이 반복마다 갱신돼도
+     반복 상한이 총 provider 호출 수를 (상한 × (1+재시도))로 묶는다
 
 새 방어 장치를 추가할 때는 반드시 여기에 상호작용 시나리오를 추가할 것 —
 "장치 하나가 더해질 때마다 종료 증명을 다시 한다"가 이 파일의 계약이다.
@@ -169,3 +171,45 @@ async def test_forever_silent_tool_calls_hit_iteration_cap_exactly_once():
     # 서사 넛지는 프로파일 상한(2)까지만 — 넛지 자체가 폭주하지 않는다
     nudges = [m for m in result.history if m.metadata.get("synthetic") == "narration_nudge"]
     assert len(nudges) == LOCAL_PROFILE.narration_nudge_max
+
+
+class _FlakyThenSilentToolCaller(_CountingProvider):
+    """매 반복: 첫 스트림 진입은 transient 에러(과부하), 재시도에선 침묵 도구 호출.
+
+    transient 재시도(반복당 예산 — loop._TRANSIENT_RETRY_DELAYS)와 서사 넛지,
+    반복 상한이 겹치는 최악의 조합. 재시도 예산이 반복마다 갱신되더라도 반복
+    상한이 최종 방벽으로 남아 총 호출 수가 유한해야 한다."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.attempts = 0  # 스트림 진입 시도(에러 포함 — calls는 성공 응답만)
+
+    async def stream(self, *, system, messages, tools=(), temperature=0.7, **_):
+        self.attempts += 1
+        if self.attempts % 2 == 1:
+            raise RuntimeError("Error code: 529 - overloaded_error")
+        self.calls += 1
+        yield ProviderChunk(
+            kind="tool_call",
+            tool_call=ToolCall(tool_name="echo", arguments={}, id=f"c{self.attempts}"),
+        )
+        yield ProviderChunk(kind="done", stop_reason="tool_use")
+
+
+@pytest.mark.asyncio
+async def test_transient_retry_plus_silent_tools_still_bounded(monkeypatch):
+    monkeypatch.setattr("rice_runtime.agent.loop._TRANSIENT_RETRY_DELAYS", (0.0, 0.0))
+    provider = _FlakyThenSilentToolCaller()
+    result = LoopResult()
+    events = [
+        ev
+        async for ev in AgentLoop(
+            provider=provider, dispatcher=_dispatcher(), profile=LOCAL_PROFILE
+        ).run(_ctx(max_iterations=6), "s1", result, asyncio.Event())
+    ]
+
+    # 반복당 정확히 (실패 1 + 성공 1) — 재시도가 반복 수를 늘리지 않는다
+    assert provider.calls == 6
+    assert provider.attempts == 12
+    errors = [ev for ev in events if ev.type.value == "error"]
+    assert len(errors) == 1 and errors[0].data["error_code"] == "max_iterations"

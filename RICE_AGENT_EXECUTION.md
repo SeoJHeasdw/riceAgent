@@ -378,7 +378,12 @@ Drift guard(§3.3)는 프롬프트로 재평가를 *권유*할 뿐이다. 계획
 호출 직전에만 provider-facing 뷰를 렌더한다. 렌더 파이프라인:
 
 1. **시크릿 마스킹** — API key/token/password 패턴은 `[REDACTED]`로. 원본은 DB에
-   그대로 남는다(마스킹은 모델에게 보내는 뷰에만).
+   그대로 남는다(마스킹은 모델에게 보내는 뷰에만). **커버리지 확장 (2026-07-10)**:
+   kv형(`api_key=`)·벤더 접두사(sk-/ghp_/xox)에 더해 AWS access key(AKIA/ASIA…),
+   Google API key(AIza…), GitHub fine-grained PAT·GitLab PAT, Authorization
+   Bearer 토큰, JWT 3분절, Slack incoming webhook URL, PEM 개인키 블록까지 —
+   도구 출력(read_file/fetch_url/terminal 덤프)이 모델 컨텍스트로 재전송되기 전의
+   방어선이다.
 2. **증류(distillation)** — 임계 초과 도구 출력(기본 4K tokens→1.2K 보존)과 초장문
    메시지는 head/tail만 남기고 중간을 접는다. "무엇이 생략됐는지" 라벨이 붙는다.
    **최근 라운드 완화 (2026-07-10)**: 마지막 `recent_messages`개 안의 도구 출력은
@@ -399,7 +404,19 @@ Drift guard(§3.3)는 프롬프트로 재평가를 *권유*할 뿐이다. 계획
 
 **토큰 추정**: CJK 인식 휴리스틱(`core/tokens.py`)으로 시작해, 프로바이더가
 보고하는 실측 input_tokens로 세션 내내 보정된다(`TokenCalibrator`). 컨텍스트 길이
-초과 에러가 나면 예산을 0.45배로 줄여 1회 재렌더-재시도한다.
+초과 에러가 나면 예산을 0.45배로 줄여 1회 재렌더-재시도한다. **실측 소스 확장
+(2026-07-10)**: Claude/Ollama만 usage를 보고하던 것을 OpenAI-호환 wire까지 넓혔다
+— 공식 OpenAI 엔드포인트는 `stream_options.include_usage`를 요청하고(커스텀 호환
+서버는 미지원 400을 피해 요청하지 않되, 서버가 스스로 실으면 줍는다),
+`assemble_stream`이 usage를 done 청크에 실어 캘리브레이터에 전달한다.
+
+**일시적 provider 장애 재시도 (2026-07-10)**: 과부하(529)·rate limit(429)·일시적
+5xx·네트워크 단절(`core/errors.py::is_transient_provider_error`)로 스트림이 죽으면
+같은 컨텍스트로 backoff(1s→4s) 후 재시도한다. **한 청크도 나가기 전에만** — 부분
+출력이 이미 사용자에게 보였으면 중복 출력을 피해 그대로 전파한다. 컨텍스트 초과
+재시도(압축)가 우선하고, backoff 대기는 abort를 함께 감시해 대기 중 중단하면 턴을
+조용히 접는다. 재시도 예산은 LLM 호출 단위로 갱신되지만 반복 상한이 최종 방벽이라
+총 호출 수는 유한하다(§3.8 종료 계약 — `tests/test_loop_termination.py` 시나리오 4).
 
 **계층 분리**: 이 계층은 학습 루프와 무관하다. 압축은 "이번 호출에 무엇을
 보여줄지"의 문제고, 스킬/메모리는 learning 모듈의 승인 기반 자기개선 문제다.
@@ -471,6 +488,38 @@ bridge-only 폴딩은 폐기):
 한 라운드에 모델이 여러 도구를 요청하면 `ToolScheduler`가 **안전한 독립 호출만
 병렬화**하고, 승인이 필요하거나 파괴적인 호출은 순서를 보존한다. 결과는 모델
 호출 순서대로 히스토리에 실린다.
+
+**판정은 도구 선언이 소유한다 (2026-07-10)**: 직렬 강제 기준은 스케줄러의
+하드코딩 이름 목록이 아니라 `ToolSpec.parallel_safe`다(기본 True). 상태를
+변경하거나 사용자 가시 효과를 스테이징하는 빌트인(write_file/edit_file/terminal/
+propose_skill)이 `parallel_safe=False`를 선언하며, connector/plugin 도구도 같은
+필드로 직렬성을 선언할 수 있다. 구 이름 목록에는 edit_file이 빠져 있었다 —
+도구가 늘 때마다 스케줄러가 함께 늘어야 하는 숨은 결합이 그 버그의 원인.
+`requires_approval`과 인자 `wait_for_previous:true`는 여전히 직렬을 강제한다.
+
+### 5.5 이미지 첨부 계약 — 멀티모달 provider seam (2026-07-10)
+
+도구가 결과 dict에 `_images: [{mime_type, data_b64}]`를 실으면(정본:
+`core/types.py::split_image_attachments`) 파이프라인이 base64를 **텍스트 본문
+밖으로** 나른다:
+
+1. **디스패처**가 `_images`를 분리해 `ToolResult.images`로 옮긴다 — SSE
+   `tool_result` payload에 base64가 새지 않는다. bridge(`tool_call`) 경유도 전파.
+2. **루프**가 tool Message의 `metadata["images"]`에 부착한다 — transcript
+   metadata JSON에 그대로 영속(스키마 변경 없음), 리로드에도 남는다.
+3. **provider 어댑터**가 각자의 wire 이미지 블록으로 렌더한다: Claude
+   tool_result image block / Ollama per-message `images`(qwen-vl·llava) /
+   OpenAI-compat `image_url` 파트(tool 메시지가 이미지를 못 실으므로 tool 블록
+   **직후** 합성 user 메시지로 flush).
+4. **컨텍스트 예산**은 첨부 1장을 ~1,600토큰으로 보수 추정한다
+   (`context_manager._IMAGE_TOKEN_ESTIMATE`) — 이미지가 쌓이면 압축이 오래된
+   이미지 메시지를 먼저 접는다.
+
+`vision_analyze`가 첫 소비자다: 구 구현은 base64 data-URL을 결과 **텍스트**로
+돌려줬다 — 모델은 base64 텍스트에서 이미지를 못 보고, 컨텍스트/SSE만 오염됐다.
+지금은 이미지를 첨부로 실어 비전 모델이 실제로 "본다"(상한 5MB — Claude API의
+이미지당 한도에 맞춤). ILLMProvider Protocol 자체는 그대로다(FROZEN 유지) —
+확장은 Message metadata 관례라 새 provider가 무시해도 안전하게 열화한다.
 
 ---
 

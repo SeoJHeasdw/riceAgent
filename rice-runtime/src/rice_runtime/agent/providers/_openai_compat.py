@@ -15,7 +15,7 @@ import json
 from collections.abc import AsyncIterable, AsyncIterator, Sequence
 from typing import Any
 
-from ...core.types import Message, ToolCall, ToolSpec
+from ...core.types import IMAGES_METADATA_KEY, Message, ToolCall, ToolSpec
 from .interfaces import ProviderChunk
 
 
@@ -33,16 +33,58 @@ def to_oai_tools(tools: Sequence[ToolSpec]) -> list[dict[str, Any]]:
     ]
 
 
+def _image_url_parts(message: Message) -> list[dict[str, Any]]:
+    """metadata["images"] 첨부(core.types 계약) → OpenAI `image_url` 콘텐츠 파트
+    (base64 data URL)."""
+    return [
+        {
+            "type": "image_url",
+            "image_url": {"url": f"data:{item.get('mime_type') or 'image/png'};base64,{item['data_b64']}"},
+        }
+        for item in (message.metadata.get(IMAGES_METADATA_KEY) or ())
+        if isinstance(item, dict) and item.get("data_b64")
+    ]
+
+
 def to_oai_messages(system: str, messages: Sequence[Message]) -> list[dict[str, Any]]:
     native: list[dict[str, Any]] = []
     if system:
         native.append({"role": "system", "content": system})
+    # OpenAI wire는 tool 메시지에 이미지 파트를 허용하지 않는다 — tool 결과의
+    # 첨부는 그 tool 응답 블록이 **끝난 뒤** 합성 user 메시지의 image_url 파트로
+    # 싣는다(블록 중간에 끼우면 "모든 tool_call_id에 tool 응답이 와야 한다"는
+    # 검증이 깨진다). Claude/Ollama는 자기 wire에 native로 싣는다.
+    pending_tool_images: list[dict[str, Any]] = []
+
+    def _flush_tool_images() -> None:
+        if not pending_tool_images:
+            return
+        native.append(
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "[Image(s) attached from the preceding tool result(s)]"},
+                    *pending_tool_images,
+                ],
+            }
+        )
+        pending_tool_images.clear()
+
     for message in messages:
+        if message.role != "tool":
+            _flush_tool_images()
         if message.role == "system":
             native.append({"role": "system", "content": message.content})
             continue
         if message.role == "user":
-            native.append({"role": "user", "content": message.content})
+            image_parts = _image_url_parts(message)
+            if image_parts:
+                content_parts: list[dict[str, Any]] = []
+                if message.content:
+                    content_parts.append({"type": "text", "text": message.content})
+                native.append({"role": "user", "content": content_parts + image_parts})
+            else:
+                native.append({"role": "user", "content": message.content})
             continue
         if message.role == "assistant":
             entry: dict[str, Any] = {"role": "assistant", "content": message.content or None}
@@ -66,8 +108,10 @@ def to_oai_messages(system: str, messages: Sequence[Message]) -> list[dict[str, 
             if tool_call_id:
                 entry["tool_call_id"] = tool_call_id
             native.append(entry)
+            pending_tool_images.extend(_image_url_parts(message))
             continue
         native.append({"role": message.role, "content": message.content})
+    _flush_tool_images()
     return native
 
 
@@ -84,9 +128,17 @@ async def assemble_stream(chunks: AsyncIterable[dict[str, Any]]) -> AsyncIterato
     # index → {"id", "name", "args"} accumulated across deltas
     pending: dict[int, dict[str, str]] = {}
     finish: str | None = None
-    yielded_done = False
+    # usage(prompt/completion tokens)를 싣는 서버가 있으면(공식 API의
+    # stream_options.include_usage, vLLM/게이트웨이의 상시 보고 등) done 청크에
+    # 실어 TokenCalibrator가 이 provider에서도 실측 보정을 받게 한다.
+    input_tokens: int | None = None
+    output_tokens: int | None = None
 
     async for chunk in chunks:
+        usage = chunk.get("usage")
+        if isinstance(usage, dict):
+            input_tokens = usage.get("prompt_tokens", input_tokens)
+            output_tokens = usage.get("completion_tokens", output_tokens)
         choices = chunk.get("choices") or []
         if not choices:
             continue
@@ -133,8 +185,4 @@ async def assemble_stream(chunks: AsyncIterable[dict[str, Any]]) -> AsyncIterato
     # if tool calls were produced but finish_reason was absent/odd, prefer tool_use
     if stop != "tool_use" and pending:
         stop = "tool_use"
-    yield ProviderChunk(kind="done", stop_reason=stop)
-    yielded_done = True
-
-    if not yielded_done:  # pragma: no cover - defensive
-        yield ProviderChunk(kind="done", stop_reason="error")
+    yield ProviderChunk(kind="done", stop_reason=stop, input_tokens=input_tokens, output_tokens=output_tokens)
