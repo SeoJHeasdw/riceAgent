@@ -67,11 +67,11 @@ rice-runtime/                                # 배포물 ② : 로컬 단일 프
 │   │   │                                    #     연결 안 된 Connector tool 제외, 예산 초과 시 bridge+관련도 스포트라이트로 폴딩(AGENT_EXECUTION §5.2, RUNTIME_DESIGN 2.1)
 │   │   ├── orchestrator.py                  #   얇은 조율: learning/connector/execution 호출
 │   │   ├── effect_surfacing.py              #   LearningEffect→SSE(+HITL), 메인 턴과 /learning-review·/learn이 공유
-│   │   ├── subagents.py                     #   focused sub-agent runner (delegate_subagent builtin의 실행체) — read-only 빌트인 미니 ReAct 루프
+│   │   ├── subagents.py                     #   focused sub-agent runner (delegate_subagent builtin의 실행체) — 격리 미니 ReAct 루프 + 스킬 인덱스 주입 + tools 화이트리스트 + write_scratch 아티팩트 채널(2026-07-10 v2)
 │   │   ├── titler.py                        #   세션 제목 생성 (post-turn, 논블로킹 — /learning-review·/learn과 같은 트리거 지점 패턴)
-│   │   ├── builtins/                        #   등록 도구: read_file/write_file/edit_file/list_dir/search_files, terminal, fetch_url, vision_analyze, skill_search/skill_view/propose_skill, delegate_subagent, create_*; workspace.py는 경로 샌드박스 helper
-│   │   │   └── office/                      #   ★ 신규(2026-07-05/06) — create_presentation/create_workbook/create_document 빌트인, stdlib-only OOXML 라이터(sandbox 미적용 — RUNTIME_DESIGN 5장)
-│   │   │       ├── pptx_writer.py           #     10레이아웃(title/section/bullets/two_column/stats/table/chart/timeline/quote/closing) + speaker notes + 도형기반 막대/선 차트
+│   │   ├── builtins/                        #   등록 도구: read_file/write_file/edit_file/list_dir/search_files, terminal, fetch_url(v2 — markdown 추출·홉별 SSRF·재시도·페이지네이션·링크), vision_analyze, skill_search/skill_view/propose_skill, delegate_subagent, create_*/edit_presentation; workspace.py는 경로 샌드박스 helper, write_scratch는 sub-agent 전용(thread 격리)
+│   │   │   └── office/                      #   ★ 2026-07-05/06(+07-10 v2) — create_presentation/edit_presentation/create_workbook/create_document 빌트인, stdlib-only OOXML 라이터(sandbox 미적용 — RUNTIME_DESIGN 5장)
+│   │   │       ├── pptx_writer.py           #     11레이아웃(title/section/bullets/two_column/stats/table/chart/timeline/quote/image/closing) + speaker notes + 그리드라인 차트 + autofit 폰트 스케일 + 임베디드 스펙(docProps/riceSpec.json — edit_presentation의 편집 원본)
 │   │   │       ├── xlsx_writer.py           #     수식 로컬 평가 → 캐시값+계산결과 반환
 │   │   │       ├── docx_writer.py           #     heading/paragraph/bullets/numbered/table/quote/callout/divider 블록
 │   │   │       ├── formula.py               #     수식 엔진(SUM/AVERAGE/IF/NPV/IRR/SUMPRODUCT 등 22함수, 교차시트 참조, 순환→#CYCLE!, 미지원 함수는 #NAME? warning으로 분리)

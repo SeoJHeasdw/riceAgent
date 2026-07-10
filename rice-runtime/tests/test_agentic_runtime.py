@@ -14,7 +14,7 @@ from rice_runtime.agent.providers.interfaces import ProviderCapabilities, Provid
 from rice_runtime.agent.subagents import SubAgentRunner
 from rice_runtime.agent.tool_dispatch import ToolDispatcher
 from rice_runtime.agent.tool_scheduler import ScheduledToolRequest, ToolBatchResult, ToolScheduler
-from rice_runtime.core.config import ContextConfig, LearningConfig
+from rice_runtime.core.config import ContextConfig
 from rice_runtime.core.types import Message, ToolCall, ToolSpec, TurnContext
 from rice_runtime.server.approval import ApprovalRegistry
 
@@ -278,7 +278,6 @@ async def test_subagent_runner_returns_structured_summary():
             Message(role="user", content="old context"),
             Message(role="user", content="new context"),
         ]),
-        learning_config=LearningConfig(approval_timeout_seconds=1),
         context_config=ContextConfig(subagent_history_messages=1),
     )
 

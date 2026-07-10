@@ -30,6 +30,11 @@ _MAX_MATCHES = 200
 _MAX_LIST_ENTRIES = 500
 _MAX_LIST_DEPTH = 6
 
+# Sub-agent 아티팩트 격리 영역 — dot-디렉토리라 list_dir 목록에는 안 잡히지만
+# read_file은 정확한 경로로 읽을 수 있다(러너가 결과에 경로를 실어 준다).
+_SCRATCH_DIR = ".subagent"
+_MAX_SCRATCH_BYTES = 512 * 1024
+
 
 def _make_read(root: Path) -> BuiltinTool:
     async def read_file(args: dict) -> object:
@@ -177,6 +182,62 @@ def _make_search(root: Path) -> BuiltinTool:
         return {"query": query, "matches": matches, "truncated": False}
 
     return search_files
+
+
+def scratch_tool_factory(paths: RicePaths):
+    """`write_scratch` — sub-agent 전용, thread 격리 쓰기 도구의 팩토리.
+
+    워커는 승인 게이트 밖에서 돌므로 일반 쓰기 도구를 줄 수 없다. 대신 산출물을
+    `.subagent/<thread_id>/` 아래에만 남기게 한다: (1) 워크스페이스 샌드박스 안,
+    (2) thread 하위로 재격리(이중 containment 검사), (3) 사용자 가시 영역으로의
+    승격은 메인 에이전트의 승인 게이트 도구가 담당한다. 반환 경로는 워크스페이스
+    상대라 메인이 그대로 read_file 할 수 있다."""
+    root = paths.workspace
+    root.mkdir(parents=True, exist_ok=True)
+    root = root.resolve()
+
+    def factory(thread_id: str) -> tuple[ToolSpec, BuiltinTool]:
+        base_rel = f"{_SCRATCH_DIR}/{thread_id}"
+
+        async def write_scratch(args: dict) -> object:
+            rel = str(args.get("path") or "").strip().lstrip("/")
+            content = args.get("content", "")
+            if not rel:
+                raise ValueError("path is required (relative, e.g. 'draft.md')")
+            if not isinstance(content, str):
+                raise ValueError("content must be a string")
+            if len(content.encode("utf-8")) > _MAX_SCRATCH_BYTES:
+                raise ValueError("content exceeds scratch size limit")
+            full_rel = f"{base_rel}/{rel}"
+            target = _resolve(root, full_rel)
+            scratch_base = _resolve(root, base_rel)
+            if target != scratch_base and scratch_base not in target.parents:
+                raise ValueError(f"path escapes the scratch area: {rel}")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+            return {"path": full_rel, "bytes_written": len(content.encode("utf-8"))}
+
+        spec = ToolSpec(
+            name="write_scratch",
+            description=(
+                "Save a long draft, table, or extraction as a UTF-8 text file in your "
+                "isolated scratch area instead of pasting it into your report. Returns "
+                "the workspace-relative path — cite it in your findings so the main "
+                "agent can read it."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Relative file name, e.g. 'draft.md'."},
+                    "content": {"type": "string", "description": "Full file contents."},
+                },
+                "required": ["path", "content"],
+            },
+            source="builtin",
+        )
+        return spec, write_scratch
+
+    return factory
 
 
 def tools(paths: RicePaths) -> list[tuple[ToolSpec, BuiltinTool]]:

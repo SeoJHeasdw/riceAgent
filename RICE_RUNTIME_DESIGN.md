@@ -109,8 +109,8 @@ Gemini CLI Scheduler의 상태 머신 전체를 옮기지는 않는다. RICE는 
 
 `delegate_subagent`는 main agent가 독립적인 분석/리서치/검토 작업을 하위 agent에게 맡길 수 있게 하는 builtin tool이다.
 
-- sub-agent는 같은 provider를 사용하며, read-only 미니 toolset(`read_file`/`list_dir`/`search_files`/`fetch_url`)만 받는다. 쓰기·셸·재위임 등 외부 효과는 main agent의 기존 tool/HITL 경로로만 수행한다.
-- sub-agent는 최근 대화 컨텍스트를 렌더링된 view로 받고, `{findings, evidence, confidence, open_questions, recommended_next_action, tools_used}` 구조화 결과를 반환한다.
+- sub-agent는 같은 provider를 사용하며, 격리 미니 toolset(`read_file`/`list_dir`/`search_files`/`fetch_url` + learning 배선 시 `skill_search`/`skill_view` + thread 격리 `write_scratch`)을 받는다. 메인 모델이 `tools` 화이트리스트로 표면을 더 좁힐 수 있다. 일반 쓰기·셸·재위임 등 외부 효과는 main agent의 기존 tool/HITL 경로로만 수행하며, `write_scratch`는 `.subagent/<thread>/` 격리 영역 밖으로는 절대 쓰지 못한다(사용자 가시 영역 승격은 메인의 승인 게이트 도구 몫).
+- sub-agent는 최근 대화 컨텍스트를 렌더링된 view로 받고, `{findings, evidence, confidence, open_questions, recommended_next_action, tools_used, artifacts}` 구조화 결과를 반환한다 — `artifacts`는 워커가 실제 남긴 scratch 파일 경로들(러너 관찰 기반)이고 메인이 `read_file`로 읽는다. 실행 모델 상세는 AGENT_EXECUTION §6 정본.
 - main agent가 여러 `delegate_subagent` 호출을 한 round에 내면 ToolScheduler가 안전하게 병렬화하고, 다음 LLM iteration에서 main agent가 결과를 종합한다.
 - 이 기능은 learning loop를 우회하지 않는다. sub-agent 결과가 스킬화될 가치가 있으면 main agent가 기존 `propose_skill` → `skill_patch_proposed` 승인 경로를 사용한다.
 

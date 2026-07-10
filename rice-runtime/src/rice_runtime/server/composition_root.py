@@ -19,7 +19,7 @@ import logging
 from dataclasses import dataclass
 from typing import Callable
 
-from ..agent.builtins import build_builtin_tools, build_subagent_toolset
+from ..agent.builtins import build_builtin_tools, build_subagent_toolset, scratch_tool_factory
 from ..agent.interfaces import IAgent, IApprovalGate, ISessionTitler
 from ..agent.orchestrator import Orchestrator
 from ..agent.planner import START_PLAN_SPEC, UPDATE_PLAN_SPEC
@@ -219,12 +219,14 @@ def build_container(
     subagents = SubAgentRunner(
         resolve_provider=resolve_provider,
         transcript=sessions,
-        learning_config=lambda: config_store.config.learning,
         context_config=lambda: config_store.config.context,
         token_calibrator=token_calibrator,
-        # read-only 워커 도구 — 워커가 직접 읽게 해 메인 컨텍스트를 원문으로
-        # 오염시키지 않는다(agent/subagents.py 모듈 docstring 참조).
-        tools=build_subagent_toolset(paths),
+        # 격리 워커 도구 — 워커가 직접 읽게 해 메인 컨텍스트를 원문으로 오염시키지
+        # 않는다. learning을 주면 skill_search/skill_view가 함께 실린다(스킬 주입).
+        tools=build_subagent_toolset(paths, learning=learning),
+        # 태스크 관련 스킬 인덱스 렌더용 + thread 격리 아티팩트 채널(write_scratch).
+        learning=learning,
+        scratch_tool_factory=scratch_tool_factory(paths),
     )
     builtin_specs, builtins = build_builtin_tools(paths, learning=learning, subagents=subagents)
 

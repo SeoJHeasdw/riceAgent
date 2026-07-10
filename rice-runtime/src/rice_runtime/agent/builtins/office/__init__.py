@@ -1,11 +1,18 @@
-"""Builtin office tools: `create_presentation` (.pptx) + `create_workbook`
-(.xlsx) + `create_document` (.docx).
+"""Builtin office tools: `create_presentation` + `edit_presentation` (.pptx) +
+`create_workbook` (.xlsx) + `create_document` (.docx).
 
-All three are pure in-process generators (stdlib OOXML writers — see pptx_writer /
+All are in-process generators (stdlib OOXML writers — see pptx_writer /
 xlsx_writer / docx_writer) confined to the workspace sandbox, and all carry
 `requires_approval=True`: they write files, so they ride the same HITL gate as
 `write_file`. The agent can QA its own output afterwards via `read_file`, which
 extracts .pptx/.xlsx/.docx back to text (read_extract).
+
+`edit_presentation` (2026-07-10): create_presentation이 원본 스펙을
+docProps/riceSpec.json으로 패키지에 임베드하므로, 슬라이드 단위 편집
+(replace/insert/remove/move + theme/title)은 전체 스펙 재전송 없이 그 파트를
+읽어 적용 후 재빌드한다 — "슬라이드 3장만 고쳐줘"가 30장 스펙 재생성이 아니라
+연산 3개가 된다(소형 모델의 재생성 드리프트 방지). 외부에서 만들었거나
+PowerPoint가 재저장해 임베드가 사라진 파일은 명확한 에러로 거절한다.
 
 Robustness note (small models): the builders are fault-tolerant — a malformed
 slide/block degrades to a salvage rendering and is reported in the result's
@@ -26,8 +33,12 @@ from ....core.types import ToolSpec
 from ...tool_dispatch import BuiltinTool
 from ..workspace import resolve_workspace_path
 from .docx_writer import DocumentSpecError, build_document
-from .pptx_writer import DeckSpecError, build_presentation
+from .pptx_writer import DeckSpecError, build_presentation, read_embedded_spec
 from .xlsx_writer import WorkbookSpecError, build_workbook
+
+# image 레이아웃이 임베드할 수 있는 워크스페이스 이미지 상한/형식(형식 검증 자체는
+# pptx_writer._image_meta가 매직바이트로 한다 — 확장자는 신뢰하지 않는다).
+_MAX_ASSET_BYTES = 8 * 1024 * 1024
 
 _PRESENTATION_PARAMETERS = {
     "type": "object",
@@ -79,10 +90,13 @@ _PRESENTATION_PARAMETERS = {
                 "series:[{name, values:[number]}] (1-3), or values:[number] for one series}, footnote?} · "
                 "timeline{title, kicker?, steps:[{title, desc?}] (2-6)} · "
                 "quote{quote, attribution?} · "
+                "image{title, kicker?, image:'workspace-relative .png/.jpg', caption?, "
+                "bullets?:[string] (adds text left / image right)} · "
                 "closing{title, subtitle?, contact?}. "
-                "Structure tip: open with title, put one stats/chart/table/timeline slide between "
-                "bullet slides (never two identical layouts in a row), close with closing. "
-                "Use a chart slide for any projection/trend/comparison with numbers."
+                "Structure tip: open with title, put one stats/chart/table/timeline/image slide "
+                "between bullet slides (never two identical layouts in a row), close with closing. "
+                "Use a chart slide for any projection/trend/comparison with numbers; use an image "
+                "slide for screenshots, diagrams, or photos already in the workspace."
             ),
             "items": {"type": "object"},
         },
@@ -157,6 +171,90 @@ _DOCUMENT_PARAMETERS = {
 }
 
 
+_EDIT_PARAMETERS = {
+    "type": "object",
+    "properties": {
+        "path": {
+            "type": "string",
+            "description": "Workspace-relative path of an existing .pptx created by create_presentation.",
+        },
+        "operations": {
+            "type": "array",
+            "description": (
+                "Slide operations applied in order (slide numbers are 1-based and refer to the "
+                "deck state at that point). Each: "
+                "{action:'replace', index:N, slide:{...full slide object...}} · "
+                "{action:'insert', index:N (insert before N; omit to append), slide:{...}} · "
+                "{action:'remove', index:N} · "
+                "{action:'move', index:N, to:M}. "
+                "Slide objects use the same layouts/fields as create_presentation."
+            ),
+            "items": {"type": "object"},
+        },
+        "title": {"type": "string", "description": "Optionally replace the deck title."},
+        "theme": {
+            "type": ["object", "string"],
+            "description": "Optionally replace the theme (same shape as create_presentation)."
+        },
+    },
+    "required": ["path", "operations"],
+}
+
+
+def _apply_deck_operations(slides: list, operations: list) -> list[str]:
+    """임베디드 스펙의 slides 배열에 연산을 순서대로 적용한다. 인덱스는 1-based,
+    각 연산 시점의 덱 상태 기준. 잘못된 연산은 어느 것도 적용하지 않은 상태로
+    ValueError를 던진다(호출부가 원본을 건드리기 전에 복사본에 적용)."""
+    applied: list[str] = []
+    for i, op in enumerate(operations):
+        if not isinstance(op, dict):
+            raise ValueError(f"operations[{i}] must be an object")
+        action = str(op.get("action") or "").strip().lower()
+
+        def index_of(key: str = "index", *, upper: int | None = None) -> int:
+            raw = op.get(key)
+            if not isinstance(raw, (int, float)):
+                raise ValueError(f"operations[{i}].{key} (1-based slide number) is required for {action!r}")
+            idx = int(raw)
+            limit = upper if upper is not None else len(slides)
+            if not 1 <= idx <= limit:
+                raise ValueError(f"operations[{i}].{key}={idx} is out of range (deck has {len(slides)} slides)")
+            return idx
+
+        if action == "replace":
+            slide = op.get("slide")
+            if not isinstance(slide, dict):
+                raise ValueError(f"operations[{i}].slide object is required for replace")
+            idx = index_of()
+            slides[idx - 1] = slide
+            applied.append(f"replace slide {idx}")
+        elif action == "insert":
+            slide = op.get("slide")
+            if not isinstance(slide, dict):
+                raise ValueError(f"operations[{i}].slide object is required for insert")
+            raw_at = op.get("index")
+            at = int(raw_at) if isinstance(raw_at, (int, float)) else len(slides) + 1
+            if not 1 <= at <= len(slides) + 1:
+                raise ValueError(f"operations[{i}].index={at} is out of range for insert")
+            slides.insert(at - 1, slide)
+            applied.append(f"insert at {at}")
+        elif action == "remove":
+            idx = index_of()
+            del slides[idx - 1]
+            applied.append(f"remove slide {idx}")
+        elif action == "move":
+            idx = index_of()
+            to = index_of("to")
+            slide = slides.pop(idx - 1)
+            slides.insert(to - 1, slide)
+            applied.append(f"move slide {idx} → {to}")
+        else:
+            raise ValueError(f"operations[{i}].action must be replace/insert/remove/move, got {action!r}")
+    if not applied:
+        raise ValueError("operations must be a non-empty array")
+    return applied
+
+
 def tools(paths: RicePaths) -> list[tuple[ToolSpec, BuiltinTool]]:
     root = paths.workspace
     root.mkdir(parents=True, exist_ok=True)
@@ -170,14 +268,54 @@ def tools(paths: RicePaths) -> list[tuple[ToolSpec, BuiltinTool]]:
         target.write_bytes(data)
         return rel
 
+    def _load_asset(rel: str) -> bytes:
+        """image 레이아웃의 워크스페이스 이미지 로더 — 샌드박스 resolve + 크기 상한.
+        형식 검증(매직바이트)은 pptx_writer가 한다."""
+        target = resolve_workspace_path(root, rel)
+        if not target.is_file():
+            raise ValueError(f"image not found in workspace: {rel}")
+        if target.stat().st_size > _MAX_ASSET_BYTES:
+            raise ValueError(f"image too large (> {_MAX_ASSET_BYTES // (1024 * 1024)} MB): {rel}")
+        return target.read_bytes()
+
     async def create_presentation(args: dict) -> object:
         rel = str(args.get("path") or "")
         try:
-            data, summary = build_presentation(args)
+            data, summary = build_presentation(args, load_asset=_load_asset)
         except DeckSpecError as exc:
             raise ValueError(f"invalid deck spec: {exc}") from None
         _write(rel, ".pptx", data)
         return {"path": rel, "bytes_written": len(data), **summary}
+
+    async def edit_presentation(args: dict) -> object:
+        rel = str(args.get("path") or "")
+        if not rel.lower().endswith(".pptx"):
+            raise ValueError(f"path must end with .pptx: {rel!r}")
+        target = resolve_workspace_path(root, rel)
+        if not target.is_file():
+            raise ValueError(f"presentation not found: {rel}")
+        spec = read_embedded_spec(target.read_bytes())
+        if spec is None:
+            raise ValueError(
+                "this .pptx has no embedded RICE spec (created elsewhere, or re-saved by "
+                "another app) — rebuild it with create_presentation instead"
+            )
+        slides = list(spec.get("slides") or [])
+        operations = args.get("operations")
+        if not isinstance(operations, list):
+            raise ValueError("operations must be an array")
+        applied = _apply_deck_operations(slides, operations)
+        spec["slides"] = slides
+        if isinstance(args.get("title"), str) and args["title"].strip():
+            spec["title"] = args["title"]
+        if args.get("theme") is not None:
+            spec["theme"] = args["theme"]
+        try:
+            data, summary = build_presentation(spec, load_asset=_load_asset)
+        except DeckSpecError as exc:
+            raise ValueError(f"edited deck spec is invalid: {exc}") from None
+        _write(rel, ".pptx", data)
+        return {"path": rel, "bytes_written": len(data), "operations_applied": applied, **summary}
 
     async def create_workbook(args: dict) -> object:
         rel = str(args.get("path") or "")
@@ -203,17 +341,37 @@ def tools(paths: RicePaths) -> list[tuple[ToolSpec, BuiltinTool]]:
                 name="create_presentation",
                 description=(
                     "Create a designed .pptx slide deck in the workspace from a structured "
-                    "slide list (10 layouts: title/section/bullets/two_column/stats/table/"
-                    "chart/timeline/quote/closing + speaker notes). Use for pitch decks, "
+                    "slide list (11 layouts: title/section/bullets/two_column/stats/table/"
+                    "chart/timeline/quote/image/closing + speaker notes). Use for pitch decks, "
                     "proposals, reviews, reports; use a `chart` slide (bar/line) for any "
-                    "projection or trend. Returns a per-slide summary (+ any `warnings`); "
-                    "QA the result with read_file on the .pptx (extracts slide text + notes)."
+                    "projection or trend, and an `image` slide for workspace screenshots/"
+                    "diagrams. Long text auto-shrinks to fit its box. Returns a per-slide "
+                    "summary (+ any `warnings`); QA the result with read_file on the .pptx "
+                    "(extracts slide text + notes). To change slides later, use "
+                    "edit_presentation instead of regenerating the whole deck."
                 ),
                 parameters=_PRESENTATION_PARAMETERS,
                 source="builtin",
                 requires_approval=True,  # writes into the workspace → HITL gate
             ),
             create_presentation,
+        ),
+        (
+            ToolSpec(
+                name="edit_presentation",
+                description=(
+                    "Edit an existing .pptx that was created by create_presentation: replace/"
+                    "insert/remove/move whole slides (and optionally the deck title/theme) "
+                    "without resending the full deck spec. Slide numbers are 1-based. The deck "
+                    "is rebuilt from its embedded spec, so all layouts and design rules apply. "
+                    "Fails clearly if the file was created elsewhere or re-saved by PowerPoint "
+                    "(embedded spec missing) — rebuild with create_presentation in that case."
+                ),
+                parameters=_EDIT_PARAMETERS,
+                source="builtin",
+                requires_approval=True,  # writes into the workspace → HITL gate
+            ),
+            edit_presentation,
         ),
         (
             ToolSpec(

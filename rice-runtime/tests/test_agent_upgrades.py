@@ -19,7 +19,7 @@ from rice_runtime.agent.loop import AgentLoop, LoopResult
 from rice_runtime.agent.tool_dispatch import ToolDispatcher
 from rice_runtime.server.approval import ApprovalRegistry
 from rice_runtime.agent.builtins.file_tools import tools as file_tools
-from rice_runtime.agent.builtins.web_tools import _TextExtractor, _reject_private_host
+from rice_runtime.agent.builtins.web_tools import _MarkdownExtractor, _reject_private_host
 from rice_runtime.agent.planner import PlanOutcome, TurnPlanner
 from rice_runtime.agent.providers.interfaces import ProviderCapabilities, ProviderChunk
 from rice_runtime.agent.providers.ollama import OllamaProvider
@@ -165,14 +165,15 @@ async def test_edit_file_replaces_unique_snippet_and_rejects_ambiguous(tmp_path)
 
 
 def test_html_text_extractor_strips_scripts_and_keeps_blocks():
-    extractor = _TextExtractor()
+    extractor = _MarkdownExtractor()
     extractor.feed(
         "<html><head><title>t</title><script>var x=1;</script></head>"
         "<body><h1>Hello</h1><p>world <b>bold</b></p><style>.a{}</style></body></html>"
     )
     text = extractor.text()
-    assert "Hello" in text and "world bold" in text
+    assert "# Hello" in text and "world bold" in text
     assert "var x" not in text and ".a{}" not in text
+    assert extractor.title == "t"
 
 
 def test_fetch_url_rejects_local_and_private_hosts():

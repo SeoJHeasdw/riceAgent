@@ -19,24 +19,43 @@ Layouts (`slides[].layout`):
   table       title + styled table {headers, rows}
   timeline    title + 2–6 numbered steps {title, desc?} on a horizontal rail
   quote       oversized quotation mark + quote + attribution
+  image       title + workspace image (png/jpeg), aspect-fit; bullets를 주면
+              좌 텍스트/우 이미지 분할, 없으면 전폭 + caption
   closing     dark thank-you/CTA slide {title, subtitle?, contact?}
 Any slide may set `notes` (speaker notes, emitted as real notesSlides).
+
+2026-07-10 quality pass:
+  - 텍스트 오버플로 방어: 제목/불릿/인용 등은 추정 줄수 기반의 **결정론적 폰트
+    다운스케일**(_fit_sz/_fit_bullets_sz)을 탄다 — 긴 문장이 상자를 넘쳐 다른
+    요소를 덮는 "처참한 슬라이드"의 1원인 제거. CJK는 전각폭으로 가중한다.
+  - 차트: 수평 그리드라인 + 좌측 눈금 값, 라인 차트 포인트 값 라벨.
+  - 딥 스펙 임베드: 원본 스펙 JSON을 docProps/riceSpec.json으로 패키지에 심는다
+    — edit_presentation(office/__init__.py)이 이를 읽어 슬라이드 단위
+    replace/insert/remove/move 후 재빌드한다(파워포인트가 재저장하면 임베드가
+    사라질 수 있고, 그때는 편집 도구가 명확히 거절한다).
 """
 
 from __future__ import annotations
 
+import json
+import math
 import zipfile
 from dataclasses import dataclass
 from io import BytesIO
+from typing import Callable
 from xml.sax.saxutils import escape
 
 from .palette import PRESETS as _PRESETS
 from .palette import resolve_palette
 
-__all__ = ["DeckSpecError", "build_presentation"]
+__all__ = ["DeckSpecError", "build_presentation", "read_embedded_spec", "SPEC_PART"]
 
 _MAX_SLIDES = 30
 _MAX_TEXT = 2_000
+_MAX_IMAGE_BYTES = 8 * 1024 * 1024
+
+# 임베디드 스펙 파트 경로 — office/__init__.py(edit_presentation)와 공유.
+SPEC_PART = "docProps/riceSpec.json"
 
 EMU_PER_IN = 914_400
 SLIDE_W = int(13.333 * EMU_PER_IN)
@@ -45,6 +64,81 @@ SLIDE_H = int(7.5 * EMU_PER_IN)
 
 def _in(v: float) -> int:
     return int(v * EMU_PER_IN)
+
+
+# ── deterministic text fitting ────────────────────────────────────────────────
+# 정확한 글리프 메트릭 없이(스탠드얼론 writer) 추정으로 줄수를 계산한다:
+# 라틴 평균 ~0.52em, CJK 전각 ~1.0em. 목적은 타이포그래피 완벽이 아니라
+# "상자를 넘치지 않는다"는 하한 보장 — 넘칠 바에야 한두 포인트 줄이는 게 낫다.
+
+
+def _em_len(text: str) -> float:
+    return sum(1.0 if ord(ch) > 0x2E80 else 0.52 for ch in text)
+
+
+def _lines_needed(text: str, sz: int, w_in: float) -> int:
+    if not text:
+        return 0
+    width_in = (sz / 72.0) * _em_len(text)
+    return max(1, math.ceil(width_in / max(w_in, 0.1)))
+
+
+def _fit_sz(text: str, base_sz: int, w_in: float, max_lines: int, min_sz: int) -> int:
+    """`text`가 폭 `w_in`에서 `max_lines` 안에 들어가는 가장 큰 크기(포인트)."""
+    for sz in range(base_sz, min_sz, -1):
+        if _lines_needed(text, sz, w_in) <= max_lines:
+            return sz
+    return min_sz
+
+
+def _fit_sz_height(text: str, base_sz: int, w_in: float, h_in: float, min_sz: int, line_pct: float = 1.08) -> int:
+    """상자 높이 `h_in`이 제약일 때의 크기 결정 — 줄수 대신 총 높이로 판정한다."""
+    for sz in range(base_sz, min_sz, -1):
+        if _lines_needed(text, sz, w_in) * (sz / 72.0) * line_pct <= h_in:
+            return sz
+    return min_sz
+
+
+def _fit_bullets_sz(
+    entries: list[tuple[str, bool]], w_in: float, h_in: float, base_sz: int, min_sz: int
+) -> int:
+    """불릿 블록 전체가 높이 `h_in`에 들어가는 크기. entries = [(text, is_sub)];
+    sub 항목은 본문보다 2pt 작게 렌더된다(호출부와 같은 규칙)."""
+    for sz in range(base_sz, min_sz, -1):
+        total_in = 0.0
+        for text, is_sub in entries:
+            item_sz = max(sz - 2, 8) if is_sub else sz
+            lines = _lines_needed(text, item_sz, w_in - 0.35)  # 불릿 들여쓰기 몫
+            total_in += lines * (item_sz / 72.0) * 1.18 + (9 if not is_sub else 4) / 72.0
+        if total_in <= h_in:
+            return sz
+    return min_sz
+
+
+# ── image sniffing (png/jpeg, stdlib) ────────────────────────────────────────
+
+
+def _image_meta(data: bytes) -> tuple[str, int, int]:
+    """(ext, width_px, height_px). PNG/JPEG만 지원 — 그 외는 DeckSpecError."""
+    if len(data) > _MAX_IMAGE_BYTES:
+        raise DeckSpecError(f"image too large ({len(data) // 1024} KB > {_MAX_IMAGE_BYTES // 1024} KB)")
+    if data[:8] == b"\x89PNG\r\n\x1a\n" and len(data) >= 24:
+        return "png", int.from_bytes(data[16:20]), int.from_bytes(data[20:24])
+    if data[:2] == b"\xff\xd8":
+        i = 2
+        while i + 9 < len(data):
+            if data[i] != 0xFF:
+                i += 1
+                continue
+            marker = data[i + 1]
+            if marker in (0xD8, 0x01) or 0xD0 <= marker <= 0xD7:
+                i += 2
+                continue
+            seg_len = int.from_bytes(data[i + 2 : i + 4])
+            if marker in (0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF):
+                return "jpeg", int.from_bytes(data[i + 7 : i + 9]), int.from_bytes(data[i + 5 : i + 7])
+            i += 2 + seg_len
+    raise DeckSpecError("unsupported image format — use PNG or JPEG")
 
 
 class DeckSpecError(ValueError):
@@ -94,14 +188,35 @@ class Theme:
 class _Shapes:
     """Builds the slide's <p:sp> list with unique shape ids."""
 
-    def __init__(self, theme: Theme) -> None:
+    def __init__(self, theme: Theme, load_asset: "Callable[[str], bytes] | None" = None) -> None:
         self.theme = theme
         self._id = 1
         self.xml: list[str] = []
+        # image 레이아웃용: 워크스페이스 자산 로더(office/__init__ 주입)와 이 슬라이드가
+        # 임베드한 이미지들 [(rel_id, ext, bytes)] — 패키징 시 media 파트/rels가 된다.
+        self.load_asset = load_asset
+        self.images: list[tuple[int, str, bytes]] = []
 
     def _next_id(self) -> int:
         self._id += 1
         return self._id
+
+    def add_image(self, data: bytes, ext: str) -> int:
+        """이미지를 이 슬라이드에 등록하고 relationship id를 돌려준다. rel id는
+        rId100부터 — 레이아웃(rId1)/노트(rId2)와 절대 충돌하지 않는 대역."""
+        rel_id = 100 + len(self.images)
+        self.images.append((rel_id, ext, data))
+        return rel_id
+
+    def picture(self, x: float, y: float, w: float, h: float, rel_id: int) -> None:
+        sid = self._next_id()
+        self.xml.append(
+            f'<p:pic><p:nvPicPr><p:cNvPr id="{sid}" name="Picture {sid}"/>'
+            '<p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr>'
+            f'<p:blipFill><a:blip r:embed="rId{rel_id}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>'
+            f'<p:spPr><a:xfrm><a:off x="{_in(x)}" y="{_in(y)}"/><a:ext cx="{_in(w)}" cy="{_in(h)}"/></a:xfrm>'
+            '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>'
+        )
 
     # text ------------------------------------------------------------------
     def run(
@@ -322,9 +437,10 @@ def _kicker_title(sp: _Shapes, kicker: str, title: str, *, color: str | None = N
             [sp.para(sp.run(kicker.upper(), sz=12, color=t.accent, bold=True, spacing=160))],
         )
     if title:
+        sz = _fit_sz(title, 27, _BODY_W, 2, 18)  # 긴 제목은 줄이되 상자를 넘치지 않는다
         sp.textbox(
             _MARGIN, 0.86, _BODY_W, 0.85,
-            [sp.para(sp.run(title, sz=27, color=color or t.primary, bold=True, font=t.heading_font))],
+            [sp.para(sp.run(title, sz=sz, color=color or t.primary, bold=True, font=t.heading_font))],
             anchor="t",
         )
 
@@ -338,15 +454,17 @@ def _render_title(sp: _Shapes, slide: dict, _idx: int, _total: int) -> None:
     if kicker:
         sp.textbox(_MARGIN, 1.5, _BODY_W, 0.4,
                    [sp.para(sp.run(kicker.upper(), sz=13, color=t.secondary, bold=True, spacing=200))])
+    cover_title = _text(slide.get("title"), "title slide title", required=True)
     sp.textbox(
         _MARGIN, 2.35, 11.0, 2.1,
-        [sp.para(sp.run(_text(slide.get("title"), "title slide title", required=True),
-                        sz=40, color="FFFFFF", bold=True, font=t.heading_font), line_pct=104)],
+        [sp.para(sp.run(cover_title, sz=_fit_sz(cover_title, 40, 11.0, 3, 24),
+                        color="FFFFFF", bold=True, font=t.heading_font), line_pct=104)],
     )
     subtitle = _text(slide.get("subtitle"), "subtitle")
     if subtitle:
         sp.textbox(_MARGIN, 4.55, 9.8, 1.1,
-                   [sp.para(sp.run(subtitle, sz=16, color=t.secondary), line_pct=118)])
+                   [sp.para(sp.run(subtitle, sz=_fit_sz_height(subtitle, 16, 9.8, 1.1, 11, line_pct=1.18),
+                                   color=t.secondary), line_pct=118)])
     footer = _text(slide.get("footer"), "footer")
     if footer:
         sp.textbox(_MARGIN, 6.72, _BODY_W, 0.4,
@@ -362,31 +480,47 @@ def _render_section(sp: _Shapes, slide: dict, idx: int, _total: int) -> None:
                [sp.para(sp.run(number, sz=88, color="FFFFFF", bold=True, font=t.heading_font))])
     # the accent block sits between the index and the title — a scale cue, not an underline
     sp.shape(_MARGIN + 0.04, 3.62, 0.62, 0.09, t.accent)
+    section_title = _text(slide.get("title"), "section title", required=True)
     sp.textbox(_MARGIN, 3.95, 11.2, 1.3,
-               [sp.para(sp.run(_text(slide.get("title"), "section title", required=True),
-                               sz=30, color="FFFFFF", bold=True, font=t.heading_font))])
+               [sp.para(sp.run(section_title, sz=_fit_sz(section_title, 30, 11.2, 2, 20),
+                               color="FFFFFF", bold=True, font=t.heading_font))])
     subtitle = _text(slide.get("subtitle"), "subtitle")
     if subtitle:
         sp.textbox(_MARGIN, 5.15, 9.6, 1.2,
                    [sp.para(sp.run(subtitle, sz=14, color=t.secondary), line_pct=120)])
 
 
-def _bullet_paras(sp: _Shapes, items: list, where: str, *, sz: int = 15) -> list[str]:
-    t = sp.theme
-    paras: list[str] = []
-    items = items[:10]  # clamp — a wall of bullets is design-bad but never fatal
-    for i, item in enumerate(items):
+def _collect_bullets(items: list, where: str, *, max_items: int = 10) -> list[tuple[str, list[str]]]:
+    """불릿 원시 배열 → [(text, subs)] — 렌더(_bullet_paras)와 사이징
+    (_fit_bullets_sz)이 같은 코어션 결과를 공유한다(이중 파싱 드리프트 방지)."""
+    collected: list[tuple[str, list[str]]] = []
+    for i, item in enumerate(items[:max_items]):
         if isinstance(item, dict):
             text = _text(item.get("text"), f"{where}[{i}].text")
             subs = _str_list(item.get("sub"), f"{where}[{i}].sub", max_items=6)
         else:
             text, subs = _text(item, f"{where}[{i}]"), []
-        if not text:
-            continue  # skip an empty bullet rather than emit a naked bullet glyph
+        if text:  # skip an empty bullet rather than emit a naked bullet glyph
+            collected.append((text, subs))
+    return collected
+
+
+def _fit_entries(collected: list[tuple[str, list[str]]]) -> list[tuple[str, bool]]:
+    entries: list[tuple[str, bool]] = []
+    for text, subs in collected:
+        entries.append((text, False))
+        entries.extend((s, True) for s in subs)
+    return entries
+
+
+def _bullet_paras(sp: _Shapes, collected: list[tuple[str, list[str]]], *, sz: int = 15) -> list[str]:
+    t = sp.theme
+    paras: list[str] = []
+    for i, (text, subs) in enumerate(collected):
         paras.append(sp.para(sp.run(text, sz=sz, color=t.INK), bullet_color=t.accent,
                              line_pct=112, before_pts=9 if i else 0))
         paras.extend(
-            sp.para(sp.run(s, sz=sz - 2, color=t.MUTED), bullet_color=t.MUTED, level=1,
+            sp.para(sp.run(s, sz=max(sz - 2, 8), color=t.MUTED), bullet_color=t.MUTED, level=1,
                     line_pct=112, before_pts=4)
             for s in subs
         )
@@ -400,11 +534,12 @@ def _render_bullets(sp: _Shapes, slide: dict, _idx: int, _total: int) -> None:
     items = slide.get("bullets")
     if not isinstance(items, list):
         items = _str_list(items, "bullets", max_items=10)  # coerce scalar/None
-    paras = _bullet_paras(sp, items, "bullets")
+    collected = _collect_bullets(items, "bullets")
     # An empty bullet list is design-poor but not fatal — a title-only slide is
     # still valid. (The default layout falls here, so it must never raise.)
-    if paras:
-        sp.textbox(_MARGIN, 1.95, _BODY_W - 0.6, 4.9, paras)
+    if collected:
+        sz = _fit_bullets_sz(_fit_entries(collected), _BODY_W - 0.6, 4.9, 15, 11)
+        sp.textbox(_MARGIN, 1.95, _BODY_W - 0.6, 4.9, _bullet_paras(sp, collected, sz=sz))
 
 
 def _render_two_column(sp: _Shapes, slide: dict, _idx: int, _total: int) -> None:
@@ -428,8 +563,9 @@ def _render_two_column(sp: _Shapes, slide: dict, _idx: int, _total: int) -> None
         items = col.get("bullets") or []
         if not isinstance(items, list):
             raise DeckSpecError(f"columns[{i}].bullets must be an array")
-        sp.textbox(x + 0.35, 3.32, col_w - 0.7, 3.05,
-                   _bullet_paras(sp, items[:6], f"columns[{i}].bullets", sz=13))
+        collected = _collect_bullets(items, f"columns[{i}].bullets", max_items=6)
+        sz = _fit_bullets_sz(_fit_entries(collected), col_w - 0.7, 3.05, 13, 10)
+        sp.textbox(x + 0.35, 3.32, col_w - 0.7, 3.05, _bullet_paras(sp, collected, sz=sz))
 
 
 def _render_stats(sp: _Shapes, slide: dict, _idx: int, _total: int) -> None:
@@ -455,7 +591,8 @@ def _render_stats(sp: _Shapes, slide: dict, _idx: int, _total: int) -> None:
         label_color = t.secondary if primary_card else t.INK
         note_color = t.secondary if primary_card else t.MUTED
         sp.textbox(x + 0.35, 2.78, card_w - 0.7, 1.35,
-                   [sp.para(sp.run(value, sz=38, color=value_color, bold=True, font=t.heading_font))],
+                   [sp.para(sp.run(value, sz=_fit_sz(value, 38, card_w - 0.7, 1, 18),
+                                   color=value_color, bold=True, font=t.heading_font))],
                    anchor="b")
         sp.textbox(x + 0.35, 4.24, card_w - 0.7, 0.62,
                    [sp.para(sp.run(label, sz=13, color=label_color, bold=True))])
@@ -511,7 +648,8 @@ def _render_timeline(sp: _Shapes, slide: dict, _idx: int, _total: int) -> None:
         title = _text(step.get("title"), f"steps[{i}].title", required=True, max_len=90)
         desc = _text(step.get("desc"), f"steps[{i}].desc", max_len=240)
         sp.textbox(_MARGIN + col_w * i + 0.12, 3.85, col_w - 0.24, 0.75,
-                   [sp.para(sp.run(title, sz=14, color=t.primary, bold=True), align="ctr", line_pct=106)])
+                   [sp.para(sp.run(title, sz=_fit_sz(title, 14, col_w - 0.24, 2, 10),
+                                   color=t.primary, bold=True), align="ctr", line_pct=106)])
         if desc:
             sp.textbox(_MARGIN + col_w * i + 0.12, 4.6, col_w - 0.24, 1.7,
                        [sp.para(sp.run(desc, sz=11, color=t.MUTED), align="ctr", line_pct=114)])
@@ -523,9 +661,11 @@ def _render_quote(sp: _Shapes, slide: dict, _idx: int, _total: int) -> None:
     sp.textbox(_MARGIN, 0.9, 2.2, 1.9,
                [sp.para(sp.run("“", sz=120, color=t.accent, bold=True, font=t.heading_font))],
                autofit=False)
+    quote_text = _text(slide.get("quote"), "quote text", required=True)
     sp.textbox(1.7, 2.55, 9.9, 2.6,
-               [sp.para(sp.run(_text(slide.get("quote"), "quote text", required=True),
-                               sz=22, color=t.INK, font=t.heading_font), line_pct=124)])
+               [sp.para(sp.run(quote_text,
+                               sz=_fit_sz_height(quote_text, 22, 9.9, 2.6, 14, line_pct=1.24),
+                               color=t.INK, font=t.heading_font), line_pct=124)])
     attribution = _text(slide.get("attribution"), "attribution")
     if attribution:
         sp.textbox(1.7, 5.5, 9.9, 0.5,
@@ -537,9 +677,10 @@ def _render_closing(sp: _Shapes, slide: dict, _idx: int, _total: int) -> None:
     sp.shape(0, 0, 13.333, 7.5, t.primary)
     _motif(sp, on_dark=True)
     sp.shape(_MARGIN, 2.42, 0.62, 0.09, t.accent)
+    closing_title = _text(slide.get("title"), "closing title", required=True)
     sp.textbox(_MARGIN, 2.75, 11.4, 1.6,
-               [sp.para(sp.run(_text(slide.get("title"), "closing title", required=True),
-                               sz=36, color="FFFFFF", bold=True, font=t.heading_font))])
+               [sp.para(sp.run(closing_title, sz=_fit_sz(closing_title, 36, 11.4, 2, 22),
+                               color="FFFFFF", bold=True, font=t.heading_font))])
     subtitle = _text(slide.get("subtitle"), "subtitle")
     if subtitle:
         sp.textbox(_MARGIN, 4.35, 9.8, 1.0,
@@ -617,11 +758,21 @@ def _render_chart(sp: _Shapes, slide: dict, _idx: int, _total: int) -> None:
     ctype, cats, series = _chart_data(chart)
     cycle = [t.primary, t.accent, t.MUTED]
 
-    plot_x0, plot_x1 = _MARGIN + 0.15, 13.333 - _MARGIN
+    # 좌측에 눈금 값 자리를 확보한다(그리드라인 라벨).
+    plot_x0, plot_x1 = _MARGIN + 0.62, 13.333 - _MARGIN
     plot_y0, plot_y1 = 2.55, 6.0
     plot_w, plot_h = plot_x1 - plot_x0, plot_y1 - plot_y0
     ncat, nser = len(cats), len(series)
     maxval = max((v for _, vals in series for v in vals), default=0.0) or 1.0
+
+    # 수평 그리드라인 + 좌측 눈금 값 (25/50/75/100%) — 축 없이 값만 있는 차트는
+    # 스케일을 읽을 수 없다. 옅은 중립 회색: 팔레트와 무관하게 배경으로 가라앉는다.
+    for frac in (0.25, 0.5, 0.75, 1.0):
+        gy = plot_y1 - plot_h * frac
+        sp.shape(plot_x0, gy, plot_w, 0.012, "E4E7EE")
+        sp.textbox(_MARGIN - 0.05, gy - 0.11, 0.6, 0.24,
+                   [sp.para(sp.run(_fmt_val(maxval * frac), sz=8, color=t.MUTED), align="r")],
+                   anchor="ctr", autofit=False)
 
     # optional legend (multi-series or named series)
     if nser > 1 or any(name for name, _ in series):
@@ -655,8 +806,12 @@ def _render_chart(sp: _Shapes, slide: dict, _idx: int, _total: int) -> None:
                    for ci in range(ncat)]
             for a, b in zip(pts, pts[1:]):
                 sp.connector(a[0], a[1], b[0], b[1], cycle[si])
-            for px, py in pts:
+            for ci, (px, py) in enumerate(pts):
                 sp.shape(px - 0.07, py - 0.07, 0.14, 0.14, cycle[si], prst="ellipse")
+                if nser == 1:  # 다시리즈에선 라벨이 겹친다 — 단일 시리즈만 값 표기
+                    sp.textbox(px - 0.5, py - 0.42, 1.0, 0.3,
+                               [sp.para(sp.run(_fmt_val(vals[ci]), sz=9, color=t.INK, bold=True), align="ctr")],
+                               anchor="b", autofit=False)
 
     for ci in range(ncat):  # category labels along the baseline
         sp.textbox(plot_x0 + ci * group_w, plot_y1 + 0.08, group_w, 0.5,
@@ -666,6 +821,60 @@ def _render_chart(sp: _Shapes, slide: dict, _idx: int, _total: int) -> None:
     if footnote:
         sp.textbox(_MARGIN, 6.85, _BODY_W, 0.35,
                    [sp.para(sp.run(footnote, sz=9, color=t.MUTED, italic=True))])
+
+
+# ── image layout (workspace png/jpeg, aspect-fit) ────────────────────────────
+
+
+def _fit_box(iw: int, ih: int, bx: float, by: float, bw: float, bh: float) -> tuple[float, float, float, float]:
+    """이미지(px)를 박스(in) 안에 contain-fit — 중앙 정렬 좌표를 돌려준다.
+    96dpi 기준 자연 크기보다 약간의 업스케일은 허용하되 2배로 캡(픽셀 뭉개짐 방지)."""
+    natural_w, natural_h = iw / 96.0, ih / 96.0
+    scale = min(bw / natural_w, bh / natural_h, 2.0)
+    w, h = natural_w * scale, natural_h * scale
+    return bx + (bw - w) / 2, by + (bh - h) / 2, w, h
+
+
+def _render_image(sp: _Shapes, slide: dict, _idx: int, _total: int) -> None:
+    t = sp.theme
+    _kicker_title(sp, _text(slide.get("kicker"), "kicker"),
+                  _text(slide.get("title"), "image slide title", required=True))
+    rel_path = _text(slide.get("image"), "image path", required=True, max_len=400)
+    if sp.load_asset is None:
+        raise DeckSpecError("image assets are unavailable in this context")
+    try:
+        data = sp.load_asset(rel_path)
+    except Exception as exc:
+        raise DeckSpecError(f"could not load image {rel_path!r}: {exc}") from None
+    ext, iw, ih = _image_meta(data)
+    if iw <= 0 or ih <= 0:
+        raise DeckSpecError(f"image has invalid dimensions: {rel_path!r}")
+    rel_id = sp.add_image(data, ext)
+
+    caption = _text(slide.get("caption"), "caption", max_len=300)
+    raw_bullets = slide.get("bullets")
+    collected = (
+        _collect_bullets(raw_bullets, "bullets", max_items=6) if isinstance(raw_bullets, list) else []
+    )
+    if collected:
+        # 분할: 좌 불릿 / 우 이미지 카드 — 텍스트와 근거 화면을 한 슬라이드에.
+        text_w = 5.4
+        img_x, img_w = _MARGIN + text_w + 0.45, _BODY_W - text_w - 0.45
+        sz = _fit_bullets_sz(_fit_entries(collected), text_w, 4.4, 14, 10)
+        sp.textbox(_MARGIN, 2.05, text_w, 4.4, _bullet_paras(sp, collected, sz=sz))
+        sp.shape(img_x, 2.05, img_w, 4.4, t.CARD, prst="roundRect", radius_pct=5)
+        x, y, w, h = _fit_box(iw, ih, img_x + 0.15, 2.2, img_w - 0.3, 4.1)
+        sp.picture(x, y, w, h, rel_id)
+        if caption:
+            sp.textbox(img_x, 6.55, img_w, 0.35,
+                       [sp.para(sp.run(caption, sz=10, color=t.MUTED, italic=True), align="ctr")])
+    else:
+        box_h = 4.35 if caption else 4.75
+        x, y, w, h = _fit_box(iw, ih, _MARGIN, 2.0, _BODY_W, box_h)
+        sp.picture(x, y, w, h, rel_id)
+        if caption:
+            sp.textbox(_MARGIN, 2.0 + box_h + 0.15, _BODY_W, 0.4,
+                       [sp.para(sp.run(caption, sz=11, color=t.MUTED, italic=True), align="ctr")])
 
 
 # ── salvage: render *something valid* from a slide that failed its layout ──────
@@ -695,7 +904,9 @@ def _render_salvage(sp: _Shapes, raw: dict) -> None:
     _kicker_title(sp, _text(raw.get("kicker"), ""), title)
     lines = _salvage_lines(raw)
     if lines:
-        sp.textbox(_MARGIN, 1.95, _BODY_W - 0.6, 4.9, _bullet_paras(sp, lines, "salvage"))
+        collected = [(line, []) for line in lines]
+        sz = _fit_bullets_sz(_fit_entries(collected), _BODY_W - 0.6, 4.9, 15, 11)
+        sp.textbox(_MARGIN, 1.95, _BODY_W - 0.6, 4.9, _bullet_paras(sp, collected, sz=sz))
 
 
 def _guess_layout(raw: dict) -> str:
@@ -703,7 +914,7 @@ def _guess_layout(raw: dict) -> str:
     unknown (a common small-model slip). Falls back to the most forgiving one."""
     for field, layout in (
         ("chart", "chart"), ("stats", "stats"), ("steps", "timeline"),
-        ("columns", "two_column"), ("quote", "quote"),
+        ("columns", "two_column"), ("quote", "quote"), ("image", "image"),
     ):
         if raw.get(field):
             return layout
@@ -722,6 +933,7 @@ _RENDERERS = {
     "timeline": _render_timeline,
     "quote": _render_quote,
     "chart": _render_chart,
+    "image": _render_image,
     "closing": _render_closing,
 }
 
@@ -889,7 +1101,7 @@ def _presentation_xml(n_slides: int, has_notes: bool) -> str:
     )
 
 
-def _content_types(n_slides: int, notes_indices: list[int]) -> str:
+def _content_types(n_slides: int, notes_indices: list[int], media_exts: frozenset[str] | set[str] = frozenset()) -> str:
     slides = "".join(
         f'<Override PartName="/ppt/slides/slide{i + 1}.xml" '
         'ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>'
@@ -908,11 +1120,18 @@ def _content_types(n_slides: int, notes_indices: list[int]) -> str:
         if notes_indices
         else ""
     )
+    media_defaults = "".join(
+        f'<Default Extension="{ext}" ContentType="image/{ext}"/>' for ext in sorted(media_exts)
+    )
     return (
         _XMLDECL
         + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
         + '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
         + '<Default Extension="xml" ContentType="application/xml"/>'
+        # 임베디드 RICE 스펙(docProps/riceSpec.json) — 파트마다 content type이 있어야
+        # OOXML 검증기가 통과한다. 앱은 이 파트를 모르면 무시한다.
+        + '<Default Extension="json" ContentType="application/json"/>'
+        + media_defaults
         + '<Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>'
         + '<Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/>'
         + '<Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/>'
@@ -928,13 +1147,22 @@ def _content_types(n_slides: int, notes_indices: list[int]) -> str:
 
 # ── entry point ──────────────────────────────────────────────────────────────
 
-def build_presentation(spec: dict) -> tuple[bytes, dict]:
+def build_presentation(
+    spec: dict,
+    *,
+    load_asset: "Callable[[str], bytes] | None" = None,
+    embed_spec: bool = True,
+) -> tuple[bytes, dict]:
     """Deck spec dict → (.pptx bytes, summary).
 
     Fault-tolerant by design (small-model robustness): a malformed slide never
     aborts the deck — it is rendered as a salvage slide and noted in
     `summary["warnings"]`. The only hard error is an entirely empty `slides`
-    array (nothing to build)."""
+    array (nothing to build).
+
+    `load_asset`: image 레이아웃의 워크스페이스 이미지 로더(office/__init__ 주입).
+    `embed_spec`: 원본 스펙을 docProps/riceSpec.json으로 패키지에 심는다 —
+    edit_presentation의 슬라이드 단위 편집이 이 파트를 읽어 재빌드한다."""
     warnings: list[str] = []
     theme = Theme.from_spec(spec.get("theme"), warnings)
     raw_slides = spec.get("slides")
@@ -946,6 +1174,7 @@ def build_presentation(spec: dict) -> tuple[bytes, dict]:
 
     slides_xml: list[str] = []
     slide_meta: list[dict] = []
+    slide_images: list[list[tuple[int, str, bytes]]] = []  # per slide: [(rel_id, ext, bytes)]
     notes: dict[int, str] = {}  # slide index (0-based) → notes text
     section_counter = 0
     for i, raw in enumerate(raw_slides):
@@ -961,15 +1190,16 @@ def build_presentation(spec: dict) -> tuple[bytes, dict]:
             layout, renderer = guessed, _RENDERERS[guessed]
         if layout == "section":
             section_counter += 1
-        shapes = _Shapes(theme)
+        shapes = _Shapes(theme, load_asset)
         try:
             renderer(shapes, raw, section_counter if layout == "section" else i + 1, len(raw_slides))
         except Exception as exc:  # noqa: BLE001 — never let one slide kill the deck
             warnings.append(f"slides[{i}] ({layout}): {exc} → rendered a salvage slide")
-            shapes = _Shapes(theme)
+            shapes = _Shapes(theme, load_asset)
             _render_salvage(shapes, raw)
             layout = "bullets"  # salvage is a light title/bullets slide
         slides_xml.append(_slide_xml(shapes, dark_bg=layout in _DARK_LAYOUTS, theme=theme))
+        slide_images.append(list(shapes.images))
         note_text = _text(raw.get("notes"), f"slides[{i}].notes", max_len=4_000)
         if note_text:
             notes[i] = note_text
@@ -978,9 +1208,21 @@ def build_presentation(spec: dict) -> tuple[bytes, dict]:
     notes_order = sorted(notes)  # slide idx → notesSlide number = position+1
     notes_number = {slide_i: n + 1 for n, slide_i in enumerate(notes_order)}
 
+    # 미디어 파트 전역 번호 부여: slide i의 rel_id → ppt/media/imageN.ext
+    media_parts: list[tuple[str, bytes]] = []  # (zip filename, bytes)
+    media_by_slide: list[list[tuple[int, str]]] = []  # per slide: [(rel_id, part filename)]
+    for images in slide_images:
+        img_rels: list[tuple[int, str]] = []
+        for rel_id, ext, data in images:
+            filename = f"image{len(media_parts) + 1}.{ext}"
+            media_parts.append((filename, data))
+            img_rels.append((rel_id, filename))
+        media_by_slide.append(img_rels)
+    media_exts = {ext for images in slide_images for _, ext, _ in images}
+
     buf = BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("[Content_Types].xml", _content_types(len(slides_xml), notes_order))
+        zf.writestr("[Content_Types].xml", _content_types(len(slides_xml), notes_order, media_exts))
         zf.writestr("_rels/.rels", _rels([
             ("rId1", "officeDocument", "ppt/presentation.xml"),
             ("rId2", "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties", "docProps/core.xml"),
@@ -1023,13 +1265,33 @@ def build_presentation(spec: dict) -> tuple[bytes, dict]:
         ]))
         zf.writestr("ppt/theme/theme1.xml", _theme_xml(theme, "RICE"))
 
-        # slides + their rels
+        # slides + their rels (+ image rels — rId100+ 대역이라 layout/notes와 무충돌)
         for i, xml in enumerate(slides_xml):
             zf.writestr(f"ppt/slides/slide{i + 1}.xml", xml)
             rels = [("rId1", "slideLayout", "../slideLayouts/slideLayout1.xml")]
             if i in notes_number:
                 rels.append(("rId2", "notesSlide", f"../notesSlides/notesSlide{notes_number[i]}.xml"))
+            rels.extend(
+                (f"rId{rel_id}", "image", f"../media/{filename}") for rel_id, filename in media_by_slide[i]
+            )
             zf.writestr(f"ppt/slides/_rels/slide{i + 1}.xml.rels", _rels(rels))
+
+        # media parts
+        for filename, data in media_parts:
+            zf.writestr(f"ppt/media/{filename}", data)
+
+        # 임베디드 스펙 — edit_presentation의 편집 원본. 파워포인트가 재저장하면
+        # 이 파트는 사라질 수 있고, 그때 편집 도구는 명확히 거절한다(조용한
+        # 어긋남보다 낫다).
+        if embed_spec:
+            zf.writestr(
+                SPEC_PART,
+                json.dumps(
+                    {"title": spec.get("title"), "theme": spec.get("theme"), "slides": raw_slides},
+                    ensure_ascii=False,
+                    default=str,
+                ),
+            )
 
         # notes
         if notes_order:
@@ -1054,8 +1316,21 @@ def build_presentation(spec: dict) -> tuple[bytes, dict]:
         "slide_count": len(slide_meta),
         "theme": {"primary": theme.primary, "secondary": theme.secondary, "accent": theme.accent},
     }
+    if media_parts:
+        summary["images_embedded"] = len(media_parts)
     if warnings:
         # Non-fatal issues the model may want to address on a regenerate. The file
         # is valid regardless — these are advisories, not errors.
         summary["warnings"] = warnings
     return buf.getvalue(), summary
+
+
+def read_embedded_spec(pptx_bytes: bytes) -> dict | None:
+    """패키지에서 임베디드 RICE 스펙을 읽는다 — 없거나(외부 생성/앱 재저장) 파손이면
+    None. edit_presentation이 편집 가능 여부를 판단하는 단일 소스."""
+    try:
+        with zipfile.ZipFile(BytesIO(pptx_bytes)) as zf:
+            data = json.loads(zf.read(SPEC_PART).decode("utf-8"))
+    except (zipfile.BadZipFile, KeyError, ValueError, OSError):
+        return None
+    return data if isinstance(data, dict) else None

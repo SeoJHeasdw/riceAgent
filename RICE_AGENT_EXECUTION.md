@@ -311,6 +311,13 @@ Drift guard(§3.3)는 프롬프트로 재평가를 *권유*할 뿐이다. 계획
   준수를 요구한다. 사용자용 문장을 런타임이 합성하는 게 아니라(2026-07-07 결정
   유지) **모델에게 지시를 상기**시키는 모델-facing 교정이다. plan 메타 호출만 있는
   라운드는 계획 카드가 보이므로 침묵으로 세지 않고, 서사가 나오면 카운터는 리셋.
+- **종료 계약 (2026-07-10)**: 방어 장치가 늘수록 장치끼리 꼬여 창발 루프가 될
+  위험이 커진다 — 그래서 모든 넛지 카운터는 **턴-로컬이고 리셋 없이 소진**되며
+  (빈 응답 ×2, reconcile ×1, 서사 ×프로파일 상한), 반복 상한이 최종 방벽이다.
+  이 계약은 문서가 아니라 테스트가 강제한다: `tests/test_loop_termination.py`가
+  병리적 모델 행동 3종(계획+영원한 빈 응답 / 빈 응답↔도구 교대 / 영원한 침묵
+  도구 호출)에서 유한·결정론적 종료를 검증한다. **새 방어 장치를 추가하면 반드시
+  그 파일에 상호작용 시나리오를 추가할 것.**
 
 ### 3.9 `start_plan` — 실행 중 계획으로 승격 (lazy escalation)
 
@@ -409,7 +416,7 @@ Drift guard(§3.3)는 프롬프트로 재평가를 *권유*할 뿐이다. 계획
 
 | source | 무엇 | 이식 방법 |
 |---|---|---|
-| `builtin` | 프로세스 내 도구: `read_file`/`write_file`/`edit_file`/`list_dir`/`search_files`, `terminal`, `fetch_url`, `vision_analyze`, `skill_search`/`skill_view`/`propose_skill`, `delegate_subagent`, `create_presentation`/`create_workbook`/`create_document` (office — stdlib OOXML 생성 + 수식 로컬 평가, `agent/builtins/office/`). `agent/builtins/workspace.py`는 경로 샌드박스 helper이며 별도 LLM tool은 아니다 | `agent/builtins/`에 모듈 추가 → `build_builtin_tools()`에 등록(한 곳). 핸들러는 `async (dict) -> object`, 위험하면 `requires_approval=True`, 세션 문맥이 필요하면 `needs_session=True` 마커 |
+| `builtin` | 프로세스 내 도구: `read_file`/`write_file`/`edit_file`/`list_dir`/`search_files`, `terminal`, `fetch_url`(v2 2026-07-10 — 마크다운형 추출·홉별 SSRF 가드·유한 재시도·HTTP 에러의 구조화 반환·`start_index` 페이지네이션+TTL 캐시·`include_links`), `vision_analyze`, `skill_search`/`skill_view`/`propose_skill`, `delegate_subagent`, `create_presentation`/`edit_presentation`/`create_workbook`/`create_document` (office — stdlib OOXML 생성 + 수식 로컬 평가 + 임베디드 스펙 기반 슬라이드 단위 편집, `agent/builtins/office/`). `agent/builtins/workspace.py`는 경로 샌드박스 helper이며 별도 LLM tool은 아니다 | `agent/builtins/`에 모듈 추가 → `build_builtin_tools()`에 등록(한 곳). 핸들러는 `async (dict) -> object`, 위험하면 `requires_approval=True`, 세션 문맥이 필요하면 `needs_session=True` 마커 |
 | `connector` | 외부 SaaS/로컬 MCP: Gmail/Calendar/Drive + 사용자가 등록한 로컬 MCP/커스텀 원격 커넥터(OAuth 자동 디스커버리) | connector 모듈이 `list_tools()`로 광고 — **연결된 커넥터의 도구만** 노출된다(미연결 도구는 스키마에서 제외). 도구별 정책(allow/approval/block)은 사용자가 저장. 프로토콜·엔드포인트 상세는 RUNTIME_DESIGN·RUNTIME_DIRECTORY·CONTRACTS 정본 |
 | `plugin` | 설치된 플러그인이 제공하는 도구 + SKILL.md(학습된 스킬과 동일한 관련도 파이프라인으로 주입 — 전량 주입 아님, §7) | manifest 기반 `IPluginLoader` — 샌드박스에서 실행 |
 | `bridge` | `tool_search`/`tool_describe`/`tool_call` 3종 | 직접 이식 대상이 아님 — 아래 폴딩의 산물 |
@@ -496,6 +503,27 @@ recommended_next_action, tools_used}`로 구조화된다 — 메인 모델과 �
 프롬프트의 "Current turn in progress" 섹션으로 렌더한다(총 4,000자 상한, 초과 시
 **최근** 관찰을 남긴다). `needs_session`과 같은 opt-in 관례라 다른 빌트인/테스트
 fake는 영향이 없다.
+
+**주입/산출 채널 v2 (2026-07-10)** — 워커를 "읽기 전용 심부름꾼"에서 "격리된
+작업 단위"로 확장했다(`tests/test_subagent_v2.py`):
+
+- **스킬 주입**: learning이 배선되면 (a) 태스크 관련 스킬 **인덱스**(이름+한 줄,
+  `search_skills` 상위 5)를 워커 프롬프트에 싣고, (b) `skill_search`/`skill_view`
+  도구를 주어 절차 전문을 온디맨드로 당기게 한다 — 메인 루프의 하이브리드 주입
+  (§7-1)과 같은 철학·같은 핸들러. `propose_skill`은 주지 않는다(사용자 가시 효과
+  스테이징은 메인 스트림의 카드 흐름 안에서만).
+- **도구 주입(화이트리스트)**: `delegate_subagent`의 `tools` 인자로 메인 모델이
+  워커의 도구 표면을 태스크에 맞게 좁힌다(웹 전용 리서치엔 `["fetch_url"]`).
+  미지의 이름은 무시, 교집합이 비면 전체 셋 폴백(fail-soft) — 메인 모델의 오타가
+  워커를 벙어리로 만들지 않는다.
+- **아티팩트 채널(`write_scratch`)**: 워커가 긴 산출물(초안·표·추출문)을
+  `.subagent/<thread_id>/` **격리 영역에만** 파일로 남긴다(이중 containment,
+  `file_tools.scratch_tool_factory`). 요약은 메인 컨텍스트로, 본문은 파일로 —
+  컨텍스트 오염 없이 대용량 산출이 가능하다. 실제로 쓰인 경로는 러너가 도구
+  결과에서 **관찰**해 `artifacts`로 보고한다(모델 자기신고 아님; timeout으로
+  죽어도 이미 남긴 아티팩트는 보고). 승인 게이트를 우회하지 않는 이유: 쓰기는
+  dot-디렉토리(리스팅에 안 잡힘) 안으로만 가능하고, 사용자 가시 영역으로의
+  승격은 메인 에이전트의 승인 게이트 도구가 담당한다.
 
 ---
 
