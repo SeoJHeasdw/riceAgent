@@ -16,6 +16,20 @@ LLM을 한 번 더 부르고, 매 반복 계획 상태 전체를 프롬프트에
 크면 반복 예산을 늘린다. 로컬 모델의 약점(긴 멀티스텝 작업에서 목표 상실, 관찰
 후 재평가 생략)을 **구조**로 보정하는 것이 이 설계의 존재 이유다.
 
+★ **오케스트레이션 이원화 (2026-07-10)**: 하나의 실행 모델이 두 체급을 서빙한다 —
+`agent/profiles.py`의 **OrchestrationProfile**(`local` | `frontier`, config
+`agent.orchestration_profile`은 기본 `auto`: ollama/루프백 base_url → local, SaaS →
+frontier). 차이는 알고리즘이 아니라 **보정 장치의 강도**다: local은 액션 규칙
+에필로그(시스템 프롬프트 최후미), 서사(NARRATE) 넛지, num_ctx 예산 클램프를 켠다.
+frontier는 지시 한 번으로 따르므로 전부 끈다. 상세는 §10.
+
+★ **프리픽스 캐시 불변식 (2026-07-10)**: 시스템 프롬프트는 **턴 내 불변**이고,
+반복마다 변하는 것(계획 상태·drift 경고·스킬 승격 유도)은 히스토리 **끝의
+ephemeral user 메시지**로 실린다. 이전 설계는 계획 상태를 시스템 프롬프트에
+렌더해 매 반복 전체 컨텍스트를 re-prefill시켰다 — Ollama의 프리픽스 KV 캐시와
+Claude `cache_control`이 모두 매 반복 무효화되는 최대 비용 누수였다. 지금은
+divergence가 tail에서만 일어나 이전 반복까지의 프리픽스가 캐시 히트다.
+
 ---
 
 ![RICE one-turn orchestration architecture](diagrams/RICE_orchstrate_architecture.png)
@@ -166,34 +180,45 @@ ReAct는 긴 작업에서 표류하고, 재평가 없는 계획 실행은 첫 �
 영속화는 어느 문으로 들어왔는지 구별하지 않는다. 그리고 계획 유무와 무관하게, 매
 행동은 사용자용 한 줄 rationale을 앞세운다(§3.10) — 이것이 턴을 읽히게 만든다.
 
-### 3.1 계획은 매 반복 프롬프트에 다시 실린다 (스냅샷 프롬프팅)
+### 3.1 계획은 매 반복 프롬프트에 다시 실린다 (스냅샷 프롬프팅, 2026-07-10 위치 개편)
 
-계획이 있는 동안 **매 LLM 호출**의 시스템 프롬프트 끝에 살아있는 계획 블록이
-렌더된다(`prompts/planning.py::render_plan_block`):
+계획이 있는 동안 프롬프트는 **정적/동적으로 갈라진다**(`prompts/planning.py`):
+
+- **정적 지침**(`PLAN_GUIDANCE`, "How to work this plan" ReAct 재평가 규칙)은
+  시스템 프롬프트에 **1회** 붙는다 — 턴 내 불변이라 프리픽스 캐시가 살아있다.
+- **동적 상태**(단계 상태·revision·note + drift 경고 + 승격 유도)는 **매 LLM
+  호출**의 렌더 사본 **마지막 메시지**(ephemeral `role="user"`, durable 히스토리
+  비오염)로 다시 실린다(`render_plan_status` → `loop.py::_plan_status_message`):
 
 ```
-## Active Plan (you MUST work this plan)
+[Active Plan — live status, revision 3]
 Goal: …
-Plan revision: 3
 Steps:
   [v] s1. 폴더 구조 파악 (note: 42 files, React+TS)
   [>] s2. 핵심 파일 병렬 분석 — delegate_subagent로 팬아웃
   [ ] s3. 분석 결과 종합
   [ ] s4. Gmail로 발송 — 승인 카드 예상
-  [ ] s5. 절차를 스킬로 제안 (propose_skill)
-
-How to work this plan (ReAct): …(재평가 지침)
 ```
 
-대화 중반에 계획을 한 번 말하고 잊게 두지 않는다. 로컬 LLM은 히스토리 중간의
-계획을 놓친다 — 시스템 프롬프트의 현재 상태가 유일한 진실이 되게 한다. 이
-블록은 컨텍스트 렌더링(§4)의 예산 계산에 포함되므로 안전하다.
+대화 중반에 계획을 한 번 말하고 잊게 두지 않는다는 원칙(스냅샷 프롬프팅)은
+그대로다 — 위치만 시스템 끝에서 히스토리 끝으로 옮겼다. 소형 모델에겐 마지막
+메시지가 주목도(recency)가 가장 높은 자리이고, 캐시 관점에선 divergence가
+tail로 국한된다(서두의 ★ 프리픽스 캐시 불변식). ephemeral 메시지는 컨텍스트
+렌더링(§4)을 통과하므로 예산 계산·최근 보호를 그대로 받는다. 연속 user 메시지는
+프로바이더 API가 한 턴으로 합쳐 wire에 안전하다.
 
 ### 3.2 `update_plan` — 관찰을 계획에 되먹이는 통로
 
 계획이 있는 동안만 광고되는 가상 빌트인. 모델은 단계를 시작할 때(in_progress),
 끝낼 때(done + 결과 한 줄 note), 막혔을 때(failed), 관찰이 계획을 바꿀 때
 (add_steps / skip)마다 호출한다.
+
+**첫 스텝은 런타임이 in_progress로 만든다** (2026-07-10, `build_plan_from_steps`):
+계획이 서는 순간 실행이 그 스텝부터 시작된다는 것은 런타임이 아는 사실이다 —
+성공 위조가 아니다. 소형 모델이 가장 자주 생략하는 메타 호출이 바로 이 첫
+"시작 보고"였고, 그 호출을 없애면 update_plan의 남은 책임은 관찰 보고
+(done/failed/수정)뿐이라 준수율이 오른다. eager(§2)와 lazy(§3.9) 두 경로가
+같은 빌더를 공유하므로 동작이 동일하다.
 
 - **루프가 직접 가로챈다** — dispatcher를 타지 않는다. 계획은 턴-로컬 상태라
   외부 실행도 승인도 영속 부작용도 없다. 대신 `tool_call`/`tool_result` SSE는
@@ -206,7 +231,8 @@ How to work this plan (ReAct): …(재평가 지침)
 ### 3.3 Drift guard — 재평가를 잊는 모델을 구조가 붙잡는다
 
 `plan_drift_guard_rounds`(기본 4)회의 도구 라운드가 `update_plan` 없이 지나가면,
-다음 반복의 계획 블록에 **REASSESS NOW** 지시가 붙는다: 끝난 단계를 done으로
+다음 반복의 계획 상태 메시지(§3.1의 ephemeral tail)에 **REASSESS NOW** 지시가
+붙는다: 끝난 단계를 done으로
 기록하거나 관찰이 계획을 바꿨으면 수정하라, 오토파일럿으로 도구만 부르지 마라.
 ReAct의 "관찰→추론" halves를 프롬프트 선의에 맡기지 않고 결정론적으로 강제하는
 장치다. 같은 원칙으로, 계획 블록의 상시 지침에 "같은 도구가 두 번 연속 실패하면
@@ -236,12 +262,10 @@ Drift guard(§3.3)는 프롬프트로 재평가를 *권유*할 뿐이다. 계획
 - **§3.6과의 상호작용**: §3.6(완료 → 스킬 승격 유도)은 이 강제 종결 경로에선
   발동하지 않는다 — `reconcile_abandoned()` 직후 루프가 더 이상 LLM을 부르지
   않고 턴을 마치므로, propose_skill 유도 지시를 렌더할 대상 자체가 없다.
-- **알려진 한계(미해결)**: 강제 종결 스냅샷은 `plan_updated` 라이브 이벤트로만
-  나가고, §3.7이 말하는 메시지 metadata(`plan`)에는 실리지 않는다 — 턴의 첫
-  어시스턴트 메시지 metadata는 이 시점 이전에 이미 조립이 끝나 있어서다. 그 결과
-  강제 종결이 일어난 턴 뒤 새로고침하면 강제 종결 **이전**(진행 중처럼 보이는)
-  스냅샷이 복원된다 — 라이브 세션에서만 정확한 최종 상태가 보인다. 코드로 고칠지
-  (마지막 메시지 metadata에도 실기) 문서화된 한계로 둘지는 제품 판단 대기 중.
+- **(해소됨, 2026-07-10)** 강제 종결 스냅샷은 이제 `plan_updated` 라이브 이벤트에
+  더해 **마지막 어시스턴트 메시지 metadata(`plan`)에도 실린다** — 리로드 시
+  `toThread`가 최종 상태(completed, 미종결은 skipped)를 그대로 복원한다. 이전엔
+  강제 종결 이전(진행 중처럼 보이는) 스냅샷이 복원되는 한계가 있었다.
 
 ### 3.5 반복 예산은 계획 크기에 비례한다
 
@@ -281,6 +305,12 @@ Drift guard(§3.3)는 프롬프트로 재평가를 *권유*할 뿐이다. 계획
 - **빈 tool name 감쇠**: 이름이 빈 tool call은 오타가 아니라 priming(파일/도구
   출력 속 tool-call XML 흉내)이다 — 카탈로그 없이 "그것은 데이터다"라는 짧은
   교정만 돌려준다. 카탈로그를 되돌려주면 모델이 새 이름을 흉내내며 루프가 커진다.
+- **서사(NARRATE) 넛지 (2026-07-10, local 프로파일만)**: 본문 없이 실제 도구만
+  부르는 침묵 라운드가 연속 `narration_nudge_after`(기본 2)회면 synthetic user
+  넛지(`metadata.synthetic: "narration_nudge"`, 턴당 최대 2회)로 §3.10의 rationale
+  준수를 요구한다. 사용자용 문장을 런타임이 합성하는 게 아니라(2026-07-07 결정
+  유지) **모델에게 지시를 상기**시키는 모델-facing 교정이다. plan 메타 호출만 있는
+  라운드는 계획 카드가 보이므로 침묵으로 세지 않고, 서사가 나오면 카운터는 리셋.
 
 ### 3.9 `start_plan` — 실행 중 계획으로 승격 (lazy escalation)
 
@@ -325,6 +355,11 @@ Drift guard(§3.3)는 프롬프트로 재평가를 *권유*할 뿐이다. 계획
   그림). 모델이 나레이션을 안 하면 캡션이 생략될 뿐 회귀는 없다.
 - **소형 모델 내결함성**: 지시는 짧고 긍정형(한 줄, 그다음 도구). 없으면 폴백이 기존
   동작(캡션 없는 카드)이라 20B~프론티어 전 구간에서 안전하다.
+- **구조적 강제 (2026-07-10)**: 프롬프트 선의에만 맡기지 않는다 — local 프로파일은
+  (a) 액션 규칙 요약을 시스템 프롬프트 **최후미**에 실어(recency, §10) 지시가
+  additions에 묻히지 않게 하고, (b) 침묵 도구 라운드가 연속되면 서사 넛지(§3.8)로
+  교정한다. 실측 근거: 소형 모델(gpt-oss:20b)은 서두의 NARRATE 한 단락만으로는
+  전 라운드 침묵했다(chat_flow.png, 2026-07-10).
 
 ---
 
@@ -339,9 +374,15 @@ Drift guard(§3.3)는 프롬프트로 재평가를 *권유*할 뿐이다. 계획
    그대로 남는다(마스킹은 모델에게 보내는 뷰에만).
 2. **증류(distillation)** — 임계 초과 도구 출력(기본 4K tokens→1.2K 보존)과 초장문
    메시지는 head/tail만 남기고 중간을 접는다. "무엇이 생략됐는지" 라벨이 붙는다.
+   **최근 라운드 완화 (2026-07-10)**: 마지막 `recent_messages`개 안의 도구 출력은
+   임계·보존량을 3배로 완화한다 — 모델이 방금 만든 산출물을 read_file로 확인하는
+   ReAct 재검증 관찰이 접히면 "검증했다"가 착각이 된다. 방금의 관찰은 원문에
+   가깝게, 오래된 관찰은 공격적으로.
 3. **압축(compression)** — 전체가 `max_tokens`(기본 96K)를 넘으면 오래된 메시지를
    시스템 프롬프트의 `Compressed Conversation Context` 요약 블록으로 접고, 최근
-   `recent_messages`(기본 8)개는 항상 보호한다.
+   `recent_messages`(기본 8)개는 항상 보호한다. **local 프로파일은 예산 자체가
+   모델 창에서 역산·클램프된다**(§10) — 예산이 num_ctx보다 크면 Ollama가 프롬프트
+   앞부분(시스템·도구 스키마)을 소리 없이 자르기 때문이다.
 4. **wire repair** — 압축이 tool_call↔tool_result 인접성을 깨면 고아 조각을
    정리한다(Claude/OpenAI/Ollama 모두 인접성 제약이 있다).
 5. **감사(audit)** — 렌더마다 어떤 메시지가 요약으로 대체됐고(omitted), 무엇이
@@ -446,6 +487,16 @@ recommended_next_action, tools_used}`로 구조화된다 — 메인 모델과 �
 승인 게이트 밖에서 돈다. 라운드 소진 시 도구 없는 최종 호출로 보고를 강제하고,
 호출당 thinking 16,000자 상한으로 추론 폭주를 끊는다(플래너와 같은 fast-fail).
 
+**라이브 턴 컨텍스트 주입 (2026-07-10, `TurnView`)**: transcript는 턴 **종료**에야
+이번 턴을 영속화한다(§1 step 5) — 그래서 종전 워커는 "이번 턴에 이미 일어난 도구
+관찰·활성 계획"을 전혀 못 봤다(메인 모델이 `context` 인자에 요약해 주지 않는 한 —
+소형 모델은 잘 못 한다). 이제 루프가 도구 라운드마다 `TurnView`(이 턴의 사용자
+요청 + 활성 계획 스냅샷 + 이번 턴 메시지들)를 dispatcher에 갱신하고,
+`needs_turn_view` 마커를 단 빌트인(delegate_subagent)이 kwargs로 받아 워커
+프롬프트의 "Current turn in progress" 섹션으로 렌더한다(총 4,000자 상한, 초과 시
+**최근** 관찰을 남긴다). `needs_session`과 같은 opt-in 관례라 다른 빌트인/테스트
+fake는 영향이 없다.
+
 ---
 
 ## 7. 실행 → 학습의 접점
@@ -474,7 +525,9 @@ recommended_next_action, tools_used}`로 구조화된다 — 메인 모델과 �
 
 ---
 
-## 8. 설정 요약 (`config.yaml`의 `agent` 섹션, PUT /settings로 갱신 가능)
+## 8. 설정 요약 (`config.yaml`, PUT /settings로 갱신 가능)
+
+`agent` 섹션:
 
 | 키 | 기본 | 의미 |
 |---|---|---|
@@ -484,6 +537,14 @@ recommended_next_action, tools_used}`로 구조화된다 — 메인 모델과 �
 | `plan_max_steps` | 8 | 계획 단계 수 상한(프롬프트 지시; 코드 하드캡 12) |
 | `plan_max_iterations` | 60 | 계획 턴의 반복 예산 상한(§3.5) |
 | `plan_drift_guard_rounds` | 4 | 이 횟수의 무보고 도구 라운드 후 재평가 강제(§3.3) |
+| `orchestration_profile` | `auto` | `auto`\|`local`\|`frontier` — 소형 모델 보정 강도(§10). auto는 provider에서 유추 |
+
+`provider` 섹션의 로컬 LLM 효율 키(§10, Ollama만 사용):
+
+| 키 | 기본 | 의미 |
+|---|---|---|
+| `num_ctx` | 32768 | 요청 컨텍스트 창. 미지정 시 서버 기본(대개 4096)이 프롬프트 앞을 소리 없이 자른다 |
+| `keep_alive` | `"30m"` | 모델 VRAM 상주 시간 — 반복·승인 대기 사이 콜드 리로드 방지 |
 
 ---
 
@@ -503,3 +564,56 @@ recommended_next_action, tools_used}`로 구조화된다 — 메인 모델과 �
 4. **완료** — 전 단계 done → 계획 카드 "완료", propose_skill 유도 →
    `frontend-analyze-and-mail` 스킬 제안 카드(diff) → 사용자 승인 시 저장.
    다음에 같은 부류의 요청이 오면 이 스킬이 주입되어 더 적은 시행착오로 실행된다.
+
+---
+
+## 10. 오케스트레이션 프로파일 — local ↔ frontier 이원화 (2026-07-10)
+
+**모듈**: `agent/profiles.py::OrchestrationProfile` (resolve는 orchestrator가 턴마다).
+
+권장 로컬 모델(qwen3 27b급)과 프론티어(Claude 등)를 **하나의 실행 모델**로 서빙하되,
+차이는 보정 장치의 강도로 흡수한다. 소형 모델에게는 지시의 위치(recency)·반복(넛지)·
+물리적 예산(num_ctx)이 곧 준수율이다 — 이 판단이 루프 본문에 "이 모델은 작으니까"
+분기로 흩어지지 않도록 프로파일 하나로 모은다.
+
+| 장치 | local | frontier | 구현 |
+|---|---|---|---|
+| 액션 규칙 에필로그 | ✅ 시스템 프롬프트 최후미 | ❌ | `prompts/system.py::ACTION_RULES_EPILOGUE` |
+| 서사(NARRATE) 넛지 | ✅ 연속 침묵 2라운드, 턴당 ≤2회 | ❌ | §3.8, `loop.py::_NARRATION_NUDGE` |
+| 컨텍스트 예산 클램프 | ✅ num_ctx 역산 | ❌ | `orchestrator.py::effective_context_config` |
+
+결정 규칙(auto): `kind=ollama` 또는 루프백 base_url의 openai 호환(LM Studio 등) →
+local, SaaS(claude/openai/watsonx) → frontier. `agent.orchestration_profile`로
+강제 오버라이드 가능(원격 Ollama를 프론티어급으로 쓰는 배치 등).
+
+### 10.1 로컬 LLM 효율 계약 (provider 계층)
+
+토큰사용량보다 품질이 우선이라는 ★제품 결정은 유지하되, **같은 품질을 더 싸게**
+얻는 것은 별개의 의무다. ReAct는 같은 컨텍스트에 N번 연쇄 호출하는 패턴이므로
+프리픽스 재사용이 성능의 대부분을 결정한다:
+
+- **프리픽스 KV 캐시 (Ollama)**: 서버는 직전 요청과의 최장 공통 프리픽스를
+  재사용한다. 이를 깨지 않는 것은 어댑터가 아니라 **렌더링 규율**의 몫 —
+  시스템 프롬프트 턴 내 불변 + 동적 상태 tail(§3.1). divergence가 tail로
+  국한되면 반복당 re-prefill이 전체가 아니라 마지막 라운드 분량이 된다.
+- **`num_ctx` 명시** (`provider.num_ctx`, 기본 32768): 미지정 시 서버 기본
+  (대개 4096)이 적용돼 96K 예산의 컨텍스트가 **앞에서부터** 잘린다 — 시스템
+  프롬프트·도구 스키마가 먼저 죽는 조용한 대참사(서사 미출력·도구 오호출의
+  근본 원인 중 하나). local 프로파일은 예산을 `num_ctx - max_output_tokens -
+  margin`으로 클램프해 잘림을 컨텍스트 매니저의 지능적 압축으로 바꾼다.
+- **`keep_alive`** (`provider.keep_alive`, 기본 30m): 턴 중엔 매 호출이 타이머를
+  리프레시하지만, 승인 대기(기본 300s)·턴 사이 간격에서 모델이 내려가면 다음
+  호출이 콜드 리로드(수십 초)를 문다.
+- **HTTP 커넥션 재사용**: Ollama 어댑터는 이벤트 루프당 httpx 클라이언트 1개를
+  공유하고(keep-alive 풀), registry는 설정 시그니처가 같으면 provider 인스턴스를
+  재사용한다 — 매 호출/매 턴 TCP 재수립 제거.
+- **실측 토큰 피드백**: Ollama의 `prompt_eval_count`/`eval_count`를 done 청크로
+  흘려 `TokenCalibrator`가 CJK 휴리스틱을 실제 토크나이저에 보정한다(이전엔
+  Claude만 보정 신호를 줬다).
+
+### 10.2 프론티어 캐싱 (Claude)
+
+같은 렌더링 규율의 수혜로 system 블록 `cache_control`이 턴 내내 유효해졌고,
+추가로 **rolling breakpoint**를 히스토리 마지막 블록에 찍는다(공식 multi-turn
+패턴) — 반복 i+1이 반복 i까지의 대화를 cache read로 가져온다. SDK 클라이언트도
+인스턴스 수명 동안 재사용한다.

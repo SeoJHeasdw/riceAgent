@@ -66,7 +66,12 @@ def build_plan_from_steps(goal: object, raw_steps: object) -> TurnPlan | None:
     실행 도중 모델이 복잡도(분해 *너비*)를 발견해 부르는 lazy 에스컬레이션
     (start_plan, loop.py). "1단계짜리 계획은 계획이 아니다" — 단일 산출물을
     다듬는 반복(깊이)은 순수 ReAct로 남고, 서로 다른 서브태스크가 2개 이상일
-    때만(너비) 계획으로 승격한다. 이 경계가 over-planning을 막는 핵심이다."""
+    때만(너비) 계획으로 승격한다. 이 경계가 over-planning을 막는 핵심이다.
+
+    첫 스텝은 런타임이 in_progress로 만든다: 계획이 서는 순간 실행이 그 스텝부터
+    시작된다는 것은 런타임이 아는 사실이다(성공 위조가 아니다). 소형 모델이 가장
+    자주 생략하는 메타 호출이 바로 이 첫 "시작 보고"였다 — 그 호출을 없애면
+    update_plan의 남은 책임은 관찰 보고(done/failed/수정)뿐이라 준수율이 오른다."""
     goal_text = str(goal or "").strip()
     if not goal_text or not isinstance(raw_steps, list):
         return None
@@ -78,7 +83,12 @@ def build_plan_from_steps(goal: object, raw_steps: object) -> TurnPlan | None:
         if not title:
             continue
         steps.append(
-            PlanStep(id=f"s{len(steps) + 1}", title=title, detail=str(item.get("detail") or "").strip())
+            PlanStep(
+                id=f"s{len(steps) + 1}",
+                title=title,
+                detail=str(item.get("detail") or "").strip(),
+                status="in_progress" if not steps else "pending",
+            )
         )
     if len(steps) < 2:
         return None

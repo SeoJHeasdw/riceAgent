@@ -38,6 +38,22 @@ BASE_SYSTEM_PROMPT = (
     "narration is what the user sees while you work."
 )
 
+# 로컬 프로파일(agent/profiles.py) 전용 에필로그 — 시스템 프롬프트 **최후미**에
+# 붙는 액션 규칙 요약. 소형 모델은 프롬프트 끝의 지시에 가장 강하게 반응한다:
+# BASE의 NARRATE/DELIVERABLES는 스킬·메모리 additions 수천 토큰 아래에 묻히므로,
+# 같은 규칙의 압축본이 마지막 발화권을 가져야 준수율이 나온다. 정적 텍스트라
+# 턴 내 프리픽스 캐시를 깨지 않는다. 프론티어 프로파일은 이 블록을 싣지 않는다.
+ACTION_RULES_EPILOGUE = (
+    "## Action rules (always apply)\n"
+    "- Before EVERY tool call: one short sentence to the user (their language) — "
+    "what you're about to do and why. Never call a tool silently.\n"
+    "- After every tool result: check it did what you expected before moving on; "
+    "if it failed or looks wrong, say what you're fixing and adjust.\n"
+    "- If an Active Plan exists, report step transitions with update_plan as you work.\n"
+    "- Deliverable requests (PPT/DOCX/XLSX or any file) mean: create the real file "
+    "with the office tools, then verify it — not chat text."
+)
+
 # 스킬은 신뢰 경계가 아니라 입력 데이터다.
 # 학습된 스킬 본문은 과거 대화·도구 결과에서 유도됐고 오염됐을 수 있으므로, 그것이
 # 지시하는 위험 행동(파괴적 명령, 시크릿 유출, 권한 상승)은 승인을 면제받지 못한다 —

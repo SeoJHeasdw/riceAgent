@@ -47,6 +47,28 @@ def _claude_system_blocks(system: str) -> list[dict[str, Any]]:
     return [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
 
 
+def _apply_rolling_cache(native: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """마지막 메시지의 마지막 콘텐츠 블록에 rolling cache breakpoint를 찍는다.
+
+    system 블록의 breakpoint는 tools+system 프리픽스만 커버한다 — 히스토리는
+    매 반복 자라므로 tail에 두 번째 breakpoint를 둬야 이전 반복까지의 대화가
+    캐시 히트가 된다(공식 multi-turn 패턴: "가장 최근 턴의 마지막 블록").
+    이전 위치의 breakpoint는 유효한 read point로 남으므로 반복마다 이동해도
+    안전하다. str 콘텐츠는 블록 리스트로 승격해서 찍는다."""
+    if not native:
+        return native
+    last = native[-1]
+    content = last.get("content")
+    if isinstance(content, str):
+        if not content:
+            return native
+        last["content"] = [{"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}]
+        return native
+    if isinstance(content, list) and content:
+        content[-1] = {**content[-1], "cache_control": {"type": "ephemeral"}}
+    return native
+
+
 def _to_claude_messages(messages: Sequence[Message]) -> list[dict[str, Any]]:
     native: list[dict[str, Any]] = []
     for message in messages:
@@ -122,6 +144,16 @@ class ClaudeProvider(ILLMProvider):
         # Prefer the key registered in state.db (passed by the registry); fall back
         # to the OS keychain / ANTHROPIC_API_KEY for the env-configured path.
         self._api_key = api_key or _load_api_key()
+        # 인스턴스 수명 동안 재사용하는 SDK 클라이언트(커넥션 풀 유지) — registry가
+        # 설정 시그니처로 인스턴스를 캐싱하므로 ReAct 반복 간 재수립이 사라진다.
+        self._client: Any = None
+
+    def _get_client(self) -> Any:
+        if self._client is None:
+            from anthropic import AsyncAnthropic  # noqa: PLC0415 - optional dependency by design
+
+            self._client = AsyncAnthropic(api_key=self._api_key, base_url=self._cfg.base_url)
+        return self._client
 
     def capabilities(self) -> ProviderCapabilities:
         return ProviderCapabilities(
@@ -142,9 +174,7 @@ class ClaudeProvider(ILLMProvider):
         think: bool | None = None,  # noqa: ARG002 — extended thinking is not enabled on this wire
         max_tokens: int | None = None,
     ) -> AsyncIterator[ProviderChunk]:
-        from anthropic import AsyncAnthropic  # noqa: PLC0415 - optional dependency by design
-
-        client = AsyncAnthropic(api_key=self._api_key, base_url=self._cfg.base_url)
+        client = self._get_client()
         tool_states: dict[int, _ToolUseState] = {}
         # Anthropic streams stop_reason on the `message_delta` event, NOT on
         # `message_stop` — capture it there and emit on stop (RUNTIME_DESIGN §6).
@@ -160,7 +190,7 @@ class ClaudeProvider(ILLMProvider):
                 model=self._cfg.model,
                 max_tokens=max_tokens or 4096,
                 system=_claude_system_blocks(system),
-                messages=_to_claude_messages(messages),
+                messages=_apply_rolling_cache(_to_claude_messages(messages)),
                 tools=_to_claude_tools(tools),
                 temperature=temperature,
             ) as stream:

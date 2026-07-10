@@ -60,7 +60,8 @@ rice-runtime/                                # 배포물 ② : 로컬 단일 프
 │   │   ├── interfaces.py                    #   IAgent / ILLMProvider (Protocol)
 │   │   ├── loop.py                          # ▣ #1 conversation/agent 루프 — plan-and-execute × ReAct + plan 강제종결(reconcile) (max_iterations, context render, scheduler 호출) — AGENT_EXECUTION §3
 │   │   ├── planner.py                       #   TurnPlanner(의도 파악·계획 수립 LLM 1회) + PlanState(update_plan/start_plan 상태 기계, reconcile_abandoned) — AGENT_EXECUTION §2·§3
-│   │   ├── context_manager.py               #   provider-facing context 렌더링/압축/마스킹 (원본 transcript 불변)
+│   │   ├── profiles.py                      #   ★ 신규(2026-07-10) OrchestrationProfile — local↔frontier 이원화(액션규칙 에필로그·서사 넛지·num_ctx 클램프) — AGENT_EXECUTION §10
+│   │   ├── context_manager.py               #   provider-facing context 렌더링/압축/마스킹 (원본 transcript 불변, 최근 도구출력 증류 완화)
 │   │   ├── tool_scheduler.py                #   tool call batch 조율: 안전한 독립 tool 병렬화, 승인/파괴적 tool 순차
 │   │   ├── tool_dispatch.py                 # ▣ #2 스키마 조립·가용성 필터(check_fn식)·라우팅·결과 수집
 │   │   │                                    #     연결 안 된 Connector tool 제외, 예산 초과 시 bridge+관련도 스포트라이트로 폴딩(AGENT_EXECUTION §5.2, RUNTIME_DESIGN 2.1)

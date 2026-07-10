@@ -7,10 +7,18 @@ Plan-and-execute × ReAct (RICE_AGENT_EXECUTION.md §3)의 프롬프트 절반�
                              계획(goal+steps)을 JSON으로 내놓는다. 하나의 호출이
                              분류와 계획 수립을 겸한다 — simple이면 출력이 몇
                              토큰이라 분류 전용 호출을 따로 둘 이유가 없다.
-  render_plan_block        — 실행 중 매 LLM 호출의 시스템 프롬프트에 실리는
-                             살아있는 계획 상태 + ReAct 작업 지침. 로컬 LLM이
-                             멀티스텝 작업에서 길을 잃지 않게 하는 핵심 장치로,
-                             토큰을 아끼지 않고 매 반복 전체 상태를 다시 싣는다.
+  PLAN_GUIDANCE            — 계획이 활성인 턴의 시스템 프롬프트에 1회 실리는
+                             **정적** ReAct 작업 지침. 정적/동적을 나누는 이유:
+                             시스템 프롬프트가 반복마다 변하면 프리픽스 캐시
+                             (Ollama KV·Claude cache_control)가 매 반복 전면
+                             무효화된다 — 지침은 변하지 않으므로 시스템에 두고,
+                             변하는 상태만 아래 render_plan_status로 뺀다.
+  render_plan_status       — 매 반복 히스토리 **끝에 ephemeral user 메시지**로
+                             실리는 살아있는 계획 상태(+ drift 경고·스킬 승격
+                             유도). 로컬 LLM이 멀티스텝 작업에서 길을 잃지 않게
+                             매 호출 전체 상태를 다시 싣되(스냅샷 프롬프팅),
+                             마지막 메시지 위치라 recency 주목도가 가장 높고
+                             프리픽스 캐시는 tail 재계산만으로 유지된다.
   plan_to_markdown         — transcript에 남는 계획 생성 메시지 본문(다음 턴의
                              플래너/모델이 이전 계획을 문맥으로 보게 된다).
 
@@ -145,10 +153,16 @@ _STATUS_MARK = {
     "skipped": "[-]",
 }
 
-_REACT_GUIDANCE = """How to work this plan (ReAct):
+# 계획이 활성인 턴의 시스템 프롬프트에 1회 붙는 정적 지침. 여기 문장 하나를 바꾸면
+# 그 턴의 프리픽스 캐시가 깨진다는 사실은 없다(턴 시작에 고정) — 단, 반복마다
+# 달라지는 어떤 것도 이 텍스트에 넣지 말 것: 그것이 render_plan_status의 몫이다.
+PLAN_GUIDANCE = """## Active Plan mode
+A live plan for this task is appended as the LAST message of the conversation, \
+updated every round. Work it like this (ReAct):
 - Before each tool call, tell the user in one short sentence what you're doing and \
 why (especially when redoing something), then call the tool.
-- Work the first step that is not done; set it in_progress via update_plan when you start it.
+- Work the first step that is not done. The runtime already marks the first step \
+in_progress when the plan starts; report the transitions YOU make via update_plan.
 - After EVERY tool result, briefly reassess before acting again: did it complete the current \
 step (→ mark done, with a one-line note), did it fail (→ retry differently or mark failed), \
 or did it change what the plan should be (→ revise via update_plan: add steps, skip obsolete ones)?
@@ -161,20 +175,19 @@ plan or ask the user.
 done and what wasn't."""
 
 
-def render_plan_block(
+def render_plan_status(
     plan: TurnPlan,
     *,
     rounds_without_update: int = 0,
     drift_guard_rounds: int = 4,
     nudge_skill_capture: bool = False,
 ) -> str:
-    """시스템 프롬프트에 붙는 살아있는 계획 블록. 매 반복 전체 상태를 다시 렌더한다
-    (스냅샷 프롬프팅) — 로컬 LLM은 대화 중반의 계획을 잊는다; 시스템 프롬프트의
-    현재 상태가 유일한 진실이 되게 한다."""
+    """매 반복 히스토리 끝에 ephemeral로 실리는 살아있는 계획 상태(스냅샷 프롬프팅).
+    로컬 LLM은 대화 중반의 계획을 잊는다 — 마지막 메시지의 현재 상태가 유일한
+    진실이 되게 한다. 작업 지침(정적)은 PLAN_GUIDANCE로 분리돼 시스템에 1회 실린다."""
     lines = [
-        "## Active Plan (you MUST work this plan)",
+        "[Active Plan — live status, revision %d]" % plan.revision,
         f"Goal: {plan.goal}",
-        f"Plan revision: {plan.revision}",
         "Steps:",
     ]
     for s in plan.steps:
@@ -185,8 +198,6 @@ def render_plan_block(
         if s.note:
             line += f" (note: {s.note})"
         lines.append(line)
-    lines.append("")
-    lines.append(_REACT_GUIDANCE)
 
     if rounds_without_update >= max(1, drift_guard_rounds):
         lines.append(

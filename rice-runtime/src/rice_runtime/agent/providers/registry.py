@@ -49,6 +49,11 @@ class ProviderRegistry(IProviderRegistry):
             "openai": self._make_openai,
             "watsonx": self._make_watsonx,
         }
+        # 단일 슬롯 인스턴스 캐시 — 같은 설정이면 같은 provider를 돌려준다.
+        # 매 턴 새 인스턴스를 만들면 provider가 보유한 HTTP 커넥션 풀/SDK
+        # 클라이언트가 매번 버려진다(ReAct 반복마다 TCP 재수립). 시그니처가
+        # 바뀌면(모델 스위치 등) 새로 만든다 — C-1(라이브 설정 반영)은 유지된다.
+        self._cache: tuple[tuple, ILLMProvider] | None = None
 
     def available(self) -> list[str]:
         return list(self._factories.keys())
@@ -59,7 +64,18 @@ class ProviderRegistry(IProviderRegistry):
             raise ProviderError(f"unknown provider kind: {kind}")
         cfg = self._config_store.config.provider
         creds = self._credentials(cfg.model) if self._credentials else None
-        return factory(cfg, creds)
+        signature = (
+            kind, cfg.model, cfg.base_url, cfg.timeout_seconds,
+            getattr(cfg, "num_ctx", None), getattr(cfg, "keep_alive", None),
+            (creds.api_key, creds.base_url, creds.project_id) if creds else None,
+        )
+        if self._cache is not None and self._cache[0] == signature:
+            return self._cache[1]
+        provider = factory(cfg, creds)
+        # 이전 인스턴스는 참조만 놓는다 — in-flight 스트림이 아직 쓰고 있을 수
+        # 있으므로(설정 변경은 다음 턴부터) 강제로 닫지 않고 GC에 맡긴다.
+        self._cache = (signature, provider)
+        return provider
 
     # ── lazy real providers (not needed for the skeleton) ────────────────────
     def _make_claude(self, cfg: ProviderConfig, creds: ProviderCredentials | None) -> ILLMProvider:

@@ -214,21 +214,32 @@ class ConversationContextManager:
         managed: list[Message] = []
         masked_ids: list[str] = []
         distilled_ids: list[str] = []
-        for message in messages:
+        # ReAct 재검증 보호: 최근 메시지(마지막 recent_messages개)의 도구 출력은
+        # 증류 임계·보존량을 3배로 완화한다. 모델이 방금 만든 산출물을 read_file로
+        # 확인하는 관찰이 head/tail로 접히면 "검증했다"가 착각이 된다 — 방금의
+        # 관찰은 원문에 가깝게, 오래된 관찰은 공격적으로 접는다. 압축의 suffix
+        # 보호(recent_messages)와 같은 노브를 쓴다.
+        recent_start = max(0, len(messages) - self._config.recent_messages)
+        for i, message in enumerate(messages):
             content = message.content
             masked = _mask_secrets(content)
             if masked != content:
                 masked_ids.append(message.id)
                 content = masked
 
-            if message.role == "tool" and self._estimate(content) > self._limit(self._config.tool_output_threshold_tokens):
+            recency_relief = 3 if i >= recent_start else 1
+            if message.role == "tool" and self._estimate(content) > self._limit(
+                self._config.tool_output_threshold_tokens * recency_relief
+            ):
                 content = _distill_text(
                     content,
-                    max_tokens=self._limit(self._config.tool_output_retained_tokens),
+                    max_tokens=self._limit(self._config.tool_output_retained_tokens * recency_relief),
                     label="tool output",
                 )
                 distilled_ids.append(message.id)
-            elif self._estimate(content) > self._limit(self._config.message_threshold_tokens):
+            elif message.role != "tool" and self._estimate(content) > self._limit(
+                self._config.message_threshold_tokens
+            ):
                 content = _distill_text(
                     content,
                     max_tokens=self._limit(self._config.message_retained_tokens),

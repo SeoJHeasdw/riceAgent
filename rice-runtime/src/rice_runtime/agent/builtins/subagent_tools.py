@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ...core.types import ToolSpec
+from ..interfaces import TurnView
 from ..tool_dispatch import BuiltinTool
 
 if TYPE_CHECKING:
@@ -12,17 +13,23 @@ if TYPE_CHECKING:
 
 
 def tools(runner: "SubAgentRunner") -> list[tuple[ToolSpec, BuiltinTool]]:
-    async def delegate_subagent(args: dict, session_id: str = "") -> object:
+    async def delegate_subagent(
+        args: dict, session_id: str = "", turn_view: TurnView | None = None
+    ) -> object:
         result = await runner.run(
             session_id=session_id,
             task=str(args.get("task") or ""),
             context=str(args.get("context") or ""),
             expected_output=str(args.get("expected_output") or ""),
             max_chars=int(args.get("max_chars") or 8_000),
+            turn_view=turn_view,
         )
         return result.to_dict()
 
     delegate_subagent.needs_session = True  # type: ignore[attr-defined]
+    # 진행 중 턴의 라이브 컨텍스트(이번 턴의 도구 관찰 + 활성 계획) — transcript는
+    # 턴 종료에야 영속화되므로 이 마커 없이는 워커가 이번 턴을 못 본다.
+    delegate_subagent.needs_turn_view = True  # type: ignore[attr-defined]
 
     spec = ToolSpec(
         name="delegate_subagent",

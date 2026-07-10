@@ -43,7 +43,7 @@ from ..core.types import (
     ev_tool_result,
 )
 from ..execution.interfaces import IPluginLoader
-from .interfaces import IApprovalGate
+from .interfaces import IApprovalGate, TurnView
 
 log = logging.getLogger("rice.agent.dispatch")
 
@@ -51,7 +51,10 @@ class SessionBuiltinTool(Protocol):
     """Builtin callable that needs the current session id.
 
     Most builtins are plain `async (args) -> object`; session-scoped tools opt in
-    by setting `needs_session = True` on the handler.
+    by setting `needs_session = True` on the handler. Handlers that must see the
+    in-progress turn (live tool observations + active plan — transcript엔 아직
+    없다) additionally opt in with `needs_turn_view = True` and receive a
+    `turn_view: TurnView | None` kwarg (delegate_subagent가 유일한 소비자).
     """
 
     needs_session: bool
@@ -195,6 +198,13 @@ class ToolDispatcher:
         # 접지 않았을 때도 넣어 둬서 무해하다(LLM 스키마에 브릿지가 없으면 애초에 안 불림).
         self._folded_catalog = folded_catalog or {}
         self._results: dict[str, ToolResult] = {}
+        # 진행 중 턴의 라이브 스냅샷 — 루프가 도구 라운드마다 갱신하고,
+        # needs_turn_view 빌트인(delegate_subagent)에 kwargs로 주입된다.
+        # dispatcher는 턴마다 새로 만들어지므로(C-2) 교차 턴 누수가 없다.
+        self._turn_view: TurnView | None = None
+
+    def set_turn_view(self, view: TurnView) -> None:
+        self._turn_view = view
 
     async def dispatch(self, session_id: str, call: ToolCall, spec: ToolSpec) -> AsyncIterator[SSEEvent]:
         yield ev_tool_call(call)
@@ -249,12 +259,15 @@ class ToolDispatcher:
                 if fn is None:
                     raise KeyError(f"unknown builtin tool: {call.tool_name}")
                 # 세션 문맥이 필요한 빌트인(예: propose_skill의 세션 단위 스테이징)은
-                # `needs_session` 마커로 opt-in한다 — 시그니처를 전 빌트인에 강제로
-                # 넓히는 대신 필요한 도구만 명시적으로 받는다.
+                # `needs_session` 마커로, 진행 중 턴의 라이브 컨텍스트가 필요한
+                # 빌트인(delegate_subagent)은 `needs_turn_view` 마커로 opt-in한다 —
+                # 시그니처를 전 빌트인에 강제로 넓히는 대신 필요한 도구만 받는다.
+                kwargs: dict[str, object] = {}
                 if getattr(fn, "needs_session", False):
-                    value = await cast(SessionBuiltinTool, fn)(call.arguments, session_id=session_id)
-                else:
-                    value = await cast(Callable[[dict], Awaitable[object]], fn)(call.arguments)
+                    kwargs["session_id"] = session_id
+                if getattr(fn, "needs_turn_view", False):
+                    kwargs["turn_view"] = self._turn_view
+                value = await cast(Callable[..., Awaitable[object]], fn)(call.arguments, **kwargs)
                 res = ToolResult(call.id, ok=True, result=value)
             elif spec.source == "connector":
                 # spec.owner_id 를 함께 넘긴다 — 같은 도구명을 노출하는 커넥터가

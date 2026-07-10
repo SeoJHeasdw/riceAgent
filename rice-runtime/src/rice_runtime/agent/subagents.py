@@ -40,7 +40,7 @@ from ..core.model_json import extract_json_object
 from ..core.tokens import TokenCalibrator
 from ..core.types import Message, ToolCall, ToolSpec, new_id
 from .context_manager import ConversationContextManager
-from .interfaces import ITranscript
+from .interfaces import ITranscript, TurnView
 from .providers.interfaces import ILLMProvider
 from .tool_dispatch import BuiltinTool
 
@@ -148,6 +148,7 @@ class SubAgentRunner:
         context: str = "",
         expected_output: str = "",
         max_chars: int = 8_000,
+        turn_view: TurnView | None = None,
     ) -> SubAgentResult:
         thread_id = new_id("sub")
         history = self._transcript.history(session_id)
@@ -162,6 +163,7 @@ class SubAgentRunner:
             context=context,
             expected_output=expected_output,
             recent_history=_format_history(rendered.history),
+            live_turn=_format_turn_view(turn_view),
         )
 
         provider = self._resolve_provider()
@@ -326,12 +328,18 @@ class SubAgentRunner:
             return f"ERROR: {exc}"
 
     @staticmethod
-    def _prompt(*, task: str, context: str, expected_output: str, recent_history: str) -> str:
+    def _prompt(
+        *, task: str, context: str, expected_output: str, recent_history: str, live_turn: str = ""
+    ) -> str:
         sections = [f"Task:\n{task.strip()}"]
         if expected_output.strip():
             sections.append(f"Expected output:\n{expected_output.strip()}")
         if context.strip():
             sections.append(f"Context from main agent:\n{context.strip()}")
+        if live_turn.strip():
+            # transcript(recent_history)는 이전 턴까지다 — 이번 턴의 목표·계획·
+            # 도구 관찰은 여기로만 워커에게 도달한다(TurnView 주입).
+            sections.append(f"Current turn in progress (not yet in the log):\n{live_turn.strip()}")
         if recent_history.strip():
             sections.append(f"Recent conversation context:\n{recent_history.strip()}")
         return "\n\n".join(sections)
@@ -351,3 +359,33 @@ def _format_history(messages: Sequence[Message]) -> str:
             continue
         lines.append(f"{message.role}: {text}")
     return "\n".join(lines)
+
+
+# 라이브 턴 섹션의 상한(자) — 워커 컨텍스트를 보호한다. 이번 턴이 길면 앞이 아니라
+# **뒤**(최근 관찰)를 남긴다: 워커에게 유용한 건 방금의 관찰이다.
+_TURN_VIEW_MAX_CHARS = 4_000
+
+
+def _format_turn_view(view: TurnView | None) -> str:
+    """이번 턴의 라이브 스냅샷을 워커 프롬프트 섹션으로 렌더한다."""
+    if view is None:
+        return ""
+    lines: list[str] = []
+    if view.user_message.strip():
+        text = " ".join(view.user_message.split())
+        if len(text) > 500:
+            text = text[:500].rstrip() + "..."
+        lines.append(f"The user's request this turn: {text}")
+    if view.plan is not None:
+        lines.append(f"Active plan (goal: {view.plan.goal}):")
+        for s in view.plan.steps:
+            note = f" — {s.note}" if s.note else ""
+            lines.append(f"  [{s.status}] {s.id}. {s.title}{note}")
+    body = _format_history(view.turn_messages)
+    if body:
+        lines.append("What has happened so far this turn:")
+        lines.append(body)
+    text = "\n".join(lines)
+    if len(text) > _TURN_VIEW_MAX_CHARS:
+        text = "[... earlier this turn omitted ...]\n" + text[-_TURN_VIEW_MAX_CHARS:]
+    return text

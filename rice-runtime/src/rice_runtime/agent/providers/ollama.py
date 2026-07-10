@@ -3,10 +3,24 @@
 Ollama's `/api/chat` wire format is close to the neutral history shape, so this
 adapter mostly translates tool-call metadata and streaming chunks. The HTTP call is
 kept behind `_stream_chat` so unit tests can replace network I/O with a small fake.
+
+로컬 LLM 효율 계약 (2026-07-10):
+  - `num_ctx`를 항상 명시한다. 미지정 시 Ollama 서버 기본(대개 4096)이 적용돼
+    긴 턴에서 프롬프트 **앞**(시스템 프롬프트·도구 스키마)이 소리 없이 잘린다 —
+    도구 호출 실패·지시 무시의 근본 원인. 예산 압축은 컨텍스트 매니저의 일이고,
+    잘림은 버그다.
+  - `keep_alive`는 config에서 온다(기본 30m) — ReAct 반복·승인 대기 사이에
+    모델이 VRAM에서 내려가 콜드 리로드(수십 초)되는 것을 막는다.
+  - HTTP 클라이언트는 이벤트 루프당 1개를 재사용한다(keep-alive 커넥션 풀).
+    ReAct 루프는 같은 서버에 수십 번 연쇄 요청한다 — 매 호출 TCP 재수립은 낭비.
+  - 프리픽스 KV 캐시는 이 어댑터가 아니라 **렌더링 규율**이 지킨다: 루프가
+    시스템 프롬프트를 턴 내 불변으로 유지하고 동적 상태를 tail 메시지로 보내므로,
+    Ollama는 직전 요청과의 최장 공통 프리픽스를 재사용한다(re-prefill 최소화).
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator, AsyncIterable, Sequence
 from typing import Any
@@ -22,6 +36,24 @@ from .interfaces import ILLMProvider, ProviderCapabilities, ProviderChunk
 # answer (200 OK, content ""). The non-streaming branch of `stream` retries once
 # at this larger budget when that specific signature is detected.
 _REASONING_RETRY_NUM_PREDICT = 200
+
+# ── 이벤트 루프당 공유 httpx 클라이언트 ──────────────────────────────────────
+# provider 인스턴스는 턴마다 새로 만들어질 수 있으므로(registry) 커넥션 풀은
+# 모듈 수준에 둔다. 이벤트 루프가 바뀌면(테스트 등) 새 클라이언트로 교체 —
+# 닫힌 루프의 transport 를 재사용하다 죽는 것을 막는다. 타임아웃은 요청별로 준다.
+_client: Any = None
+_client_loop_id: int | None = None
+
+
+def _shared_client() -> Any:
+    import httpx  # noqa: PLC0415 - optional dependency by design
+
+    global _client, _client_loop_id
+    loop_id = id(asyncio.get_running_loop())
+    if _client is None or _client_loop_id != loop_id:
+        _client = httpx.AsyncClient(timeout=None)
+        _client_loop_id = loop_id
+    return _client
 
 
 def _to_ollama_tools(tools: Sequence[ToolSpec]) -> list[dict[str, Any]]:
@@ -102,29 +134,37 @@ class OllamaProvider(ILLMProvider):
     def capabilities(self) -> ProviderCapabilities:
         return ProviderCapabilities(native_tool_calling=True, streaming=True, prompt_caching=False, vision=False)
 
-    async def _stream_chat(self, payload: dict[str, Any]) -> AsyncIterable[dict[str, Any]]:
-        import httpx  # noqa: PLC0415 - optional dependency by design
+    def _chat_url(self) -> str:
+        return (self._cfg.base_url or "http://localhost:11434").rstrip("/") + "/api/chat"
 
-        base_url = (self._cfg.base_url or "http://localhost:11434").rstrip("/")
+    async def _stream_chat(self, payload: dict[str, Any]) -> AsyncIterable[dict[str, Any]]:
         timeout = getattr(self._cfg, "timeout_seconds", 300)
-        async with httpx.AsyncClient(base_url=base_url, timeout=timeout) as client:
-            async with client.stream("POST", "/api/chat", json=payload) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if line:
-                        yield json.loads(line)
+        client = _shared_client()
+        async with client.stream("POST", self._chat_url(), json=payload, timeout=timeout) as response:
+            response.raise_for_status()
+            async for line in response.aiter_lines():
+                if line:
+                    yield json.loads(line)
 
     async def _post_chat(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Single non-streaming POST — used when streaming is unnecessary (titler).
         No iterator, no drain stall: the full response arrives in one round-trip."""
-        import httpx  # noqa: PLC0415 - optional dependency by design
-
-        base_url = (self._cfg.base_url or "http://localhost:11434").rstrip("/")
         timeout = getattr(self._cfg, "timeout_seconds", 300)
-        async with httpx.AsyncClient(base_url=base_url, timeout=timeout) as client:
-            response = await client.post("/api/chat", json=payload)
-            response.raise_for_status()
-            return response.json()
+        client = _shared_client()
+        response = await client.post(self._chat_url(), json=payload, timeout=timeout)
+        response.raise_for_status()
+        return response.json()
+
+    def _base_options(self) -> dict[str, Any]:
+        """모든 호출에 공통인 options — num_ctx는 항상 명시한다(모듈 docstring 참고)."""
+        options: dict[str, Any] = {}
+        num_ctx = int(getattr(self._cfg, "num_ctx", 0) or 0)
+        if num_ctx > 0:
+            options["num_ctx"] = num_ctx
+        return options
+
+    def _keep_alive(self) -> str:
+        return str(getattr(self._cfg, "keep_alive", "") or "30m")
 
     async def stream(
         self,
@@ -144,14 +184,14 @@ class OllamaProvider(ILLMProvider):
             # stream-drain stall that happens when the caller breaks out of the
             # async-for early: with stream=False Ollama returns one JSON object,
             # httpx closes the connection cleanly, and no drain is needed.
-            options: dict[str, Any] = {"temperature": 0.0, "num_predict": max_tokens or 20}
+            options: dict[str, Any] = {**self._base_options(), "temperature": 0.0, "num_predict": max_tokens or 20}
             payload = {
                 "model": self._cfg.model,
                 "messages": ([{"role": "system", "content": system}] if system else []) + _to_ollama_messages(messages),
                 "stream": False,
                 "think": False,
                 "options": options,
-                "keep_alive": "5m",
+                "keep_alive": self._keep_alive(),
             }
             if response_schema is not None:
                 payload["format"] = response_schema
@@ -178,7 +218,7 @@ class OllamaProvider(ILLMProvider):
             return
 
         # ── streaming path (normal chat) ──────────────────────────────────────
-        options: dict[str, Any] = {"temperature": temperature}
+        options: dict[str, Any] = {**self._base_options(), "temperature": temperature}
         if max_tokens is not None:
             # decode-level runaway guard — a looping generation is cut by the
             # sampler, not by burning the caller's wall-clock timeout.
@@ -194,7 +234,7 @@ class OllamaProvider(ILLMProvider):
             # Per-call think=False (planner 등 구조화 1회 호출) overrides this.
             "think": self._think if think is None else think,
             "options": options,
-            "keep_alive": "5m",
+            "keep_alive": self._keep_alive(),
         }
         if response_schema is not None:
             # grammar-constrained decoding: the model physically cannot emit
@@ -223,6 +263,10 @@ class OllamaProvider(ILLMProvider):
                         stop_reason={"stop": "end_turn", "tool_calls": "tool_use", "length": "max_tokens"}.get(
                             stop_reason, stop_reason if stop_reason in {"end_turn", "tool_use", "max_tokens"} else "error"
                         ),
+                        # Ollama는 done 메시지에 실측 카운트를 싣는다 — TokenCalibrator가
+                        # CJK 휴리스틱을 실제 토크나이저에 맞춰 보정하는 유일한 로컬 신호.
+                        input_tokens=item.get("prompt_eval_count"),
+                        output_tokens=item.get("eval_count"),
                     )
                     yielded_done = True
                     break

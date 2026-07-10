@@ -56,6 +56,16 @@ class ProviderConfig:
     # 60초를 쉽게 넘긴다 — 기본 300초로 설정해 ReadTimeout을 방지한다.
     # SaaS 프로바이더(Claude/OpenAI)는 이 값을 사용하지 않는다.
     timeout_seconds: int = 600
+    # Ollama 요청 컨텍스트 창(num_ctx). 미지정 시 Ollama 서버 기본값(대개 4096)이
+    # 적용돼 긴 턴에서 프롬프트 앞부분(시스템 프롬프트·도구 스키마)이 **소리 없이
+    # 잘린다** — 도구 호출 실패·지시 무시의 근본 원인. 로컬 프로파일은 이 값에서
+    # 컨텍스트 예산을 역산해 클램프한다(잘림 대신 지능적 압축). qwen3 27b/gpt-oss
+    # 20b급이 무리 없이 감당하는 32K를 기본으로 한다. SaaS는 사용하지 않는다.
+    num_ctx: int = 32_768
+    # Ollama keep_alive — 모델을 메모리에 상주시키는 시간. 매 호출이 타이머를
+    # 리프레시하므로 턴 진행 중엔 항상 로드 상태다; 이 값은 승인 대기·턴 사이
+    # 간격에서 콜드 리로드(수십 초)를 막는 여유폭이다. SaaS는 사용하지 않는다.
+    keep_alive: str = "30m"
     # First-run gate: False until the user picks & connects a model in the
     # settings panel and saves (PUT /settings). The app shows the mandatory
     # model-onboarding flow while this is False, then trusts the saved provider.
@@ -191,6 +201,11 @@ class AgentConfig:
     # 이만큼 연속 도구 라운드 동안 update_plan이 없으면 시스템 프롬프트에
     # 재평가(ReAct reflection) 지시를 주입한다.
     plan_drift_guard_rounds: int = 4
+    # 오케스트레이션 프로파일(agent/profiles.py): "auto" | "local" | "frontier".
+    # auto는 provider에서 유추한다(ollama/로컬 base_url → local, SaaS → frontier).
+    # local은 소형 모델 보정 장치(액션 규칙 에필로그·서사 넛지·num_ctx 예산
+    # 클램프)를 켠다 — LM Studio 등 openai 호환 로컬 서버는 "local"로 강제한다.
+    orchestration_profile: str = "auto"
 
 
 @dataclass(frozen=True)

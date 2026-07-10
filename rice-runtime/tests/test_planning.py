@@ -274,10 +274,19 @@ async def test_loop_plans_executes_and_react_updates():
     exec_tools = [t.name for t in provider.calls[1]["tools"]]
     assert "update_plan" in exec_tools and "echo" in exec_tools
 
-    # 매 실행 반복의 시스템 프롬프트에 살아있는 계획 상태가 렌더된다
-    assert "## Active Plan" in provider.calls[1]["system"]
-    assert "[ ] s1. step one" in provider.calls[1]["system"]
-    assert "[v] s1. step one" in provider.calls[2]["system"]  # ReAct: 관찰이 반영된 상태
+    # 정적 작업 지침은 시스템에 1회, 살아있는 계획 상태는 렌더된 히스토리의
+    # **마지막 메시지**(ephemeral tail)에 실린다 — 시스템 프롬프트는 턴 내 불변
+    # (프리픽스 캐시 불변식: Ollama KV·Claude cache_control이 반복 간 유지된다).
+    assert "## Active Plan mode" in provider.calls[1]["system"]
+    assert provider.calls[1]["system"] == provider.calls[2]["system"]
+    tail1 = provider.calls[1]["messages"][-1]
+    tail2 = provider.calls[2]["messages"][-1]
+    assert tail1.metadata.get("synthetic") == "plan_status"
+    # 첫 스텝은 런타임이 in_progress로 만든다(실행 시작은 런타임이 아는 사실)
+    assert "[>] s1. step one" in tail1.content
+    assert "[v] s1. step one" in tail2.content  # ReAct: 관찰이 반영된 상태
+    # ephemeral tail은 durable 히스토리에 남지 않는다
+    assert not any(m.metadata.get("synthetic") == "plan_status" for m in result.history)
 
     # 영속화: 계획 생성 스냅샷은 첫 어시스턴트 메시지에, 갱신본은 tool 메시지에
     first_assistant = next(m for m in result.history if m.role == "assistant")
@@ -441,8 +450,10 @@ async def test_loop_drift_guard_forces_reassessment():
     _ = [ev async for ev in loop.run(_ctx((_spec("echo"),)), "s1", result, asyncio.Event())]
 
     # round1(무보고) 후엔 아직 아니고, round2(무보고) 후의 세 번째 실행 호출에 경고
-    assert "REASSESS NOW" not in provider.calls[2]["system"]
-    assert "REASSESS NOW" in provider.calls[3]["system"]
+    # — 경고는 시스템이 아니라 ephemeral tail(마지막 메시지)에 실린다(캐시 불변식).
+    assert "REASSESS NOW" not in provider.calls[2]["messages"][-1].content
+    assert "REASSESS NOW" in provider.calls[3]["messages"][-1].content
+    assert "REASSESS NOW" not in provider.calls[3]["system"]
 
 
 @pytest.mark.asyncio
@@ -555,9 +566,9 @@ def test_completed_plan_nudges_skill_capture():
         )
     )
     loop = AgentLoop(provider=None, dispatcher=None, agent_config=AgentConfig())  # type: ignore[arg-type]
-    ctx = _ctx(())
-    with_nudge = loop._system_prompt_for(ctx, state, tool_calls_made=5)
-    without_nudge = loop._system_prompt_for(ctx, state, tool_calls_made=1)
+    # 승격 유도는 동적 상태의 일부 — ephemeral tail 메시지에 실린다(시스템은 불변).
+    with_nudge = loop._plan_status_message(state, tool_calls_made=5).content
+    without_nudge = loop._plan_status_message(state, tool_calls_made=1).content
     assert "propose_skill" in with_nudge
     assert "propose_skill" not in without_nudge  # 도구 호출이 적으면 절차랄 게 없다
 

@@ -53,10 +53,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import replace
 from typing import AsyncIterator, Callable
 
 from ..connector.interfaces import IConnectorService
-from ..core.config import ConfigStore
+from ..core.config import Config, ConfigStore, ContextConfig
 from ..core.types import (
     Message,
     SSEEvent,
@@ -69,16 +70,43 @@ from ..core.types import (
 from ..core.tokens import TokenCalibrator
 from ..execution.interfaces import IPluginLoader
 from ..learning.interfaces import ILearningService
-from ..prompts.system import compose_system_prompt
+from ..prompts.system import ACTION_RULES_EPILOGUE, compose_system_prompt
 from .context_manager import ConversationContextManager
 from .effect_surfacing import surface_learning_effect
 from .interfaces import IApprovalGate, ITranscript
 from .loop import AgentLoop, LoopResult
 from .planner import TurnPlanner
+from .profiles import OrchestrationProfile, resolve_profile
 from .providers.interfaces import ILLMProvider
 from .tool_dispatch import BuiltinTool, ToolDispatcher, fold_tools_for_budget
 
 log = logging.getLogger("rice.agent.orchestrator")
+
+# num_ctx 클램프 시 시스템/도구 스키마 밖 여유분(토큰) — 추정 오차 흡수용.
+_MODEL_WINDOW_MARGIN_TOKENS = 1_024
+
+
+def effective_context_config(cfg: Config, profile: OrchestrationProfile) -> ContextConfig:
+    """로컬 프로파일이면 컨텍스트 예산을 모델 창(num_ctx)에서 역산해 클램프한다.
+
+    예산(기본 96K)이 모델 창(예: 32K)보다 크면 Ollama가 프롬프트 앞부분을 소리
+    없이 잘라 시스템 프롬프트·도구 스키마부터 죽는다. 클램프는 그 잘림을
+    컨텍스트 매니저의 지능적 압축(요약·증류·최근 보호)으로 바꾼다 — "무엇을
+    버릴지"를 서버의 우연이 아니라 런타임이 결정하게 한다."""
+    ctx_cfg = cfg.context
+    if not profile.clamp_context_to_model_window or cfg.provider.kind != "ollama":
+        return ctx_cfg
+    num_ctx = int(getattr(cfg.provider, "num_ctx", 0) or 0)
+    if num_ctx <= 0:
+        return ctx_cfg
+    input_budget = max(4_096, num_ctx - cfg.provider.max_output_tokens - _MODEL_WINDOW_MARGIN_TOKENS)
+    if input_budget >= ctx_cfg.max_tokens:
+        return ctx_cfg
+    return replace(
+        ctx_cfg,
+        max_tokens=input_budget,
+        retained_tokens=min(ctx_cfg.retained_tokens, max(2_048, int(input_budget * 0.7))),
+    )
 
 
 def _dedupe_tool_names(
@@ -198,6 +226,11 @@ class Orchestrator:
         abort = self._aborts.setdefault(session_id, asyncio.Event())
         abort.clear()
         cfg = self._config_store.config  # snapshot for this turn (live across turns)
+        # 오케스트레이션 프로파일 — 소형 로컬 모델 보정 장치의 강도를 정한다
+        # (agent/profiles.py). 턴마다 resolve하므로 provider 스위치가 즉시 반영된다.
+        profile = resolve_profile(
+            cfg.provider.kind, cfg.provider.base_url, cfg.agent.orchestration_profile
+        )
         try:
             # 2. PREFETCH (learning assembles injectable context). Plugin-provided
             # SKILL.md bundles ride the SAME relevance pipeline as learned skills
@@ -222,7 +255,12 @@ class Orchestrator:
                 tuple(self._connectors.list_tools()) + tuple(self._plugins.list_tools()),
             )
             tools = fold_tools_for_budget(self._builtin_specs(), foldable_tools, query=user_message)
-            system_prompt = compose_system_prompt(pf.system_prompt_additions)
+            # local 프로파일은 액션 규칙 요약을 시스템 프롬프트 **최후미**에 싣는다 —
+            # 소형 모델은 프롬프트 끝의 지시에 가장 강하게 반응한다(recency).
+            system_prompt = compose_system_prompt(
+                pf.system_prompt_additions,
+                ACTION_RULES_EPILOGUE if profile.action_rules_epilogue else None,
+            )
             base_history = self._transcript.history(session_id)
             ctx = TurnContext(
                 session_id=session_id,
@@ -256,12 +294,16 @@ class Orchestrator:
                 dispatcher=dispatcher,
                 temperature=cfg.provider.temperature,
                 context_manager=ConversationContextManager(
-                    cfg.context, estimate=self._token_calibrator.estimate
+                    # 로컬이면 num_ctx 역산 예산으로 클램프 — Ollama의 조용한
+                    # 앞부분 잘림 대신 여기서 지능적으로 압축한다.
+                    effective_context_config(cfg, profile),
+                    estimate=self._token_calibrator.estimate,
                 ),
                 token_calibrator=self._token_calibrator,
                 planner=planner,
                 agent_config=cfg.agent,
                 max_output_tokens=cfg.provider.max_output_tokens,
+                profile=profile,
             )
             result = LoopResult()
             async for event in loop.run(ctx, session_id, result, abort):

@@ -44,13 +44,13 @@ from ..core.types import (
     ev_tool_call,
     ev_tool_result,
 )
-from ..prompts.planning import render_plan_block
+from ..prompts.planning import PLAN_GUIDANCE, render_plan_status
 from .context_manager import (
     ContextRenderStats,
     ConversationContextManager,
     estimate_context_tokens as _pure_ctx_tokens,
 )
-from .interfaces import IToolDispatcher
+from .interfaces import IToolDispatcher, TurnView
 from .planner import (
     START_PLAN_SPEC,
     UPDATE_PLAN_SPEC,
@@ -59,6 +59,7 @@ from .planner import (
     TurnPlanner,
     build_plan_from_steps,
 )
+from .profiles import FRONTIER_PROFILE, OrchestrationProfile
 from .providers.interfaces import ILLMProvider, ProviderChunk
 from .tool_scheduler import ScheduledToolRequest, ToolBatchResult, ToolScheduler
 
@@ -103,6 +104,17 @@ _PLAN_RECONCILE_NUDGE = (
 # 지시가 유일한 채널이고, 모델이 침묵한 라운드의 진행 표시는 프론트엔드
 # (thinking 애니메이션·도구 카드)가 담당한다. 하드코딩 문장을 사용자에게
 # 스트리밍하는 것은 제품 원칙 위반.
+#
+# 대신 런타임이 하는 것은 **모델-facing 교정**이다(local 프로파일): 서사 없이
+# 도구만 부르는 침묵 라운드가 연속되면 synthetic user 넛지로 NARRATE 준수를
+# 요구한다 — 사용자에게 문장을 합성하는 게 아니라 모델에게 지시를 상기시킨다.
+# 소형 모델은 시스템 프롬프트 서두의 지시 하나로는 서사하지 않는다(실측:
+# chat_flow.png, 2026-07-10) — recency 위치의 반복 지시가 준수율을 만든다.
+_NARRATION_NUDGE = (
+    "Reminder: before EVERY tool call, first write ONE short sentence to the user "
+    "(in their language) saying what you're about to do and why. You have been "
+    "calling tools silently. Continue the task now — narrate, then act."
+)
 
 
 @dataclass
@@ -137,6 +149,7 @@ class AgentLoop:
         planner: TurnPlanner | None = None,
         agent_config: AgentConfig | None = None,
         max_output_tokens: int | None = None,
+        profile: OrchestrationProfile | None = None,
     ) -> None:
         self._provider = provider
         self._dispatcher = dispatcher
@@ -151,6 +164,8 @@ class AgentLoop:
         # 맡겨 긴 답이 문장 중간에 잘리던 버그가 났다. 오케스트레이터가
         # cfg.provider.max_output_tokens를 주입한다.
         self._max_output_tokens = max_output_tokens
+        # 소형 모델 보정 강도(서사 넛지 등). 기본 frontier = 보정 없음(기존 동작).
+        self._profile = profile or FRONTIER_PROFILE
 
     def _render(self, system_prompt: str, messages: list[Message], *, budget_scale: float):
         """이 반복에 보낼 컨텍스트를 렌더한다. budget_scale<1이면 컨텍스트 길이
@@ -188,26 +203,44 @@ class AgentLoop:
         plan_budget = 12 + 6 * len(plan_state.plan.steps)
         return max(ctx.max_iterations, min(plan_budget, self._agent_config.plan_max_iterations))
 
-    def _system_prompt_for(self, ctx: TurnContext, plan_state: PlanState | None, tool_calls_made: int) -> str:
-        """계획이 있으면 시스템 프롬프트 뒤에 살아있는 계획 블록을 덧붙인다 —
-        매 반복 전체 상태를 다시 싣는다(토큰 절약보다 수행 품질, AgentConfig 참고)."""
+    def _system_prompt_for(self, ctx: TurnContext, plan_state: PlanState | None) -> str:
+        """이 반복의 시스템 프롬프트. 계획이 활성이면 **정적** 작업 지침(PLAN_GUIDANCE)만
+        덧붙는다 — 턴 내 불변이라 프리픽스 캐시(Ollama KV·Claude cache_control)가
+        살아있다. 반복마다 변하는 계획 *상태*는 시스템이 아니라 히스토리 끝의
+        ephemeral 메시지로 실린다(_plan_status_message): 이전 설계는 상태를 시스템에
+        렌더해 매 반복 전체 컨텍스트를 re-prefill시켰다(로컬 LLM 최대 비용 누수)."""
         if plan_state is None:
             return ctx.system_prompt
-        block = render_plan_block(
-            plan_state.plan,
-            rounds_without_update=plan_state.rounds_without_update,
-            drift_guard_rounds=self._agent_config.plan_drift_guard_rounds,
-            nudge_skill_capture=(
-                plan_state.all_terminal and tool_calls_made >= _SKILL_NUDGE_MIN_TOOL_CALLS
+        return f"{ctx.system_prompt}\n\n{PLAN_GUIDANCE}"
+
+    def _plan_status_message(self, plan_state: PlanState, tool_calls_made: int) -> Message:
+        """살아있는 계획 상태를 담은 ephemeral tail 메시지(스냅샷 프롬프팅).
+
+        durable 히스토리에 넣지 않고 렌더 직전 사본에만 덧붙인다 — 매 호출 최신
+        전체 상태를 다시 싣되(로컬 LLM은 대화 중반의 계획을 잊는다), 마지막 메시지
+        위치라 recency 주목도가 가장 높고 캐시는 tail 재계산만으로 유지된다.
+        role="user"인 이유: 히스토리 중간 system은 Claude wire에서 떨어져 나가고,
+        연속 user 메시지는 API가 한 턴으로 합쳐 허용된다."""
+        return Message(
+            role="user",
+            content=render_plan_status(
+                plan_state.plan,
+                rounds_without_update=plan_state.rounds_without_update,
+                drift_guard_rounds=self._agent_config.plan_drift_guard_rounds,
+                nudge_skill_capture=(
+                    plan_state.all_terminal and tool_calls_made >= _SKILL_NUDGE_MIN_TOOL_CALLS
+                ),
             ),
+            metadata={"synthetic": "plan_status", "ephemeral": True},
         )
-        return f"{ctx.system_prompt}\n\n{block}"
 
     async def run(self, ctx: TurnContext, session_id: str, result: LoopResult, abort: asyncio.Event):
         tool_index = {t.name: t for t in ctx.tools}
         messages: list[Message] = list(ctx.history)
         tool_calls_made = 0
         final_text = ""
+        # 이 턴의 사용자 요청 — 플래너와 TurnView(서브에이전트 라이브 컨텍스트)가 공유.
+        user_message = next((m.content for m in reversed(messages) if m.role == "user"), "")
 
         # ── PLAN: 의도 파악 + 필요 시 계획 수립 (fail-soft — 실패해도 턴 진행) ──
         plan_state: PlanState | None = None
@@ -216,7 +249,6 @@ class AgentLoop:
         # trailing-assistant는 prefill로 해석하는 API가 있다).
         pending_plan_meta: dict | None = None
         if self._planner is not None and ctx.tools and not abort.is_set():
-            user_message = next((m.content for m in reversed(messages) if m.role == "user"), "")
             if user_message.strip():
                 outcome = PlanOutcome()
                 async for ev in self._planner.run(ctx, user_message, outcome, abort):
@@ -234,6 +266,10 @@ class AgentLoop:
         iteration = 0
         empty_retries = 0
         plan_reconcile_nudges = 0
+        # 서사(NARRATE) 준수 추적 — 본문 없이 실제 도구만 부른 연속 라운드 수와
+        # 이 턴에 이미 쓴 넛지 수(프로파일 상한, local만 활성).
+        silent_tool_rounds = 0
+        narration_nudges = 0
         while True:
             if iteration >= self._effective_max_iterations(ctx, plan_state):
                 # budget exhausted without a clean stop
@@ -257,7 +293,13 @@ class AgentLoop:
                 iteration_tools = ctx.tools + (START_PLAN_SPEC,)
             else:
                 iteration_tools = ctx.tools
-            iteration_system = self._system_prompt_for(ctx, plan_state, tool_calls_made)
+            iteration_system = self._system_prompt_for(ctx, plan_state)
+            # 살아있는 계획 상태는 렌더 **사본**의 tail에만 싣는다 — durable 히스토리를
+            # 오염시키지 않으면서 컨텍스트 예산·recent 보호(컨텍스트 매니저)는 그대로
+            # 적용받고, 시스템 프롬프트는 턴 내 불변으로 남는다(프리픽스 캐시 유지).
+            render_messages = list(messages)
+            if plan_state is not None:
+                render_messages.append(self._plan_status_message(plan_state, tool_calls_made))
 
             assistant_parts: list[str] = []
             thinking_parts: list[str] = []
@@ -268,7 +310,7 @@ class AgentLoop:
             # 전에 안전하게 재렌더할 수 있다. 재시도 후에도 실패하면 상위로 전파.
             for attempt, budget_scale in enumerate((1.0, 0.45)):
                 rendered_context, provider_system, provider_messages = self._render(
-                    iteration_system, messages, budget_scale=budget_scale
+                    iteration_system, render_messages, budget_scale=budget_scale
                 )
                 produced_any = False
                 try:
@@ -356,6 +398,11 @@ class AgentLoop:
                     log.warning("plan still unfinished after reconcile nudge — auto-closing remaining steps as skipped")
                     plan_state.reconcile_abandoned()
                     yield ev_plan_updated(plan_state.plan)
+                    # 강제 종결 스냅샷을 마지막 어시스턴트 메시지 metadata에도 싣는다 —
+                    # 리로드가 "진행 중처럼 보이는" 이전 스냅샷으로 복원되던 한계
+                    # (AGENT_EXECUTION §3.4의 알려진 한계) 해소. metadata dict는
+                    # frozen Message에서도 가변이라 append 이후 부착이 안전하다.
+                    messages[-1].metadata["plan"] = plan_state.plan.to_dict()
                 final_text = assistant_text
                 yield ev_message(content=assistant_text)
                 break
@@ -461,6 +508,19 @@ class AgentLoop:
                 scheduled.append(ScheduledToolRequest(call=call, spec=spec))
 
             if scheduled:
+                # 이번 턴의 라이브 스냅샷을 dispatcher에 갱신 — transcript는 턴 종료에야
+                # 영속화되므로, 이것 없이는 delegate_subagent 워커가 이번 턴의 도구
+                # 관찰·계획을 전혀 못 본다(컨텍스트 주입 공백). duck-typed optional:
+                # 테스트 fake dispatcher는 구현하지 않아도 된다.
+                set_view = getattr(self._dispatcher, "set_turn_view", None)
+                if set_view is not None:
+                    set_view(
+                        TurnView(
+                            user_message=user_message,
+                            plan=plan_state.plan if plan_state is not None else None,
+                            turn_messages=tuple(messages[len(ctx.history):]),
+                        )
+                    )
                 batch = ToolBatchResult()
                 scheduler = ToolScheduler(self._dispatcher)
                 async for ev in scheduler.schedule(session_id, scheduled, batch, abort):
@@ -479,13 +539,37 @@ class AgentLoop:
                     )
                     tool_calls_made += 1
 
-            # ── ReAct drift guard 카운터: 실제 도구 라운드가 계획 보고 없이
-            # 지나가면 누적 — 임계 도달 시 다음 반복 프롬프트가 재평가를 강제한다.
-            # 계획 관련 호출(update_plan·start_plan)은 "보고"이므로 카운트에서 제외한다.
-            if plan_state is not None and not any(
+            # ── ReAct drift guard 카운터: 도구 라운드가 계획 보고 없이 지나가면
+            # 누적 — 임계 도달 시 다음 반복 프롬프트가 재평가를 강제한다. 계획 관련
+            # 호출(update_plan·start_plan)이 하나라도 있으면 그 라운드는 "보고"다.
+            made_plan_report = any(
                 c.tool_name in (UPDATE_PLAN_SPEC.name, START_PLAN_SPEC.name) for c in pending_calls
-            ):
+            )
+            has_real_tool_call = any(
+                c.tool_name not in (UPDATE_PLAN_SPEC.name, START_PLAN_SPEC.name)
+                for c in pending_calls
+            )
+            if plan_state is not None and not made_plan_report:
                 plan_state.note_tool_round()
+
+            # ── 서사(NARRATE) 넛지: 본문 없이 실제 도구만 부른 라운드가 연속되면
+            # synthetic user 넛지 1회로 교정한다(local 프로파일만, 턴당 상한).
+            # plan 메타 호출만 있는 라운드는 계획 카드가 보이므로 침묵으로 안 센다.
+            if assistant_text.strip():
+                silent_tool_rounds = 0
+            elif has_real_tool_call:
+                silent_tool_rounds += 1
+                if (
+                    self._profile.narration_nudge_after > 0
+                    and silent_tool_rounds >= self._profile.narration_nudge_after
+                    and narration_nudges < self._profile.narration_nudge_max
+                ):
+                    narration_nudges += 1
+                    silent_tool_rounds = 0
+                    log.info("silent tool rounds — injecting narration nudge (%d)", narration_nudges)
+                    messages.append(
+                        Message(role="user", content=_NARRATION_NUDGE, metadata={"synthetic": "narration_nudge"})
+                    )
             # loop continues: provider sees the tool results next iteration
 
         result.final_message = final_text

@@ -19,10 +19,11 @@ from __future__ import annotations
 
 from .curator import CURATOR_REVIEW_PROMPT, build_curator_messages, build_curator_tool_specs
 from .planning import (
+    PLAN_GUIDANCE,
     PLANNING_TEMPERATURE,
     build_planning_messages,
     plan_to_markdown,
-    render_plan_block,
+    render_plan_status,
 )
 from .review import (
     LEARN_SYSTEM_PROMPT,
@@ -31,16 +32,18 @@ from .review import (
     build_review_messages,
     build_review_tool_specs,
 )
-from .system import BASE_SYSTEM_PROMPT, SKILL_GUIDANCE, compose_system_prompt
+from .system import ACTION_RULES_EPILOGUE, BASE_SYSTEM_PROMPT, SKILL_GUIDANCE, compose_system_prompt
 from .title import TITLE_MAX_CHARS, build_title_messages, clean_title
 
 __all__ = [
+    "ACTION_RULES_EPILOGUE",
     "BASE_SYSTEM_PROMPT",
     "SKILL_GUIDANCE",
     "compose_system_prompt",
+    "PLAN_GUIDANCE",
     "PLANNING_TEMPERATURE",
     "build_planning_messages",
-    "render_plan_block",
+    "render_plan_status",
     "plan_to_markdown",
     "TITLE_MAX_CHARS",
     "build_title_messages",

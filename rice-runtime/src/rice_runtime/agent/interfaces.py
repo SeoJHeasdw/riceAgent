@@ -20,6 +20,7 @@ Seams defined here:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import AsyncIterator, Protocol, Sequence, runtime_checkable
 
 from ..core.types import (
@@ -31,7 +32,24 @@ from ..core.types import (
     ToolResult,
     ToolSpec,
     TurnContext,
+    TurnPlan,
 )
+
+
+@dataclass(frozen=True)
+class TurnView:
+    """이번 턴에서 지금까지 일어난 일의 라이브 스냅샷.
+
+    transcript는 턴 **종료** 시에야 이번 턴을 영속화한다(orchestrator step 5) —
+    그래서 진행 중 턴의 도구 관찰·계획을 봐야 하는 빌트인(delegate_subagent)은
+    transcript만 읽어서는 장님이다. 루프가 도구 라운드마다 이 뷰를 dispatcher에
+    갱신하고, `needs_turn_view = True` 마커를 단 빌트인 핸들러가 kwargs로 받는다
+    (needs_session과 같은 opt-in 관례)."""
+
+    user_message: str = ""
+    plan: TurnPlan | None = None
+    # 이번 턴에 루프가 만든 메시지들(assistant 라운드 + tool 결과) — ctx.history 이후분.
+    turn_messages: tuple[Message, ...] = ()
 
 
 @runtime_checkable
@@ -106,7 +124,13 @@ class IToolDispatcher(Protocol):
     """Routes a normalized `ToolCall` to its executor and yields the resulting
     SSE events. For tools with `requires_approval`, it yields a
     `tool_approval_required` control event and awaits the `IApprovalGate` before
-    executing (or skips on reject/timeout)."""
+    executing (or skips on reject/timeout).
+
+    Optional extension (duck-typed, NOT part of the frozen Protocol): a concrete
+    dispatcher may expose `set_turn_view(view: TurnView) -> None`. The loop calls
+    it via getattr-guard before each tool round so turn-aware builtins
+    (delegate_subagent) see the in-progress turn; fakes/tests that don't care
+    simply omit it."""
 
     def dispatch(self, session_id: str, call: ToolCall, spec: ToolSpec) -> AsyncIterator[SSEEvent]:
         ...
