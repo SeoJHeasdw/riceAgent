@@ -92,7 +92,6 @@ RICE는 사용자의 업무 경험을 축적하며 학습·진화하는 개인 �
 **로드맵/미구현:**
 - 파일 첨부 / 멀티모달 입력 — 계약 설계는 있으나 `POST /sessions/{id}/attachments`와 `MessageIn.attachment_ids`가 아직 없다
 - 대화 내보내기 / 공유 — runtime 라우트 없음
-- 음성 입력(STT)
 
 **특징:**
 - Claude Desktop 스타일 벤치마킹

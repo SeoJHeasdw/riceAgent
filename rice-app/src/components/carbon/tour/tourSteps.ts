@@ -28,7 +28,7 @@ export const TOUR_STEPS: TourStep[] = [
     id: 'chat-input',
     target: 'chat-input',
     title: '채팅 입력창',
-    body: '여기서 에이전트에게 메시지를 보내요. / 를 입력하면 저장된 스킬을 바로 불러올 수 있고, 첨부 파일·음성 입력도 지원해요.',
+    body: '여기서 에이전트에게 메시지를 보내요. / 를 입력하면 저장된 스킬을 바로 불러올 수 있고, 첨부 파일도 지원해요.',
     placement: 'top',
     navigateTo: '/chat',
   },

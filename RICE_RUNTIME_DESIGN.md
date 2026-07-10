@@ -362,7 +362,6 @@ def check_plugin_permission(plugin_id: str, connector_type: str) -> bool:
 > 설계는 UI 상위집합이다. 현재 프로토타입 UI에 있으나 MVP 범위가 미정인 것 + 아직 UI에 없는 확장 후보를 추적한다.
 
 - **멀티모달/첨부 처리 (설계 확정, 구현은 아직 — 2026-07-08 확인)**: ChatScreen 파일 첨부 → **xlsx·png만** 첨부 저장(`~/.rice/attachments/`) + provider 멀티모달 전달이 **설계**이지만, `POST /sessions/{id}/attachments` 라우트도 `MessageIn.attachment_ids` 필드도 코드에 없다(CONTRACTS 정본 — 프론트 `sse.ts` 주석도 동일하게 미래형으로 남아 있음). 착수 시 CONTRACTS 1.1·1.3과 함께 갱신할 것
-- **음성 입력(STT)**: ChatScreen 마이크 UI → Web Speech 또는 로컬 STT (이번 개발 **제외**, 향후 확장)
 - **Skill 작성·게시**: 사용자 제작 skill(SKILL.md)을 platform에 publish(`POST /artifacts`) — **UI는 이미 존재한다**(`SkillAuthorModal`·`SkillPublishDialog`, SkillMarketScreen/MySkillsScreen에 배선됨, PRODUCT_IDEA 정본)지만 로컬 React state만 갱신하고 실제 `POST /artifacts` 호출은 아직 없다(2026-07-08 확인) — 남은 일은 UI 신설이 아니라 백엔드 연동
 - **Connector 제공 도구 가시화**: 연결된 Connector(MCP)가 노출하는 원자적 tool 목록을 ConnectorsScreen에서 확인
 - **artifact 디지털 서명**: 10장 Phase 2 분석 항목

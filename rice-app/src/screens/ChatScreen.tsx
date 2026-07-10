@@ -2119,11 +2119,6 @@ function ChatScreen() {
                       <Icon name="attachment" size={16} />
                     </button>
                   </Tooltip>
-                  <Tooltip label="음성">
-                    <button className="p-1.5 rounded-lg text-icon-secondary hover:text-icon-primary hover:bg-layer-hover-01 transition-colors">
-                      <Icon name="microphone" size={16} />
-                    </button>
-                  </Tooltip>
                   <div className="relative">
                     <button
                       onClick={() => setSkillsOpen((o) => !o)}

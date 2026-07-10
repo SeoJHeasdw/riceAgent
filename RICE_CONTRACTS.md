@@ -129,7 +129,7 @@ Electron main process
 
 **엔드포인트**: 위 초안을 정본으로 하며, `contracts/runtime.yaml`(OpenAPI)로 상세화한다.
 
-**첨부/멀티모달 입력**: **설계 확정, 구현은 아직(2026-07-08 확인)** — 대상은 xlsx·png 2종만(벤치마크: Claude cowork의 파일 첨부). 설계된 방식은 **선업로드 후 참조**: 앱이 `POST /sessions/{id}/attachments`(multipart)로 먼저 올려 `attachment_id`를 받고, `POST /sessions/{id}/messages`는 `attachment_ids[]`로 참조 — SSE 스트림 응답과 multipart 본문이 한 요청에서 충돌하는 걸 피하기 위함이다. 런타임이 xlsx·png 외 MIME을 **거부**(415)하는 것도 설계값이다. **그러나 이 라우트도 `MessageIn.attachment_ids` 필드도 코드에 없다** — `messages.py`의 `MessageIn`은 `content` 하나뿐이고, 프론트 `sse.ts` 주석도 여전히 미래형("CONTRACTS decision 1-C (future)")으로 남아 있다. 착수 시 이 절 전체를 실제 스펙으로 갱신할 것. 음성 입력(STT)은 **이번 개발 제외**(향후 Web Speech 또는 로컬 STT).
+**첨부/멀티모달 입력**: **설계 확정, 구현은 아직(2026-07-08 확인)** — 대상은 xlsx·png 2종만(벤치마크: Claude cowork의 파일 첨부). 설계된 방식은 **선업로드 후 참조**: 앱이 `POST /sessions/{id}/attachments`(multipart)로 먼저 올려 `attachment_id`를 받고, `POST /sessions/{id}/messages`는 `attachment_ids[]`로 참조 — SSE 스트림 응답과 multipart 본문이 한 요청에서 충돌하는 걸 피하기 위함이다. 런타임이 xlsx·png 외 MIME을 **거부**(415)하는 것도 설계값이다. **그러나 이 라우트도 `MessageIn.attachment_ids` 필드도 코드에 없다** — `messages.py`의 `MessageIn`은 `content` 하나뿐이고, 프론트 `sse.ts` 주석도 여전히 미래형("CONTRACTS decision 1-C (future)")으로 남아 있다. 착수 시 이 절 전체를 실제 스펙으로 갱신할 것).
 
 **스킬 개선(patch) 계약** (LEARNING_LOOP 소유): `skill_patched`·`skill_patch_proposed` 이벤트 + `/skills/{id}/patch|history|rollback` 엔드포인트. 본 절에 반영 완료.
 

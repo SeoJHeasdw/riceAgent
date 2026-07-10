@@ -43,7 +43,6 @@ tools/                    ← 모든 built-in tool 구현 위치
 ├── kanban_tools.py       ← kanban_* (HERMES_KANBAN_TASK 게이팅)
 ├── discord_tool.py       ← discord, discord_admin
 ├── image_generation_tool.py ← image_generate
-├── tts_tool.py           ← text_to_speech
 ├── computer_use_tool.py  ← computer_use (cua-driver 게이팅)
 └── ...
 
@@ -196,8 +195,6 @@ _HERMES_CORE_TOOLS = [
     "browser_type", "browser_scroll", "browser_back",
     "browser_press", "browser_get_images",
     "browser_vision", "browser_console", "browser_cdp", "browser_dialog",
-    # TTS
-    "text_to_speech",
     # 플래닝·메모리
     "todo", "memory",
     # 세션 검색
@@ -269,7 +266,6 @@ _HERMES_CORE_TOOLS = [
 | `code_execution` | `execute_code` |
 | `delegation` | `delegate_task` |
 | `cronjob` | `cronjob` |
-| `tts` | `text_to_speech` |
 | `moa` | `mixture_of_agents` |
 | `homeassistant` | `ha_*` |
 | `kanban` | `kanban_*` |
@@ -389,7 +385,6 @@ AIAgent.__init__()
 | `video_analyze` | `tools/vision_tools.py` | 비디오 지원 모델 | 비디오 분석 (기본 OFF) |
 | `image_generate` | `tools/image_generation_tool.py` | 이미지 생성 프로바이더 설정 | 이미지 생성 |
 | `video_generate` | `tools/video_generation_tool.py` | 비디오 생성 프로바이더 설정 | 비디오 생성 (기본 OFF) |
-| `text_to_speech` | `tools/tts_tool.py` | Edge TTS (무료)/ElevenLabs/OpenAI/xAI | TTS |
 
 ### 스킬 관리
 
