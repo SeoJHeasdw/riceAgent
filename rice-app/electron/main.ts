@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron';
 import path from 'path';
 import { promises as fs } from 'fs';
 import { fileURLToPath } from 'url';
@@ -165,6 +165,17 @@ ipcMain.handle('app:get-path', (_event, name: string) => {
     throw new Error(`Disallowed path name: ${name}`);
   }
   return app.getPath(name as Parameters<typeof app.getPath>[0]);
+});
+
+// Native directory picker for the workspace-output setting. The renderer only
+// receives a user-selected directory path; it never receives filesystem access.
+ipcMain.handle('dialog:select-directory', async (_event, defaultPath?: string) => {
+  const result = await dialog.showOpenDialog(mainWindow ?? undefined, {
+    title: 'RICE 생성 파일 저장 폴더 선택',
+    defaultPath: typeof defaultPath === 'string' && defaultPath ? defaultPath : undefined,
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  return result.canceled ? null : result.filePaths[0] ?? null;
 });
 
 // Open an external URL in the user's default browser (OAuth consent — CONTRACTS

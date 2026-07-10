@@ -1,4 +1,5 @@
 import React, { useId, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { dialogBackdropCls, dialogSurfaceCls } from './surfaces';
 import { useDialogA11y } from '../../hooks/useDialogA11y';
 
@@ -21,7 +22,7 @@ export interface ModalProps {
   /** Modal content */
   children: React.ReactNode;
   /** Modal size */
-  size?: 'sm' | 'md' | 'lg';
+  size?: 'sm' | 'md' | 'lg' | 'xl';
   /** Footer content (typically buttons) */
   footer?: React.ReactNode;
   /** 컴팩트 푸터가 기본 — 두꺼운 py-4 푸터가 필요한 예외 표면만 false로 */
@@ -50,9 +51,10 @@ export const Modal: React.FC<ModalProps> = ({
     sm: 'max-w-md',
     md: 'max-w-2xl',
     lg: 'max-w-4xl',
+    xl: 'max-w-6xl',
   };
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[100] flex items-center justify-center">
       {/* Backdrop */}
       <div className={dialogBackdropCls} onClick={onClose} aria-hidden="true" />
@@ -101,7 +103,8 @@ export const Modal: React.FC<ModalProps> = ({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 };
 

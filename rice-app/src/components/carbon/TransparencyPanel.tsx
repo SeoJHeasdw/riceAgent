@@ -157,8 +157,8 @@ export const TransparencyPanel: React.FC<TransparencyPanelProps> = ({ open, onCl
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="학습 투명성" size="lg">
-      <div className="flex flex-col gap-5 max-h-[68vh] overflow-y-auto pr-1">
+    <Modal open={open} onClose={onClose} title="학습 투명성" size="xl">
+      <div className="flex flex-col gap-5 max-h-[76vh] overflow-y-auto pr-1">
         {/* 1. 컨텍스트 렌더 — 모델이 본 것 / 못 본 것 / 압축한 것 */}
         <section>
           <SectionTitle icon="flow">모델이 본 것 · 못 본 것</SectionTitle>

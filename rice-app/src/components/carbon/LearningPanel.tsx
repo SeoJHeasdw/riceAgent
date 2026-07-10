@@ -1,21 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Icon, Tag, Toggle } from '../ui';
+import { Icon, Tag } from '../ui';
 import type { IconName } from '../ui/Icon';
 import { useLearning } from '../../lib/learning/LearningContext';
-import {
-  type InstalledTool,
-  type Proposal,
-  type ProposalKind,
-  type UserSignal,
-} from '../../lib/learningData';
+import { type Proposal, type ProposalKind, type UserSignal } from '../../lib/learningData';
 import type { SkillSuggestion } from '../../lib/types';
 import { api } from '../../lib/api';
 import { TransparencyPanel } from './TransparencyPanel';
 
 /**
  * LearningPanel - the right-side learning surface. Interactive: users can
- * toggle/remove installed tools, edit/remove user-model signals, and
- * enable/disable/delete learned skills. A skill highlighted from the chat
+ * edit/remove user-model signals and enable/disable/delete learned skills.
+ * A skill highlighted from the chat
  * thread scrolls into view and pulses.
  */
 
@@ -26,25 +21,6 @@ export interface LearningPanelProps {
   /** open the conversation (and scroll to the message) a proposal's evidence came from */
   onOpenConversation?: (conversationId: string, messageIndex?: number) => void;
 }
-
-// confidence meter — 신뢰도 구간별로 색을 달리해 바가 "다 똑같은 파란 줄"로
-// 읽히지 않게 한다 (낮음=회색, 보통=블루, 높음=AI 그라디언트)
-const Confidence: React.FC<{ v: number }> = ({ v }) => {
-  const fill =
-    v >= 0.75
-      ? 'bg-gradient-to-r from-[var(--ai-gradient-start)] to-[var(--ai-gradient-end)]'
-      : v >= 0.4
-        ? 'bg-blue-50'
-        : 'bg-border-strong-03';
-  return (
-    <div
-      title={`신뢰도 ${Math.round(v * 100)}%`}
-      className="w-11 h-1 bg-border-strong-01 flex-shrink-0 rounded-full overflow-hidden"
-    >
-      <div className={`h-full rounded-full ${fill}`} style={{ width: `${Math.round(v * 100)}%` }} />
-    </div>
-  );
-};
 
 // small overflow menu
 interface MenuItem {
@@ -130,18 +106,24 @@ const SignalRow: React.FC<{ s: UserSignal; onEdit: (v: string) => void; onRemove
     return (
       <div className="flex flex-col gap-1.5 bg-layer-02 px-2.5 py-2 rounded-md">
         <div className="text-caption-01 text-text-helper">{s.label}</div>
-        <input
+        <textarea
           value={val}
           onChange={(e) => setVal(e.target.value)}
           autoFocus
+          rows={4}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') {
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
               onEdit(val);
+              setEditing(false);
+            } else if (e.key === 'Escape') {
+              setVal(s.value);
               setEditing(false);
             }
           }}
-          className="bg-field-01 border-0 border-b border-border-strong-01 outline-none text-text-primary text-body-short-01 px-1.5 py-1"
+          className="min-h-24 w-full resize-y rounded-md border border-border-strong-01 bg-field-01 px-2.5 py-2 text-body-short-01 leading-relaxed text-text-primary outline-none focus:border-focus"
         />
+        <span className="text-label-micro text-text-helper">⌘ Enter로 저장 · Esc로 취소</span>
         <div className="flex gap-1.5 justify-end">
           <button
             onClick={() => {
@@ -171,12 +153,8 @@ const SignalRow: React.FC<{ s: UserSignal; onEdit: (v: string) => void; onRemove
       <div className="min-w-0 flex-1">
         {/* label은 그룹 헤더로 승격됐으므로 행에는 출처만 */}
         <div className="text-caption-01 text-text-helper">{s.source}</div>
-        <div className="text-body-short-01 text-text-primary">{s.value}</div>
+        <div className="text-body-short-01 text-text-primary whitespace-pre-wrap">{s.value}</div>
       </div>
-      {/* 신뢰도 바 — 항상 노출하면 로그처럼 읽혀서, 행에 관심을 줄 때만 */}
-      <span className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
-        <Confidence v={s.conf} />
-      </span>
       <div className="flex flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
         <button
           onClick={() => setEditing(true)}
@@ -198,34 +176,6 @@ const SignalRow: React.FC<{ s: UserSignal; onEdit: (v: string) => void; onRemove
     </div>
   );
 };
-
-// installed tool/plugin row
-const InstalledRow: React.FC<{ t: InstalledTool; onToggle: () => void; onRemove: () => void }> = ({
-  t,
-  onToggle,
-  onRemove,
-}) => (
-  <div className={`flex items-center gap-2 px-2 py-1.5 rounded-md ${t.enabled ? '' : 'opacity-55'}`}>
-    <div className="w-[22px] h-[22px] flex-shrink-0 flex items-center justify-center rounded bg-layer-02 border border-border-subtle-02">
-      <Icon name={t.icon} size={13} className={t.enabled ? 'text-icon-primary' : 'text-icon-secondary'} />
-    </div>
-    <div className="flex-1 min-w-0">
-      <div className="flex items-center gap-1.5">
-        <span className="text-caption-02 text-text-primary truncate">{t.name}</span>
-        <Tag type={t.kind === 'plugin' ? 'purple' : 'gray'} size="sm">
-          {t.kind === 'plugin' ? '플러그인' : '도구'}
-        </Tag>
-      </div>
-      <div className="text-caption-01 text-text-helper leading-tight">{t.meta}</div>
-    </div>
-    <Toggle
-      checked={t.enabled}
-      onChange={() => onToggle()}
-      aria-label={`${t.name} ${t.enabled ? '비활성화' : '활성화'}`}
-    />
-    <RowMenu items={[{ icon: 'trash', label: '제거', danger: true, onClick: onRemove }]} />
-  </div>
-);
 
 // loop proposal card — a "pending decision" the loop surfaced (accept / later)
 const PROPOSAL_META: Record<ProposalKind, { icon: IconName; tint: string }> = {
@@ -385,14 +335,12 @@ const SuggestionCard: React.FC<{
   );
 };
 
-export const LearningPanel: React.FC<LearningPanelProps> = ({ isLearning = true, width = 320, onOpenConversation }) => {
+export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpenConversation }) => {
   const {
     skills,
     setSkills,
     signals,
     setSignals,
-    installed,
-    setInstalled,
     setDetails,
     proposals,
     setProposals,
@@ -500,12 +448,11 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ isLearning = true,
   }, [highlightedSkill, panelScrollRef]);
 
   const activeSkills = skills.filter((s) => s.enabled).length;
-  const activeTools = installed.filter((t) => t.enabled).length;
 
   return (
     <div className="h-full flex-shrink-0 bg-layer-01 border-l border-border-subtle-01 flex flex-col overflow-hidden" style={{ width }}>
       {/* header — 스크롤 밖 고정, 채팅의 compact window row와 같은 높이 */}
-      <div className="flex items-center gap-2 px-4 h-11 flex-shrink-0 electron-drag">
+      <div className="flex items-center gap-2 px-4 pr-12 h-11 flex-shrink-0 electron-drag">
           <Icon name="renew" size={16} className="text-icon-primary" />
           <span className="text-label-02 font-semibold text-text-primary">학습 루프</span>
           <button
@@ -517,22 +464,6 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ isLearning = true,
             <Icon name="view" size={14} />
             투명성
           </button>
-          <span className="flex-shrink-0">
-            {isLearning ? (
-              // 살아있는 루프임이 느껴지도록 도트에 은은한 pulse
-              <span className="inline-flex items-center gap-1.5 h-[18px] px-2 rounded-full text-label-micro font-semibold bg-support-success/12 text-support-success">
-                <span className="relative flex h-1.5 w-1.5">
-                  <span className="absolute inline-flex h-full w-full rounded-full bg-support-success opacity-60 animate-ping" />
-                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-support-success" />
-                </span>
-                학습 중
-              </span>
-            ) : (
-              <Tag type="gray" size="sm">
-                일시정지
-              </Tag>
-            )}
-          </span>
         </div>
 
       <div ref={panelScrollRef} className="flex-1 overflow-y-auto">
@@ -609,28 +540,6 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ isLearning = true,
           </div>
         )}
 
-        {/* installed tools / plugins — what the agent can call now */}
-        <PanelSection icon="plug" title="설치된 도구 · 플러그인" count={`${activeTools}/${installed.length} 활성`}>
-          <div className="flex flex-col gap-1">
-            {installed.map((t) => (
-              <InstalledRow
-                key={t.id}
-                t={t}
-                onToggle={() => setInstalled((arr) => arr.map((x) => (x.id === t.id ? { ...x, enabled: !x.enabled } : x)))}
-                onRemove={() => setInstalled((arr) => arr.filter((x) => x.id !== t.id))}
-              />
-            ))}
-            {installed.length === 0 && (
-              <div className="flex items-center gap-2.5 rounded-lg border border-dashed border-border-strong-01 px-3 py-2.5">
-                <Icon name="plug" size={16} className="text-icon-secondary flex-shrink-0" />
-                <span className="text-caption-01 text-text-helper">
-                  설치된 도구가 없어요. 마켓에서 설치해보세요.
-                </span>
-              </div>
-            )}
-          </div>
-        </PanelSection>
-
         {/* user model — grouped memory card. 같은 label끼리 묶고, 반복 항목은
             preview 2개 + count로 접어 raw log처럼 쌓이지 않게 한다. */}
         <PanelSection icon="user" title="나에 대한 모델" count={`신호 ${signals.length}`}>
@@ -694,7 +603,7 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ isLearning = true,
 
         {/* learned skills — enable/disable/delete */}
         <PanelSection icon="skill" title="학습한 스킬" count={`${activeSkills}/${skills.length} 활성`}>
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-0.5">
             {skills.map((s) => {
               const hot = highlightedSkill === s.id;
               // 빌트인: 토글은 서버 상태(active/archived)로 영속하고 삭제 항목은 아예
@@ -717,29 +626,23 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ isLearning = true,
                   ref={(el) => {
                     skillRefs.current[s.id] = el;
                   }}
-                  className={`flex items-center gap-2 bg-layer-01 pl-2.5 pr-1.5 py-2 rounded-md ${s.enabled ? '' : 'opacity-50'} ${
+                  className={`flex min-h-8 items-center gap-2 bg-layer-01 pl-2.5 pr-1 py-1 rounded-md ${s.enabled ? '' : 'opacity-50'} ${
                     hot ? 'ia-skill-hot outline outline-2 outline-blue-50 -outline-offset-1' : ''
                   }`}
                 >
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      {builtin && (
-                        <span title="기본 내장 스킬 — 활성/비활성만 가능" className="flex-shrink-0">
-                          <Icon name="sparkle" size={11} className="text-teal-40 opacity-80" />
-                        </span>
-                      )}
-                      <span className={`text-body-short-01 text-text-primary truncate ${s.enabled ? '' : 'line-through'}`}>
-                        {s.name} <span className="text-text-helper font-mono">{s.ver}</span>
+                  <div className="flex flex-1 min-w-0 items-center gap-1.5">
+                    {builtin && (
+                      <span title="기본 내장 스킬 — 활성/비활성만 가능" className="flex-shrink-0">
+                        <Icon name="sparkle" size={11} className="text-teal-40 opacity-80" />
                       </span>
-                      {!s.enabled && (
-                        <Tag type="gray" size="sm">
-                          비활성
-                        </Tag>
-                      )}
-                    </div>
-                    <div className="text-caption-01 text-text-helper">
+                    )}
+                    <span className={`min-w-0 truncate text-body-short-01 text-text-primary ${s.enabled ? '' : 'line-through'}`}>
+                      {s.name} <span className="text-text-helper font-mono">{s.ver}</span>
+                    </span>
+                    <span className="max-w-[112px] truncate text-caption-01 text-text-helper">
                       {s.uses}회 사용 · {s.trend}
-                    </div>
+                    </span>
+                    {!s.enabled && <Tag type="gray" size="sm">비활성</Tag>}
                   </div>
                   <RowMenu
                     items={[

@@ -722,6 +722,12 @@ function ChatScreen() {
   // so we subscribe rather than read once — when it flips on, we load the real
   // sessions persisted in state.db into the sidebar.
   const [connected, setConnected] = useState(api.isEnabled);
+  // Runtime owns this path (and can relocate it with RICE_HOME), so never
+  // reconstruct it from the browser's home directory.
+  const [workspacePath, setWorkspacePath] = useState<string | null>(null);
+  const [workspaceSaving, setWorkspaceSaving] = useState(false);
+  const [workspaceRestartRequired, setWorkspaceRestartRequired] = useState(false);
+  const [pendingWorkspacePath, setPendingWorkspacePath] = useState<string | null>(null);
   // which session's thread is currently mounted (gates the scroll-to-message effect)
   const [loadedSession, setLoadedSession] = useState('');
   const [highlightMsg, setHighlightMsg] = useState<number | null>(null);
@@ -815,6 +821,49 @@ function ChatScreen() {
     setConnected(api.isEnabled);
     return api.onEnabledChange(setConnected);
   }, []);
+
+  // Make the effective output location discoverable directly below the composer.
+  // The native picker selects a new single sandbox root; the runtime applies it
+  // atomically on restart so one in-flight turn never spans two folders.
+  useEffect(() => {
+    if (!connected) {
+      setWorkspacePath(null);
+      return;
+    }
+    void api.getWorkspaceInfo().then((res) => {
+      if (res.success && res.data?.path) {
+        setWorkspacePath(res.data.path);
+        setPendingWorkspacePath(null);
+        setWorkspaceRestartRequired(false);
+      }
+    });
+  }, [connected]);
+
+  const chooseWorkspaceFolder = () => {
+    if (workspaceSaving) return;
+    const picker = (
+      window as { electronAPI?: { dialog?: { selectDirectory: (defaultPath?: string) => Promise<string | null> } } }
+    ).electronAPI?.dialog?.selectDirectory;
+    if (!picker) {
+      toast.notify({ message: '폴더 선택은 RICE 데스크톱 앱에서 사용할 수 있어요.', variant: 'info' });
+      return;
+    }
+    setWorkspaceSaving(true);
+    void picker(pendingWorkspacePath || workspacePath || undefined)
+      .then(async (path) => {
+        if (!path) return;
+        const res = await api.updateWorkspaceLocation(path);
+        if (!res.success || !res.data?.path) {
+          toast.notify({ message: `저장 위치를 바꾸지 못했어요 · ${res.error ?? 'workspace'}`, variant: 'error' });
+          return;
+        }
+        setPendingWorkspacePath(res.data.path);
+        setWorkspaceRestartRequired(!!res.data.restart_required);
+        toast.notify({ message: '저장 위치를 변경했어요. RICE를 재시작하면 적용됩니다.', variant: 'success', duration: 4500 });
+      })
+      .catch(() => toast.notify({ message: '폴더 선택창을 열 수 없어요.', variant: 'error' }))
+      .finally(() => setWorkspaceSaving(false));
+  };
 
   // When connected, restore persisted settings (model/provider/endpoint) from
   // config.yaml via GET /settings, then load the session list.
@@ -1956,38 +2005,13 @@ function ChatScreen() {
               fixed toggle only when the session panel is collapsed. */}
           <div
             className={`h-11 flex-shrink-0 flex items-center gap-3 pr-4 border-b border-shell-border electron-drag ${
-              sessionSidebarOpen ? 'pl-4' : isElectron ? 'pl-[68px]' : 'pl-11'
+              sessionSidebarOpen ? 'pl-4' : isElectron ? 'pl-[100px]' : 'pl-[76px]'
             }`}
           >
             <span className="text-body-short-01 font-semibold text-text-primary truncate">
               {isEmpty ? '새 대화' : activeSession?.title || '대화'}
             </span>
 
-            <div className="ml-auto flex items-center gap-1">
-              <Tooltip label="빠른 실행 (⌘K)">
-                <button
-                  type="button"
-                  onClick={openCommandPalette}
-                  className="electron-no-drag flex h-7 w-7 items-center justify-center rounded-md text-icon-secondary transition-colors duration-150 hover:bg-layer-hover-01 hover:text-icon-primary"
-                  aria-label="빠른 실행 열기"
-                >
-                  <Icon name="search" size={14} />
-                </button>
-              </Tooltip>
-              {/* 패널이 열려 있으면 제목이 패널 헤더에 이미 있으므로 아이콘으로 축약 — 같은 라벨 이중 표기 방지 */}
-              <button
-                onClick={() => setLearningPanelOpen((o) => !o)}
-                data-tour="learning-loop"
-                className={`electron-no-drag flex items-center gap-1.5 px-2 py-0.5 border border-border-subtle-01 hover:bg-layer-hover-01 transition-colors text-text-secondary text-caption-01 rounded-md ${
-                  learningPanelOpen ? 'bg-layer-selected-01' : ''
-                }`}
-                title={learningPanelOpen ? '학습 루프 접기' : '학습 루프 펼치기'}
-              >
-                <Icon name="growth" size={14} />
-                {!learningPanelOpen && '학습 루프'}
-                <Icon name={learningPanelOpen ? 'side-panel-close' : 'side-panel-open'} size={14} />
-              </button>
-            </div>
           </div>
 
           {/* Thread */}
@@ -2234,39 +2258,71 @@ function ChatScreen() {
                   </Tooltip>
                 </div>
               </div>
-              <div className="flex items-center justify-center gap-1.5 text-caption-01 text-text-helper mt-2.5">
-                <span
-                  className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                    modelMode === 'local' ? 'bg-support-success' : 'bg-interactive'
-                  }`}
-                />
-                {modelMode === 'local'
-                  ? 'Ollama 로컬 모델로 실행 중 · 데이터가 기기를 벗어나지 않습니다'
-                  : 'Claude(SaaS) 모델로 실행 중'}
-              </div>
+              {workspacePath && (
+                <div className="mt-3 flex items-center px-1">
+                  <Tooltip label={`생성 파일 저장 위치 변경 · ${pendingWorkspacePath ?? workspacePath}`}>
+                    <button
+                      type="button"
+                      onClick={chooseWorkspaceFolder}
+                      disabled={workspaceSaving}
+                      className="flex min-w-0 max-w-full items-center gap-2 rounded-md py-1 text-caption-01 text-text-helper transition-colors hover:text-text-primary"
+                      aria-label={`생성 파일 저장 위치 변경: ${pendingWorkspacePath ?? workspacePath}`}
+                    >
+                      <Icon name="folder" size={18} className="flex-shrink-0 text-icon-secondary" />
+                      <span className="flex-shrink-0 text-text-secondary">저장 위치</span>
+                      <span className="truncate font-mono">{workspacePath}</span>
+                      {workspaceRestartRequired && (
+                        <span className="flex-shrink-0 text-support-warning" title={`다음 시작 저장 위치: ${pendingWorkspacePath ?? ''}`}>
+                          재시작 필요
+                        </span>
+                      )}
+                    </button>
+                  </Tooltip>
+                </div>
+              )}
               <style>{`
                 @keyframes chipIn {
                   from { opacity: 0; transform: translateY(3px) scale(0.97); }
                   to { opacity: 1; transform: none; }
+                }
+                @keyframes riceLearningPanelEnter {
+                  from { opacity: 0; transform: translateX(20px); }
+                  to { opacity: 1; transform: translateX(0); }
+                }
+                @keyframes riceLearningToggleRotate {
+                  from { transform: rotate(-100deg); }
+                  to { transform: rotate(0); }
+                }
+                .rice-learning-panel-enter {
+                  animation: riceLearningPanelEnter 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+                }
+                .rice-learning-toggle-active {
+                  animation: riceLearningToggleRotate 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
                 }
               `}</style>
             </div>
           </div>
         </div>
 
-        {/* Learning Panel */}
-        {learningPanelOpen && (
-          <>
-            <ResizeHandle
-              onPointerDown={learningPanel.startResize}
-              onDoubleClick={learningPanel.resetWidth}
-              isResizing={learningPanel.isResizing}
-              value={learningPanel.width} min={learningPanel.min} max={learningPanel.max} onResizeBy={learningPanel.resizeBy}
-              aria-label="Resize learning loop panel"
-            />
-            <LearningPanel width={learningPanel.width} onOpenConversation={openConversation} />
-          </>
-        )}
+        {/* Learning Panel — its width expands from the right, so the chat area
+            is pushed in rather than covered. */}
+        <div
+          className="relative flex-shrink-0 overflow-hidden transition-[width] duration-[280ms] ease-[cubic-bezier(0.16,1,0.3,1)]"
+          style={{ width: learningPanelOpen ? learningPanel.width + 6 : 0 }}
+        >
+          {learningPanelOpen && (
+            <div className="rice-learning-panel-enter flex h-full">
+              <ResizeHandle
+                onPointerDown={learningPanel.startResize}
+                onDoubleClick={learningPanel.resetWidth}
+                isResizing={learningPanel.isResizing}
+                value={learningPanel.width} min={learningPanel.min} max={learningPanel.max} onResizeBy={learningPanel.resizeBy}
+                aria-label="Resize learning loop panel"
+              />
+              <LearningPanel width={learningPanel.width} onOpenConversation={openConversation} />
+            </div>
+          )}
+        </div>
 
         {/* Fixed chat-list toggle — rendered LAST on purpose. In Electron the drag-region
             hit test is resolved in DOM order (later wins), so a no-drag button placed before
@@ -2275,7 +2331,7 @@ function ChatScreen() {
             small window-drag strip pinned by the macOS traffic lights, staying put whether the
             session panel is open or collapsed. */}
         <div
-          className="absolute top-0 left-0 z-30 flex h-11 items-center electron-drag"
+          className="absolute top-0 left-0 z-30 flex h-11 items-center gap-0.5 electron-drag"
           style={{ paddingLeft: isElectron ? 30 : 8 }}
         >
           <button
@@ -2287,6 +2343,32 @@ function ChatScreen() {
           >
             <Icon name="sidebar" size={18} />
           </button>
+          <Tooltip label="빠른 실행 (⌘K)">
+            <button
+              type="button"
+              onClick={openCommandPalette}
+              className="electron-no-drag flex h-7 w-7 items-center justify-center rounded-md text-icon-secondary transition-colors hover:bg-layer-hover-01 hover:text-icon-primary"
+              aria-label="빠른 실행 열기"
+            >
+              <Icon name="search" size={16} />
+            </button>
+          </Tooltip>
+        </div>
+
+        {/* This stays pinned at the same top-right point while the learning
+            surface expands beneath it. */}
+        <div className="absolute top-0 right-0 z-30 flex h-11 items-center pr-2 electron-drag">
+          <Tooltip label={learningPanelOpen ? '학습 루프 닫기' : '학습 루프 열기'}>
+            <button
+              type="button"
+              onClick={() => setLearningPanelOpen((open) => !open)}
+              data-tour="learning-loop"
+              className="electron-no-drag flex h-7 w-7 items-center justify-center rounded-md text-icon-secondary transition-colors hover:bg-layer-hover-01 hover:text-icon-primary"
+              aria-label={learningPanelOpen ? '학습 루프 닫기' : '학습 루프 열기'}
+            >
+              <Icon name="renew" size={17} className={learningPanelOpen ? 'rice-learning-toggle-active' : ''} />
+            </button>
+          </Tooltip>
         </div>
       </div>
 

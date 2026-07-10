@@ -216,6 +216,10 @@ class UIConfig:
     language: str = "ko"
     theme: str = "system"  # light | dark | system
     font: str = "default"
+    # Absolute output root for agent-created files. None keeps the default
+    # ``~/.rice/workspace``. Applied while the runtime starts so every builtin
+    # shares the same sandbox boundary for its whole lifetime.
+    workspace_path: str | None = None
 
 
 @dataclass(frozen=True)

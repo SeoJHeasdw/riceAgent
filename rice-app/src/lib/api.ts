@@ -155,9 +155,21 @@ class ApiClient {
   readWorkspaceFile(path: string): Promise<ApiResponse> {
     return this.get(`/workspace/file?path=${encodeURIComponent(path)}`);
   }
+  /** effective local workspace root; may be relocated through RICE_HOME */
+  getWorkspaceInfo(): Promise<ApiResponse<{ path: string }>> {
+    return this.get<{ path: string }>('/workspace');
+  }
   /** open a workspace file in the user's OS default app (Excel→office, .txt→editor…) */
   openWorkspaceFile(path: string): Promise<ApiResponse> {
     return this.send('POST', '/workspace/open', { path });
+  }
+  /** open the folder containing all files created by builtin tools */
+  openWorkspaceFolder(): Promise<ApiResponse<{ path: string }>> {
+    return this.send<{ path: string }>('POST', '/workspace/open-folder');
+  }
+  /** persist the output folder; the runtime applies its new sandbox after restart */
+  updateWorkspaceLocation(path: string | null): Promise<ApiResponse<{ path: string; restart_required: boolean }>> {
+    return this.send<{ path: string; restart_required: boolean }>('PUT', '/workspace/location', { path });
   }
   regenerate(id: string, messageId: string): Promise<ApiResponse> {
     return this.send('POST', `/sessions/${id}/messages/${messageId}/regenerate`);

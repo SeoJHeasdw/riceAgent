@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable
 
 from ..agent.builtins import build_builtin_tools, build_subagent_toolset, scratch_tool_factory
@@ -132,6 +133,17 @@ def build_container(
     args = args or RuntimeArgs()
     paths = (paths or RicePaths.from_env()).ensure()
     config_store = ConfigStore(load_config(paths))
+
+    # Workspace output location is configurable, while state.db/config/skills
+    # intentionally remain under RICE_HOME. Resolve it once at startup: builtin
+    # tool closures share this fixed sandbox root until the next restart.
+    configured_workspace = config_store.config.ui.workspace_path
+    if configured_workspace:
+        candidate = Path(configured_workspace).expanduser()
+        if candidate.is_absolute():
+            paths = RicePaths(root=paths.root, workspace_root=candidate).ensure()
+        else:
+            log.warning("ignoring non-absolute workspace_path in config: %r", configured_workspace)
 
     # ── infrastructure ────────────────────────────────────────────────────────
     db = Database(paths.db).connect()

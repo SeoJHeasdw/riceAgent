@@ -23,6 +23,9 @@ from pathlib import Path
 @dataclass(frozen=True)
 class RicePaths:
     root: Path
+    # User-selected output root. Configuration and state still remain under
+    # ``root``; only agent-created workspace files move to this directory.
+    workspace_root: Path | None = None
 
     @classmethod
     def from_env(cls, override: str | os.PathLike[str] | None = None) -> "RicePaths":
@@ -70,10 +73,13 @@ class RicePaths:
 
     @property
     def workspace(self) -> Path:
-        """`~/.rice/workspace/` — the sandbox root for builtin file tools. All
-        read/write/search is confined here so the agent can't touch arbitrary
-        paths (RUNTIME_DESIGN §10 — least authority)."""
-        return self.root / "workspace"
+        """Sandbox root for builtin file tools.
+
+        Defaults to ``~/.rice/workspace/`` but may be relocated by the user's
+        saved workspace setting. All agent read/write/search remains confined to
+        this *single* root (RUNTIME_DESIGN §10 — least authority).
+        """
+        return (self.workspace_root or self.root / "workspace").expanduser().resolve()
 
     def skill_history(self, name: str) -> Path:
         """`~/.rice/skills/<name>/.history/` — prior SKILL.md versions for
