@@ -40,7 +40,7 @@ from typing import Collection, Sequence
 
 from ...core import lexical
 
-__all__ = ["Finding", "VerificationReport", "verify_candidate"]
+__all__ = ["Finding", "VerificationReport", "verify_candidate", "tool_call_refs"]
 
 
 @dataclass(frozen=True)
@@ -109,8 +109,10 @@ _CALL_BEFORE = re.compile(r"(?:call|invoke|run|use)\s*$", re.IGNORECASE)
 _CALL_AFTER = re.compile(r"^\s*(?:도구|툴)|^\s*tool\b|^\s*(?:을|를|이|가|로|으로)?\s*(?:호출|실행)")
 
 
-def _tool_call_refs(body: str) -> list[str]:
-    """호출 문맥에 놓인 백틱 식별자들(중복 제거, 등장 순서 유지)."""
+def tool_call_refs(body: str) -> list[str]:
+    """호출 문맥에 놓인 백틱 식별자들(중복 제거, 등장 순서 유지). 공개 헬퍼 —
+    observe()의 관여(engagement) 판정도 같은 규칙을 쓴다(주입된 스킬이 지시한
+    도구가 실제로 호출됐는가)."""
     refs: list[str] = []
     for m in _BACKTICK_IDENT.finditer(body):
         before = body[max(0, m.start() - 12) : m.start()]
@@ -175,7 +177,7 @@ def verify_candidate(
     # ── mocked dry-run lite: 참조 도구 실재 검사 (warn — 카탈로그는 동적이다:
     #    지금 없는 커넥터가 나중에 연결될 수 있으므로 차단하지 않고 표시한다) ──
     if known_tool_names is not None:
-        for ref in _tool_call_refs(body):
+        for ref in tool_call_refs(body):
             if ("_" in ref or "." in ref) and ref not in known_tool_names:
                 findings.append(
                     Finding("unknown-tool", "warn", f"본문이 호출을 지시하는 도구 `{ref}` 가 현재 카탈로그에 없습니다 — 이름 오타이거나 존재하지 않는 도구일 수 있습니다.")

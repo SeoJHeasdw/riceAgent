@@ -32,6 +32,7 @@ from dataclasses import replace
 from typing import Callable
 
 from ..agent.providers.interfaces import ILLMProvider
+from ..core import lexical
 from ..core.config import LearningConfig
 from ..core.errors import ConflictError, NotFoundError, ValidationError
 from ..core.paths import RicePaths
@@ -68,13 +69,14 @@ from .proposals import make_create_proposal, make_patch_proposal, proposal_to_pa
 from .review.context import LearningContextManager, ReviewContextConfig
 from .review.engine import ReviewEngine
 from .review.gate import ReviewGate
+from .signals import has_correction_signal, has_failure_signal
 from .skill import guard as skill_guard
-from .skill.verifier import VerificationReport, verify_candidate
+from .skill.verifier import VerificationReport, tool_call_refs, verify_candidate
 from .skill.analysis import AnalysisStore, SkillAnalysisData, effective_status
 from .skill.analyzer import SkillAnalyzer
 from .skill.builtin import BuiltinSkillCatalog
 from .skill.lifecycle import SkillLifecycle
-from .skill.relevance import AUTO_INJECT_THRESHOLD, score_skills
+from .skill.relevance import AUTO_INJECT_THRESHOLD, auto_inject_eligible, score_skills
 from .skill.store import SkillData, SkillStore
 from .skill.usage import UsageStore
 from .user_model.profile import UserProfile
@@ -125,7 +127,13 @@ def _render_skills(skills: list[InjectedSkill]) -> str:
     — 위험 행동은 스킬 지시와 무관하게 승인을 거친다."""
     if not skills:
         return ""
-    lines = ["## Available Skills (follow these procedures when relevant)", SKILL_TRUST_NOTE]
+    lines = [
+        # "already loaded" 명시 — 소형 모델이 인덱스의 skill_view 지시와 헷갈려
+        # 이미 주입된 본문을 다시 로딩하는 중복 호출(view 인플레이션)을 막는다.
+        "## Available Skills (full procedures below — already loaded, do NOT call "
+        "skill_view for these; follow them when relevant)",
+        SKILL_TRUST_NOTE,
+    ]
     for sk in skills:
         # provenance 를 헤딩에 남긴다 — "왜 이게 프롬프트에 있었나"가 transcript
         # 만으로 감사 가능해야 한다(plugin 스킬도 같은 파이프라인을 타므로).
@@ -135,20 +143,25 @@ def _render_skills(skills: list[InjectedSkill]) -> str:
 
 
 _INDEX_DESC_MAX = 140  # one-liner cap per index row — keep the always-on index cheap
+_INDEX_MAX_ROWS = 30  # 인덱스도 무한하지 않다 — 초과분은 skill_search 안내 한 줄로
 
 
 def _render_skill_index(entries: list[tuple[str, str]]) -> str:
     """Active 스킬 중 전문 주입되지 **않은** 것들의 짧은 인덱스(이름 + 한 줄 설명).
     모델은 이걸 보고 `skill_view`로 필요한 전문만 온디맨드로 당긴다 — inject-all-active를
-    대체하는 하이브리드 주입의 '항상 켜진 인덱스' 절반이다."""
+    대체하는 하이브리드 주입의 '항상 켜진 인덱스' 절반이다. 호출자가 관련도순으로
+    정렬해 넘긴다(모델은 앞줄에 가장 주의를 쏟는다 — 알파벳순은 그 신호를 버렸다)."""
     if not entries:
         return ""
     lines = [SKILL_INDEX_HEADER, SKILL_INDEX_NOTE]
-    for name, desc in entries:
+    for name, desc in entries[:_INDEX_MAX_ROWS]:
         one_line = " ".join((desc or "").split())
         if len(one_line) > _INDEX_DESC_MAX:
             one_line = one_line[: _INDEX_DESC_MAX - 1].rstrip() + "…"
         lines.append(f"- {name} — {one_line}" if one_line else f"- {name}")
+    overflow = len(entries) - _INDEX_MAX_ROWS
+    if overflow > 0:
+        lines.append(f"- …and {overflow} more — find them with `skill_search`.")
     return "\n".join(lines)
 
 
@@ -220,6 +233,15 @@ class LearningService(ILearningService):
         # skill_view 로 이번 턴에 전문을 당긴 스킬들 — 세션별. observe()가 드레인해
         # auto-injected 와 합쳐 use 카운터에 귀속한다(온디맨드 로딩도 '사용'이다).
         self._viewed_skills: dict[str, set[str]] = {}
+        # 자동 주입 점착(sticky) 상태 — 세션별 {skill_name: 남은 턴 수}. 한 번
+        # 전문 주입된 스킬은 후속 턴이 재매칭에 실패해도 이 턴 수만큼 계속
+        # 주입된다("3번 슬라이드 파랗게" 같은 후속 지시는 어휘 라우터에 안 걸린다 —
+        # 절차가 태스크 중간에 증발하던 무점착 결함의 교정). in-memory 로 충분:
+        # 재시작 시 소실돼도 다음 매칭이 다시 세운다(ReviewGate 카운터와 동일 전례).
+        self._sticky_skills: dict[str, dict[str, int]] = {}
+        # 세션별 마지막 prefetch 쿼리 — skill_view 시점의 라우팅 미스 판정용
+        # (라우터가 이 쿼리에 못 맞춘 스킬을 모델이 수동 로딩하면 발견성 결함 신호).
+        self._last_query: dict[str, str] = {}
         # 외부 소스(plugin) 스킬 레지스트리 — prefetch(extra_skills=...)가 매 턴
         # 갱신한다. skill_search/skill_view 가 인덱스에 실린 plugin 스킬을 실제로
         # 찾고 열 수 있게 하는 온디맨드 반쪽(store 에는 없는 스킬들이므로).
@@ -247,6 +269,7 @@ class LearningService(ILearningService):
                         older_summary_tokens=config.review_context_summary_tokens,
                     )
                 ),
+                builtin_catalog=self._builtin_skills,
             )
             if resolve_provider is not None
             else None
@@ -270,6 +293,7 @@ class LearningService(ILearningService):
                 ledger=self._ledger,
                 rejection_cooldown_hours=config.review_rejection_cooldown_hours,
                 max_rejections=config.review_max_rejections,
+                builtin_catalog=self._builtin_skills,
             )
             if resolve_provider is not None
             else None
@@ -297,10 +321,6 @@ class LearningService(ILearningService):
         ]
         return skills
 
-    # 한 턴에 전문 주입하는 스킬 상한 — inject-all-active로 회귀하지 않도록 관련도
-    # 상위 소수만. 예산(skill_inject_token_budget)이 먼저 걸리기도 한다.
-    _MAX_AUTO_INJECT = 2
-
     # ── turn-critical ─────────────────────────────────────────────────────────
     def prefetch(
         self,
@@ -311,10 +331,16 @@ class LearningService(ILearningService):
         """Assemble injectable context for the next LLM call (LEARNING_LOOP §6, §7).
 
         Hybrid skill injection (replaces inject-all-active):
-          - 관련도 상위 & 고신뢰(≥ AUTO_INJECT_THRESHOLD) 스킬만 **전문 주입**
-            (예산·개수 상한 내). 무관한 프롬프트엔 전문이 하나도 안 들어간다.
-          - 나머지 active 스킬은 **짧은 인덱스**(이름 + 한 줄 설명)로만 실려서
-            모델이 `skill_view` 로 온디맨드로 당길 수 있다.
+          - **전문 주입은 정밀도 우선**: 명시적 언급이거나, 점수 임계
+            (AUTO_INJECT_THRESHOLD)와 strong-hit 게이트(name/tag 신호 ≥ 2)를
+            모두 넘는 스킬만, `skill_max_auto_inject`(기본 1)·토큰 예산 내에서
+            전문 주입한다. 태그 한 개 스치는 오탐은 인덱스에 남는다.
+          - **점착(sticky)**: 한 번 전문 주입된 스킬은 `skill_sticky_turns` 동안
+            재매칭 없이도 유지된다 — 후속 지시("이어서 해줘")가 라우터에 안
+            걸려도 태스크 중간에 절차가 증발하지 않는다. 상한과 별도로 예산만
+            차지한다(신규 주입을 밀어내지 않음).
+          - 나머지 active 스킬은 **짧은 인덱스**(이름 + 한 줄 설명, 관련도순)로만
+            실려서 모델이 `skill_view` 로 온디맨드로 당길 수 있다.
           - `extra_skills`(plugin SKILL.md 번들)도 **같은 파이프라인**을 탄다 —
             전량 주입이 아니라 스코어링→예산→인덱스→skill_view. 동명 학습
             스킬이 이긴다(사용자 학습이 시장 번들보다 우선).
@@ -329,38 +355,75 @@ class LearningService(ILearningService):
         # 온디맨드 레지스트리 갱신 — 인덱스에 실린 plugin 스킬을 skill_search/
         # skill_view 가 찾을 수 있어야 인덱스가 거짓말이 아니게 된다.
         self._extra_skills = {s.name: s for s in extras}
+        self._last_query[session_id] = user_message
         candidates: list = all_active + extras
         by_name = {s.name: s for s in candidates}
         ranked = score_skills(user_message, candidates)
+        rank_order = {s.name: i for i, s in enumerate(ranked)}
 
-        # ── 고신뢰 상위 매칭만 전문 주입 (예산·개수 상한) ─────────────────
-        injected_skills: list[InjectedSkill] = []
-        injected_names: set[str] = set()
-        remaining_budget = self._config.skill_inject_token_budget
-        for scored in ranked:
-            if scored.score < AUTO_INJECT_THRESHOLD:
-                break  # ranked 는 내림차순 — 이 아래는 전부 임계 미만
-            if len(injected_skills) >= self._MAX_AUTO_INJECT:
-                break
-            skill = by_name[scored.name]
-            body = skill.body or ""
-            tokens = _estimate_tokens(body)
-            if tokens > remaining_budget:
-                break
-            injected_skills.append(
+        def _as_injected(skill) -> InjectedSkill:
+            return (
                 skill
                 if isinstance(skill, InjectedSkill)  # plugin 스킬은 provenance 그대로
                 else InjectedSkill(
-                    skill_id=skill.name, name=skill.name, version=skill.version, body=body
+                    skill_id=skill.name, name=skill.name, version=skill.version,
+                    body=skill.body or "",
                 )
             )
+
+        # ── ① 신규 자격 매칭: 정밀도 게이트 + 개수 상한 + 예산 ────────────
+        injected_skills: list[InjectedSkill] = []
+        injected_names: set[str] = set()
+        remaining_budget = self._config.skill_inject_token_budget
+        max_inject = max(0, self._config.skill_max_auto_inject)
+        fresh_count = 0
+        for scored in ranked:
+            if scored.score < AUTO_INJECT_THRESHOLD:
+                break  # ranked 는 내림차순 — 이 아래는 전부 임계 미만
+            if fresh_count >= max_inject:
+                break
+            if not auto_inject_eligible(scored):
+                continue  # 임계는 넘었지만 강신호 부족 — 인덱스로 (오탐 방지)
+            skill = by_name[scored.name]
+            tokens = _estimate_tokens(skill.body or "")
+            if tokens > remaining_budget:
+                continue  # 큰 본문 하나가 더 작은 차순위까지 막지 않게 skip
+            injected_skills.append(_as_injected(skill))
             injected_names.add(skill.name)
             remaining_budget -= tokens
+            fresh_count += 1
 
-        # ── 전문 주입되지 않은 나머지는 짧은 인덱스로 ─────────────────────
+        # ── ② 점착 유지: 직전 턴들에 주입된 스킬을 예산 내에서 계속 싣는다 ──
+        sticky = self._sticky_skills.setdefault(session_id, {})
+        sticky_turns = max(0, self._config.skill_sticky_turns)
+        for name in list(sticky):
+            if name in injected_names:
+                continue  # 이번 턴 재매칭 — 아래에서 만료 카운터가 리셋된다
+            skill = by_name.get(name)
+            remaining = sticky[name] - 1
+            if skill is None or remaining <= 0:
+                sticky.pop(name, None)  # 비활성화/삭제됐거나 점착 만료
+                continue
+            sticky[name] = remaining  # 유지 턴은 리셋하지 않는다 — 점착은 유한하다
+            tokens = _estimate_tokens(skill.body or "")
+            if tokens > remaining_budget:
+                continue  # 예산 밖이면 이번 턴은 인덱스로 강등(점착은 유지)
+            injected_skills.append(_as_injected(skill))
+            injected_names.add(name)
+            remaining_budget -= tokens
+        if sticky_turns > 0:
+            # 이번 턴 신선 매칭(재매칭 포함)만 만료 카운터를 리셋한다 — ①에서
+            # 앞쪽 fresh_count 개가 신선 매칭이다. 유지 전용 스킬은 리셋하지
+            # 않아 점착이 무한히 자기연장되지 않는다.
+            for s in injected_skills[:fresh_count]:
+                sticky[s.name] = sticky_turns
+        if not sticky:
+            self._sticky_skills.pop(session_id, None)
+
+        # ── ③ 전문 주입되지 않은 나머지는 짧은 인덱스로 (관련도순) ─────────
         index_entries = [
             (s.name, s.description)
-            for s in sorted(candidates, key=lambda s: s.name)
+            for s in sorted(candidates, key=lambda s: rank_order.get(s.name, len(rank_order)))
             if s.name not in injected_names
         ]
 
@@ -411,10 +474,43 @@ class LearningService(ILearningService):
             for s in chosen
         ]
 
+    def _note_routing_miss(self, session_id: str, skill, *, is_store_skill: bool) -> None:
+        """모델이 수동 로딩한 스킬이 이번 턴 쿼리의 라우터에 안 걸렸다면 발견성
+        결함으로 계측한다 — usage 사이드카(routing_miss)와 ledger 에 남아 리뷰
+        LLM 의 '설명/태그를 보강하라' 힌트의 실측 원천이 된다. best-effort."""
+        query = self._last_query.get(session_id, "")
+        if not query.strip():
+            return
+        if skill.name in self._sticky_skills.get(session_id, {}):
+            return  # 점착으로 이미 주입돼 있다 — 라우터가 놓친 게 아니다
+        try:
+            scored = score_skills(query, [skill])[0]
+            if auto_inject_eligible(scored):
+                return  # 라우터도 맞췄을 매칭 — 미스가 아니다
+            if is_store_skill:
+                self._usage_store.increment_routing_miss(skill.name)
+            self._ledger.record(
+                "routing_miss",
+                skill_id=skill.name,
+                session_id=session_id,
+                detail={"score": round(scored.score, 2), "query": query[:120]},
+            )
+        except Exception:  # noqa: BLE001 — 계측 실패가 skill_view 를 깨면 안 된다
+            log.warning("routing-miss telemetry failed for %r", skill.name, exc_info=True)
+
+    _REPEAT_VIEW_NOTE = (
+        "NOTE: this skill was already loaded earlier in this turn — its body is "
+        "above in your context. Do not call skill_view for it again."
+    )
+
     def view_skill_body(self, session_id: str, skill_id: str) -> dict:
         """`skill_view` 빌트인의 백엔드 — 스킬 전문을 반환하고 view 카운터를 올린다.
         비활성(archived) 스킬은 사용자가 끈 것이므로 로딩을 거부한다(토글 존중).
-        이번 턴 조회 집합에 기록해 observe()가 use 카운터에 귀속하게 한다."""
+        이번 턴 조회 집합에 기록해 observe()가 use 카운터에 귀속하게 한다.
+
+        같은 턴 반복 조회에는 note 를 함께 실어(본문은 그대로 반환 — sub-agent
+        워커는 자기 컨텍스트에 본문이 없을 수 있다) 소형 모델의 중복 호출 루프를
+        끊는다. 라우터가 못 맞춘 수동 로딩은 routing_miss 로 계측한다."""
         skill = self._read_any_skill(skill_id)
         if skill is None or skill.state != "active":
             # store 에 없으면 plugin 스킬 레지스트리 폴백 — 인덱스가 광고한 이름은
@@ -423,28 +519,83 @@ class LearningService(ILearningService):
             extra = self._extra_skills.get(skill_id)
             if extra is None:
                 raise NotFoundError(f"skill {skill_id!r} not found or not active")
-            self._viewed_skills.setdefault(session_id, set()).add(extra.skill_id)
-            return {
+            viewed = self._viewed_skills.setdefault(session_id, set())
+            repeat = extra.skill_id in viewed
+            if not repeat:
+                self._note_routing_miss(session_id, extra, is_store_skill=False)
+            viewed.add(extra.skill_id)
+            out = {
                 "name": extra.name,
                 "version": extra.version,
                 "description": extra.description,
                 "body": extra.body,
             }
+            if repeat:
+                out["note"] = self._REPEAT_VIEW_NOTE
+            return out
+        viewed = self._viewed_skills.setdefault(session_id, set())
+        repeat = skill_id in viewed
         self._usage_store.increment_view(skill_id)
-        self._viewed_skills.setdefault(session_id, set()).add(skill_id)
-        return {
+        if not repeat:
+            self._note_routing_miss(session_id, skill, is_store_skill=True)
+        viewed.add(skill_id)
+        out = {
             "name": skill.name,
             "version": skill.version,
             "description": skill.description,
             "body": skill.body,
         }
+        if repeat:
+            out["note"] = self._REPEAT_VIEW_NOTE
+        return out
+
+    def _engagement_evidence(
+        self,
+        skill_id: str,
+        *,
+        viewed: set[str],
+        user_tokens: set[str],
+        turn_tools: set[str],
+    ) -> bool:
+        """이 턴에 스킬이 실제로 **관여**했다는 근거가 있는가.
+
+        노출(주입) ≠ 사용이다. 관여 근거 세 가지 중 하나면 충분하다:
+          - 모델이 skill_view 로 직접 당겼다 (명시적 선택)
+          - 사용자가 스킬 이름을 그대로 언급했다 (명시적 요청)
+          - 주입된 본문이 호출을 지시하는 도구가 이 턴에 실제로 호출됐다
+            (절차가 실행에 반영됐다는 실측 단서 — verifier 와 같은 규칙)
+        도구 없는 스타일 스킬은 view/언급 외에는 증명 불가 — 정직하게 안 센다."""
+        if skill_id in viewed:
+            return True
+        if user_tokens and lexical.name_mentioned(user_tokens, skill_id):
+            return True
+        if not turn_tools:
+            return False
+        body = ""
+        skill = self._read_any_skill(skill_id)
+        if skill is not None:
+            body = skill.body or ""
+        else:
+            for extra in self._extra_skills.values():
+                if extra.skill_id == skill_id:
+                    body = extra.body or ""
+                    break
+        if not body:
+            return False
+        return bool(set(tool_call_refs(body)) & turn_tools)
 
     async def observe(self, outcome: TurnOutcome) -> list[LearningEffect]:
         """턴 결과를 관찰해 *즉시·저비용* 학습 효과만 반환한다 (LEARNING_LOOP §1).
 
         수행 내용 (LLM 호출 없음 — 턴의 SSE 스트림 안에서 `done` 이전에 동기
         실행되므로 여기서 절대 느려져선 안 된다):
-          ① 주입됐던 스킬 use += 1 & last_used_at 갱신
+          ① 텔레메트리(정직화, 2026-07-11):
+             - 전문 주입된 스킬 → injected += 1 (노출 집계, 중단 턴 포함)
+             - 관여 근거(view/언급/지시 도구 실제 호출)가 있는 스킬만 use += 1
+               + last_used_at 갱신 + observed 도구 ledger. curator 의 신선도와
+               리뷰 카탈로그 정렬은 이제 이 정직한 use 를 본다.
+             - 관여한 턴에서 교정/실패 신호(signals.py) 감지 시 friction += 1 —
+               리뷰 LLM 에게 "이 스킬 절차를 의심하라"는 실측 힌트.
           ② 미드턴 `propose_skill`(T5) 스테이징 드레인 — 에이전트가 대화 중 발의한
              제안을 이 턴의 스트림에서 HITL 카드로 서피싱하도록 effects에 싣는다.
              중단된 턴은 폐기(fail-closed — 사용자가 멈춘 턴의 제안을 들이밀지 않는다).
@@ -458,22 +609,42 @@ class LearningService(ILearningService):
         """
         effects: list[LearningEffect] = []
 
-        # ① 주입됐던 스킬 use 카운터 올리기 + observed 도구 ledger 갱신.
-        #    도구 귀속은 턴 단위다 — 주입돼 있던 모든 스킬이 이 턴의 호출 도구를
-        #    공유 기록한다("이 스킬이 시켰다"가 아니라 "주입된 턴의 실행 로그").
-        #    전문 주입(injected)뿐 아니라 skill_view로 온디맨드 로딩된 스킬도
-        #    '사용'으로 함께 귀속한다 — 세션 조회 집합은 여기서 드레인한다.
+        # ① 텔레메트리 — 노출(injected)과 관여(use)를 분리 집계한다.
         viewed = self._viewed_skills.pop(outcome.session_id, set())
-        turn_tools = _turn_tool_names(outcome.history) if not outcome.aborted else []
-        for skill_id in dict.fromkeys((*outcome.injected_skill_ids, *viewed)):
+        turn_tools = set(_turn_tool_names(outcome.history)) if not outcome.aborted else set()
+        user_text = next(
+            (m.content for m in reversed(outcome.history) if m.role == "user"), ""
+        ) or ""
+        user_tokens = lexical.tokens(user_text)
+        friction_turn = not outcome.aborted and (
+            has_correction_signal(f"{outcome.final_message}\n{user_text}")
+            or has_failure_signal(f"{outcome.final_message}\n{user_text}")
+        )
+
+        for skill_id in dict.fromkeys(outcome.injected_skill_ids):
             try:
-                self._usage_store.increment_use(skill_id)
-                if turn_tools:
-                    self._usage_store.record_tools(skill_id, turn_tools)
-            except Exception:
-                # NOTE(agent): usage increment 실패는 조용히 넘긴다. 카운터 오류가
-                # 턴을 깨지 않도록 (fail-safe 우선).
+                self._usage_store.increment_injected(skill_id)
+            except Exception:  # noqa: BLE001 — 카운터 오류가 턴을 깨지 않게
                 pass
+
+        if not outcome.aborted:
+            for skill_id in dict.fromkeys((*outcome.injected_skill_ids, *viewed)):
+                try:
+                    if not self._engagement_evidence(
+                        skill_id, viewed=viewed, user_tokens=user_tokens, turn_tools=turn_tools
+                    ):
+                        continue
+                    self._usage_store.increment_use(skill_id)
+                    if turn_tools:
+                        # 도구 귀속은 여전히 턴 단위 실행 로그다 — 다만 이제
+                        # 관여 근거가 있는 스킬에만 남는다(설명 가치가 있는 것만).
+                        self._usage_store.record_tools(skill_id, sorted(turn_tools))
+                    if friction_turn:
+                        self._usage_store.increment_friction(skill_id)
+                except Exception:
+                    # NOTE(agent): usage increment 실패는 조용히 넘긴다. 카운터 오류가
+                    # 턴을 깨지 않도록 (fail-safe 우선).
+                    pass
 
         # ② 미드턴 스테이징 드레인 (T5)
         staged = self._staged.pop(outcome.session_id, [])
@@ -501,6 +672,8 @@ class LearningService(ILearningService):
         tags: tuple[str, ...] = (),
         source: str | None = None,
         expected_version: int | None = None,
+        new_description: str | None = None,
+        new_tags: tuple[str, ...] | None = None,
     ) -> int | None:
         """HITL 승인 결정대로 패치(또는 신규 생성 제안)를 적용하거나 버린다
         (LEARNING_LOOP §5.2.4, Phase A.1: 생성 = v0에서의 patch로 통일).
@@ -607,6 +780,12 @@ class LearningService(ILearningService):
         new_version = current.version + 1
         current.version = new_version
         current.body = new_body
+        # 발견성 메타데이터 변경(제안의 new_description/new_tags) — 본문 patch 와
+        # 같은 승인 카드에서 함께 승인된 것만 도달한다(warnings 로 명시됨).
+        if new_description is not None and new_description.strip():
+            current.description = " ".join(new_description.split())
+        if new_tags is not None:
+            current.tags = [t for t in dict.fromkeys(t.strip() for t in new_tags) if t]
         current.updated_at = now_iso()
         self._skill_store.write(current)
 
@@ -789,6 +968,11 @@ class LearningService(ILearningService):
                 changelog=changelog or "대화 중 에이전트 발의 개선",
                 trigger="T5",
                 max_body_chars=self._config.skill_max_body_chars,
+                # propose_skill 의 description/tags 인자는 기존 스킬에선 "변경
+                # 제안"으로 해석한다(현재 값과 같으면 빌더가 None 으로 접는다) —
+                # 발견성(라우팅) 결함을 대화 중에도 고칠 수 있게.
+                new_description=description or None,
+                new_tags=tags or None,
             )
         if proposal is None:
             return {
@@ -878,6 +1062,8 @@ class LearningService(ILearningService):
                     tags=proposal.tags,
                     source=f"session:{session_id}",
                     expected_version=proposal.from_version,
+                    new_description=proposal.new_description,
+                    new_tags=proposal.new_tags,
                 )
             except ConflictError:
                 # 제안 생성 시점과 승인 시점 사이에 스킬 버전이 움직였다 — 기록 후
@@ -961,6 +1147,7 @@ class LearningService(ILearningService):
         source_session = payload.get("session_id")
         source = f"session:{source_session}" if source_session else sug["origin"]
         try:
+            raw_new_tags = payload.get("new_tags")
             version = self.apply_patch(
                 sug["skill_id"],
                 approved=True,
@@ -970,6 +1157,8 @@ class LearningService(ILearningService):
                 tags=tuple(payload.get("tags") or ()),
                 source=source,
                 expected_version=payload.get("from_version"),
+                new_description=payload.get("new_description"),
+                new_tags=tuple(str(t) for t in raw_new_tags) if raw_new_tags is not None else None,
             )
         except ConflictError:
             # 제안함에 머무는 동안 스킬이 다른 경로로 변경됐다. 계속 pending으로
@@ -1195,19 +1384,24 @@ class LearningService(ILearningService):
                     patch=usage.patch,
                     last_used_at=usage.last_used_at,
                     enabled=skill.enabled,
+                    injected=usage.injected,
+                    friction=usage.friction,
+                    routing_miss=usage.routing_miss,
                 )
             )
         return result
 
     def get_skill(self, skill_id: str) -> SkillDetail | None:
-        """스킬 상세 조회. view 카운터를 올린다 (LEARNING_LOOP §3)."""
+        """스킬 상세 조회. view 카운터를 **올리지 않는다** (2026-07-11 정직화) —
+        view 는 모델의 skill_view 온디맨드 로딩 신호이고, 사용자가 MySkills 패널을
+        여는 것은 다른 사건이다(패널 열람이 view 를 152까지 부풀려 온디맨드
+        텔레메트리를 무의미하게 만들었다)."""
         skill = self._builtin_skills.get(skill_id)
         if skill is None:
             try:
                 skill = self._skill_store.read(skill_id)
             except Exception:
                 return None
-        self._usage_store.increment_view(skill_id)
         usage = self._usage_store.read(skill_id)
         return self._detail_from(skill, usage)
 
@@ -1226,6 +1420,9 @@ class LearningService(ILearningService):
             patch=usage.patch,
             last_used_at=usage.last_used_at,
             enabled=skill.enabled,
+            injected=usage.injected,
+            friction=usage.friction,
+            routing_miss=usage.routing_miss,
             body=skill.body,
         )
 

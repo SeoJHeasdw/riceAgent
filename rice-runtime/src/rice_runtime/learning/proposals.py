@@ -89,6 +89,27 @@ def make_create_proposal(
     )
 
 
+_MAX_TAGS = 5
+
+
+def _clean_metadata_change(
+    current: SkillData, new_description: str | None, new_tags: tuple[str, ...] | None
+) -> tuple[str | None, tuple[str, ...] | None]:
+    """메타데이터 변경 제안 정규화 — 현재 값과 같으면 None(변경 없음)으로 접는다.
+    태그는 개수 상한과 공백 제거만 본다(내용 판단은 HITL 카드의 몫)."""
+    desc = None
+    if new_description is not None:
+        cleaned = " ".join(new_description.split())
+        if cleaned and cleaned != current.description:
+            desc = cleaned
+    tags = None
+    if new_tags is not None:
+        cleaned_tags = tuple(dict.fromkeys(t.strip() for t in new_tags if t.strip()))[:_MAX_TAGS]
+        if cleaned_tags and list(cleaned_tags) != list(current.tags):
+            tags = cleaned_tags
+    return desc, tags
+
+
 def make_patch_proposal(
     *,
     current: SkillData,
@@ -98,9 +119,16 @@ def make_patch_proposal(
     max_body_chars: int = skill_guard.DEFAULT_MAX_BODY_CHARS,
     derived_from_external: bool = False,
     evidence_message_ids: tuple[str, ...] = (),
+    new_description: str | None = None,
+    new_tags: tuple[str, ...] | None = None,
 ) -> PatchProposal | None:
-    """기존 스킬 개선 제안. 실질 변경이 없으면(diff 빈 줄) None — 빈 제안 카드로
-    사용자를 방해하지 않는다."""
+    """기존 스킬 개선 제안. 실질 변경이 없으면(diff 빈 줄 + 메타데이터 변경 없음)
+    None — 빈 제안 카드로 사용자를 방해하지 않는다.
+
+    `new_description`/`new_tags`(2026-07-11): 발견성 자기개선 — routing_miss 가
+    쌓인 스킬은 본문이 아니라 색인 신호(설명/태그)가 문제라서, 리뷰 LLM 이 그걸
+    고칠 채널이 필요했다. 변경이 있으면 승인 카드 warnings 로 명시된다(diff 는
+    본문 전용 렌더러라서)."""
     if not new_body.strip():
         return None
     try:
@@ -110,8 +138,14 @@ def make_patch_proposal(
         return None
     new_body, scrubbed = skill_guard.scrub_secrets(new_body)
     diff = build_diff(current.body, new_body)
-    if not diff["lines"]:
+    desc_change, tags_change = _clean_metadata_change(current, new_description, new_tags)
+    if not diff["lines"] and desc_change is None and tags_change is None:
         return None
+    warnings = list(_build_warnings(new_body, scrubbed, derived_from_external))
+    if desc_change is not None:
+        warnings.append(f"설명 변경 포함: “{desc_change}”")
+    if tags_change is not None:
+        warnings.append(f"태그 변경 포함: {', '.join(tags_change)}")
     return PatchProposal(
         skill_id=current.name,
         changelog=_clean_changelog(changelog, "개선 제안"),
@@ -120,9 +154,11 @@ def make_patch_proposal(
         proposed_body=new_body,
         from_version=current.version,
         to_version=current.version + 1,
-        warnings=_build_warnings(new_body, scrubbed, derived_from_external),
+        warnings=tuple(warnings),
         derived_from_external=derived_from_external,
         evidence_message_ids=evidence_message_ids,
+        new_description=desc_change,
+        new_tags=tags_change,
     )
 
 
@@ -143,4 +179,6 @@ def proposal_to_payload(p: PatchProposal) -> dict:
         "warnings": list(p.warnings),
         "derived_from_external": p.derived_from_external,
         "evidence_message_ids": list(p.evidence_message_ids),
+        "new_description": p.new_description,
+        "new_tags": list(p.new_tags) if p.new_tags is not None else None,
     }

@@ -82,7 +82,15 @@ class LearningConfig:
     max_iterations: int = 25  # agent loop cap (RUNTIME_DESIGN §2)
     prefetch_recent_facts: int = 8  # N recent facts (LL-4 default, tunable)
     prefetch_fts_top_k: int = 5  # K FTS-matched memories
-    skill_inject_token_budget: int = 24_000  # inject-all-active-under-budget (§7)
+    skill_inject_token_budget: int = 24_000  # 전문 자동 주입 총 토큰 예산 (§7)
+    # 한 턴에 전문 자동 주입하는 스킬 상한. 기본 1 — 최고 득점 하나만 본문으로
+    # 들어가고 나머지는 인덱스(+skill_view 온디맨드)로 밀려난다. 프론티어
+    # 프로파일에서 컨텍스트가 넉넉하면 2로 올릴 수 있다.
+    skill_max_auto_inject: int = 1
+    # 자동 주입 점착(sticky) 턴 수 — 한 번 전문 주입된 스킬은 이후 이 턴 수만큼
+    # 재매칭 없이도 계속 주입된다("그거 이어서 해줘"가 절차를 잃지 않게). 재매칭
+    # 시 카운터가 갱신되고, 0이면 비활성.
+    skill_sticky_turns: int = 2
     stale_after_days: int = 3  # active → stale (§5.1)
     archive_after_days: int = 7  # stale → archived
     approval_timeout_seconds: int = 300  # HITL safe-default reject (§5.1)

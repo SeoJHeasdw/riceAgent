@@ -123,8 +123,9 @@ class TestObserve:
         self._store = SkillStore(self._paths)
 
     @pytest.mark.asyncio
-    async def test_observe_increments_use_for_injected_skill(self):
-        """T4 수용: 주입된 스킬의 use 카운터가 올라간다."""
+    async def test_observe_counts_injected_exposure(self):
+        """T4 수용(2026-07-11 개정): 주입 자체는 injected(노출)로 집계되고, use 는
+        관여 근거(view/언급/지시 도구 호출)가 있어야 오른다 — 텔레메트리 정직화."""
         self._store.write(_make_skill("used-sk"))
         outcome = TurnOutcome(
             session_id="sess1",
@@ -135,7 +136,8 @@ class TestObserve:
         )
         await self._svc.observe(outcome)
         usage = UsageStore(self._paths).read("used-sk")
-        assert usage.use == 1
+        assert usage.injected == 1
+        assert usage.use == 0
 
     @pytest.mark.asyncio
     async def test_observe_no_effects_on_empty_outcome(self):
@@ -429,8 +431,10 @@ class TestT3Acceptance:
 
     @pytest.mark.asyncio
     async def test_acceptance_observe_increments_use(self):
-        """수용 기준 (T4 연계): observe가 use 카운터를 올린다."""
+        """수용 기준 (T4 연계, 2026-07-11 개정): 관여 근거가 있는 스킬만 use 가
+        오른다 — 여기서는 skill_view 온디맨드 로딩(모델의 명시적 선택)이 근거."""
         self._store.write(_make_skill("obs-sk"))
+        self._svc.view_skill_body("s1", "obs-sk")
         outcome = TurnOutcome(
             session_id="s1",
             final_message="Done.",

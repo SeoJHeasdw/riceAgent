@@ -32,13 +32,28 @@ from dataclasses import dataclass
 
 from ...core import lexical
 
-__all__ = ["ScoredSkill", "score_skills", "AUTO_INJECT_THRESHOLD"]
+__all__ = [
+    "ScoredSkill",
+    "score_skills",
+    "auto_inject_eligible",
+    "AUTO_INJECT_THRESHOLD",
+    "MIN_STRONG_HITS",
+]
 
-# A distinctive name/tag hit scores 3.0, so a single unambiguous keyword
-# ("pitch", "재무모델", "kubernetes") clears the bar and auto-injects the body.
-# Incidental body-text overlap (0.5) never does on its own — that path is what
-# `skill_view` is for.
+# Score floor for auto-injection. NOTE: since the strong-hit gate below, the
+# threshold alone no longer decides — see `auto_inject_eligible`.
 AUTO_INJECT_THRESHOLD = 3.0
+
+# Precision gate for auto-injection (2026-07-11): a single name/tag token hit
+# used to clear AUTO_INJECT_THRESHOLD on its own (tag hit = 3.0), so ANY query
+# sharing one incidental keyword with a tag ("엑셀"→xlsx) injected a full ~1k-token
+# body. Field data showed the cost: bodies injected on barely-related turns, and
+# every injection polluting use/last_used_at telemetry downstream. Auto-inject now
+# additionally requires ≥2 independent author-signal hits (name/tag credit; exact
+# hit = 1.0, substring = 0.5) — one keyword puts a skill in the index, where it is
+# one `skill_view` away; it does not put its body in the prompt. Explicit mention
+# still routes unconditionally.
+MIN_STRONG_HITS = 2.0
 
 # Explicit mention outranks any organic score — the user asked for THIS skill.
 _EXPLICIT_MENTION_BONUS = 3 * AUTO_INJECT_THRESHOLD
@@ -59,11 +74,25 @@ _NEGATIVE_TAG_PREFIX = "not:"
 @dataclass(frozen=True)
 class ScoredSkill:
     """One skill scored against a query. `name`/`description` feed both the index
-    render and the `skill_search` tool result; `score` drives auto-inject."""
+    render and the `skill_search` tool result; `score`+`strong`+`explicit` drive
+    auto-inject (see `auto_inject_eligible`). `strong` is the raw name/tag hit
+    credit (unweighted), `explicit` is a literal mention of the skill's name."""
 
     name: str
     description: str
     score: float
+    strong: float = 0.0
+    explicit: bool = False
+
+
+def auto_inject_eligible(scored: ScoredSkill) -> bool:
+    """Should this skill's FULL BODY be auto-injected for the query?
+    Explicit mention → always. Otherwise the score must clear the threshold AND
+    the strong-hit gate (≥ MIN_STRONG_HITS of name/tag credit) — incidental
+    single-keyword overlap stays in the index instead."""
+    if scored.explicit:
+        return True
+    return scored.score >= AUTO_INJECT_THRESHOLD and scored.strong >= MIN_STRONG_HITS
 
 
 def _split_tags(tags: list[str]) -> tuple[list[str], list[str]]:
@@ -75,21 +104,25 @@ def _split_tags(tags: list[str]) -> tuple[list[str], list[str]]:
 
 def _score_one(
     raw_query: set[str], query: set[str], name: str, tags: list[str], description: str, body: str
-) -> float:
+) -> tuple[float, float, bool]:
+    """(score, strong_hits, explicit). `strong_hits` = raw name+tag hit credit —
+    the author-signal evidence the auto-inject gate requires."""
     # 1. explicit mention — checked against the RAW query (an intent-table
     #    expansion must never fabricate a "mention").
     if lexical.name_mentioned(raw_query, name):
-        return _EXPLICIT_MENTION_BONUS
+        return _EXPLICIT_MENTION_BONUS, _EXPLICIT_MENTION_BONUS, True
     positive_tags, negative_tags = _split_tags(tags)
+    name_hits = lexical.field_score(query, name.replace("-", " "))
+    tag_hits = lexical.field_score(query, " ".join(positive_tags))
     score = (
-        _W_NAME * lexical.field_score(query, name.replace("-", " "))
-        + _W_TAGS * lexical.field_score(query, " ".join(positive_tags))
+        _W_NAME * name_hits
+        + _W_TAGS * tag_hits
         + _W_DESC * lexical.field_score(query, description)
         + _W_BODY * lexical.field_score(query, body[:_BODY_SCAN_CHARS])
     )
     if negative_tags:
         score -= _NEGATIVE_HIT_PENALTY * lexical.field_score(query, " ".join(negative_tags))
-    return max(0.0, score)
+    return max(0.0, score), name_hits + tag_hits, False
 
 
 def score_skills(query: str, skills: list) -> list[ScoredSkill]:
@@ -99,13 +132,15 @@ def score_skills(query: str, skills: list) -> list[ScoredSkill]:
     take the top N)."""
     raw_q = lexical.tokens(query)
     q = lexical.expand_query(raw_q)
-    scored = [
-        ScoredSkill(
-            name=s.name,
-            description=s.description,
-            score=(_score_one(raw_q, q, s.name, s.tags, s.description, s.body) if q else 0.0),
+    scored = []
+    for s in skills:
+        score, strong, explicit = (
+            _score_one(raw_q, q, s.name, s.tags, s.description, s.body) if q else (0.0, 0.0, False)
         )
-        for s in skills
-    ]
+        scored.append(
+            ScoredSkill(
+                name=s.name, description=s.description, score=score, strong=strong, explicit=explicit
+            )
+        )
     scored.sort(key=lambda s: s.score, reverse=True)
     return scored

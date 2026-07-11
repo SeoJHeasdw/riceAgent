@@ -93,13 +93,23 @@ REVIEW_SYSTEM_PROMPT = (
     "why: T1a (the user explicitly corrected the procedure or a value), T1b "
     "(a tool call using the old approach failed and a different approach "
     "worked), or T1c (you noticed a missing step or stale value yourself, "
-    "without an explicit user correction)."
+    "without an explicit user correction).\n\n"
+    "Usage telemetry hints (shown next to each full-body skill below):\n"
+    "  - high `friction` = turns where this skill was in play repeatedly "
+    "coincided with user corrections or failures — scrutinize its procedure; "
+    "if this conversation shows what went wrong, patch it.\n"
+    "  - high `routing_miss` = the model keeps having to load this skill "
+    "manually because the request wording never matches its name/tags/"
+    "description — fix DISCOVERABILITY, not just the body: use the patch "
+    "tool's `new_description`/`new_tags` to add the words users actually say "
+    "(keep them short; both Korean and English trigger words help)."
 )
 
 
 def _render_skill_catalog(
     full_body_skills: Sequence[tuple[str, str, str]],  # (skill_id, description, body)
     compact_skills: Sequence[tuple[str, str]],  # (skill_id, description)
+    usage_hints: dict[str, str] | None = None,  # skill_id → "use=…, friction=…, …"
 ) -> str:
     """Render the skill library into the review's context block.
 
@@ -108,12 +118,17 @@ def _render_skill_catalog(
     exactly the skill_ids `propose_skill_patch` is allowed to target (the tool
     schema's `skill_id` enum is built from the same list), so the model can
     never be asked to rewrite a skill it never actually saw the content of.
+
+    `usage_hints` (2026-07-11): 실측 텔레메트리 한 줄(use/friction/routing_miss)을
+    헤딩에 붙인다 — 시스템 프롬프트의 telemetry-hints 지침이 이 줄을 읽는다.
     """
     lines: list[str] = []
     if full_body_skills:
         lines.append("## Existing skills (full body shown — you may PATCH these)")
         for skill_id, description, body in full_body_skills:
-            lines.append(f"\n### [{skill_id}] {description}\n{body}")
+            hint = (usage_hints or {}).get(skill_id, "")
+            hint_part = f" ({hint})" if hint else ""
+            lines.append(f"\n### [{skill_id}] {description}{hint_part}\n{body}")
     if compact_skills:
         lines.append(
             "\n## Other existing skills (name/description only — do NOT patch "
@@ -155,6 +170,7 @@ def build_review_messages(
     compact_skills: Sequence[tuple[str, str]],
     known_facts: Sequence[str],
     rejected_recently: Sequence[str] = (),
+    usage_hints: dict[str, str] | None = None,
     instruction: str = "Review the conversation above and propose any durable skill/memory updates.",
 ) -> tuple[str, list[Message]]:
     """Build (system, messages) for a one-shot review call. `history` is the
@@ -167,7 +183,7 @@ def build_review_messages(
     """
     rejection_block = _render_rejections(rejected_recently)
     parts = [
-        _render_skill_catalog(full_body_skills, compact_skills),
+        _render_skill_catalog(full_body_skills, compact_skills, usage_hints),
         _render_known_facts(known_facts),
     ]
     if rejection_block:
@@ -243,6 +259,19 @@ def build_review_tool_specs(patchable_skill_ids: Sequence[str]) -> tuple[ToolSpe
                         "changelog": {"type": "string", "description": "One-line summary of what changed and why."},
                         "new_body": {"type": "string", "description": "Full replacement SKILL.md body (not a diff)."},
                         "trigger_reason": {"type": "string", "enum": ["T1a", "T1b", "T1c"]},
+                        "new_description": {
+                            "type": "string",
+                            "description": (
+                                "Optional replacement one-line description — use when the "
+                                "skill's routing_miss telemetry shows it isn't being found "
+                                "(add the words users actually say)."
+                            ),
+                        },
+                        "new_tags": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Optional replacement tags (max 5) — same discoverability purpose.",
+                        },
                     },
                     "required": ["skill_id", "changelog", "new_body", "trigger_reason"],
                 },

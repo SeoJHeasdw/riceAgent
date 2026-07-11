@@ -359,13 +359,20 @@ class TestLearningServiceT2:
         assert detail.id == "detail-skill"
         assert "Do thing A" in detail.body
 
-    def test_get_skill_increments_view(self):
+    def test_get_skill_does_not_increment_view(self):
+        """UI 상세 조회는 view 를 올리지 않는다(2026-07-11 텔레메트리 정직화) —
+        view 는 모델의 skill_view 온디맨드 로딩 신호 전용이다. 패널 열람이 view 를
+        부풀리면 온디맨드 텔레메트리(라우팅/리뷰 힌트)가 무의미해진다."""
         self._write_skill("view-skill")
         self._svc.get_skill("view-skill")
         self._svc.get_skill("view-skill")
         detail = self._svc.get_skill("view-skill")
         assert detail is not None
-        assert detail.view == 3  # 3번 호출
+        assert detail.view == 0
+        # 모델 경로(view_skill_body)만 view 를 올린다.
+        self._svc.view_skill_body("sess-v", "view-skill")
+        detail = self._svc.get_skill("view-skill")
+        assert detail is not None and detail.view == 1
 
     def test_get_skill_not_found_returns_none(self):
         assert self._svc.get_skill("no-such") is None
@@ -493,7 +500,10 @@ class TestLearningServiceT2:
         assert UsageStore(self._paths).read("viewed-sk").use == 1
 
     @pytest.mark.asyncio
-    async def test_observe_increments_use_for_injected_skills(self):
+    async def test_observe_counts_exposure_not_use_for_injected_only(self):
+        """정직화(2026-07-11): 주입만 됐고 관여 근거(view/언급/지시 도구 호출)가
+        없으면 use 는 오르지 않는다 — injected(노출)만 오른다. 라우터 오탐 한 번이
+        last_used_at/curator/리뷰 정렬을 오염시키던 결함의 교정."""
         self._write_skill("used-sk", "active")
         outcome = TurnOutcome(
             session_id="sess1",
@@ -504,4 +514,52 @@ class TestLearningServiceT2:
         )
         await self._svc.observe(outcome)
         usage = UsageStore(self._paths).read("used-sk")
+        assert usage.use == 0
+        assert usage.injected == 1
+        assert usage.last_used_at is None
+
+    @pytest.mark.asyncio
+    async def test_observe_counts_use_when_injected_skill_directed_tools_ran(self):
+        """주입된 본문이 호출을 지시한 도구가 이 턴에 실제 호출됐으면 관여로 본다."""
+        from rice_runtime.core.types import Message, ToolCall
+
+        skill = SkillData(
+            name="tooled-sk", version=1, description="uses tools", state="active",
+            body="## Steps\n1. call `create_presentation` with the outline\n",
+            tags=[], source=None, created_at=None, updated_at=None,
+        )
+        SkillStore(self._paths).write(skill)
+        history = (
+            Message(role="user", content="발표자료 만들어줘"),
+            Message(
+                role="assistant", content="",
+                tool_calls=(ToolCall(id="t1", tool_name="create_presentation", arguments={}),),
+            ),
+        )
+        outcome = TurnOutcome(
+            session_id="sess1", final_message="done", history=history,
+            tool_calls_made=1, injected_skill_ids=("tooled-sk",),
+        )
+        await self._svc.observe(outcome)
+        usage = UsageStore(self._paths).read("tooled-sk")
         assert usage.use == 1
+        assert usage.injected == 1
+        assert usage.tools.get("create_presentation") == 1
+
+    @pytest.mark.asyncio
+    async def test_observe_friction_counter_on_correction_signal(self):
+        """관여한 턴에서 교정 신호가 감지되면 friction 이 오른다 — 리뷰 LLM 의
+        '이 스킬 절차를 의심하라' 실측 힌트."""
+        self._write_skill("fric-sk", "active")
+        self._svc.view_skill_body("sess1", "fric-sk")  # 관여 근거(view)
+        outcome = TurnOutcome(
+            session_id="sess1",
+            final_message="그게 아니라 이 단계를 고쳐서 다시 진행했습니다",
+            history=(),
+            tool_calls_made=0,
+            injected_skill_ids=(),
+        )
+        await self._svc.observe(outcome)
+        usage = UsageStore(self._paths).read("fric-sk")
+        assert usage.use == 1  # view 는 관여다
+        assert usage.friction >= 1

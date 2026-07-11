@@ -47,6 +47,7 @@ class DiscoveryEngine:
         ledger: LearningLedger | None = None,
         rejection_cooldown_hours: float = 0.0,
         max_rejections: int = 0,
+        builtin_catalog=None,
     ) -> None:
         self._resolve_provider = resolve_provider
         self._skill_store = skill_store
@@ -54,6 +55,9 @@ class DiscoveryEngine:
         self._ledger = ledger
         self._rejection_cooldown_hours = rejection_cooldown_hours
         self._max_rejections = max_rejections
+        # 빌트인 스킬 카탈로그 — 리뷰 엔진과 같은 이유(builtin 이 이미 덮는
+        # 패턴의 재발명 방지 + 예약 이름 조기 드랍). None 허용(기존 테스트).
+        self._builtin_catalog = builtin_catalog
 
     async def discover(self, digests: Sequence[SessionDigest]) -> list[PatchProposal]:
         provider = self._resolve_provider()
@@ -65,6 +69,15 @@ class DiscoveryEngine:
         catalog = [
             (s.name, s.description) for s in self._skill_store.list() if s.state != "archived"
         ]
+        if self._builtin_catalog is not None:
+            try:
+                catalog += [
+                    (b.name, f"(builtin) {b.description}")
+                    for b in self._builtin_catalog.list()
+                    if getattr(b, "state", "active") == "active"
+                ]
+            except Exception:  # noqa: BLE001 — 카탈로그 조회 실패가 발굴을 깨면 안 된다
+                log.warning("builtin catalog unavailable for discovery context", exc_info=True)
         rejected = (
             [
                 f"[{r['skill_id']}] {r['changelog']}".strip()
@@ -88,6 +101,11 @@ class DiscoveryEngine:
             return []  # best-effort — 발굴 실패는 조용히 다음 기회로
 
         existing = {s.name for s in self._skill_store.list()}
+        if self._builtin_catalog is not None:
+            try:
+                existing |= set(self._builtin_catalog.names())  # 예약 이름 — 재발명/충돌 조기 드랍
+            except Exception:  # noqa: BLE001
+                pass
         proposals: list[PatchProposal] = []
         for call in calls:
             if len(proposals) >= _MAX_PROPOSALS_PER_RUN:

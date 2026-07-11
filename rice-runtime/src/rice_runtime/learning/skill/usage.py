@@ -6,13 +6,24 @@
 포맷 (LEARNING_LOOP §3):
   {
     "skill": "<name>",
-    "use": <int>,      # 턴 종료 시 주입됐던 스킬에 +1 (observe에서)
-    "view": <int>,     # GET /skills/{id} 호출 시 +1 (get_skill에서)
+    "use": <int>,      # 턴 종료 시 **관여(engagement) 근거가 있는** 스킬에 +1 (observe)
+    "view": <int>,     # 모델의 skill_view 온디맨드 로딩 시 +1 (view_skill_body)
+    "injected": <int>, # 자동 전문 주입 횟수 (관여 여부와 무관 — 노출 측정)
     "patch": <int>,    # 본문 수정 승인 시 +1 (apply_patch에서)
+    "friction": <int>, # 이 스킬이 관여한 턴에서 교정/실패 신호가 감지된 횟수
+    "routing_miss": <int>, # 라우터가 못 맞췄는데 모델이 수동 로딩한 횟수 (발견성 결함 신호)
     "last_used_at": "<ISO8601 | null>",
     "created_at": "<ISO8601>",
     "tools": {"<tool_name>": <int>, ...}   # observed 도구 호출 ledger (아래 참고)
   }
+
+정직화(2026-07-11): 이전엔 자동 주입 = use+1 이었다 — 라우터 오탐 한 번에
+last_used_at 이 갱신되고 curator 의 stale/archive 판단·리뷰 카탈로그 정렬이 전부
+오염됐다(현장 데이터: 서로 무관한 스킬 3개가 같은 초에 "사용"됨). 이제
+use 는 관여 근거(명시적 언급, skill_view, 주입 본문이 지시한 도구의 실제 호출)가
+있을 때만 오르고, 단순 노출은 injected 로 분리 집계한다. UI 상세 조회(get_skill)는
+더 이상 view 를 올리지 않는다 — 모델의 온디맨드 로딩 신호와 사용자의 패널 열람은
+다른 사건이다(view=152 vs use=26 인플레이션의 주범).
 
 `tools` — **observed 도구 단서 ledger**: 이 스킬이 주입돼 있던 턴에서 실제로
 호출된 도구별 누적 카운트 (observe에서 record_tools로 증가). 분석 사이드카의
@@ -49,7 +60,10 @@ class UsageData:
     skill: str
     use: int = 0
     view: int = 0
+    injected: int = 0
     patch: int = 0
+    friction: int = 0
+    routing_miss: int = 0
     last_used_at: str | None = None
     created_at: str = ""
     tools: dict[str, int] = field(default_factory=dict)
@@ -59,7 +73,10 @@ class UsageData:
             "skill": self.skill,
             "use": self.use,
             "view": self.view,
+            "injected": self.injected,
             "patch": self.patch,
+            "friction": self.friction,
+            "routing_miss": self.routing_miss,
             "last_used_at": self.last_used_at,
             "created_at": self.created_at,
             "tools": self.tools,
@@ -73,7 +90,10 @@ class UsageData:
             skill=d.get("skill", ""),
             use=int(d.get("use", 0)),
             view=int(d.get("view", 0)),
+            injected=int(d.get("injected", 0)),
             patch=int(d.get("patch", 0)),
+            friction=int(d.get("friction", 0)),
+            routing_miss=int(d.get("routing_miss", 0)),
             last_used_at=d.get("last_used_at"),
             created_at=d.get("created_at", ""),
             tools=tools,
@@ -120,9 +140,34 @@ class UsageStore:
         return usage
 
     def increment_view(self, name: str) -> UsageData:
-        """view += 1. get_skill 호출 시 증가."""
+        """view += 1. 모델의 skill_view 온디맨드 로딩(view_skill_body)에서만 증가 —
+        UI 상세 조회는 세지 않는다(텔레메트리 정직화, 2026-07-11)."""
         usage = self.read(name)
         usage.view += 1
+        self._write(usage)
+        return usage
+
+    def increment_injected(self, name: str) -> UsageData:
+        """injected += 1. prefetch 가 전문을 자동 주입한 턴의 관찰(observe)에서
+        호출 — 노출(exposure) 집계이며 use(관여)와 분리된다."""
+        usage = self.read(name)
+        usage.injected += 1
+        self._write(usage)
+        return usage
+
+    def increment_friction(self, name: str) -> UsageData:
+        """friction += 1. 이 스킬이 관여한 턴에서 교정/실패 신호(signals.py)가
+        감지됐을 때 — 리뷰 LLM에게 '이 스킬 절차를 의심하라'는 힌트가 된다."""
+        usage = self.read(name)
+        usage.friction += 1
+        self._write(usage)
+        return usage
+
+    def increment_routing_miss(self, name: str) -> UsageData:
+        """routing_miss += 1. 관련도 라우터가 이번 턴 쿼리에 못 맞췄는데 모델이
+        skill_view 로 수동 로딩했을 때 — 발견성(설명/태그) 결함의 실측 신호."""
+        usage = self.read(name)
+        usage.routing_miss += 1
         self._write(usage)
         return usage
 

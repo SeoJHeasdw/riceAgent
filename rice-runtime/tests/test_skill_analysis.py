@@ -146,7 +146,10 @@ def test_tool_mention_sources_are_separated():
     data.tools = ["create_workbook"]
     svc._skill_store.write(data)
 
-    # observed: 주입된 턴의 tool_calls 를 observe 가 기록.
+    # observed: 관여(engagement)한 턴의 tool_calls 를 observe 가 기록한다.
+    # 2026-07-11 정직화 이후 단순 주입만으로는 기록되지 않으므로, 모델이 스킬을
+    # skill_view 로 직접 당긴(=관여 근거) 턴으로 구성한다.
+    svc.view_skill_body("s1", "demo-skill")
     outcome = TurnOutcome(
         session_id="s1",
         final_message="done",

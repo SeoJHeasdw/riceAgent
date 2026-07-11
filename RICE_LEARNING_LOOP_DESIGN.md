@@ -66,16 +66,33 @@ absorbed_into: null                   # curator 통합으로 archived됐으면 �
 ```json
 {
   "skill": "deploy-k8s-service",
-  "use": 12,          // 시스템 프롬프트에 주입되어 실제 작업에 사용된 횟수
-  "view": 3,          // 사용자가 MySkills에서 상세 열람한 횟수
+  "use": 12,          // 관여(engagement) 근거가 있는 턴 수 — 아래 정직화 참고
+  "view": 3,          // 모델이 skill_view 로 온디맨드 로딩한 횟수 (UI 열람은 세지 않음)
+  "injected": 30,     // 전문 자동 주입(노출) 횟수 — use 와 분리 (2026-07-11 신규)
   "patch": 2,         // 개선(본문 수정)된 횟수 → version과 동기
+  "friction": 1,      // 관여한 턴에서 교정/실패 신호가 함께 감지된 횟수 (2026-07-11 신규)
+  "routing_miss": 4,  // 라우터가 못 맞췄는데 모델이 수동 로딩한 횟수 = 발견성 결함 (2026-07-11 신규)
   "tools": {"kubectl_apply": 5, "search_files": 2},  // 관측된 도구 호출 빈도(상한 40종, 2026-07-06 신규)
   "last_used_at": "2026-06-18T09:00:00Z",
   "created_at": "2026-06-10T00:00:00Z"
 }
 ```
 
-- 카운터 증가 시점: `use`=턴 종료 시 주입된 스킬에 가산, `view`=`GET /skills/{id}`, `patch`=본문 수정(승인) 시 (§5.2.4)
+- **텔레메트리 정직화(2026-07-11)**: 이전엔 "주입 = use+1"이었고 `view`는 UI 상세
+  열람까지 세었다. 그 결과 라우터 오탐 한 번이 `last_used_at`을 갱신해 curator의
+  stale/archive 판단과 리뷰 카탈로그 정렬(use 상위)이 전부 오염됐고, MySkills 패널
+  열람이 view를 부풀려(실측 view=152 vs use=26) 온디맨드 신호가 무의미해졌다. 이제:
+  - `use` = **관여 근거**가 있는 턴에만 가산: ① 모델이 `skill_view`로 직접 로딩,
+    ② 사용자가 스킬 이름을 명시적으로 언급, ③ 주입 본문이 호출을 지시한 도구
+    (verifier의 `tool_call_refs`와 동일 규칙)가 이 턴에 실제 호출됨. `last_used_at`·
+    observed `tools` ledger도 관여 턴에만 갱신된다.
+  - `view` = 모델의 `skill_view` 경로 전용. `GET /skills/{id}`(UI)는 어떤 카운터도
+    올리지 않는다.
+  - `injected` = 전문 자동 주입(노출) 집계 — "주입은 됐지만 안 쓰인" 스킬(오탐)을
+    `injected≫use` 패턴으로 식별할 수 있다.
+  - `friction`/`routing_miss` = 리뷰 LLM에 실리는 실측 힌트(§5.2.2) — 각각 "절차를
+    의심하라", "발견성(설명/태그)을 고쳐라"의 근거.
+- 카운터 증가 시점: `use`/`injected`/`friction`=턴 종료 observe, `view`/`routing_miss`=`skill_view`, `patch`=본문 수정(승인) 시 (§5.2.4)
 - 상태 전이·curator 입력으로 사용 (§5.1). `use`·`patch`는 학습 측정 지표로도 사용된다([RICE_LEARNING_EVAL.md](RICE_LEARNING_EVAL.md) 2장).
 - **설명 사이드카(별개 파일, 2026-07-06 신규)**: `usage.json`이 텔레메트리라면, `learning/skill/analysis.py`+`analyzer.py`가 만드는 `SkillAnalysisData`는 "이 스킬이 뭘 하는지" 사람이 읽을 설명이다(휴리스틱+LLM 1회, `GET /skills/{id}`가 lazy-load, `POST /skills/{id}/analysis/refresh`로 재생성). **UI 설명 전용 — 권한/실행 판단에는 절대 쓰이지 않는다.**
 
@@ -208,6 +225,18 @@ patch로 표현되고(`from_version=0`), `skill_patch_proposed`가 diff 카드�
   요청일 수 있기 때문(쿨다운은 무인 재제안을 막는 장치지 명시적 의도를 막는
   장치가 아니다).
 
+- **실측 텔레메트리 힌트(2026-07-11 신규).** 리뷰 프롬프트의 patch 가능 스킬
+  헤딩에 `use/friction/routing_miss`(§3) 한 줄이 붙는다(0이면 생략). 시스템
+  프롬프트가 해석 규칙을 준다 — friction 높음 = "이 스킬이 관여한 턴마다
+  교정/실패가 겹쳤다, 절차를 의심하라"; routing_miss 높음 = "본문이 아니라
+  발견성이 문제다, `new_description`/`new_tags`로 사용자가 실제로 쓰는 단어를
+  추가하라". 리뷰가 대화 하나만 보던 맹점을 누적 실측이 보완한다.
+- **빌트인 카탈로그 인지(2026-07-11 신규).** 리뷰/발굴 엔진의 카탈로그에 빌트인
+  스킬이 "(builtin)" 라벨의 compact(패치 불가) 항목으로 실린다 — 이전엔 안 보여서
+  빌트인이 이미 덮는 절차를 신규 스킬로 재발명하거나, 빌트인 예약 이름으로 create를
+  제안해 **승인 시점에야 에러가 나는 막다른 카드**가 가능했다. 이제 예약 이름
+  제안은 엔진에서 조기 드랍된다(fail-closed).
+
 **신호 소스가 둘로 나뉜다는 점에 주의**: (1) 메인 턴 안에서 정규식이 감지하는
 신호는 `ReviewGate.should_review()`의 **게이트 판단**에만 쓰인다(LLM을 부를지
 결정) — 신호 자체가 제안이 되진 않는다. (2) 실제 trigger 분류(T1a/b/c)는
@@ -225,7 +254,16 @@ patch로 표현되고(`from_version=0`), `skill_patch_proposed`가 diff 카드�
   100%-add diff로, "새 스킬 제안" 카드가 된다(별도 카드 타입 불필요, `from_version===0`이
   판별자)
 - `trigger` — T1a/T1b/T1c/T3/T4 (감사용)
-- `description`/`tags` — T4(신규 생성)에서만 의미 있음(patch는 메타데이터를 건드리지 않는다)
+- `description`/`tags` — T4(신규 생성)에서만 의미 있음(생성 초기값)
+- `new_description`/`new_tags` — **기존 스킬 patch의 발견성 메타데이터 변경**(2026-07-11
+  신규, 선택). `routing_miss`(§3)가 쌓인 스킬은 본문이 아니라 색인 신호(설명/태그)가
+  문제다 — 리뷰 LLM(`propose_skill_patch`의 동명 인자)과 미드턴 `propose_skill`
+  (기존 스킬에 description/tags를 주면 변경 제안으로 해석)이 이 채널로 고친다.
+  None이면 변경 없음, 현재 값과 같으면 빌더가 None으로 접는다. **메타데이터-only
+  patch도 성립한다**(본문 diff가 비어도). diff 렌더러는 본문 전용이므로 변경 내용은
+  `warnings`에 "설명 변경 포함: …" / "태그 변경 포함: …"으로 명시돼 카드에 보인다.
+  승인 시 `apply_patch`가 본문과 함께 적용한다 — 발견성 개선이 다음 턴의 라우팅
+  (§7 관련도 매칭)에 즉시 반영되는 **자기개선 되먹임 루프**가 이걸로 닫힌다.
 - `warnings` — §8 가드가 시크릿을 마스킹했으면 그 라벨 목록("AWS access key 자동 마스킹됨" 등),
   없으면 빈 배열
 
@@ -345,13 +383,13 @@ patch로 표현되고(`from_version=0`), `skill_patch_proposed`가 diff 카드�
 | 도구 정의(built-in tools, `execute_code` 포함) | ~12K | |
 | MCP 도구(Connector 노출 tool) | ~15K | 연결 수 비례 (MVP: Gmail) |
 | 규칙(rules) | ~5K | |
-| **스킬(자동 주입 상위 + 인덱스)** | **작음 — 상위 소수 본문 + 짧은 인덱스** | 2026-07-07 개편: `skill_inject_token_budget`(24K) 상한 자체는 유지되지만 도달 방식이 바뀌었다 — 예산까지 채워 넣는 게 아니라 관련도 스코어 상위(기본 임계 3.0·최대 2개, `learning/skill/relevance.py`)만 본문 그대로 넣고 **나머지는 이름+한줄 설명 인덱스**로만 얹는다(아래 서술 갱신) |
+| **스킬(자동 주입 상위 + 인덱스)** | **작음 — 상위 1개 본문 + 짧은 인덱스** | 2026-07-11 v2: 점수 임계(3.0)에 **strong-hit 게이트**(name/tag 신호 ≥2 또는 명시적 언급)가 추가됐고, 개수 상한은 `skill_max_auto_inject`(기본 **1**)로 내려갔다 — 태그 한 개 스치는 오탐이 본문 ~1K 토큰을 끌고 들어오던 것을 차단. 한 번 주입된 스킬은 `skill_sticky_turns`(기본 2) 동안 재매칭 없이 유지된다(후속 지시가 라우터에 안 걸려도 태스크 중간에 절차가 증발하지 않게). 인덱스는 관련도순·상한 30행+오버플로 안내(`learning/skill/relevance.py`, `learning/service.py::prefetch`) |
 | 메모리(facts 8 + FTS 상위 5, §6 실 기본값) | ~10K | §6 |
 | 메시지(대화 히스토리) | ~160K (잔여) | 초과 시 오래된 턴부터 요약/절단 |
 | **모델 응답(출력 예약)** | **20K** | |
 | **합계** | **270K** | |
 
-- **스킬 선별은 매 턴 관련도 매칭이 주경로다(2026-07-07 개편)**: `core/lexical.py`의 결정론적 사다리(exact→substring→char-bigram fuzzy→ko→en 의도어 확장)로 스코어링해, 상위(기본 임계 3.0·최대 2개)만 본문 그대로 자동 주입하고 나머지는 이름+한줄 설명의 인덱스만 실린다. 모델이 인덱스에서 필요를 느끼면 `skill_view` builtin으로 온디맨드 로드한다. prefix caching(Claude `cache_control`) 이점은 상위 스킬·인덱스가 매 턴 반복되는 한 유지된다. Ollama는 caching 미지원 → 컨텍스트 재사용으로 대체([RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md) 6장).
+- **스킬 선별은 매 턴 관련도 매칭이 주경로다(2026-07-07 개편, 2026-07-11 정밀도 v2)**: `core/lexical.py`의 결정론적 사다리(exact→substring→char-bigram fuzzy→ko→en 의도어 확장)로 스코어링해, **명시적 언급이거나 (점수 ≥3.0 AND name/tag strong-hit ≥2)** 인 상위 `skill_max_auto_inject`(기본 1)개만 본문 그대로 자동 주입하고 나머지는 이름+한줄 설명의 인덱스(관련도순, 30행 상한)만 실린다. 주입된 스킬은 `skill_sticky_turns`(기본 2) 동안 점착 유지된다. 모델이 인덱스에서 필요를 느끼면 `skill_view` builtin으로 온디맨드 로드한다(같은 턴 반복 조회에는 "already loaded" note가 실려 소형 모델의 중복 로딩 루프를 끊는다). 라우터가 못 맞춘 수동 로딩은 `routing_miss`로 계측돼(§3) 리뷰 LLM의 발견성 개선(`new_description`/`new_tags` patch)으로 되먹임된다. prefix caching(Claude `cache_control`) 이점은 상위 스킬·인덱스가 매 턴 반복되는 한 유지된다. Ollama는 caching 미지원 → 컨텍스트 재사용으로 대체([RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md) 6장).
 - **매 턴이 매칭에 의존하므로 retrieval 정확도가 그만큼 더 중요해졌다** — 예산 초과 시에만 작동하던 안전장치가 아니라 상시 경로가 됐다는 것이 이전 서술과의 핵심 차이. `skill_hit`으로 매칭 실패를 계속 진단한다([RICE_LEARNING_EVAL.md](RICE_LEARNING_EVAL.md) 2장). 시멘틱(임베딩) 매칭은 2026-07-07 적대적 리뷰에서 최종 기각됐다(로컬 8GB 최소사양 트레이드오프).
 - **MCP 도구는 연결된 Connector 것만 주입**한다(미연결 Connector tool은 스키마에서 제외 — [RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md) 2.1). MCP 예산(~15K) 초과 시엔 bridge 3종 + 관련도 스포트라이트로 접는다(**구현 완료** — 기존 문서의 "Phase 2" 항목은 2026-07-01에 착수했고, 2026-07-07에 관련도 스포트라이트 방식으로 개편됐다. [RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md) 2.1).
 - **서브에이전트 컨텍스트 격리**: 서브에이전트 실행은 **새 대화를 여는 것과 동일하게** 독립된 컨텍스트(별도 270K 윈도)에서 작업시켜 부모 대화의 컨텍스트 오염을 막는다. 토큰 사용량은 늘지만 정확도를 우선하는 위 원칙과 일관된다.

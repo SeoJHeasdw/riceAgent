@@ -52,10 +52,19 @@ divergence가 tail에서만 일어나 이전 반복까지의 프리픽스가 캐
               2b. 스킬 관련도 산정: 임베딩/벡터 검색 없이 결정론적 lexical router 사용.
                   explicit mention → name/tag → description/body → substring →
                   char-bigram fuzzy → ko→en 의도어 확장 → negative tag 감점.
-              2c. 자동 전문 주입: score >= 3.0인 상위 스킬만, 최대 2개, 24K token
-                  예산 안에서 SKILL.md 본문을 시스템 프롬프트에 넣는다.
-              2d. 나머지 스킬: 이름+한줄 설명의 짧은 index만 넣고, 필요 시 모델이
-                  skill_search/skill_view로 전문을 온디맨드 로드한다.
+              2c. 자동 전문 주입(2026-07-11 정밀도 v2): 명시적 언급이거나
+                  (score >= 3.0 AND name/tag strong-hit >= 2)인 상위 스킬만,
+                  skill_max_auto_inject(기본 1)개·24K token 예산 안에서 SKILL.md
+                  본문을 시스템 프롬프트에 넣는다. 태그 1개 스침(오탐)은 인덱스로.
+              2c'. 점착(sticky): 한 번 주입된 스킬은 skill_sticky_turns(기본 2)
+                  동안 재매칭 없이 유지된다 — 후속 지시("이어서 해줘")가 라우터에
+                  안 걸려도 태스크 중간에 절차가 증발하지 않는다. 유지 턴은
+                  카운터를 리셋하지 않는다(무한 자기연장 방지).
+              2d. 나머지 스킬: 이름+한줄 설명의 짧은 index(관련도순, 30행 상한 +
+                  오버플로 안내)만 넣고, 필요 시 모델이 skill_search/skill_view로
+                  전문을 온디맨드 로드한다. 같은 턴 반복 skill_view에는 "already
+                  loaded" note가 실린다. 라우터가 못 맞춘 수동 로딩은 routing_miss
+                  로 계측된다(LEARNING_LOOP §3 — 리뷰의 발견성 patch 힌트).
               2e. 메모리: 최근 facts 기본 8개 + 현재 쿼리 FTS5 매칭 기본 5개.
                   quarantined 메모리는 승인 전까지 주입하지 않는다.
               2f. SKILL_GUIDANCE + 자동 주입 스킬 본문 + 스킬 index + 메모리 +
@@ -604,10 +613,12 @@ fake는 영향이 없다.
 
 1. **주입(턴 시작)**: prefetch가 학습된 스킬과 **플러그인 SKILL.md를 같은 관련도
    파이프라인으로 합쳐**(2026-07-07 개편 — 플러그인 스킬 전량 주입은 폐기)
-   채점한다: 관련도 상위(기본 임계 3.0, 최대 2개)만 본문 그대로 자동 주입되고,
-   나머지는 이름+한줄 설명의 인덱스로만 실려 모델이 필요하면 `skill_view`로
-   온디맨드 로드한다. 관련 메모리도 같은 턴에 함께 실린다. 상세 스코어링·인덱스
-   포맷은 [RICE_LEARNING_LOOP_DESIGN.md](RICE_LEARNING_LOOP_DESIGN.md)가 정본.
+   채점한다(2026-07-11 정밀도 v2): 명시적 언급이거나 점수 임계+strong-hit 게이트를
+   모두 넘는 상위 `skill_max_auto_inject`(기본 1)개만 본문 그대로 자동 주입되고
+   `skill_sticky_turns`(기본 2) 동안 점착 유지되며, 나머지는 이름+한줄 설명의
+   인덱스(관련도순)로만 실려 모델이 필요하면 `skill_view`로 온디맨드 로드한다.
+   관련 메모리도 같은 턴에 함께 실린다. 상세 스코어링·점착·인덱스 포맷은
+   [RICE_LEARNING_LOOP_DESIGN.md](RICE_LEARNING_LOOP_DESIGN.md)가 정본.
 2. **미드턴 제안**: `propose_skill` builtin — 스테이징 전에 결정론적 검증 게이트
    (`learning/skill/verifier.py`, LLM 재채점 없음 — 프론트matter·코드펜스
    무결성 같은 객관적 위반은 즉시 반려해 같은 턴에 모델이 고쳐 재제안하게 함)를

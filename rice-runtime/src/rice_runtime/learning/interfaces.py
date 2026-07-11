@@ -93,6 +93,12 @@ class PatchProposal:
     to_version: int
     description: str = ""  # only meaningful when from_version == 0 (creation)
     tags: tuple[str, ...] = ()  # only meaningful when from_version == 0 (creation)
+    # 기존 스킬 patch 의 **발견성 메타데이터 개선**(2026-07-11): routing_miss 가
+    # 쌓인 스킬(라우터가 못 맞춰 모델이 수동 로딩)은 본문이 아니라 설명/태그가
+    # 문제다 — 리뷰 LLM 이 이 필드로 그것을 고칠 수 있다. None = 변경 없음
+    # (creation 의 description/tags 와 분리 — 그쪽은 "초기값", 이쪽은 "변경 제안").
+    new_description: str | None = None
+    new_tags: tuple[str, ...] | None = None
     # Phase D (secret-scrub/size-cap guard) redaction notices, surfaced on the
     # approval card ("N개의 잠재적 민감정보가 자동으로 제거되었습니다"). Empty when
     # the guard found nothing to flag.
@@ -124,6 +130,10 @@ class SkillSummary:
     patch: int = 0
     last_used_at: str | None = None
     enabled: bool = True
+    # 텔레메트리 정직화(2026-07-11): 노출/마찰/발견성 결함 카운터 — use 와 분리.
+    injected: int = 0
+    friction: int = 0
+    routing_miss: int = 0
 
 
 @dataclass(frozen=True)

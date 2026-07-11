@@ -94,6 +94,7 @@ class ReviewEngine:
         rejection_cooldown_hours: float = 0.0,
         max_rejections: int = 0,
         context: LearningContextManager | None = None,
+        builtin_catalog=None,
     ) -> None:
         self._resolve_provider = resolve_provider
         self._skill_store = skill_store
@@ -101,6 +102,13 @@ class ReviewEngine:
         self._mem_store = mem_store
         self._catalog_budget = skill_catalog_token_budget
         self._max_body_chars = max_body_chars
+        # 빌트인 스킬 카탈로그(BuiltinSkillCatalog 호환: .list()/.names()) —
+        # 없으면(None, 기존 테스트) 리뷰 LLM 은 빌트인의 존재를 모른 채 동작한다.
+        # 있으면 (1) compact 카탈로그에 실어 빌트인이 이미 덮는 절차의 재발명을
+        # 막고, (2) 빌트인 이름으로 온 create 제안을 조기 드랍한다 — 이전엔 승인
+        # 시점(_ensure_not_builtin)에야 막혀 사용자가 승인하고 에러를 보는 막다른
+        # 카드였다.
+        self._builtin_catalog = builtin_catalog
         # 리뷰 전용 컨텍스트 렌더러: None(기존 테스트)이면 v3와 동일하게
         # 히스토리를 그대로 넘긴다. 실배선(composition)은 항상 렌더러를 준다.
         self._context = context
@@ -180,6 +188,7 @@ class ReviewEngine:
             compact_skills=compact_skills,
             known_facts=known_facts,
             rejected_recently=self._recent_rejection_lines(),
+            usage_hints=self._usage_hints(patchable_ids),
             **kwargs,
         )
         tools = build_review_tool_specs(patchable_ids)
@@ -246,8 +255,34 @@ class ReviewEngine:
             else:
                 compact.append((skill.name, skill.description))
 
+        # 빌트인 스킬은 patch 불가(이름 예약)지만 **존재는 보여야** 한다 — 안
+        # 보이면 리뷰 LLM 이 빌트인이 이미 덮는 절차를 신규 스킬로 재발명한다.
+        # compact(do-NOT-patch) 목록에 싣는 이유다.
+        if self._builtin_catalog is not None:
+            try:
+                for b in self._builtin_catalog.list():
+                    if getattr(b, "state", "active") == "active" and getattr(b, "enabled", True):
+                        compact.append((b.name, f"(builtin) {b.description}"))
+            except Exception:  # noqa: BLE001 — 카탈로그 조회 실패가 리뷰를 깨면 안 된다
+                log.warning("builtin catalog unavailable for review context", exc_info=True)
+
         patchable_ids = tuple(s[0] for s in full_body)
         return full_body, compact, patchable_ids
+
+    def _usage_hints(self, skill_ids: Sequence[str]) -> dict[str, str]:
+        """patch 가능한 스킬들의 실측 텔레메트리 한 줄 — friction(관여 턴의
+        교정/실패 동시 발생)과 routing_miss(라우터 미스 수동 로딩)가 0이면
+        굳이 싣지 않는다(신호 없는 잡음)."""
+        hints: dict[str, str] = {}
+        for sid in skill_ids:
+            try:
+                u = self._usage_store.read(sid)
+            except Exception:  # noqa: BLE001
+                continue
+            if u.friction <= 0 and u.routing_miss <= 0:
+                continue
+            hints[sid] = f"use={u.use}, friction={u.friction}, routing_miss={u.routing_miss}"
+        return hints
 
     def _recent_fact_strings(self, limit: int = _MAX_KNOWN_FACTS) -> list[str]:
         return [m.content for m in self._mem_store.list()[:limit]]
@@ -277,6 +312,15 @@ class ReviewEngine:
         body = str(args.get("body") or "")
         if not name or not body.strip():
             return None
+        if self._builtin_catalog is not None:
+            try:
+                if name in self._builtin_catalog.names():
+                    # 빌트인 이름은 예약 — 승인 시점에야 막히는 막다른 카드를
+                    # 만들지 않고 여기서 버린다(fail-closed).
+                    log.warning("review engine: create proposal for builtin name %r ignored", name)
+                    return None
+            except Exception:  # noqa: BLE001
+                pass
         try:
             self._skill_store.read(name)
             # 모델이 실제로 존재하는 이름으로 "생성"을 제안했다 — patch를 썼어야
@@ -313,6 +357,8 @@ class ReviewEngine:
             # 모델이 카탈로그에 없는/유효하지 않은 skill_id를 줬다 — 스키마의 enum이
             # 이미 이걸 막지만(build_review_tool_specs), 방어적으로 한 번 더 확인.
             return None
+        raw_new_desc = args.get("new_description")
+        raw_new_tags = args.get("new_tags")
         return make_patch_proposal(
             current=current,
             new_body=new_body,
@@ -321,6 +367,8 @@ class ReviewEngine:
             max_body_chars=self._max_body_chars,
             derived_from_external=external,
             evidence_message_ids=evidence_ids,
+            new_description=str(raw_new_desc) if raw_new_desc else None,
+            new_tags=tuple(str(t) for t in raw_new_tags) if isinstance(raw_new_tags, (list, tuple)) else None,
         )
 
     def _memory_effect(
