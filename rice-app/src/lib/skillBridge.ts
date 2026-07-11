@@ -231,18 +231,23 @@ export function runtimePluginToMyPlugin(p: {
   enabled: boolean;
   required_connectors?: string[];
   description?: string;
+  skill_names?: string[];
+  source?: string;
+  author?: string;
 }): MyPlugin {
+  const builtin = p.source === 'builtin';
   return {
     id: p.id,
     name: p.name,
     icon: 'plug',
     enabled: p.enabled,
-    source: '설치됨 · 마켓',
+    builtin,
+    source: builtin ? 'RICE 기본 내장' : '설치됨 · 마켓',
     version: p.version,
-    author: '',
-    updated: '설치됨',
+    author: p.author ?? '',
+    updated: builtin ? '앱과 함께 제공' : '설치됨',
     summary: p.description || '',
-    skills: [],
+    skills: (p.skill_names ?? []).map((name) => ({ name, desc: '' })),
     knowledge: [],
     permissions: (p.required_connectors ?? []).map((c) => ({ name: c, mode: '연결 필요' })),
     examples: [],

@@ -100,6 +100,8 @@ export interface Plugin {
   knowledge?: PluginKnowledge[];
   installed: boolean;
   enabled: boolean;
+  /** Runtime package asset. It may be enabled/disabled, but not installed or removed. */
+  builtin?: boolean;
   icon?: string;
 }
 

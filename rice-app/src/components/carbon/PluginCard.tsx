@@ -13,6 +13,7 @@ export interface PluginCardProps {
   skillCount: number;
   installed: boolean;
   enabled: boolean;
+  builtin?: boolean;
   icon?: string;
   gains?: string;
   useCases: string[];
@@ -31,6 +32,7 @@ export const PluginCard: React.FC<PluginCardProps> = ({
   skillCount,
   installed,
   enabled,
+  builtin,
   gains,
   useCases,
   connectors,
@@ -79,7 +81,11 @@ export const PluginCard: React.FC<PluginCardProps> = ({
           </h3>
           <p className="text-caption-01 text-text-helper">{author}</p>
         </div>
-        {installed ? (
+        {builtin ? (
+          <Tag type="teal" size="sm">
+            기본 내장
+          </Tag>
+        ) : installed ? (
           enabled ? (
             <Tag type="green" size="sm" dot>
               활성

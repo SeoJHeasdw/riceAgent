@@ -240,7 +240,8 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           if (!rt.success || !rt.data) return; // 런타임 오프라인 → 빈 상태 유지
           type RtPlugin = {
             id: string; name: string; version: string; enabled: boolean;
-            required_connectors?: string[]; skill_count?: number; description?: string;
+            required_connectors?: string[]; skill_count?: number; skill_names?: string[]; description?: string;
+            source?: string; author?: string;
           };
           type RtConnector = { connector_type: string; status: string };
           const installed = rt.data as unknown as RtPlugin[];
@@ -269,7 +270,16 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             const art = byId.get(p.id) ?? byId.get(p.id.replace(/^plugin:/, ''));
             if (art) {
               // 카탈로그 매칭: 마켓 Plugin으로 풍부하게, 단 정체성·상태는 런타임 기준.
-              return decoratePermissions({ ...marketPluginToMyPlugin(platformArtifactToPlugin(art)), id: p.id, enabled: p.enabled, version: p.version });
+              const fromMarket = marketPluginToMyPlugin(platformArtifactToPlugin(art));
+              return decoratePermissions({
+                ...fromMarket,
+                id: p.id,
+                enabled: p.enabled,
+                version: p.version,
+                builtin: p.source === 'builtin',
+                source: p.source === 'builtin' ? 'RICE 기본 내장' : fromMarket.source,
+                updated: p.source === 'builtin' ? '앱과 함께 제공' : fromMarket.updated,
+              });
             }
             return decoratePermissions(runtimePluginToMyPlugin(p));
           });

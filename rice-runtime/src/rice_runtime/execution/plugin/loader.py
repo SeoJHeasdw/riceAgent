@@ -48,6 +48,7 @@ from ...core.types import InjectedSkill, ToolCall, ToolResult, ToolSpec, new_id,
 from ..interfaces import ISandbox, PluginInfo, SandboxResult
 from .manifest import ArtifactManifest, parse_manifest
 from .registry import PluginRegistry
+from .builtin import BUILTIN_PLUGIN_SOURCE, BuiltinPluginCatalog
 
 
 # ─── minimal SKILL.md parser (mirrors learning/skill/store.py) ───────────────
@@ -102,9 +103,18 @@ def _parse_skill_md_minimal(text: str) -> dict[str, Any]:
                 fm[k] = v
                 in_list_key = None
 
+    version_raw = fm.get("version", 1)
+    try:
+        version = int(version_raw)
+    except (TypeError, ValueError):
+        # Claude plugins commonly use semver in SKILL.md (for example 0.1.0),
+        # while InjectedSkill keeps the learning subsystem's integer revision
+        # contract. Plugin revisions are immutable here, so use revision 1.
+        version = 1
+
     return {
         "name": str(fm.get("name", "")),
-        "version": int(fm.get("version", 1)),
+        "version": version,
         "description": str(fm.get("description", "")),
         "state": str(fm.get("state", "active")),
         "tags": list(fm.get("tags", [])),
@@ -156,11 +166,18 @@ class PluginLoader:
     filesystem layout under `paths.plugins` and `paths.skills`.
     """
 
-    def __init__(self, db: Database, sandbox: ISandbox, paths: RicePaths) -> None:
+    def __init__(
+        self,
+        db: Database,
+        sandbox: ISandbox,
+        paths: RicePaths,
+        builtin_plugins: BuiltinPluginCatalog | None = None,
+    ) -> None:
         self._db = db
         self._sandbox = sandbox
         self._paths = paths
         self._registry = PluginRegistry(db)
+        self._builtin_plugins = builtin_plugins
 
     # ── tool / skill surface ─────────────────────────────────────────────────
 
@@ -173,7 +190,12 @@ class PluginLoader:
 
     def _tools_for_plugin(self, info: PluginInfo) -> list[ToolSpec]:
         """Read the tool declarations from the plugin's stored manifest JSON."""
-        manifest_path = self._paths.plugins / info.id / "rice-artifact.json"
+        plugin_dir = self._plugin_dir(info)
+        manifest_path = (
+            plugin_dir / ".claude-plugin" / "plugin.json"
+            if info.source == BUILTIN_PLUGIN_SOURCE
+            else plugin_dir / "rice-artifact.json"
+        )
         if not manifest_path.exists():
             return []
         try:
@@ -210,7 +232,7 @@ class PluginLoader:
         """
         skills: list[InjectedSkill] = []
         for info in self._list_enabled_plugin_infos():
-            skills_dir = self._paths.plugins / info.id / "skills"
+            skills_dir = self._plugin_dir(info) / "skills"
             if not skills_dir.is_dir():
                 continue
             # Both layouts (CONTRACTS §2.2): flat `skills/*.md` AND the standard
@@ -283,7 +305,12 @@ class PluginLoader:
         if owner_id is not None:
             infos = [i for i in infos if i.id == owner_id]
         for info in infos:
-            manifest_path = self._paths.plugins / info.id / "rice-artifact.json"
+            plugin_dir = self._plugin_dir(info)
+            manifest_path = (
+                plugin_dir / ".claude-plugin" / "plugin.json"
+                if info.source == BUILTIN_PLUGIN_SOURCE
+                else plugin_dir / "rice-artifact.json"
+            )
             if not manifest_path.exists():
                 continue
             try:
@@ -295,22 +322,26 @@ class PluginLoader:
             for t in ep.get("tools", []) or []:
                 if isinstance(t, dict) and t.get("name") == tool_name:
                     entry = t.get("entry") or (f"{module}.{tool_name}" if module else tool_name)
-                    return entry, self._paths.plugins / info.id
+                    return entry, plugin_dir
         return None, None
 
     # ── management ────────────────────────────────────────────────────────────
 
     def list_plugins(self) -> list[PluginInfo]:
         """All installed plugins (enabled + disabled)."""
+        builtin_ids = self._builtin_plugins.ids() if self._builtin_plugins else frozenset()
         rows = self._db.query_all(
             "SELECT id, name, version, enabled FROM installed_artifacts WHERE type = 'plugin'"
         )
         infos: list[PluginInfo] = []
         for r in rows:
+            if r["id"] in builtin_ids:
+                continue
             manifest_path = self._paths.plugins / r["id"] / "rice-artifact.json"
             required_connectors: tuple[str, ...] = ()
             description = ""
             skill_count = 0
+            skill_names: tuple[str, ...] = ()
             if manifest_path.exists():
                 try:
                     raw = json.loads(manifest_path.read_text())
@@ -320,9 +351,13 @@ class PluginLoader:
                     )
                     skills_dir = self._paths.plugins / r["id"] / "skills"
                     if skills_dir.is_dir():
-                        skill_count = len(list(skills_dir.glob("*.md"))) + len(
-                            list(skills_dir.glob("*/SKILL.md"))
+                        flat_skills = sorted(skills_dir.glob("*.md"))
+                        nested_skills = sorted(skills_dir.glob("*/SKILL.md"))
+                        skill_names = tuple(
+                            [path.stem for path in flat_skills]
+                            + [path.parent.name for path in nested_skills]
                         )
+                        skill_count = len(skill_names)
                 except (OSError, json.JSONDecodeError):
                     pass
             infos.append(
@@ -334,9 +369,11 @@ class PluginLoader:
                     enabled=bool(r["enabled"]),
                     required_connectors=required_connectors,
                     skill_count=skill_count,
+                    skill_names=skill_names,
                 )
             )
-        return infos
+        builtins = self._builtin_plugins.list() if self._builtin_plugins else []
+        return builtins + infos
 
     def get_plugin(self, plugin_id: str) -> PluginInfo | None:
         """Single plugin's info (enabled state + required_connectors), or None."""
@@ -344,6 +381,9 @@ class PluginLoader:
 
     def set_enabled(self, plugin_id: str, enabled: bool) -> None:
         """Toggle a plugin's active state (CONTRACTS §1.3: PATCH /plugins/{id}/enabled)."""
+        if self._builtin_plugins and self._builtin_plugins.is_builtin(plugin_id):
+            self._builtin_plugins.set_enabled(plugin_id, enabled)
+            return
         self._registry.set_enabled(plugin_id, enabled)
 
     async def install(self, *, path: str, manifest: dict[str, Any]) -> PluginInfo:
@@ -359,6 +399,8 @@ class PluginLoader:
           ④ Record in `installed_artifacts` (enabled=1 by default).
         """
         parsed = parse_manifest(manifest)
+        if parsed.type == "plugin" and self._builtin_plugins:
+            self._builtin_plugins.ensure_mutable(parsed.name, "설치/덮어쓰기")
         await self._verify_checksum(path, parsed)
 
         artifact_id = f"{parsed.type}:{parsed.name}"
@@ -391,6 +433,8 @@ class PluginLoader:
 
     async def remove(self, artifact_id: str) -> None:
         """Remove an installed artifact from DB and filesystem."""
+        if self._builtin_plugins:
+            self._builtin_plugins.ensure_mutable(artifact_id, "삭제")
         row = self._db.query_one(
             "SELECT type, name FROM installed_artifacts WHERE id = ?", (artifact_id,)
         )
@@ -545,12 +589,26 @@ class PluginLoader:
 
     def _list_enabled_plugin_infos(self) -> list[PluginInfo]:
         """Internal: enabled plugins only, light read."""
+        builtin_ids = self._builtin_plugins.ids() if self._builtin_plugins else frozenset()
         rows = self._db.query_all(
             "SELECT id, name, version FROM installed_artifacts "
             "WHERE type = 'plugin' AND enabled = 1"
         )
-        return [
+        installed = [
             PluginInfo(id=r["id"], name=r["name"], version=r["version"],
                        description="", enabled=True)
-            for r in rows
+            for r in rows if r["id"] not in builtin_ids
         ]
+        builtins = (
+            [info for info in self._builtin_plugins.list() if info.enabled]
+            if self._builtin_plugins
+            else []
+        )
+        return builtins + installed
+
+    def _plugin_dir(self, info: PluginInfo) -> Path:
+        if info.source == BUILTIN_PLUGIN_SOURCE and self._builtin_plugins:
+            asset_path = self._builtin_plugins.asset_path(info.id)
+            if asset_path is not None:
+                return asset_path
+        return self._paths.plugins / info.id

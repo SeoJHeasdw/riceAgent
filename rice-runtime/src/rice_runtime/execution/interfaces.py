@@ -35,6 +35,10 @@ class PluginInfo:
     enabled: bool
     required_connectors: tuple[str, ...] = ()  # connector_type list (CONTRACTS §2.1)
     skill_count: int = 0
+    skill_names: tuple[str, ...] = ()
+    # ``builtin`` plugins are package assets and may only be enabled/disabled.
+    source: str = "installed"
+    author: str = ""
 
 
 @dataclass(frozen=True)

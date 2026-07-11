@@ -99,6 +99,11 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
               <Tag type="purple" size="sm">
                 플러그인
               </Tag>
+              {plugin.builtin && (
+                <Tag type="teal" size="sm">
+                  기본 내장
+                </Tag>
+              )}
               {!plugin.enabled && (
                 <Tag type="gray" size="sm">
                   비활성
@@ -119,7 +124,7 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
         </div>
 
         {/* update available — sits right under the plugin description */}
-        {plugin.update && (
+        {plugin.update && !plugin.builtin && (
           <div className="mt-4 flex items-center gap-3 rounded-xl border border-blue-50/30 bg-gradient-to-r from-blue-60/12 to-blue-60/[0.04] pl-3 pr-3 py-2.5">
             <div className="w-8 h-8 flex-shrink-0 flex items-center justify-center rounded-lg bg-blue-60/15">
               <Icon name="renew" size={16} className="text-link-primary" />
@@ -308,13 +313,17 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
             Plugin Market에서 보기
           </Button>
           <div className="flex-1" />
-          <button
-            onClick={remove}
-            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-support-error/40 bg-transparent text-support-error text-body-short-01 font-semibold hover:bg-support-error/10 hover:border-support-error/70 transition-colors"
-          >
-            <Icon name="trash" size={15} />
-            제거
-          </button>
+          {plugin.builtin ? (
+            <span className="text-caption-01 text-text-helper">RICE 기본 내장 · 활성/비활성만 가능</span>
+          ) : (
+            <button
+              onClick={remove}
+              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-support-error/40 bg-transparent text-support-error text-body-short-01 font-semibold hover:bg-support-error/10 hover:border-support-error/70 transition-colors"
+            >
+              <Icon name="trash" size={15} />
+              제거
+            </button>
+          )}
         </div>
       </div>
     </div>

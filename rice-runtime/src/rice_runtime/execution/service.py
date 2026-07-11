@@ -17,6 +17,7 @@ from ..core.storage.sqlite import Database
 from ..core.types import InjectedSkill, ToolCall, ToolResult
 from .interfaces import IPluginLoader, ISandbox, PluginInfo, SandboxResult
 from .plugin.loader import PluginLoader
+from .plugin.builtin import BuiltinPluginCatalog
 from .sandbox.runner import ChildProcessSandbox
 
 
@@ -55,8 +56,16 @@ class PluginLoaderService(IPluginLoader):
     a temp-dir RicePaths.
     """
 
-    def __init__(self, db: Database, sandbox: ISandbox, paths: RicePaths) -> None:
-        self._impl = PluginLoader(db=db, sandbox=sandbox, paths=paths)
+    def __init__(
+        self,
+        db: Database,
+        sandbox: ISandbox,
+        paths: RicePaths,
+        builtin_plugins: BuiltinPluginCatalog | None = None,
+    ) -> None:
+        self._impl = PluginLoader(
+            db=db, sandbox=sandbox, paths=paths, builtin_plugins=builtin_plugins
+        )
 
     # ── tool / skill surface ─────────────────────────────────────────────────
 

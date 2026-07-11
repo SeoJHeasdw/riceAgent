@@ -74,6 +74,7 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
   if (!isOpen || !artifact) return null;
 
   const plugin = !isSkill ? (artifact as Plugin) : null;
+  const builtinPlugin = !!plugin?.builtin;
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
@@ -398,16 +399,21 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
                 </span>
               )}
 
-              {/* Uninstall button */}
-              <Button
-                kind="secondary"
-                size="sm"
-                onClick={onUninstall}
-                className="ml-auto border-support-error/35 bg-transparent text-text-error hover:bg-support-error/10 hover:border-support-error/70"
-                icon={<Icon name="trash" size={14} />}
-              >
-                제거
-              </Button>
+              {builtinPlugin ? (
+                <span className="ml-auto text-caption-01 text-text-helper">
+                  RICE 기본 내장 · 활성/비활성만 가능
+                </span>
+              ) : (
+                <Button
+                  kind="secondary"
+                  size="sm"
+                  onClick={onUninstall}
+                  className="ml-auto border-support-error/35 bg-transparent text-text-error hover:bg-support-error/10 hover:border-support-error/70"
+                  icon={<Icon name="trash" size={14} />}
+                >
+                  제거
+                </Button>
+              )}
             </div>
           ) : (
             <div className="flex items-center gap-2.5">

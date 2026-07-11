@@ -40,6 +40,7 @@ from ..core.storage.sqlite import Database
 from ..core.tokens import TokenCalibrator
 from ..execution.interfaces import IPluginLoader
 from ..execution.service import ChildProcessSandbox, PluginLoaderService
+from ..execution.plugin.builtin import BuiltinPluginCatalog
 from ..learning.interfaces import ILearningService
 from ..learning.service import LearningService
 from .approval import ApprovalRegistry
@@ -160,7 +161,9 @@ def build_container(
     # port 를 넘겨 OAuth redirect_uri(http://localhost:{port}/connectors/oauth/callback)를
     # 정확히 구성한다 (CONTRACTS §4.2). args.port 가 0 이면 flow 가 dev 기본(8080)으로 폴백.
     connectors: IConnectorService = ConnectorService(db, paths, port=args.port or None)
-    plugins: IPluginLoader = PluginLoaderService(db, ChildProcessSandbox(), paths)
+    plugins: IPluginLoader = PluginLoaderService(
+        db, ChildProcessSandbox(), paths, builtin_plugins=BuiltinPluginCatalog(paths)
+    )
     approvals: IApprovalGate = ApprovalRegistry()
 
     # ── provider selection (one mapping point) ────────────────────────────────

@@ -636,6 +636,8 @@ export interface MyPlugin {
   name: string;
   icon: IconName;
   enabled: boolean;
+  /** 앱과 함께 제공되는 읽기 전용 플러그인 — 활성/비활성만 가능. */
+  builtin?: boolean;
   source: string;
   version: string;
   author: string;

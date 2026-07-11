@@ -35,6 +35,8 @@ rice_runtime = [
   "core/storage/migrations/*.sql",
   "py.typed",
   "learning/skill/builtin_skills/*.md",
+  "execution/plugin/builtin_plugins/*/.claude-plugin/*.json",
+  "execution/plugin/builtin_plugins/**/*",
 ]
 
 [tool.pytest.ini_options]

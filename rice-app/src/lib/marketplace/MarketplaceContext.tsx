@@ -59,7 +59,7 @@ export interface MarketplaceContextValue {
 const MarketplaceCtx = createContext<MarketplaceContextValue | null>(null);
 
 type RuntimeSkillSummary = { id: string; state?: 'active' | 'stale' | 'archived' };
-type RuntimePluginInfo = { id: string; enabled: boolean };
+type RuntimePluginInfo = { id: string; enabled: boolean; source?: string };
 
 const runtimePluginIdForMarketId = (id: string) => (id.startsWith('plugin:') ? id : installedPluginId(id));
 const runtimeSkillIdForMarketId = (id: string) => (id.startsWith('platform-') ? installedSkillId(id) : id);
@@ -76,7 +76,9 @@ const mergePluginInstallState = (catalog: Plugin[], installed: RuntimePluginInfo
   const byId = new Map(installed.map((p) => [p.id, p] as const));
   return catalog.map((plugin) => {
     const rt = byId.get(runtimePluginIdForMarketId(plugin.id)) ?? byId.get(plugin.id);
-    return rt ? { ...plugin, installed: true, enabled: rt.enabled } : plugin;
+    return rt
+      ? { ...plugin, installed: true, enabled: rt.enabled, builtin: rt.source === 'builtin' }
+      : plugin;
   });
 };
 
