@@ -1,8 +1,6 @@
 import React from 'react';
 import { useLocation } from 'react-router-dom';
 import { IconRail, IconRailItem } from './carbon';
-import { Icon, Kbd } from './ui';
-import { openCommandPalette } from '../lib/commandBridge';
 
 /**
  * Layout - Main app layout: titlebar + icon rail + content

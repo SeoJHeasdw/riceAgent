@@ -16,34 +16,18 @@ import { REPLAY_ONBOARDING_EVENT, REPLAY_TOUR_EVENT } from './lib/tutorial';
 import { defaultModelSettings } from './lib/mockData';
 import type { ModelSettings } from './components/carbon/ModelSettingsPanel';
 import type { RegisteredModel } from './components/carbon/ModelSettingsPanel';
+import HomeScreen from '@screens/HomeScreen';
+import MySkillsScreen from '@screens/MySkillsScreen';
+import MyPluginsScreen from '@screens/MyPluginsScreen';
+import SkillMarketScreen from '@screens/SkillMarketScreen';
+import PluginMarketScreen from '@screens/PluginMarketScreen';
+import ConnectorsScreen from '@screens/ConnectorsScreen';
+import SettingsScreen from '@screens/SettingsScreen';
 
 // The cinematic renderer includes Three.js. Load it only after language
 // selection so the everyday app shell stays lean and fast to reopen.
 const ModelOnboarding = lazy(() =>
   import('./components/carbon/ModelOnboarding').then((module) => ({ default: module.ModelOnboarding })),
-);
-
-// Chat owns live SSE state and stays eager/mounted. Secondary destinations are
-// route-split so the first conversation paints without loading every market and
-// management workspace up front.
-const HomeScreen = lazy(() => import('@screens/HomeScreen'));
-const MySkillsScreen = lazy(() => import('@screens/MySkillsScreen'));
-const MyPluginsScreen = lazy(() => import('@screens/MyPluginsScreen'));
-const SkillMarketScreen = lazy(() => import('@screens/SkillMarketScreen'));
-const PluginMarketScreen = lazy(() => import('@screens/PluginMarketScreen'));
-const ConnectorsScreen = lazy(() => import('@screens/ConnectorsScreen'));
-const SettingsScreen = lazy(() => import('@screens/SettingsScreen'));
-
-const ScreenLoading = () => (
-  <div className="flex flex-1 flex-col bg-background p-8" role="status" aria-label="화면 불러오는 중">
-    <span className="sr-only">화면을 불러오는 중입니다.</span>
-    <div className="h-6 w-32 rounded-md bg-layer-02 animate-pulse" aria-hidden="true" />
-    <div className="mt-6 grid max-w-4xl grid-cols-2 gap-3" aria-hidden="true">
-      <div className="h-28 rounded-xl border border-border-subtle-01 bg-layer-01 animate-pulse" />
-      <div className="h-28 rounded-xl border border-border-subtle-01 bg-layer-01 animate-pulse" />
-      <div className="col-span-2 h-40 rounded-xl border border-border-subtle-01 bg-layer-01 animate-pulse" />
-    </div>
-  </div>
 );
 
 // 좌측 레일 항목은 공용 네비게이션 매니페스트에서 파생한다(홈 허브와 동일 출처).
@@ -79,20 +63,18 @@ function AppShell({ tourActive, onTourDone }: AppShellProps) {
 
         {!isChatRoute && (
           <div key={activeRailId} className="flex flex-1 flex-col min-h-0 animate-fade-in">
-            <Suspense fallback={<ScreenLoading />}>
-              <Routes>
-                <Route path="/" element={<Navigate to="/chat" replace />} />
-                <Route path="/home" element={<HomeScreen />} />
-                <Route path="/my-skills" element={<MySkillsScreen />} />
-                <Route path="/my-plugins" element={<MyPluginsScreen />} />
-                <Route path="/skills" element={<SkillMarketScreen />} />
-                <Route path="/plugins" element={<PluginMarketScreen />} />
-                <Route path="/connectors" element={<ConnectorsScreen />} />
-                <Route path="/connectors/:id" element={<ConnectorsScreen />} />
-                <Route path="/settings" element={<SettingsScreen />} />
-                <Route path="*" element={<Navigate to="/chat" replace />} />
-              </Routes>
-            </Suspense>
+            <Routes>
+              <Route path="/" element={<Navigate to="/chat" replace />} />
+              <Route path="/home" element={<HomeScreen />} />
+              <Route path="/my-skills" element={<MySkillsScreen />} />
+              <Route path="/my-plugins" element={<MyPluginsScreen />} />
+              <Route path="/skills" element={<SkillMarketScreen />} />
+              <Route path="/plugins" element={<PluginMarketScreen />} />
+              <Route path="/connectors" element={<ConnectorsScreen />} />
+              <Route path="/connectors/:id" element={<ConnectorsScreen />} />
+              <Route path="/settings" element={<SettingsScreen />} />
+              <Route path="*" element={<Navigate to="/chat" replace />} />
+            </Routes>
           </div>
         )}
       </Layout>

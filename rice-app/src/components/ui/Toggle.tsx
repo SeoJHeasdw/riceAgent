@@ -48,27 +48,33 @@ export const Toggle: React.FC<ToggleProps> = ({
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={`
-        relative inline-flex items-center flex-shrink-0 h-6 w-10 rounded-full
-        transition-colors duration-150
-        ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+        relative inline-flex h-[20px] w-[36px] flex-shrink-0 items-center rounded-full
+        transition-colors duration-200 ease-out
+        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2
+        focus-visible:ring-offset-background
+        ${disabled
+          ? `${label ? '' : 'opacity-50'} cursor-not-allowed`
+          : 'cursor-pointer hover:brightness-110 active:brightness-95'}
         ${checked
           ? accent.track
-          : 'bg-layer-03 ring-1 ring-inset ring-border-strong-01'}
+          : 'bg-layer-03 ring-1 ring-inset ring-border-strong-01/70'}
       `}
     >
       <span
+        aria-hidden="true"
         className={`
-          absolute top-1/2 -translate-y-1/2 h-5 w-5 rounded-full bg-white shadow-elevation-1
-          flex items-center justify-center transition-[left] duration-150
-          ${checked ? 'left-[18px]' : 'left-0.5'}
+          pointer-events-none absolute left-[2px] top-[2px] flex h-[16px] w-[16px]
+          items-center justify-center rounded-full bg-white shadow-elevation-1
+          transition-transform duration-200 ease-out motion-reduce:transition-none
+          ${checked ? 'translate-x-[16px]' : 'translate-x-0'}
         `}
       >
         {checked ? (
-          <svg width="10" height="10" viewBox="0 0 32 32" fill="none" className={accent.check}>
+          <svg width="9" height="9" viewBox="0 0 32 32" fill="none" className={accent.check}>
             <path d="M13 21.5l-6-6 1.8-1.8 4.2 4.2 9.4-9.4L24.2 10z" fill="currentColor" />
           </svg>
         ) : (
-          <span className="w-2 h-2 rounded-full border border-text-helper" />
+          <span className="h-[5px] w-[5px] rounded-full border border-text-helper/80" />
         )}
       </span>
     </button>
