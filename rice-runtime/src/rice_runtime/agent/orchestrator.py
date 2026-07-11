@@ -60,6 +60,7 @@ from typing import AsyncIterator, Callable
 
 from ..connector.interfaces import IConnectorService
 from ..core.config import Config, ConfigStore, ContextConfig
+from ..core.paths import WorkspaceLocation
 from ..core.types import (
     Message,
     SSEEvent,
@@ -199,6 +200,7 @@ class Orchestrator:
         builtins: dict[str, BuiltinTool] | None = None,
         builtin_specs: tuple[ToolSpec, ...] = (),
         token_calibrator: TokenCalibrator | None = None,
+        workspace: WorkspaceLocation | None = None,
     ) -> None:
         # `resolve_provider` is a thunk, not a captured instance, so a runtime
         # model switch (PUT /settings) takes effect next turn (C-1). Likewise
@@ -212,6 +214,10 @@ class Orchestrator:
         self._transcript = transcript
         self._builtins = builtins
         self._builtin_specs_catalog = builtin_specs
+        # Live workspace root holder. A queued folder change is promoted at a turn
+        # boundary (see _drive_turn), so file tools relocate next turn — never
+        # mid-turn — without a restart. None in tests that omit it.
+        self._workspace = workspace
         # 세션 전반에 걸쳐 토큰 추정을 실측으로 보정하는 싱글턴. None이면
         # 순수 CJK 휴리스틱만 쓴다(테스트/오프라인).
         self._token_calibrator = token_calibrator or TokenCalibrator()
@@ -275,6 +281,12 @@ class Orchestrator:
         already persisted as the tail of history."""
         abort = self._aborts.setdefault(session_id, asyncio.Event())
         abort.clear()
+        # Apply a queued workspace relocation at this turn boundary. This
+        # session's slot is already in `_active`, so `<= 1` means no *other* turn
+        # is mid-flight — swapping the root here can't split another turn across
+        # two folders. After an idle change this lands on the user's next message.
+        if self._workspace is not None and len(self._active) <= 1:
+            self._workspace.promote()
         cfg = self._config_store.config  # snapshot for this turn (live across turns)
         # 오케스트레이션 프로파일 — 소형 로컬 모델 보정 장치의 강도를 정한다
         # (agent/profiles.py). 턴마다 resolve하므로 provider 스위치가 즉시 반영된다.

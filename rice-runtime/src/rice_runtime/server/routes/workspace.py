@@ -57,23 +57,28 @@ def _open_in_default_app(target: Path) -> None:
 
 @router.get("/workspace")
 async def get_workspace(c: Container = Depends(get_container)):
-    """Return the effective workspace root for display in the local app.
+    """Return the workspace root to show in the local app.
 
-    The value may differ from ``~/.rice/workspace`` when the runtime is started
-    with ``RICE_HOME``. It is intentionally exposed only by the localhost,
+    When a folder change is queued but not yet promoted (the idle window before
+    the next turn), this returns the *pending* target so the UI reflects the
+    user's choice immediately. The value may also differ from ``~/.rice/workspace``
+    when the runtime is started with ``RICE_HOME``. Exposed only by the localhost,
     bearer-token-protected runtime.
     """
-    root = c.paths.workspace.resolve()
+    loc = c.paths.location
+    root = loc.display if loc is not None else c.paths.workspace.resolve()
     return {"success": True, "data": {"path": str(root)}}
 
 
 @router.put("/workspace/location")
 async def update_workspace_location(body: WorkspaceLocationIn, c: Container = Depends(get_container)):
-    """Persist a new output folder for the next runtime start.
+    """Change the output folder — applied at the next turn boundary (no restart).
 
-    Builtin tool handlers capture their sandbox root during composition. Updating
-    that root mid-turn would make a single plan read from one folder and write to
-    another, so the change is deliberately applied after an app restart.
+    Two things happen: the choice is persisted to config so it survives a restart,
+    and it is queued on the live workspace holder. The orchestrator promotes the
+    queued root when the next turn begins (and only when no other turn is
+    mid-flight), so a single turn never spans two folders. When idle, that next
+    turn is the user's next message — effectively immediate.
     """
     requested = (body.path or "").strip()
     if requested:
@@ -100,8 +105,11 @@ async def update_workspace_location(body: WorkspaceLocationIn, c: Container = De
     )
     save_config(c.paths, new_cfg)
     c.config_store.update(new_cfg)
-    next_path = workspace_path or str((c.paths.root / "workspace").resolve())
-    return {"success": True, "data": {"path": next_path, "restart_required": True}}
+    next_path = Path(workspace_path) if workspace_path else (c.paths.root / "workspace").resolve()
+    # Queue the live relocation; the orchestrator promotes it at the next turn.
+    if c.paths.location is not None:
+        c.paths.location.queue(next_path)
+    return {"success": True, "data": {"path": str(next_path)}}
 
 
 @router.get("/workspace/file")

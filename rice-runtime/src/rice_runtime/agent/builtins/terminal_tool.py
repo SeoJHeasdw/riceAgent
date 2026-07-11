@@ -238,10 +238,11 @@ def _clamp_timeout(raw: object) -> float:
     return min(max(value, _MIN_TIMEOUT_S), _MAX_TIMEOUT_S)
 
 
-def _make_terminal(workspace: Path) -> BuiltinTool:
+def _make_terminal(paths: RicePaths) -> BuiltinTool:
     _env = _sanitize_env()
 
     async def terminal(args: dict) -> object:
+        workspace = paths.workspace  # live: relocation applied at the turn boundary
         command = args.get("command", "")
         if not command or not isinstance(command, str):
             raise ValueError("command is required and must be a string")
@@ -261,9 +262,7 @@ def _make_terminal(workspace: Path) -> BuiltinTool:
 
 
 def tools(paths: RicePaths) -> list[tuple[ToolSpec, BuiltinTool]]:
-    workspace = paths.workspace
-    workspace.mkdir(parents=True, exist_ok=True)
-    workspace = workspace.resolve()
+    paths.workspace.mkdir(parents=True, exist_ok=True)  # ensure initial root; handler reads live
     return [
         (
             ToolSpec(
@@ -299,6 +298,6 @@ def tools(paths: RicePaths) -> list[tuple[ToolSpec, BuiltinTool]]:
                 requires_approval=True,  # shell commands are arbitrary external effects — HITL gate (§5.1)
                 parallel_safe=False,  # 임의 부작용 — 모델 호출 순서대로 직렬 실행
             ),
-            _make_terminal(workspace),
+            _make_terminal(paths),
         ),
     ]

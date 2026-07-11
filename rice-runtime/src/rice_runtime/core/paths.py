@@ -16,8 +16,53 @@ touches the filesystem goes through `RicePaths` so the layout can be relocated
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+
+
+class WorkspaceLocation:
+    """Mutable holder for the *live* workspace root (no-restart relocation).
+
+    Builtin file tools read ``paths.workspace`` at call time, so pointing this
+    holder at a new directory redirects every file/office/vision/terminal tool
+    without an app restart. To keep the invariant "a single turn never spans two
+    roots" (RUNTIME_DESIGN §10), the route only *queues* a change and the
+    orchestrator ``promote()``s it at a turn boundary — mirroring how provider/
+    model switches are read live from config each turn, not mid-turn.
+    """
+
+    def __init__(self, initial: Path) -> None:
+        self._current = self._prepare(initial)
+        self._pending: Path | None = None
+
+    @staticmethod
+    def _prepare(p: Path) -> Path:
+        p = p.expanduser()
+        p.mkdir(parents=True, exist_ok=True)
+        return p.resolve()
+
+    @property
+    def current(self) -> Path:
+        """The root tools write to right now (stable within a turn)."""
+        return self._current
+
+    @property
+    def display(self) -> Path:
+        """What the UI should show: the queued target if one is waiting, else
+        the live root. The two differ only in the idle window between picking a
+        folder and the next turn — no tool runs there, so nothing observes it."""
+        return self._pending or self._current
+
+    def queue(self, new_root: Path) -> None:
+        """Record a root to switch to at the next turn boundary."""
+        self._pending = new_root.expanduser().resolve()
+
+    def promote(self) -> Path:
+        """Apply a queued change (called at a turn boundary). Idempotent."""
+        if self._pending is not None:
+            self._current = self._prepare(self._pending)
+            self._pending = None
+        return self._current
 
 
 @dataclass(frozen=True)
@@ -26,6 +71,11 @@ class RicePaths:
     # User-selected output root. Configuration and state still remain under
     # ``root``; only agent-created workspace files move to this directory.
     workspace_root: Path | None = None
+    # Live relocation holder (composition root attaches one). When present it is
+    # the authoritative source for ``workspace`` so a folder change takes effect
+    # next turn without a restart. Excluded from equality so tests comparing
+    # paths by (root, workspace_root) are unaffected.
+    location: "WorkspaceLocation | None" = field(default=None, compare=False)
 
     @classmethod
     def from_env(cls, override: str | os.PathLike[str] | None = None) -> "RicePaths":
@@ -76,9 +126,13 @@ class RicePaths:
         """Sandbox root for builtin file tools.
 
         Defaults to ``~/.rice/workspace/`` but may be relocated by the user's
-        saved workspace setting. All agent read/write/search remains confined to
-        this *single* root (RUNTIME_DESIGN §10 — least authority).
+        saved workspace setting. When a live ``location`` holder is attached it
+        wins, so a mid-session folder change (promoted at a turn boundary) is
+        reflected here without a restart. All agent read/write/search remains
+        confined to this *single* root (RUNTIME_DESIGN §10 — least authority).
         """
+        if self.location is not None:
+            return self.location.current
         return (self.workspace_root or self.root / "workspace").expanduser().resolve()
 
     def skill_history(self, name: str) -> Path:

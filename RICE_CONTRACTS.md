@@ -101,8 +101,8 @@ Electron main process
 | PUT | `/settings` | 설정 갱신 (provider/model/temperature, context 렌더링 예산/threshold, **agent 섹션**, **registered_models**(멀티 SaaS 모델+API 키 등록), api_key→키체인, language, theme, **font**) |
 | POST | `/artifacts/install` | platform에서 받은 artifact 설치 (2장 manifest 전달) |
 | DELETE | `/artifacts/{id}` | 제거 |
-| **GET** | **`/workspace`** | **현재 유효한 워크스페이스 절대 경로 조회(`RICE_HOME` 재배치 반영) — 2026-07-10 반영** |
-| **PUT** | **`/workspace/location`** | **생성 파일 저장 폴더 변경 저장(다음 런타임 시작부터 적용; `path:null`은 기본 위치 복원) — 2026-07-10 반영** |
+| **GET** | **`/workspace`** | **표시용 워크스페이스 절대 경로 조회(`RICE_HOME` 재배치 반영; 변경 대기 중이면 대기 경로 반환) — 2026-07-10 반영** |
+| **PUT** | **`/workspace/location`** | **생성 파일 저장 폴더 변경(config 영속 + 라이브 홀더에 큐잉 → 다음 턴 경계에서 promote되어 재시작 없이 적용; `path:null`은 기본 위치 복원) — 2026-07-11 라이브 반영 개정** |
 | **GET** | **`/workspace/file?path=`** | **워크스페이스 샌드박스 내 파일 읽기(경로 탈출 방지, 256KB 상한) — 2026-07-08 반영** |
 | **POST** | **`/workspace/open`** | **파일을 OS 기본 앱으로 열기(macOS `open`/Windows `os.startfile`/`xdg-open`) — 2026-07-08 반영** |
 | **POST** | **`/workspace/open-folder`** | **워크스페이스 폴더를 Finder/Explorer/파일 관리자에서 열기 — 2026-07-10 반영** |

@@ -117,11 +117,12 @@ def _local_image_to_base64(path_str: str) -> tuple[str, str]:
     return base64.standard_b64encode(data).decode("ascii"), mime
 
 
-def _make_vision_analyze(workspace: Path) -> BuiltinTool:
+def _make_vision_analyze(paths: RicePaths) -> BuiltinTool:
     async def vision_analyze(args: dict) -> object:
         """이미지를 이 도구 결과에 **첨부**한다(모듈 docstring의 멀티모달 경로).
         본문에는 요약 메타데이터만 남고, 이미지는 provider의 이미지 블록으로
         모델에게 전달된다."""
+        workspace = paths.workspace  # live: relocation applied at the turn boundary
         image_source: str = args.get("image_url") or args.get("image_path", "")
         question: str = args.get("question", "Describe this image in detail.")
 
@@ -160,9 +161,7 @@ def _make_vision_analyze(workspace: Path) -> BuiltinTool:
 
 
 def tools(paths: RicePaths) -> list[tuple[ToolSpec, BuiltinTool]]:
-    workspace = paths.workspace
-    workspace.mkdir(parents=True, exist_ok=True)
-    workspace = workspace.resolve()
+    paths.workspace.mkdir(parents=True, exist_ok=True)  # ensure initial root; handler reads live
     return [
         (
             ToolSpec(
@@ -194,6 +193,6 @@ def tools(paths: RicePaths) -> list[tuple[ToolSpec, BuiltinTool]]:
                 },
                 source="builtin",
             ),
-            _make_vision_analyze(workspace),
+            _make_vision_analyze(paths),
         ),
     ]

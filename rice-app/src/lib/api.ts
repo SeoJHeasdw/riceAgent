@@ -168,8 +168,8 @@ class ApiClient {
     return this.send<{ path: string }>('POST', '/workspace/open-folder');
   }
   /** persist the output folder; the runtime applies its new sandbox after restart */
-  updateWorkspaceLocation(path: string | null): Promise<ApiResponse<{ path: string; restart_required: boolean }>> {
-    return this.send<{ path: string; restart_required: boolean }>('PUT', '/workspace/location', { path });
+  updateWorkspaceLocation(path: string | null): Promise<ApiResponse<{ path: string }>> {
+    return this.send<{ path: string }>('PUT', '/workspace/location', { path });
   }
   regenerate(id: string, messageId: string): Promise<ApiResponse> {
     return this.send('POST', `/sessions/${id}/messages/${messageId}/regenerate`);

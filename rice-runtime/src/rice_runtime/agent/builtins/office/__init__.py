@@ -256,11 +256,12 @@ def _apply_deck_operations(slides: list, operations: list) -> list[str]:
 
 
 def tools(paths: RicePaths) -> list[tuple[ToolSpec, BuiltinTool]]:
-    root = paths.workspace
-    root.mkdir(parents=True, exist_ok=True)
-    root = root.resolve()
+    # Ensure the initial root; inner functions read `paths.workspace` live so a
+    # relocation applied at a turn boundary is honored without rebuilding tools.
+    paths.workspace.mkdir(parents=True, exist_ok=True)
 
     def _write(rel: str, suffix: str, data: bytes) -> str:
+        root = paths.workspace
         if not rel.lower().endswith(suffix):
             raise ValueError(f"path must end with {suffix}: {rel!r}")
         target = resolve_workspace_path(root, rel)
@@ -271,6 +272,7 @@ def tools(paths: RicePaths) -> list[tuple[ToolSpec, BuiltinTool]]:
     def _load_asset(rel: str) -> bytes:
         """image 레이아웃의 워크스페이스 이미지 로더 — 샌드박스 resolve + 크기 상한.
         형식 검증(매직바이트)은 pptx_writer가 한다."""
+        root = paths.workspace
         target = resolve_workspace_path(root, rel)
         if not target.is_file():
             raise ValueError(f"image not found in workspace: {rel}")
@@ -288,6 +290,7 @@ def tools(paths: RicePaths) -> list[tuple[ToolSpec, BuiltinTool]]:
         return {"path": rel, "bytes_written": len(data), **summary}
 
     async def edit_presentation(args: dict) -> object:
+        root = paths.workspace
         rel = str(args.get("path") or "")
         if not rel.lower().endswith(".pptx"):
             raise ValueError(f"path must end with .pptx: {rel!r}")

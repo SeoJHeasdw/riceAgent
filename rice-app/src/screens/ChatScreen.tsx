@@ -726,8 +726,6 @@ function ChatScreen() {
   // reconstruct it from the browser's home directory.
   const [workspacePath, setWorkspacePath] = useState<string | null>(null);
   const [workspaceSaving, setWorkspaceSaving] = useState(false);
-  const [workspaceRestartRequired, setWorkspaceRestartRequired] = useState(false);
-  const [pendingWorkspacePath, setPendingWorkspacePath] = useState<string | null>(null);
   // which session's thread is currently mounted (gates the scroll-to-message effect)
   const [loadedSession, setLoadedSession] = useState('');
   const [highlightMsg, setHighlightMsg] = useState<number | null>(null);
@@ -833,8 +831,6 @@ function ChatScreen() {
     void api.getWorkspaceInfo().then((res) => {
       if (res.success && res.data?.path) {
         setWorkspacePath(res.data.path);
-        setPendingWorkspacePath(null);
-        setWorkspaceRestartRequired(false);
       }
     });
   }, [connected]);
@@ -849,7 +845,7 @@ function ChatScreen() {
       return;
     }
     setWorkspaceSaving(true);
-    void picker(pendingWorkspacePath || workspacePath || undefined)
+    void picker(workspacePath || undefined)
       .then(async (path) => {
         if (!path) return;
         const res = await api.updateWorkspaceLocation(path);
@@ -857,9 +853,8 @@ function ChatScreen() {
           toast.notify({ message: `저장 위치를 바꾸지 못했어요 · ${res.error ?? 'workspace'}`, variant: 'error' });
           return;
         }
-        setPendingWorkspacePath(res.data.path);
-        setWorkspaceRestartRequired(!!res.data.restart_required);
-        toast.notify({ message: '저장 위치를 변경했어요. RICE를 재시작하면 적용됩니다.', variant: 'success', duration: 4500 });
+        setWorkspacePath(res.data.path);
+        toast.notify({ message: '저장 위치를 변경했어요. 다음 메시지부터 적용됩니다.', variant: 'success', duration: 4500 });
       })
       .catch(() => toast.notify({ message: '폴더 선택창을 열 수 없어요.', variant: 'error' }))
       .finally(() => setWorkspaceSaving(false));
@@ -2260,22 +2255,17 @@ function ChatScreen() {
               </div>
               {workspacePath && (
                 <div className="mt-3 flex items-center px-1">
-                  <Tooltip label={`생성 파일 저장 위치 변경 · ${pendingWorkspacePath ?? workspacePath}`}>
+                  <Tooltip label={`생성 파일 저장 위치 변경 · ${workspacePath}`}>
                     <button
                       type="button"
                       onClick={chooseWorkspaceFolder}
                       disabled={workspaceSaving}
                       className="flex min-w-0 max-w-full items-center gap-2 rounded-md py-1 text-caption-01 text-text-helper transition-colors hover:text-text-primary"
-                      aria-label={`생성 파일 저장 위치 변경: ${pendingWorkspacePath ?? workspacePath}`}
+                      aria-label={`생성 파일 저장 위치 변경: ${workspacePath}`}
                     >
                       <Icon name="folder" size={18} className="flex-shrink-0 text-icon-secondary" />
                       <span className="flex-shrink-0 text-text-secondary">저장 위치</span>
                       <span className="truncate font-mono">{workspacePath}</span>
-                      {workspaceRestartRequired && (
-                        <span className="flex-shrink-0 text-support-warning" title={`다음 시작 저장 위치: ${pendingWorkspacePath ?? ''}`}>
-                          재시작 필요
-                        </span>
-                      )}
                     </button>
                   </Tooltip>
                 </div>

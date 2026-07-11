@@ -36,8 +36,9 @@ _SCRATCH_DIR = ".subagent"
 _MAX_SCRATCH_BYTES = 512 * 1024
 
 
-def _make_read(root: Path) -> BuiltinTool:
+def _make_read(paths: RicePaths) -> BuiltinTool:
     async def read_file(args: dict) -> object:
+        root = paths.workspace  # live: reflects a workspace relocation applied this turn
         rel = args.get("path", "")
         path = _resolve(root, rel)
         if not path.is_file():
@@ -60,8 +61,9 @@ def _make_read(root: Path) -> BuiltinTool:
     return read_file
 
 
-def _make_write(root: Path) -> BuiltinTool:
+def _make_write(paths: RicePaths) -> BuiltinTool:
     async def write_file(args: dict) -> object:
+        root = paths.workspace
         rel = args.get("path", "")
         content = args.get("content", "")
         if not isinstance(content, str):
@@ -76,8 +78,9 @@ def _make_write(root: Path) -> BuiltinTool:
     return write_file
 
 
-def _make_edit(root: Path) -> BuiltinTool:
+def _make_edit(paths: RicePaths) -> BuiltinTool:
     async def edit_file(args: dict) -> object:
+        root = paths.workspace
         rel = args.get("path", "")
         old = args.get("old_text", "")
         new = args.get("new_text", "")
@@ -103,8 +106,9 @@ def _make_edit(root: Path) -> BuiltinTool:
     return edit_file
 
 
-def _make_list(root: Path) -> BuiltinTool:
+def _make_list(paths: RicePaths) -> BuiltinTool:
     async def list_dir(args: dict) -> object:
+        root = paths.workspace
         rel = args.get("path") or "."
         depth = min(int(args.get("depth") or 2), _MAX_LIST_DEPTH)
         base = _resolve(root, rel) if rel != "." else root
@@ -147,8 +151,9 @@ def _make_list(root: Path) -> BuiltinTool:
     return list_dir
 
 
-def _make_search(root: Path) -> BuiltinTool:
+def _make_search(paths: RicePaths) -> BuiltinTool:
     async def search_files(args: dict) -> object:
+        root = paths.workspace
         query = args.get("query", "")
         if not query:
             raise ValueError("query is required")
@@ -192,14 +197,13 @@ def scratch_tool_factory(paths: RicePaths):
     (2) thread 하위로 재격리(이중 containment 검사), (3) 사용자 가시 영역으로의
     승격은 메인 에이전트의 승인 게이트 도구가 담당한다. 반환 경로는 워크스페이스
     상대라 메인이 그대로 read_file 할 수 있다."""
-    root = paths.workspace
-    root.mkdir(parents=True, exist_ok=True)
-    root = root.resolve()
+    paths.workspace.mkdir(parents=True, exist_ok=True)  # ensure initial root
 
     def factory(thread_id: str) -> tuple[ToolSpec, BuiltinTool]:
         base_rel = f"{_SCRATCH_DIR}/{thread_id}"
 
         async def write_scratch(args: dict) -> object:
+            root = paths.workspace  # live: relocation applied at the turn boundary
             rel = str(args.get("path") or "").strip().lstrip("/")
             content = args.get("content", "")
             if not rel:
@@ -241,11 +245,12 @@ def scratch_tool_factory(paths: RicePaths):
 
 
 def tools(paths: RicePaths) -> list[tuple[ToolSpec, BuiltinTool]]:
-    root = paths.workspace
-    root.mkdir(parents=True, exist_ok=True)
-    # Resolve once so containment checks compare like-for-like (symlinked temp
-    # dirs on macOS, e.g. /var → /private/var, would otherwise look like escapes).
-    root = root.resolve()
+    # Ensure the *initial* root exists; handlers read `paths.workspace` live at
+    # call time (already resolved), so a relocation applied at a turn boundary is
+    # picked up without rebuilding the toolset. Containment checks compare
+    # like-for-like because `paths.workspace` is always a resolved path
+    # (symlinked temp dirs on macOS, e.g. /var → /private/var, stay consistent).
+    paths.workspace.mkdir(parents=True, exist_ok=True)
     return [
         (
             ToolSpec(
@@ -258,7 +263,7 @@ def tools(paths: RicePaths) -> list[tuple[ToolSpec, BuiltinTool]]:
                 },
                 source="builtin",
             ),
-            _make_read(root),
+            _make_read(paths),
         ),
         (
             ToolSpec(
@@ -276,7 +281,7 @@ def tools(paths: RicePaths) -> list[tuple[ToolSpec, BuiltinTool]]:
                 requires_approval=True,  # external effect → HITL gate
                 parallel_safe=False,  # 파일 쓰기는 모델 호출 순서대로 직렬 실행
             ),
-            _make_write(root),
+            _make_write(paths),
         ),
         (
             ToolSpec(
@@ -300,7 +305,7 @@ def tools(paths: RicePaths) -> list[tuple[ToolSpec, BuiltinTool]]:
                 requires_approval=True,  # external effect → HITL gate (write_file과 동일 기준)
                 parallel_safe=False,  # 같은 파일 동시 편집 레이스 방지 — 직렬 실행
             ),
-            _make_edit(root),
+            _make_edit(paths),
         ),
         (
             ToolSpec(
@@ -318,7 +323,7 @@ def tools(paths: RicePaths) -> list[tuple[ToolSpec, BuiltinTool]]:
                 },
                 source="builtin",
             ),
-            _make_list(root),
+            _make_list(paths),
         ),
         (
             ToolSpec(
@@ -331,6 +336,6 @@ def tools(paths: RicePaths) -> list[tuple[ToolSpec, BuiltinTool]]:
                 },
                 source="builtin",
             ),
-            _make_search(root),
+            _make_search(paths),
         ),
     ]

@@ -35,7 +35,7 @@ from ..connector.service import ConnectorService
 from ..core.config import Config, ConfigStore, RuntimeArgs, load_config
 from ..core.errors import ProviderError
 from ..core.events import EventBus
-from ..core.paths import RicePaths
+from ..core.paths import RicePaths, WorkspaceLocation
 from ..core.storage.sqlite import Database
 from ..core.tokens import TokenCalibrator
 from ..execution.interfaces import IPluginLoader
@@ -138,12 +138,18 @@ def build_container(
     # intentionally remain under RICE_HOME. Resolve it once at startup: builtin
     # tool closures share this fixed sandbox root until the next restart.
     configured_workspace = config_store.config.ui.workspace_path
+    workspace_root: Path | None = None
     if configured_workspace:
         candidate = Path(configured_workspace).expanduser()
         if candidate.is_absolute():
-            paths = RicePaths(root=paths.root, workspace_root=candidate).ensure()
+            workspace_root = candidate
         else:
             log.warning("ignoring non-absolute workspace_path in config: %r", configured_workspace)
+    # Live holder: a folder change (PUT /workspace/location) is queued here and
+    # promoted by the orchestrator at a turn boundary, so file tools relocate
+    # next turn without a restart. Initial root still comes from config above.
+    workspace_location = WorkspaceLocation(workspace_root or paths.root / "workspace")
+    paths = RicePaths(root=paths.root, workspace_root=workspace_root, location=workspace_location).ensure()
 
     # ── infrastructure ────────────────────────────────────────────────────────
     db = Database(paths.db).connect()
@@ -303,6 +309,7 @@ def build_container(
         builtins=builtins,
         builtin_specs=builtin_specs,
         token_calibrator=token_calibrator,
+        workspace=workspace_location,
     )
 
     return Container(
