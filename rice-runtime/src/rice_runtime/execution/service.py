@@ -66,8 +66,11 @@ class PluginLoaderService(IPluginLoader):
     def injected_skills(self) -> list[InjectedSkill]:
         return self._impl.injected_skills()
 
-    async def invoke(self, call: ToolCall) -> ToolResult:
-        return await self._impl.invoke(call)
+    async def invoke(self, call: ToolCall, owner_id: str | None = None) -> ToolResult:
+        # IPluginLoader 계약과 동일하게 owner_id 를 그대로 전달한다 — 이 facade 가
+        # 인자를 떨어뜨리면 dispatcher 의 실제 플러그인 호출 전부가 TypeError 로
+        # 죽는다(적대 리뷰 P1#1).
+        return await self._impl.invoke(call, owner_id=owner_id)
 
     # ── management ────────────────────────────────────────────────────────────
 

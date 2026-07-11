@@ -205,12 +205,13 @@ async def regenerate(session_id: str, c: Container = Depends(get_container)):
     if c.agent.is_active(session_id):
         raise ConflictError("이 세션에서 이미 응답을 생성하고 있습니다. 완료 후 다시 시도하세요.")
     # Drop the stale assistant turn (everything after the last user message) so the
-    # re-run replaces it rather than appending a second answer.
+    # re-run replaces it rather than appending a second answer. 절단 기준은 그 사용자
+    # 메시지의 고유 id(rowid) — ts 절단은 같은 밀리초의 assistant 응답을 남긴다.
     history = c.sessions.history(session_id)
     last_user = next((m for m in reversed(history) if m.role == "user"), None)
     if last_user is None:
         raise ConflictError("재생성할 사용자 메시지가 없습니다.")
-    c.sessions.delete_after(session_id, last_user.ts)
+    c.sessions.delete_after_message(session_id, last_user.id)
     stream = to_sse_stream(c.agent.regenerate(session_id))
     return StreamingResponse(stream, media_type="text/event-stream")
 

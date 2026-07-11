@@ -16,13 +16,20 @@ def main() -> None:
     parser.add_argument("--token", type=str, default="")
     parser.add_argument("--host", type=str, default="127.0.0.1")
     parser.add_argument("--log-level", type=str, default="info")
+    # 비루프백 바인딩은 명시적 위험 플래그 + 강제 토큰 둘 다 있어야 한다
+    # (RUNTIME_DESIGN §10.1). serve()가 기동 단계에서 fail-closed 로 검증한다.
+    parser.add_argument(
+        "--allow-external",
+        action="store_true",
+        help="DANGEROUS: allow binding a non-loopback host (requires --token).",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=args.log_level.upper(), format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
     from .server.app import serve
 
-    serve(host=args.host, port=args.port, token=args.token)
+    serve(host=args.host, port=args.port, token=args.token, allow_external=args.allow_external)
 
 
 if __name__ == "__main__":

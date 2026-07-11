@@ -133,6 +133,20 @@ def _canonicalize_skill_md(text: str, name: str) -> str:
     return "---" + fm + "---" + parts[2]
 
 
+def _resolved_within(base: Path, target: Path) -> Path:
+    """Resolve `target` and require it to stay inside `base`.
+
+    manifest name 은 slug 로 검증되지만(manifest.py), 최종 경로 조립 지점에서
+    한 번 더 fail-closed 로 재검증한다 — symlink·정규화 우회까지 resolve() 뒤
+    포함 관계로 막는 두 번째 방어선. 탈출이면 ValidationError.
+    """
+    base_r = base.resolve()
+    target_r = target.resolve()
+    if target_r != base_r and base_r not in target_r.parents:
+        raise ValidationError(f"artifact path escapes install root: {target}")
+    return target_r
+
+
 # ─── PluginLoader ─────────────────────────────────────────────────────────────
 
 class PluginLoader:
@@ -382,23 +396,25 @@ class PluginLoader:
         )
         if row is None:
             raise NotFoundError(f"artifact not found: {artifact_id}")
+        # DB 의 id/name 은 설치 시 검증된 값이지만, 삭제 경로도 동일하게 설치 루트
+        # 안임을 재검증한다(수동 편집된 DB 행이 rmtree 를 임의 경로로 끌고 가지 않게).
         if row["type"] == "plugin":
-            dest = self._paths.plugins / artifact_id
+            dest = _resolved_within(self._paths.plugins, self._paths.plugins / artifact_id)
             if dest.exists():
                 shutil.rmtree(dest, ignore_errors=True)
         else:
             # skill artifact installed FLAT as <name>.md (+ usage/history sidecars).
             name = row["name"]
-            (self._paths.skills / f"{name}.md").unlink(missing_ok=True)
-            (self._paths.skills / f"{name}.usage.json").unlink(missing_ok=True)
-            shutil.rmtree(self._paths.skills / name, ignore_errors=True)  # .history dir
+            _resolved_within(self._paths.skills, self._paths.skills / f"{name}.md").unlink(missing_ok=True)
+            _resolved_within(self._paths.skills, self._paths.skills / f"{name}.usage.json").unlink(missing_ok=True)
+            shutil.rmtree(_resolved_within(self._paths.skills, self._paths.skills / name), ignore_errors=True)  # .history dir
         self._db.execute("DELETE FROM installed_artifacts WHERE id = ?", (artifact_id,))
 
     # ── internal helpers ──────────────────────────────────────────────────────
 
     async def _install_plugin(self, path: str, parsed: ArtifactManifest, manifest: dict[str, Any]) -> None:
         """Place a plugin tree under ~/.rice/plugins/plugin:<name>/ + manifest.json."""
-        dest = self._paths.plugins / f"plugin:{parsed.name}"
+        dest = _resolved_within(self._paths.plugins, self._paths.plugins / f"plugin:{parsed.name}")
         dest.mkdir(parents=True, exist_ok=True)
         await self._unpack(path, dest)
         self._flatten_single_package_root(dest, parsed.name)
@@ -423,7 +439,8 @@ class PluginLoader:
                 )
             md_text = _canonicalize_skill_md(md_text, parsed.name)
             self._paths.skills.mkdir(parents=True, exist_ok=True)
-            (self._paths.skills / f"{parsed.name}.md").write_text(md_text, encoding="utf-8")
+            target = _resolved_within(self._paths.skills, self._paths.skills / f"{parsed.name}.md")
+            target.write_text(md_text, encoding="utf-8")
         finally:
             shutil.rmtree(staging, ignore_errors=True)
 

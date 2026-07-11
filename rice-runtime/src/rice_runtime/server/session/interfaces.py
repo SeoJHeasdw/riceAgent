@@ -47,8 +47,10 @@ class ISessionStore(Protocol):
         """Remove a session and its messages (history sidebar delete)."""
         ...
 
-    def delete_after(self, session_id: str, ts: int) -> None:
-        """Drop messages newer than `ts` (regenerate drops the stale assistant turn)."""
+    def delete_after_message(self, session_id: str, message_id: str) -> None:
+        """Drop messages inserted after `message_id` (regenerate drops the stale
+        assistant turn). Keyed by the message's unique id — a ts cut-off misses
+        same-millisecond rows."""
         ...
 
     def append(self, session_id: str, message: Message) -> None:

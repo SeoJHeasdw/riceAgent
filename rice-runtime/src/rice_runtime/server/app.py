@@ -149,8 +149,16 @@ def create_app(container: Container):
 
     @app.post("/shutdown")
     async def shutdown():
-        # Graceful stop is the supervisor's call; we tear down resources here.
-        await container.shutdown_async()
+        # 프로세스 종료까지 책임진다. uvicorn Server 가 있으면
+        # `should_exit` 만 세운다 — 자원 정리는 ASGI lifespan 의 finally 가
+        # (scheduler.stop → container.shutdown_async) 단일 경로로 수행하므로
+        # 여기서 먼저 DB 를 닫아 "서빙 중인데 내부는 닫힌" 좀비를 만들지 않는다.
+        # 서버 밖에서 띄운 테스트 앱(TestClient 등)은 종전대로 직접 정리한다.
+        server = getattr(app.state, "uvicorn_server", None)
+        if server is not None:
+            server.should_exit = True
+        else:
+            await container.shutdown_async()
         return {"success": True}
 
     # ── routers (one per CONTRACTS surface) ───────────────────────────────────
@@ -164,8 +172,34 @@ def create_app(container: Container):
     return app
 
 
-def serve(host: str | None = None, port: int | None = None, token: str = "") -> None:
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
+
+
+def serve(
+    host: str | None = None,
+    port: int | None = None,
+    token: str = "",
+    *,
+    allow_external: bool = False,
+) -> None:
     """Build the container + app and run uvicorn. Used by `__main__`."""
+    bind_host = host or "127.0.0.1"
+    # 기동 단계 fail-closed 게이트: 비루프백 바인딩은 그 자체로
+    # "네트워크의 모든 이웃에게 API 를 연다"는 뜻이다. Host/Origin 헤더 검사는
+    # 클라이언트가 임의로 채울 수 있어 네트워크 경계가 아니므로, 여기서
+    # (1) 명시적 위험 플래그와 (2) 비어 있지 않은 토큰을 **둘 다** 요구한다.
+    if bind_host not in _LOOPBACK_HOSTS:
+        if not allow_external:
+            raise SystemExit(
+                f"refusing to bind non-loopback host {bind_host!r}: "
+                "pass --allow-external (and --token) to expose the API beyond localhost"
+            )
+        if not token:
+            raise SystemExit(
+                f"refusing to bind non-loopback host {bind_host!r} without a token: "
+                "an empty --token disables auth entirely"
+            )
+
     import uvicorn
 
     from ..core.config import RuntimeArgs
@@ -173,7 +207,12 @@ def serve(host: str | None = None, port: int | None = None, token: str = "") -> 
     # 실제 바인딩 포트를 먼저 확정한 뒤 컨테이너에 주입한다 — OAuth redirect_uri
     # (http://localhost:{port}/connectors/oauth/callback)가 바인딩 포트와 일치해야 한다.
     bind_port = port or 8080
-    container = build_container(RuntimeArgs(host=host or "127.0.0.1", port=bind_port, token=token))
+    container = build_container(RuntimeArgs(host=bind_host, port=bind_port, token=token))
     app = create_app(container)
     log.info("rice-runtime listening on %s:%s", container.args.host, bind_port)
-    uvicorn.run(app, host=container.args.host, port=bind_port, log_level="info")
+    # uvicorn.run() 대신 Server 를 직접 들고 있는다 — POST /shutdown 이
+    # `should_exit` 를 세워 프로세스가 실제로 종료되게 하기 위함
+    # 이전엔 endpoint 가 DB/provider 만 닫아 "요청은 받되 내부는 닫힌" 좀비가 됐다).
+    server = uvicorn.Server(uvicorn.Config(app, host=container.args.host, port=bind_port, log_level="info"))
+    app.state.uvicorn_server = server
+    server.run()

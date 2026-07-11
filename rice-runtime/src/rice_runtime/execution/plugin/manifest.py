@@ -24,6 +24,7 @@ Schema (CONTRACTS §2.1 — abridged, do not extend without updating CONTRACTS):
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -34,6 +35,12 @@ _SUPPORTED_SCHEMA_VERSIONS: frozenset[int] = frozenset({1})
 
 # Valid artifact types (CONTRACTS §2.1).
 _VALID_TYPES: frozenset[str] = frozenset({"skill", "plugin"})
+
+# Artifact name = strict slug (적대 리뷰 P0#2). name 은 그대로 설치 파일 경로가
+# 되므로(`~/.rice/skills/<name>.md`, `~/.rice/plugins/plugin:<name>/`) 경로
+# 구분자·상위 참조가 섞이면 설치 루트를 탈출한다. 첫 글자는 영숫자(선행 `.`/`-`
+# 금지 → `..` 불가), 이후는 영숫자와 `._-` 만, 길이 상한 64.
+_NAME_SLUG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
 @dataclass(frozen=True)
@@ -89,6 +96,10 @@ def parse_manifest(raw: dict[str, Any]) -> ArtifactManifest:
     name = raw.get("name")
     if not name or not isinstance(name, str):
         raise ValidationError("manifest missing required field: name")
+    if not _NAME_SLUG_RE.fullmatch(name):
+        raise ValidationError(
+            f"manifest 'name' must be a slug ([A-Za-z0-9][A-Za-z0-9._-]*, max 64 chars), got {name!r}"
+        )
 
     # ── version ──────────────────────────────────────────────────────────────
     # YAML 에서 `version: 1.0` 은 float, `version: 1` 은 int 로 파싱된다. semver 문자열을

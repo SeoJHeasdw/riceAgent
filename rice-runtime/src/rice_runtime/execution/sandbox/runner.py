@@ -27,6 +27,8 @@ This is explicitly tested in test_execution.py (acceptance criterion #1).
 from __future__ import annotations
 
 import asyncio
+import os
+import signal
 import sys
 from typing import Any
 
@@ -88,6 +90,9 @@ class ChildProcessSandbox(ISandbox):
         args = child_script_args()
         kwargs = make_child_kwargs(extra_path=sys_path)
         # asyncio subprocess: stdin/stdout are async streams.
+        # start_new_session(POSIX): 자식을 전용 프로세스 그룹으로 분리한다 — 종료
+        # 시 killpg 로 손자 프로세스까지 함께 내리기 위함
+        # 코드가 또 subprocess 를 만들면 proc.kill() 만으로는 고아가 남는다).
         proc = await asyncio.create_subprocess_exec(
             *args,
             stdin=asyncio.subprocess.PIPE,
@@ -95,6 +100,7 @@ class ChildProcessSandbox(ISandbox):
             stderr=asyncio.subprocess.PIPE,
             env=kwargs["env"],
             close_fds=True,
+            start_new_session=(sys.platform != "win32"),
         )
         request_bytes = encode_request(entrypoint, payload)
         try:
@@ -106,6 +112,11 @@ class ChildProcessSandbox(ISandbox):
             # Hard-kill the runaway child, then reap it (no orphan).
             await self._terminate(proc)
             return SandboxResult(ok=False, error="timeout")
+        except asyncio.CancelledError:
+            # 턴 abort/shutdown 이 이 task 를 취소해도 자식은 반드시 함께 내린다
+            # kill 후 reap 까지 마치고 취소를 그대로 전파한다.
+            await self._terminate(proc)
+            raise
         except Exception as exc:  # noqa: BLE001
             await self._terminate(proc)
             return SandboxResult(ok=False, error=f"ipc error: {exc}")
@@ -141,12 +152,23 @@ class ChildProcessSandbox(ISandbox):
 
     @staticmethod
     async def _terminate(proc: asyncio.subprocess.Process) -> None:
-        """Kill and reap a child process, tolerating an already-exited one."""
+        """Kill and reap the child's whole process group, tolerating exits.
+
+        start_new_session 으로 자식이 그룹 리더이므로 pgid == proc.pid. killpg 가
+        손자까지 내린다; 그룹 시그널이 불가한 플랫폼/상태에선 proc.kill() 폴백.
+        reap(wait)까지 반드시 수행해 좀비를 남기지 않는다.
+        """
         try:
-            proc.kill()
-        except ProcessLookupError:
-            pass
+            if sys.platform != "win32":
+                os.killpg(proc.pid, signal.SIGKILL)
+            else:
+                proc.kill()
+        except (ProcessLookupError, PermissionError, OSError):
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
         try:
-            await proc.wait()
+            await asyncio.shield(proc.wait())
         except Exception:  # noqa: BLE001
             pass

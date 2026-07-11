@@ -45,10 +45,22 @@ class SessionManager(ISessionStore):
         self._db.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
         self._db.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
 
-    def delete_after(self, session_id: str, ts: int) -> None:
-        """Drop messages strictly newer than `ts` (used by regenerate to remove the
-        stale assistant turn while keeping the user message that precedes it)."""
-        self._db.execute("DELETE FROM messages WHERE session_id = ? AND ts > ?", (session_id, ts))
+    def delete_after_message(self, session_id: str, message_id: str) -> None:
+        """Drop messages inserted after `message_id` (regenerate 절단).
+
+        기준은 rowid(삽입 순서)다 — `ts > ?` 절단은 밀리초 timestamp 가 같은
+        assistant 응답을 남겨 재생성 후 답이 두 개가 됐다(적대 리뷰 P1#3).
+        미지의 message_id 는 no-op(아무것도 지우지 않는 fail-safe).
+        """
+        row = self._db.query_one(
+            "SELECT rowid AS rid FROM messages WHERE session_id = ? AND id = ?",
+            (session_id, message_id),
+        )
+        if row is None:
+            return
+        self._db.execute(
+            "DELETE FROM messages WHERE session_id = ? AND rowid > ?", (session_id, row["rid"])
+        )
 
     # ── messages ──────────────────────────────────────────────────────────────
     def append(self, session_id: str, message: Message) -> None:
@@ -70,25 +82,38 @@ class SessionManager(ISessionStore):
         )
 
     def history(self, session_id: str) -> tuple[Message, ...]:
+        # rowid 타이브레이크: 같은 밀리초에 저장된 메시지도 삽입 순서를 유지한다.
         rows = self._db.query_all(
-            "SELECT * FROM messages WHERE session_id = ? ORDER BY ts ASC", (session_id,)
+            "SELECT * FROM messages WHERE session_id = ? ORDER BY ts ASC, rowid ASC", (session_id,)
         )
         return tuple(self._to_message(r) for r in rows)
 
     def page(self, session_id: str, cursor: str | None = None, limit: int = 50) -> MessagePage:
-        # cursor = last seen ts (descending page). Simple + stable for the MVP.
+        # cursor = "<ts>:<rowid>" 복합 키(내림차순 페이지). ts 단독 커서는 밀리초
+        # timestamp 가 고유하지 않아 같은 ts 의 나머지 행을 영구히 건너뛰었다
+        # (적대 리뷰 P1#3). 구형 ts 단독 커서(정수)는 종전 의미로 폴백한다.
         if cursor:
-            rows = self._db.query_all(
-                "SELECT * FROM messages WHERE session_id = ? AND ts < ? ORDER BY ts DESC LIMIT ?",
-                (session_id, int(cursor), limit),
-            )
+            ts_part, sep, rid_part = cursor.partition(":")
+            if sep:
+                rows = self._db.query_all(
+                    "SELECT rowid AS _rid, * FROM messages WHERE session_id = ? "
+                    "AND (ts < ? OR (ts = ? AND rowid < ?)) ORDER BY ts DESC, rowid DESC LIMIT ?",
+                    (session_id, int(ts_part), int(ts_part), int(rid_part), limit),
+                )
+            else:
+                rows = self._db.query_all(
+                    "SELECT rowid AS _rid, * FROM messages WHERE session_id = ? AND ts < ? "
+                    "ORDER BY ts DESC, rowid DESC LIMIT ?",
+                    (session_id, int(ts_part), limit),
+                )
         else:
             rows = self._db.query_all(
-                "SELECT * FROM messages WHERE session_id = ? ORDER BY ts DESC LIMIT ?",
+                "SELECT rowid AS _rid, * FROM messages WHERE session_id = ? "
+                "ORDER BY ts DESC, rowid DESC LIMIT ?",
                 (session_id, limit),
             )
         msgs = [self._to_message(r) for r in rows]
-        next_cursor = str(msgs[-1].ts) if len(msgs) == limit and msgs else None
+        next_cursor = f"{rows[-1]['ts']}:{rows[-1]['_rid']}" if len(rows) == limit and rows else None
         return MessagePage(messages=tuple(reversed(msgs)), next_cursor=next_cursor)
 
     def search(self, query: str, limit: int = 10) -> tuple[Message, ...]:

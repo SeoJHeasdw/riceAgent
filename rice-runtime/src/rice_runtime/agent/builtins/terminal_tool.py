@@ -22,6 +22,7 @@ import os
 import platform
 import re
 import shutil
+import signal
 import subprocess
 import tempfile
 from pathlib import Path
@@ -157,6 +158,25 @@ def _safe_cwd(cwd: str | None) -> str:
     return tempfile.gettempdir()
 
 
+def _kill_process_group(proc: asyncio.subprocess.Process) -> None:
+    """셸이 띄운 백그라운드 자식까지 프로세스 그룹 전체를 SIGKILL 한다.
+
+    start_new_session 으로 셸이 그룹 리더이므로 pgid == proc.pid. 셸 하나만
+    죽이면 `cmd &` 로 분기한 손자가 abort 이후에도 부작용을 계속 낸다
+    그룹 시그널 불가 시 proc.kill() 폴백.
+    """
+    try:
+        if not _IS_WINDOWS:
+            os.killpg(proc.pid, signal.SIGKILL)
+        else:
+            proc.kill()
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+
+
 async def _run_command(
     command: str,
     cwd: str | None,
@@ -180,6 +200,7 @@ async def _run_command(
             stdin=asyncio.subprocess.DEVNULL,
             cwd=safe,
             env=env,
+            start_new_session=not _IS_WINDOWS,
         )
         try:
             stdout_bytes, _ = await asyncio.wait_for(
@@ -187,17 +208,16 @@ async def _run_command(
             )
         except asyncio.CancelledError:
             # 턴 abort 가 도구 실행을 취소하면(tool_scheduler 의 task.cancel)
-            # 자식 프로세스를 함께 내린다 — 안 죽이면 셸이 고아로 계속 돈다.
+            # 자식 프로세스 그룹을 함께 내리고 reap 까지 마친다 — 안 죽이면
+            # 셸/백그라운드 손자가 고아로 계속 돈다.
+            _kill_process_group(proc)
             try:
-                proc.kill()
-            except ProcessLookupError:
+                await asyncio.shield(proc.wait())
+            except Exception:
                 pass
             raise
         except asyncio.TimeoutError:
-            try:
-                proc.kill()
-            except ProcessLookupError:
-                pass
+            _kill_process_group(proc)
             try:
                 await proc.wait()
             except Exception:
