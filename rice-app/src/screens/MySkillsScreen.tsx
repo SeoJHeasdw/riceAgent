@@ -1768,10 +1768,7 @@ function MySkillsScreen() {
           <div className="domain-summary domain-summary--skill overflow-hidden rounded-xl text-white">
             <div className="p-4">
               <div className="flex items-center gap-1.5 mb-1">
-                <span className="text-caption-01 text-white/70">학습한 스킬</span>
-                <span className="ai-label">
-                  <span className="ai-label__text">AI</span>
-                </span>
+                <span className="text-caption-01 text-white/70">나의 스킬</span>
               </div>
               <div className="text-heading-03 font-semibold text-white leading-none tabular-nums">
                 {skills.length}
@@ -1917,7 +1914,7 @@ function MySkillsScreen() {
         style={{ width: listPanel.width }}
       >
         <div className="px-5 pt-5 pb-3">
-          <h1 className="text-heading-03 font-semibold text-text-primary">나의 스킬</h1>
+          <h1 className="text-heading-03 font-semibold text-text-primary">스킬 목록</h1>
         </div>
         {list.map((s) => {
           const on = s.id === effectiveSel;

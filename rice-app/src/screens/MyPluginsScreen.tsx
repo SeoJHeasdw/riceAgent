@@ -385,7 +385,7 @@ function MyPluginsScreen() {
       >
         <div className="p-4">
           <div className="domain-summary domain-summary--plugin rounded-xl p-4 text-white">
-            <div className="text-caption-01 text-white/70 mb-1">설치된 플러그인</div>
+            <div className="text-caption-01 text-white/70 mb-1">나의 플러그인</div>
             <div className="text-heading-03 font-semibold text-white leading-none tabular-nums">
               {myPlugins.length}
               <span className="text-body-short-01 font-normal text-white/70 ml-1">개</span>
@@ -446,7 +446,7 @@ function MyPluginsScreen() {
         style={{ width: listPanel.width }}
       >
         <div className="px-5 pt-5 pb-3">
-          <h1 className="text-heading-03 font-semibold text-text-primary">나의 플러그인</h1>
+          <h1 className="text-heading-03 font-semibold text-text-primary">플러그인 목록</h1>
         </div>
         {list.map((p) => {
           const on = p.id === effectiveSel;
