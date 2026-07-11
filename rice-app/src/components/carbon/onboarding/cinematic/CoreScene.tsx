@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import type { AwakeningBeat, CinematicPhase, SceneDragState } from '../sequences/types';
 import { CapabilityOrbit } from './CapabilityOrbit';
 import { EnergyCore } from './EnergyCore';
-import { StarField } from './StarField';
+import { SignalField } from './SignalField';
 
 interface CoreSceneProps {
   phase: CinematicPhase;
@@ -35,10 +35,10 @@ export const CoreScene = ({ phase, awakeningBeat, capabilityIndex, drag }: CoreS
 
   return (
     <>
-      <fog attach="fog" args={['#010309', 8, 27]} />
-      <ambientLight intensity={0.28} color="#7db6ff" />
+      <fog attach="fog" args={['#101319', 9, 30]} />
+      <ambientLight intensity={0.34} color="#9fb7d1" />
       <directionalLight position={[3, 4, 6]} intensity={1.1} color="#bfdcff" />
-      <StarField phase={phase} drag={drag} />
+      <SignalField phase={phase} drag={drag} />
       <group ref={rigRef}>
         <EnergyCore phase={phase} awakeningBeat={awakeningBeat} />
         <CapabilityOrbit phase={phase} capabilityIndex={capabilityIndex} />

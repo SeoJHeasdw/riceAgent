@@ -24,7 +24,7 @@ function createWindow() {
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 16, y: 16 },
     autoHideMenuBar: true, // Windows 상단 메뉴바(File/Edit/View...) 숨김
-    backgroundColor: '#161616', // IBM Carbon gray-100
+    backgroundColor: '#16181b', // RICE soft graphite — matches the first renderer paint
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,

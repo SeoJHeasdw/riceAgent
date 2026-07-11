@@ -79,8 +79,8 @@ export const CinematicCanvas = ({ phase, awakeningBeat, capabilityIndex }: Cinem
         gl={{ antialias: true, alpha: true, powerPreference: 'high-performance' }}
         onCreated={({ gl }) => {
           gl.toneMapping = THREE.ACESFilmicToneMapping;
-          gl.toneMappingExposure = 1.18;
-          gl.setClearColor('#010309', 0);
+          gl.toneMappingExposure = 1.12;
+          gl.setClearColor('#101319', 0);
         }}
         fallback={<div className="cinematic-core-fallback" />}
       >

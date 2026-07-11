@@ -192,10 +192,10 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                         <button
                           onClick={() => onSelectSession(session.id)}
                           title={session.title}
-                          className={`flex items-center w-full min-w-0 h-6 px-2 text-left cursor-pointer border-none rounded-lg transition-colors ${
+                          className={`flex items-center w-full min-w-0 h-6 px-2 text-left cursor-pointer border-l-2 rounded-lg transition-colors ${
                             isActive
-                              ? 'bg-layer-selected-01'
-                              : 'bg-transparent hover:bg-layer-hover-01'
+                              ? 'border-l-interactive bg-layer-selected-01'
+                              : 'border-l-transparent bg-transparent hover:bg-layer-hover-01'
                           }`}
                         >
                           <span

@@ -11,7 +11,9 @@ export const useCinematicSequence = (onFinished: () => void) => {
   useEffect(() => {
     const assemble = window.setTimeout(() => setAwakeningBeat('assembly'), 180);
     const awake = window.setTimeout(() => setAwakeningBeat('awake'), 2900);
-    const revealLoop = window.setTimeout(() => setPhase('loop'), 4300);
+    // Leave the promise on screen long enough to read after the core wakes.
+    // The skip action remains available throughout for returning users.
+    const revealLoop = window.setTimeout(() => setPhase('loop'), 5200);
     return () => {
       window.clearTimeout(assemble);
       window.clearTimeout(awake);

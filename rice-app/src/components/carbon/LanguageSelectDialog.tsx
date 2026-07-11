@@ -36,7 +36,7 @@ export const LanguageSelectDialog: React.FC<LanguageSelectDialogProps> = ({ open
 
   return (
     <div className="cinematic-language" role="dialog" aria-modal="true" aria-labelledby="language-title">
-      <div className="cinematic-language__stars" aria-hidden="true" />
+      <div className="cinematic-language__field" aria-hidden="true" />
       <div className="cinematic-language__orbit" aria-hidden="true"><i /><i /><i /></div>
       <section className="language-dock">
         <div className="language-dock__brand">
