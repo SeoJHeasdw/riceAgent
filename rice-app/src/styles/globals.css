@@ -790,10 +790,9 @@ button,
   border-color: rgb(var(--domain-accent) / 0.24);
 }
 
-/* ── Model Core ────────────────────────────────────────────────────────────
-   Model configuration is the bridge between the cinematic brand moment and
-   the focused productivity UI. Tokens are scoped here on purpose: the rest of
-   the application keeps its calm Carbon workspace palette. */
+/* ── Cinematic onboarding model theme ─────────────────────────────────────
+   최초 연결 장면에만 쓰는 시네마틱 토큰. 메인 앱의 ModelSettingsPanel은 이
+   scope를 사용하지 않고 workspace의 기본 Carbon 팔레트를 그대로 따른다. */
 .rice-model-theme {
   --cds-background: #12161c;
   --cds-layer: #1b2028;
@@ -839,127 +838,6 @@ button,
   --ai-popover-bg: #1b2028;
 }
 
-.rice-model-core-backdrop {
-  background: rgba(10, 12, 16, 0.68) !important;
-  backdrop-filter: blur(12px);
-}
-
-.rice-model-core-panel {
-  overflow: hidden;
-  border-color: rgba(123, 173, 235, 0.22) !important;
-  background:
-    radial-gradient(circle at 88% 2%, rgba(74, 139, 236, 0.12), transparent 24%),
-    radial-gradient(circle at 8% 90%, rgba(155, 105, 235, 0.05), transparent 31%),
-    linear-gradient(165deg, rgba(30, 36, 46, 0.995), rgba(20, 24, 31, 0.995)) !important;
-  box-shadow: -28px 0 86px rgba(0, 0, 0, 0.38), inset 1px 0 0 rgba(255, 255, 255, 0.04) !important;
-}
-
-.rice-model-core-panel::before {
-  content: '';
-  position: absolute;
-  top: -170px;
-  right: -120px;
-  width: 340px;
-  height: 340px;
-  pointer-events: none;
-  border: 1px solid rgba(105, 166, 241, 0.08);
-  border-radius: 50%;
-  box-shadow: inset 0 0 80px rgba(55, 124, 224, 0.035);
-}
-
-.rice-model-core-hero {
-  position: relative;
-  z-index: 1;
-  background: linear-gradient(180deg, rgba(18, 31, 52, 0.7), rgba(8, 14, 25, 0.26));
-}
-
-.rice-model-core-emblem {
-  position: relative;
-  display: grid;
-  width: 46px;
-  height: 46px;
-  flex: 0 0 auto;
-  place-items: center;
-  color: #c2e1ff;
-  border: 1px solid rgba(103, 169, 248, 0.36);
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(70, 145, 241, 0.3), rgba(28, 66, 133, 0.11) 55%, transparent 58%);
-  box-shadow: 0 0 30px rgba(38, 111, 218, 0.18), inset 0 0 20px rgba(72, 151, 255, 0.08);
-}
-
-.rice-model-core-emblem span {
-  position: absolute;
-  inset: -5px;
-  border: 1px solid rgba(102, 171, 255, 0.18);
-  border-radius: 50%;
-  animation: modelCoreOrbit 9s linear infinite;
-}
-
-.rice-model-core-emblem span::after {
-  content: '';
-  position: absolute;
-  top: 4px;
-  left: 7px;
-  width: 3px;
-  height: 3px;
-  border-radius: 50%;
-  background: #7fc2ff;
-  box-shadow: 0 0 8px #5aa6ff;
-}
-
-.rice-model-core-emblem span:nth-child(2) {
-  inset: 2px;
-  border-color: rgba(173, 126, 255, 0.24);
-  animation-direction: reverse;
-  animation-duration: 6s;
-}
-
-.rice-model-core-eyebrow {
-  color: #83bdff;
-  font: 500 8px/1 var(--font-mono);
-  letter-spacing: 0.19em;
-}
-
-.rice-model-core-status {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  min-height: 34px;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 20px;
-  color: rgba(139, 164, 195, 0.6);
-  border-bottom: 1px solid var(--cds-border-subtle-01);
-  background: rgba(3, 8, 16, 0.48);
-  font: 500 8px/1 var(--font-mono);
-  letter-spacing: 0.12em;
-}
-
-.rice-model-core-status span {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-
-.rice-model-core-status i {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: #54d8b5;
-  box-shadow: 0 0 9px #54d8b5;
-}
-
-.rice-model-core-content,
-.rice-model-core-footer {
-  position: relative;
-  z-index: 1;
-}
-
-.rice-model-core-footer {
-  background: rgba(3, 7, 14, 0.72);
-  backdrop-filter: blur(16px);
-}
-
 .rice-model-theme .rice-model-picker .border-dashed {
   min-height: 148px;
   justify-content: center;
@@ -977,10 +855,6 @@ button,
 .rice-model-theme .rice-model-picker input,
 .rice-model-theme .rice-model-picker select {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
-}
-
-@keyframes modelCoreOrbit {
-  to { transform: rotate(360deg); }
 }
 
 /* ──────────────────────────────────────────────────────────────────────────

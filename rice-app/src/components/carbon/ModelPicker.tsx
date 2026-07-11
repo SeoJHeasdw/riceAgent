@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Button, Icon, Input, Tag } from '../ui';
+import { Button, Icon, Input, Tag, Toggle } from '../ui';
 import { ModelRegisterModal, RegisterPayload } from './ModelRegisterModal';
 import { useToast } from '../../lib/toast/ToastContext';
 import { api } from '../../lib/api';
@@ -36,13 +36,13 @@ export interface RegisteredModel {
 
 export interface ModelSettings {
   temperature: number;
-  maxTokens: number;
-  contextLength: string;
   /** N개의 (모델, API 키) 쌍 */
   registeredModels: RegisteredModel[];
   endpoint?: string;
   userModelingEnabled: boolean;
   localStorageOnly: boolean;
+  /** Local LLM이 보내는 thinking trace를 대화 화면에 표시할지 여부 */
+  thinkingVisible: boolean;
 }
 
 /** 모델 식별용 경량 타입 (현재는 SaaS 등록 모델 렌더에만 사용) */
@@ -447,7 +447,7 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
                 </div>
               </div>
 
-              <Params localSettings={localSettings} setLocalSettings={setLocalSettings} contextLength />
+              <Params localSettings={localSettings} setLocalSettings={setLocalSettings} showThinking />
             </>
           )}
         </>
@@ -543,14 +543,14 @@ const EmptyState: React.FC<{
   </div>
 );
 
-/* ── 파라미터 (temperature, max tokens, [context length]) ── */
+/* ── Local 응답 설정 (temperature + thinking 표시) ── */
 const Params: React.FC<{
   localSettings: ModelSettings;
   setLocalSettings: React.Dispatch<React.SetStateAction<ModelSettings>>;
-  contextLength?: boolean;
-}> = ({ localSettings, setLocalSettings, contextLength = false }) => (
+  showThinking?: boolean;
+}> = ({ localSettings, setLocalSettings, showThinking = false }) => (
   <div>
-    <div className="text-label-01 text-text-secondary mb-2">파라미터</div>
+    <div className="text-label-01 text-text-secondary mb-2">응답 설정</div>
     <div className="space-y-4">
       {/* 창의성 */}
       <div>
@@ -578,40 +578,15 @@ const Params: React.FC<{
         </div>
       </div>
 
-      {/* 최대 토큰 */}
-      <div>
-        <label className="text-label-01 text-text-secondary mb-1.5 block">최대 토큰</label>
-        <Input
-          type="number"
-          size="sm"
-          value={localSettings.maxTokens}
-          onChange={(e) => setLocalSettings({ ...localSettings, maxTokens: parseInt(e.target.value) || 0 })}
-          min={1}
-          max={128000}
-        />
-      </div>
-
-      {/* 컨텍스트 길이 (Local 전용) */}
-      {contextLength && (
-        <div>
-          <label className="text-label-01 text-text-secondary mb-1.5 block">컨텍스트 길이</label>
-          <div className="relative">
-            <select
-              value={localSettings.contextLength}
-              onChange={(e) => setLocalSettings({ ...localSettings, contextLength: e.target.value })}
-              className="w-full h-8 bg-field-01 border border-border-strong-01 rounded-lg pl-3 pr-9 text-body-short-01 text-text-primary outline-none transition-colors focus:border-focus focus:ring-1 focus:ring-focus appearance-none cursor-pointer"
-            >
-              <option value="8K">8K 토큰</option>
-              <option value="32K">32K 토큰</option>
-              <option value="128K">128K 토큰</option>
-              <option value="256K">256K 토큰</option>
-            </select>
-            <Icon
-              name="chevron-down"
-              size={12}
-              className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-icon-secondary"
-            />
-          </div>
+      {/* Local 모델의 reasoning trace는 비용과 무관하지만 사용자가 화면 노출을 선택한다. */}
+      {showThinking && (
+        <div className="border-t border-border-subtle-01 pt-3">
+          <Toggle
+            checked={localSettings.thinkingVisible}
+            onChange={(thinkingVisible) => setLocalSettings({ ...localSettings, thinkingVisible })}
+            label="Thinking 표시"
+            description="로컬 모델의 추론 과정을 대화에서 확인합니다"
+          />
         </div>
       )}
     </div>

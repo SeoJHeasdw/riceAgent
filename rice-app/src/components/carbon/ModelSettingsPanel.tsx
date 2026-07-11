@@ -41,7 +41,7 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
 
   // 저장 의미 있는 변경 여부:
   // mode 전환이나 "로컬 모델 확인" 같은 탐색 행위는 제외하고,
-  // 실제로 저장될 값(modelId · registeredModels · temperature · maxTokens · contextLength · endpoint)이
+  // 실제로 저장될 값(modelId · registeredModels · temperature · endpoint · thinking 표시)이
   // 패널을 열 때의 초기값과 달라졌을 때만 dirty로 판단한다.
   const savedModelId = useRef(currentModel);
   const savedSettings = useRef(settings);
@@ -56,8 +56,7 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
     const b = savedSettings.current;
     const paramsChanged =
       a.temperature !== b.temperature ||
-      a.maxTokens !== b.maxTokens ||
-      a.contextLength !== b.contextLength ||
+      a.thinkingVisible !== b.thinkingVisible ||
       (a.endpoint ?? '') !== (b.endpoint ?? '');
     const registeredChanged =
       a.registeredModels.length !== b.registeredModels.length ||
@@ -153,7 +152,7 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
       <div
         onClick={requestClose}
         aria-hidden="true"
-        className="rice-model-core-backdrop fixed inset-0 bg-black/60 backdrop-blur-sm z-40"
+        className="fixed inset-0 z-40 bg-black/35"
         style={{
           animation: closing
             ? `panelFadeOut ${CLOSE_MS}ms ease forwards`
@@ -163,7 +162,7 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
 
       <div
         ref={panelRef}
-        className="rice-model-core-panel rice-model-theme fixed top-0 right-0 bottom-0 w-[440px] max-w-[calc(100vw-24px)] bg-layer-01 border-l border-border-subtle-01 z-50 flex flex-col shadow-elevation-3"
+        className="fixed bottom-0 right-0 top-0 z-50 flex w-[384px] max-w-[calc(100vw-16px)] flex-col border-l border-border-subtle-01 bg-layer-01 shadow-elevation-3"
         style={{
           animation: closing
             ? `panelSlideOut ${CLOSE_MS}ms cubic-bezier(0.4, 0, 1, 1) forwards`
@@ -174,19 +173,10 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
         aria-label="Model settings"
         tabIndex={-1}
       >
-        <div className="rice-model-core-hero flex items-center gap-3.5 px-5 py-5 border-b border-border-subtle-01 flex-shrink-0">
-          <div className="rice-model-core-emblem" aria-hidden="true">
-            <span /><span />
-            <Icon name="model" size={17} />
-          </div>
+        <div className="flex h-[64px] flex-shrink-0 items-center gap-3 border-b border-border-subtle-01 px-4">
           <div className="min-w-0">
-            <span className="rice-model-core-eyebrow">RICE / MODEL CORE</span>
-            <div className="flex items-baseline gap-2 mt-1.5 min-w-0">
-              <h2 className="text-heading-02 font-semibold text-text-primary flex-shrink-0">AI 엔진 연결</h2>
-              <span className="text-caption-01 font-mono text-text-helper truncate">
-                {currentModel || '미설정'}
-              </span>
-            </div>
+            <h2 className="text-body-short-02 font-semibold text-text-primary">모델 설정</h2>
+            <p className="mt-0.5 truncate text-caption-01 text-text-helper">{currentModel || '모델 미설정'}</p>
           </div>
           <button
             onClick={requestClose}
@@ -197,13 +187,8 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
           </button>
         </div>
 
-        <div className="rice-model-core-status" aria-hidden="true">
-          <span><i /> CORE LINK</span>
-          <span><Icon name="lock" size={11} /> LOCAL CREDENTIAL VAULT</span>
-        </div>
-
         {/* Content — 열릴 때마다 최신 prop으로 새로 초기화하도록 key로 remount */}
-        <div ref={scrollRef} onScroll={updateFooterShadow} className="rice-model-core-content flex-1 overflow-y-auto px-5 py-5">
+        <div ref={scrollRef} onScroll={updateFooterShadow} className="flex-1 overflow-y-auto px-4 py-4">
           <ModelPicker
             key={`${currentModel}|${modelMode}`}
             currentModel={currentModel}
@@ -215,12 +200,12 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
 
         {/* Footer — 우측 정렬 자연폭. 취소는 조용한 텍스트 버튼, 저장만 primary로 위계를 만든다 */}
         <div
-          className={`rice-model-core-footer px-4 py-3 border-t border-border-subtle-01 flex items-center gap-1.5 flex-shrink-0 transition-shadow duration-200 ${
+          className={`flex flex-shrink-0 items-center gap-1.5 border-t border-border-subtle-01 bg-layer-01 px-3 py-3 transition-shadow duration-200 ${
             footerLifted ? 'shadow-[0_-10px_18px_-10px_rgba(0,0,0,0.55)]' : ''
           }`}
         >
-          <span className="hidden sm:flex items-center gap-1.5 text-caption-01 text-text-helper mr-auto">
-            <Icon name="lock" size={12} /> 키와 설정은 이 기기에 저장됩니다
+          <span className="mr-auto hidden items-center gap-1.5 text-caption-01 text-text-helper sm:flex">
+            <Icon name="lock" size={12} /> 이 기기에 저장
           </span>
           <button
             onClick={requestClose}

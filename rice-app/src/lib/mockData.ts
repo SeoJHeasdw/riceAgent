@@ -10,12 +10,11 @@ import { ModelSettings } from '../components/carbon/ModelSettingsPanel';
 // Default model settings (used until the runtime restores saved settings)
 export const defaultModelSettings: ModelSettings = {
   temperature: 0.7,
-  maxTokens: 2048,
-  contextLength: '32K',
   registeredModels: [],
   endpoint: 'http://localhost:11434',
   userModelingEnabled: true,
   localStorageOnly: false,
+  thinkingVisible: true,
 };
 
 // Skill categories

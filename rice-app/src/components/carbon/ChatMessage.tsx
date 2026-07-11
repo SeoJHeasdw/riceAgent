@@ -1449,6 +1449,8 @@ export interface ChatTurnProps {
   actionsCopyAt?: Record<number, string>;
   /** index → epoch ms of the agent answer that owns that action bar */
   actionsTimeAt?: Record<number, number>;
+  /** Local LLM의 thinking trace를 대화에 표시할지 여부 */
+  showThinking?: boolean;
 }
 
 export const ChatTurn: React.FC<ChatTurnProps> = ({
@@ -1463,14 +1465,19 @@ export const ChatTurn: React.FC<ChatTurnProps> = ({
   highlightIndex,
   actionsCopyAt = {},
   actionsTimeAt = {},
+  showThinking = true,
 }) => {
-  const first = items[0].m;
+  const visibleItems = showThinking ? items : items.filter(({ m }) => m.kind !== 'thinking');
+  const first = visibleItems[0]?.m;
+
+  // thinking만 있던 중간 프레임은 설정이 꺼져 있으면 완전히 숨긴다.
+  if (!first) return null;
 
   // user turn — a right-aligned bubble, no avatar/label (normal chat convention)
   if (first.kind === 'user') {
     const timeLabel = formatTime(first.sentAt);
     return (
-      <div className="group/user flex flex-col items-end py-2.5" data-msg-index={items[0].index}>
+      <div className="group/user flex flex-col items-end py-2.5" data-msg-index={visibleItems[0].index}>
         <div className="max-w-[76%]">
           <div className="rounded-xl border border-border-subtle-01 bg-layer-02/80 px-4 py-2.5 text-body-short-02 text-text-primary leading-relaxed break-words whitespace-pre-wrap">
             {first.text}
@@ -1494,7 +1501,7 @@ export const ChatTurn: React.FC<ChatTurnProps> = ({
           <AILabel />
         </div>
         <div className="flex flex-col">
-          {items.map(({ m, index }) => (
+          {visibleItems.map(({ m, index }) => (
             <div
               key={index}
               data-msg-index={index}

@@ -916,7 +916,14 @@ function ChatScreen() {
   const [modelMode, setModelMode] = useState<'saas' | 'local'>('saas');
   const [currentModel, setCurrentModel] = useState('claude-sonnet-4-6');
   // 등록 모델·키는 런타임 state.db(SQLite)에 저장된다 — 연결 시 GET /settings로 복원.
-  const [modelSettings, setModelSettings] = useState(defaultModelSettings);
+  const [modelSettings, setModelSettings] = useState(() => {
+    try {
+      const saved = window.localStorage.getItem('rice.chat.thinkingVisible');
+      return { ...defaultModelSettings, thinkingVisible: saved == null ? true : saved === 'true' };
+    } catch {
+      return defaultModelSettings;
+    }
+  });
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -974,6 +981,11 @@ function ChatScreen() {
     setCurrentModel(modelId);
     setModelSettings(settings);
     setModelMode(mode);
+    try {
+      window.localStorage.setItem('rice.chat.thinkingVisible', String(settings.thinkingVisible));
+    } catch {
+      // 메모리 상태는 현재 앱 세션 동안 계속 적용된다.
+    }
     if (connected) {
       // SaaS는 등록 모델의 provider로 런타임 kind를 정한다. base_url/project_id 같은
       // 연결정보는 provider_models(state.db)에서 모델별로 읽으므로 config엔 안 넣는다.
@@ -2234,6 +2246,7 @@ function ChatScreen() {
                       highlightIndex={highlightMsg}
                       actionsCopyAt={actionsCopyAt}
                       actionsTimeAt={actionsTimeAt}
+                      showThinking={modelMode !== 'local' || modelSettings.thinkingVisible}
                     />
                   ))
                 )}
