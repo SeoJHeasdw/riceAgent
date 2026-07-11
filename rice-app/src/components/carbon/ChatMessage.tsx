@@ -1396,7 +1396,7 @@ const AssistantBlock: React.FC<{
           overrides lift the shared Markdown's body text to primary + trim the
           trailing block margin so it sits flush above the action bar. */}
       <div className="text-body-short-02 text-text-primary leading-relaxed break-words [&_p]:text-text-primary [&_li]:text-text-secondary [&_p]:mb-2 [&_p:last-child]:mb-0 [&>div>*:last-child]:mb-0">
-        {m.text ? <Markdown source={m.text} onFileClick={openFile} /> : <TypingDots />}
+        {m.text ? <Markdown source={m.text} onFileClick={openFile} streaming={m.streaming} /> : <TypingDots />}
       </div>
       {m.bullets && (
         <ul className="mt-2.5 pl-5 flex flex-col gap-1.5 list-disc">

@@ -537,6 +537,7 @@ def tools() -> list[tuple[ToolSpec, BuiltinTool]]:
                     "required": ["url"],
                 },
                 source="builtin",
+                is_web_tool=True,
             ),
             _make_fetch(),
         ),

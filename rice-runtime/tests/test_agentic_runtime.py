@@ -15,13 +15,25 @@ from rice_runtime.agent.subagents import SubAgentRunner
 from rice_runtime.agent.tool_dispatch import ToolDispatcher
 from rice_runtime.agent.tool_scheduler import ScheduledToolRequest, ToolBatchResult, ToolScheduler
 from rice_runtime.core.config import ContextConfig
-from rice_runtime.core.types import Message, ToolCall, ToolSpec, TurnContext
+from rice_runtime.core.types import ApprovalResponse, Message, ToolCall, ToolSpec, TurnContext
 from rice_runtime.server.approval import ApprovalRegistry
 
 
 class _NoopService:
     async def invoke(self, call, owner_id=None):
         raise AssertionError(f"unexpected invoke: {call}")
+
+
+class _AutoApproveGate:
+    def __init__(self) -> None:
+        self.requests = []
+
+    async def request(self, session_id, request, timeout_s):
+        self.requests.append((session_id, request))
+        return ApprovalResponse(approval_id=request.approval_id, decision="approve")
+
+    def cancel_session(self, session_id):
+        return None
 
 
 def _spec(name: str, *, requires_approval: bool = False) -> ToolSpec:
@@ -32,6 +44,57 @@ def _spec(name: str, *, requires_approval: bool = False) -> ToolSpec:
         source="builtin",
         requires_approval=requires_approval,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("mode", "expects_prompt"),
+    [("ask", True), ("approve_for_me", False), ("full_access", False)],
+)
+async def test_approval_modes_for_routine_workspace_write(mode, expects_prompt):
+    gate = _AutoApproveGate()
+    executed = []
+
+    async def write_file(args):
+        executed.append(args)
+        return {"written": True}
+
+    dispatcher = ToolDispatcher(
+        connectors=_NoopService(),
+        plugins=_NoopService(),
+        approvals=gate,
+        approval_timeout_s=1,
+        builtins={"write_file": write_file},
+        approval_mode=mode,
+    )
+    call = ToolCall(tool_name="write_file", arguments={"path": "ok.txt"}, id="write_1")
+    events = [event async for event in dispatcher.dispatch("s1", call, _spec("write_file", requires_approval=True))]
+
+    assert ("tool_approval_required" in [event.type.value for event in events]) is expects_prompt
+    assert bool(gate.requests) is expects_prompt
+    assert executed == [{"path": "ok.txt"}]
+
+
+@pytest.mark.asyncio
+async def test_approve_for_me_still_prompts_for_potentially_unsafe_terminal():
+    gate = _AutoApproveGate()
+
+    async def terminal(args):
+        return {"ok": True}
+
+    dispatcher = ToolDispatcher(
+        connectors=_NoopService(),
+        plugins=_NoopService(),
+        approvals=gate,
+        approval_timeout_s=1,
+        builtins={"terminal": terminal},
+        approval_mode="approve_for_me",
+    )
+    call = ToolCall(tool_name="terminal", arguments={"command": "rm -rf build"}, id="shell_1")
+    events = [event async for event in dispatcher.dispatch("s1", call, _spec("terminal", requires_approval=True))]
+
+    assert "tool_approval_required" in [event.type.value for event in events]
+    assert len(gate.requests) == 1
 
 
 def test_context_manager_masks_distills_and_compresses():

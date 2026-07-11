@@ -389,6 +389,8 @@ export type ThreadMessage =
   | {
       kind: 'agent';
       text: string;
+      /** current answer is still receiving/draining streamed tokens */
+      streaming?: boolean;
       bullets?: string[];
       usedSkill?: SkillRef;
       action?: { label: string; icon: IconName };

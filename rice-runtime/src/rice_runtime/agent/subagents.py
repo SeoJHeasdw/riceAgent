@@ -181,13 +181,17 @@ class SubAgentRunner:
         return self._semaphore
 
     def _compose_tools(
-        self, thread_id: str, tool_names: Sequence[str]
+        self, thread_id: str, tool_names: Sequence[str], web_search_enabled: bool = True
     ) -> tuple[tuple[ToolSpec, ...], dict[str, BuiltinTool]]:
         """이 실행의 도구 표면을 조립한다: 정적 read-only 셋에 화이트리스트를
         적용하고, scratch 팩토리가 있으면 thread 격리 write_scratch를 더한다.
         화이트리스트의 미지 이름은 무시, 교집합이 비면 전체 셋 폴백(fail-soft —
         메인 모델의 오타가 워커를 벙어리로 만들면 안 된다)."""
-        available = list(self._static_tools)
+        available = [
+            (spec, handler)
+            for spec, handler in self._static_tools
+            if web_search_enabled or not spec.is_web_tool
+        ]
         if self._scratch_factory is not None:
             available.append(self._scratch_factory(thread_id))
         wanted = {str(n).strip() for n in tool_names if str(n).strip()}
@@ -230,6 +234,7 @@ class SubAgentRunner:
         max_chars: int = 8_000,
         turn_view: TurnView | None = None,
         tool_names: Sequence[str] = (),
+        web_search_enabled: bool = True,
     ) -> SubAgentResult:
         thread_id = new_id("sub")
         history = self._transcript.history(session_id)
@@ -239,7 +244,9 @@ class SubAgentRunner:
             "",
             history[-context_config.subagent_history_messages :],
         )
-        tool_specs, tool_handlers = self._compose_tools(thread_id, tool_names)
+        tool_specs, tool_handlers = self._compose_tools(
+            thread_id, tool_names, web_search_enabled=web_search_enabled
+        )
         system = _SUBAGENT_SYSTEM
         if "write_scratch" in tool_handlers:
             system += _SCRATCH_NOTE

@@ -18,6 +18,9 @@ export interface Message {
   metadata?: Record<string, unknown>;
 }
 
+/** Per-turn tool approval policy selected in the chat composer. */
+export type ApprovalMode = 'ask' | 'approve_for_me' | 'full_access';
+
 // A single file bundled with a skill (README, instructions, scripts, license…)
 // A skill is a bundle (folder), not a single file: SKILL.md + scripts/ + agents/
 // + references/ + assets/. language drives syntax/icon in the source workspace.

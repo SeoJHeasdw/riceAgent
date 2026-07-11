@@ -1,4 +1,4 @@
-import type { SSEEvent, SSEEventType } from './types';
+import type { ApprovalMode, SSEEvent, SSEEventType } from './types';
 
 /**
  * SSE client for the RICE runtime (RICE_CONTRACTS 1.2/1.3).
@@ -114,8 +114,12 @@ export class SSEClient {
   }
 
   /** re-answer the last user message — streams a fresh turn (POST /regenerate). */
-  regenerate(sessionId: string, handlers: StreamHandlers): StreamHandle {
-    return this._streamPost(`/sessions/${sessionId}/regenerate`, undefined, handlers);
+  regenerate(sessionId: string, approvalMode: ApprovalMode, webSearchEnabled: boolean, handlers: StreamHandlers): StreamHandle {
+    return this._streamPost(
+      `/sessions/${sessionId}/regenerate`,
+      { approval_mode: approvalMode, web_search_enabled: webSearchEnabled },
+      handlers,
+    );
   }
 
   /**
@@ -197,8 +201,12 @@ export class SSEClient {
   }
 
   /** convenience: text-only message */
-  streamText(sessionId: string, text: string, handlers: StreamHandlers): StreamHandle {
-    return this.streamMessages(sessionId, { content: text }, handlers);
+  streamText(sessionId: string, text: string, approvalMode: ApprovalMode, webSearchEnabled: boolean, handlers: StreamHandlers): StreamHandle {
+    return this.streamMessages(
+      sessionId,
+      { content: text, approval_mode: approvalMode, web_search_enabled: webSearchEnabled },
+      handlers,
+    );
   }
 }
 

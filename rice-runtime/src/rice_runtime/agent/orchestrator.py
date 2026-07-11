@@ -62,6 +62,7 @@ from ..connector.interfaces import IConnectorService
 from ..core.config import Config, ConfigStore, ContextConfig
 from ..core.paths import WorkspaceLocation
 from ..core.types import (
+    ApprovalMode,
     Message,
     SSEEvent,
     ToolSpec,
@@ -231,7 +232,13 @@ class Orchestrator:
         self._active: dict[str, asyncio.Event] = {}
 
     # ── IAgent.run_turn ──────────────────────────────────────────────────────
-    async def run_turn(self, session_id: str, user_message: str) -> AsyncIterator[SSEEvent]:
+    async def run_turn(
+        self,
+        session_id: str,
+        user_message: str,
+        approval_mode: ApprovalMode = "ask",
+        web_search_enabled: bool = True,
+    ) -> AsyncIterator[SSEEvent]:
         # 세션 동시 턴 방어: 이미 이 세션에서 턴이 진행 중이면 두 번째
         # POST /messages는 히스토리를 건드리기 전에 거절한다 — 두 스트림이 같은
         # transcript를 교차 append하면 순서가 깨진다. 단일 이벤트 루프라 set
@@ -244,7 +251,9 @@ class Orchestrator:
         try:
             # 1. PERSIST user turn, then drive the turn over the (now-updated) history.
             self._transcript.append(session_id, Message(role="user", content=user_message))
-            async for event in self._drive_turn(session_id, user_message):
+            async for event in self._drive_turn(
+                session_id, user_message, approval_mode, web_search_enabled
+            ):
                 yield event
         finally:
             done = self._active.pop(session_id, None)
@@ -252,7 +261,12 @@ class Orchestrator:
                 done.set()
 
     # ── IAgent.regenerate ─────────────────────────────────────────────────────
-    async def regenerate(self, session_id: str) -> AsyncIterator[SSEEvent]:
+    async def regenerate(
+        self,
+        session_id: str,
+        approval_mode: ApprovalMode = "ask",
+        web_search_enabled: bool = True,
+    ) -> AsyncIterator[SSEEvent]:
         """Re-answer the last user message. The route already dropped the stale
         assistant turn (delete_after), so history ends with that user message —
         we drive a fresh turn on it WITHOUT re-persisting a duplicate user row."""
@@ -268,14 +282,22 @@ class Orchestrator:
                 yield ev_error("no_user_message", "재생성할 사용자 메시지가 없습니다.")
                 yield ev_done()
                 return
-            async for event in self._drive_turn(session_id, last_user.content):
+            async for event in self._drive_turn(
+                session_id, last_user.content, approval_mode, web_search_enabled
+            ):
                 yield event
         finally:
             done = self._active.pop(session_id, None)
             if done is not None:
                 done.set()
 
-    async def _drive_turn(self, session_id: str, user_message: str) -> AsyncIterator[SSEEvent]:
+    async def _drive_turn(
+        self,
+        session_id: str,
+        user_message: str,
+        approval_mode: ApprovalMode = "ask",
+        web_search_enabled: bool = True,
+    ) -> AsyncIterator[SSEEvent]:
         """Steps 2–7 of a turn (prefetch → assemble → loop → persist → observe →
         surface), shared by run_turn and regenerate. The user message is assumed
         already persisted as the tail of history."""
@@ -312,11 +334,16 @@ class Orchestrator:
             # relevance-ranked spotlight of top-K tools for this user message (the fold
             # is no longer budget-only). The dispatcher gets the full foldable catalog
             # regardless, so tool_call can resolve a folded tool by name.
+            builtin_tools = tuple(
+                spec
+                for spec in self._builtin_specs()
+                if web_search_enabled or not spec.is_web_tool
+            )
             foldable_tools = _dedupe_tool_names(
-                self._builtin_specs(),
+                builtin_tools,
                 tuple(self._connectors.list_tools()) + tuple(self._plugins.list_tools()),
             )
-            tools = fold_tools_for_budget(self._builtin_specs(), foldable_tools, query=user_message)
+            tools = fold_tools_for_budget(builtin_tools, foldable_tools, query=user_message)
             # local 프로파일은 액션 규칙 요약을 시스템 프롬프트 **최후미**에 싣는다 —
             # 소형 모델은 프롬프트 끝의 지시에 가장 강하게 반응한다(recency).
             system_prompt = compose_system_prompt(
@@ -342,6 +369,8 @@ class Orchestrator:
                 approval_timeout_s=cfg.learning.approval_timeout_seconds,
                 builtins=self._builtins,
                 folded_catalog={t.name: t for t in foldable_tools},
+                approval_mode=approval_mode,
+                web_search_enabled=web_search_enabled,
             )
             # 플래너와 실행 루프는 같은 provider 인스턴스를 쓴다(로컬 LLM 하나가
             # 겸임). planning_enabled=False면 플래너 없이 순수 ReAct — 기존 동작.

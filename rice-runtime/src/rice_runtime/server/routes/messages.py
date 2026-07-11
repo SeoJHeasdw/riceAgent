@@ -29,7 +29,7 @@ park-for-HITL dance the main turn already does — reusing `effect_surfacing`
 from __future__ import annotations
 
 import logging
-from typing import AsyncIterator
+from typing import AsyncIterator, Literal
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
@@ -49,7 +49,14 @@ router = APIRouter(tags=["sessions"])
 
 class MessageIn(BaseModel):
     content: str
+    approval_mode: Literal["ask", "approve_for_me", "full_access"] = "ask"
+    web_search_enabled: bool = True
     # attachments: list[...] — CONTRACTS decision 1-C (future)
+
+
+class RegenerateIn(BaseModel):
+    approval_mode: Literal["ask", "approve_for_me", "full_access"] = "ask"
+    web_search_enabled: bool = True
 
 
 class ToolApprovalIn(BaseModel):
@@ -120,7 +127,11 @@ async def post_message(session_id: str, body: MessageIn, c: Container = Depends(
     # Title is generated lazily by POST /sessions/{id}/title, which the client calls
     # after this turn's first `done` — kept off the hot streaming path so a slow
     # title model never delays the answer or holds the stream open.
-    stream = to_sse_stream(c.agent.run_turn(session_id, body.content))
+    stream = to_sse_stream(
+        c.agent.run_turn(
+            session_id, body.content, body.approval_mode, body.web_search_enabled
+        )
+    )
     return StreamingResponse(stream, media_type="text/event-stream")
 
 
@@ -195,7 +206,9 @@ async def learn(session_id: str, body: LearnIn, c: Container = Depends(get_conta
 
 
 @router.post("/sessions/{session_id}/regenerate")
-async def regenerate(session_id: str, c: Container = Depends(get_container)):
+async def regenerate(
+    session_id: str, c: Container = Depends(get_container), body: RegenerateIn | None = None
+):
     if c.sessions.get(session_id) is None:
         raise NotFoundError(f"session {session_id} not found")
     # busy 확인은 delete_after **이전**이어야 한다 — 이전엔 여기서 무조건 지운 뒤
@@ -212,7 +225,12 @@ async def regenerate(session_id: str, c: Container = Depends(get_container)):
     if last_user is None:
         raise ConflictError("재생성할 사용자 메시지가 없습니다.")
     c.sessions.delete_after_message(session_id, last_user.id)
-    stream = to_sse_stream(c.agent.regenerate(session_id))
+    request = body or RegenerateIn()
+    stream = to_sse_stream(
+        c.agent.regenerate(
+            session_id, request.approval_mode, request.web_search_enabled
+        )
+    )
     return StreamingResponse(stream, media_type="text/event-stream")
 
 

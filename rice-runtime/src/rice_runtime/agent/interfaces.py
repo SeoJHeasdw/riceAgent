@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from typing import AsyncIterator, Protocol, Sequence, runtime_checkable
 
 from ..core.types import (
+    ApprovalMode,
     ApprovalRequest,
     ApprovalResponse,
     Message,
@@ -50,6 +51,7 @@ class TurnView:
     plan: TurnPlan | None = None
     # 이번 턴에 루프가 만든 메시지들(assistant 라운드 + tool 결과) — ctx.history 이후분.
     turn_messages: tuple[Message, ...] = ()
+    web_search_enabled: bool = True
 
 
 @runtime_checkable
@@ -90,13 +92,24 @@ class IAgent(Protocol):
     """The orchestrator's public face — the server depends on this, not on the
     concrete `Orchestrator`."""
 
-    def run_turn(self, session_id: str, user_message: str) -> AsyncIterator[SSEEvent]:
+    def run_turn(
+        self,
+        session_id: str,
+        user_message: str,
+        approval_mode: ApprovalMode = "ask",
+        web_search_enabled: bool = True,
+    ) -> AsyncIterator[SSEEvent]:
         """Run one full agent turn for `session_id`, streaming SSE events end to
         end: prefetch → LLM loop (with tool dispatch + HITL) → learning observe →
         `done`. Errors surface as a terminal `error` event, then `done`."""
         ...
 
-    def regenerate(self, session_id: str) -> AsyncIterator[SSEEvent]:
+    def regenerate(
+        self,
+        session_id: str,
+        approval_mode: ApprovalMode = "ask",
+        web_search_enabled: bool = True,
+    ) -> AsyncIterator[SSEEvent]:
         """Re-answer the last user message, streaming a fresh turn. The caller
         removes the previous assistant turn first (so it's a replace, not append)."""
         ...

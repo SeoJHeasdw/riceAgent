@@ -26,6 +26,7 @@ def tools(runner: "SubAgentRunner") -> list[tuple[ToolSpec, BuiltinTool]]:
             max_chars=int(args.get("max_chars") or 8_000),
             turn_view=turn_view,
             tool_names=tool_names,
+            web_search_enabled=turn_view.web_search_enabled if turn_view is not None else True,
         )
         return result.to_dict()
 

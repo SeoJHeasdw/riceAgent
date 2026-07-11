@@ -57,6 +57,7 @@ def now_iso() -> str:
 # Conversation primitives
 # ─────────────────────────────────────────────────────────────────────────────
 Role = Literal["user", "assistant", "system", "tool"]
+ApprovalMode = Literal["ask", "approve_for_me", "full_access"]
 
 
 @dataclass(frozen=True)
@@ -86,6 +87,9 @@ class ToolSpec:
     owner_id: str | None = None
     # Whether a successful call needs HITL approval (RUNTIME_DESIGN §5).
     requires_approval: bool = False
+    # 웹 검색 토글이 꺼진 턴에서는 이 spec 자체를 LLM/서브에이전트 도구 표면에서
+    # 제외한다. 이름 하드코딩 대신 선언이 capability를 소유한다.
+    is_web_tool: bool = False
     # 같은 라운드의 다른 도구와 동시 실행해도 안전한가 — ToolScheduler의 병렬 배치
     # 판정 근거. False = 상태를 변경하거나 사용자 가시 효과를 스테이징하는 도구
     # (write_file/edit_file/terminal/propose_skill 등)로, 모델 호출 순서대로 직렬

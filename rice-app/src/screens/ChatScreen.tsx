@@ -10,7 +10,7 @@ import { defaultModelSettings } from '../lib/mockData';
 import { RUN_SKILL_EVENT, NEW_CHAT_EVENT, openCommandPalette } from '../lib/commandBridge';
 import { api } from '../lib/api';
 import { sseClient } from '../lib/sse';
-import type { PatchTrigger, PendingApproval, PlanUpdatedEventData, ToolApprovalRequiredData, SkillPatchProposedData, MemoryWrittenEventData, SSEEvent } from '../lib/types';
+import type { ApprovalMode, PatchTrigger, PendingApproval, PlanUpdatedEventData, ToolApprovalRequiredData, SkillPatchProposedData, MemoryWrittenEventData, SSEEvent } from '../lib/types';
 import { Icon, Kbd, ResizeHandle, ConfirmDialog, Tooltip } from '../components/ui';
 import type { IconName } from '../components/ui/Icon';
 import { FileViewerProvider } from '../lib/fileViewer/FileViewerProvider';
@@ -234,6 +234,8 @@ const SkillsPopover: React.FC<{
   onInsert: (command: string) => void;
   onClose: () => void;
   onManage: () => void;
+  webSearchEnabled: boolean;
+  onWebSearchChange: (enabled: boolean) => void;
   /** Called when the user presses Escape — lets the parent return focus to the composer */
   onEscape?: () => void;
   /** Pre-fill the search box (used when triggered by inline "/" typing) */
@@ -241,7 +243,7 @@ const SkillsPopover: React.FC<{
   /** When true the popover is triggered inline — suppress the outside-click close
    *  on the textarea itself so the user can keep typing to filter */
   inlineMode?: boolean;
-}> = ({ onInsert, onClose, onManage, onEscape, initialQuery = '', inlineMode = false }) => {
+}> = ({ onInsert, onClose, onManage, webSearchEnabled, onWebSearchChange, onEscape, initialQuery = '', inlineMode = false }) => {
   const { skills, installed } = useLearning();
   const ref = useRef<HTMLDivElement>(null);
   const [q, setQ] = useState(initialQuery);
@@ -438,6 +440,25 @@ const SkillsPopover: React.FC<{
 
       {/* Body */}
       <div ref={listRef} className="max-h-[332px] overflow-y-auto pb-1">
+        <div className="mx-2 mb-1 flex items-center gap-2.5 rounded-lg border border-border-subtle-01 bg-layer-01 px-2.5 py-2">
+          <span className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md ${webSearchEnabled ? 'bg-blue-60/15 text-blue-30' : 'bg-layer-02 text-icon-secondary'}`}>
+            <Icon name="search" size={14} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="text-caption-01 font-medium text-text-primary">웹 검색 허용</div>
+            <div className="truncate text-label-micro text-text-helper">이 대화의 다음 요청부터 적용</div>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={webSearchEnabled}
+            aria-label="웹 검색 허용"
+            onClick={() => onWebSearchChange(!webSearchEnabled)}
+            className={`relative h-[18px] w-8 flex-shrink-0 rounded-full transition-colors ${webSearchEnabled ? 'bg-interactive' : 'bg-layer-03 ring-1 ring-inset ring-border-strong-01'}`}
+          >
+            <span className={`absolute top-0.5 h-3.5 w-3.5 rounded-full bg-white shadow-elevation-1 transition-[left] ${webSearchEnabled ? 'left-4' : 'left-0.5'}`} />
+          </button>
+        </div>
         {empty && (
           <div className="flex flex-col items-center gap-1.5 px-3 py-6 text-center">
             <Icon name="search" size={18} className="text-icon-secondary opacity-50" />
@@ -552,6 +573,132 @@ const SkillsPopover: React.FC<{
           to { opacity: 1; transform: none; }
         }
       `}</style>
+    </div>
+  );
+};
+
+const APPROVAL_OPTIONS: Array<{
+  value: ApprovalMode;
+  label: string;
+  description: string;
+  icon: IconName;
+}> = [
+  {
+    value: 'ask',
+    label: 'Ask for approval',
+    description: '파일 변경과 외부 도구 실행 전에 항상 확인합니다.',
+    icon: 'lock',
+  },
+  {
+    value: 'approve_for_me',
+    label: 'Approve for me',
+    description: '일반 작업은 자동 승인하고 위험 가능성이 있는 동작만 묻습니다.',
+    icon: 'check-circle',
+  },
+  {
+    value: 'full_access',
+    label: 'Full access',
+    description: '승인 카드 없이 허용된 도구를 바로 실행합니다.',
+    icon: 'warning',
+  },
+];
+
+/** Codex-style per-turn approval policy selector. Tool cards remain unchanged;
+ * this only decides whether an approval gate is automatic or interactive. */
+const ApprovalModePicker: React.FC<{
+  value: ApprovalMode;
+  open: boolean;
+  onToggle: () => void;
+  onClose: () => void;
+  onChange: (value: ApprovalMode) => void;
+}> = ({ value, open, onToggle, onClose, onChange }) => {
+  const ref = useRef<HTMLDivElement>(null);
+  const selected = APPROVAL_OPTIONS.find((option) => option.value === value) ?? APPROVAL_OPTIONS[0];
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) onClose();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [onClose, open]);
+
+  const fullAccess = value === 'full_access';
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className={`flex h-6 items-center gap-1.5 rounded-full border px-2 text-label-micro font-medium transition-colors ${
+          fullAccess
+            ? 'border-yellow-50/35 bg-yellow-50/10 text-yellow-30 hover:bg-yellow-50/15'
+            : open
+              ? 'border-interactive/40 bg-interactive/15 text-blue-30'
+              : 'border-border-subtle-01 text-text-secondary hover:bg-layer-hover-01 hover:text-text-primary'
+        }`}
+      >
+        <Icon name={selected.icon} size={12} />
+        {selected.label}
+        <Icon name={open ? 'chevron-up' : 'chevron-down'} size={10} className="opacity-70" />
+      </button>
+
+      {open && (
+        <div
+          role="listbox"
+          aria-label="도구 승인 방식"
+          className="absolute bottom-full left-0 z-40 mb-2 w-[340px] max-w-[calc(100vw-40px)] overflow-hidden rounded-lg border border-border-subtle-01 bg-layer-02/95 p-1.5 shadow-elevation-2 backdrop-blur-md"
+          style={{ animation: 'popoverIn 140ms cubic-bezier(0.16, 1, 0.3, 1)' }}
+        >
+          <div className="flex items-center gap-2 px-2 pb-1.5 pt-1">
+            <span className="text-caption-01 font-semibold text-text-primary">실행 권한</span>
+            <span className="ml-auto text-label-micro text-text-helper">다음 요청부터 적용</span>
+          </div>
+          {APPROVAL_OPTIONS.map((option) => {
+            const active = value === option.value;
+            const danger = option.value === 'full_access';
+            return (
+              <button
+                key={option.value}
+                type="button"
+                role="option"
+                aria-selected={active}
+                onClick={() => {
+                  onChange(option.value);
+                  onClose();
+                }}
+                className={`relative flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors ${
+                  active ? 'bg-layer-selected-01' : 'hover:bg-layer-hover-02'
+                }`}
+              >
+                {active && <span className={`absolute bottom-2 left-0 top-2 w-0.5 rounded-full ${danger ? 'bg-yellow-30' : 'bg-interactive'}`} />}
+                <span className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md ${
+                  danger ? 'bg-yellow-50/10 text-yellow-30' : active ? 'bg-blue-60/15 text-blue-30' : 'bg-layer-01 text-icon-secondary'
+                }`}>
+                  <Icon name={option.icon} size={14} />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-caption-01 font-medium text-text-primary">{option.label}</span>
+                  <span className="block truncate text-label-micro leading-4 text-text-helper">{option.description}</span>
+                </span>
+                {active && <Icon name="check" size={14} className={`flex-shrink-0 ${danger ? 'text-yellow-30' : 'text-link-primary'}`} />}
+              </button>
+            );
+          })}
+          <div className="mx-2 mt-1 border-t border-border-subtle-01 px-0.5 pb-0.5 pt-1.5 text-label-micro leading-4 text-text-helper">
+            차단한 도구와 스킬 변경 승인은 이 설정과 별도로 유지됩니다.
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -740,6 +887,23 @@ function ChatScreen() {
   const [learningPanelOpen, setLearningPanelOpen] = useState(true);
   const [settingsPanelOpen, setSettingsPanelOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
+  const [approvalMenuOpen, setApprovalMenuOpen] = useState(false);
+  const [approvalMode, setApprovalMode] = useState<ApprovalMode>(() => {
+    try {
+      const saved = window.localStorage.getItem('rice.chat.approvalMode');
+      if (saved === 'ask' || saved === 'approve_for_me' || saved === 'full_access') return saved;
+    } catch {
+      // localStorage can be unavailable in hardened browser contexts.
+    }
+    return 'ask';
+  });
+  const [webSearchEnabled, setWebSearchEnabled] = useState(() => {
+    try {
+      return window.localStorage.getItem('rice.chat.webSearchEnabled') !== 'false';
+    } catch {
+      return true;
+    }
+  });
   // "이 대화를 스킬로 저장" 팝오버 — 선택 instruction 입력 후 /learn 스트림 시작
   const [learnOpen, setLearnOpen] = useState(false);
   const [learnInstruction, setLearnInstruction] = useState('');
@@ -756,6 +920,22 @@ function ChatScreen() {
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('rice.chat.approvalMode', approvalMode);
+    } catch {
+      // The selection still applies for this mounted app session.
+    }
+  }, [approvalMode]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('rice.chat.webSearchEnabled', String(webSearchEnabled));
+    } catch {
+      // Keep the in-memory selection when persistence is unavailable.
+    }
+  }, [webSearchEnabled]);
 
   // composer 자동 높이 — 내용만큼 자라고 max-h(200px)에서 내부 스크롤로 전환
   useEffect(() => {
@@ -1113,7 +1293,7 @@ function ChatScreen() {
       }
       return [...p.slice(0, end), { kind: 'thinking', duration: '', text: '', streaming: true, startedAt: Date.now() }];
     });
-    streamHandleRef.current = sseClient.regenerate(sessionId, buildStreamHandlers(sessionId, requestId));
+    streamHandleRef.current = sseClient.regenerate(sessionId, approvalMode, webSearchEnabled, buildStreamHandlers(sessionId, requestId));
   };
 
   // ── live-turn thread reducers (multi-round: thinking ↔ tool ↔ approval ↔ answer) ──
@@ -1167,11 +1347,12 @@ function ChatScreen() {
   // Deltas can arrive as either tiny character trickles or large bursts. Rendering
   // them verbatim makes the text shimmer; draining by a fixed, bounded chunk gives
   // a calmer reading rhythm while a short buffer groups one-character trickles.
-  const answerRef = useRef<{ sessionId: string; target: string; shown: number; active: boolean; lastFeedAt: number }>({
+  const answerRef = useRef<{ sessionId: string; target: string; shown: number; active: boolean; complete: boolean; lastFeedAt: number }>({
     sessionId: '',
     target: '',
     shown: 0,
     active: false,
+    complete: false,
     lastFeedAt: 0,
   });
   const answerTimerRef = useRef<number | null>(null);
@@ -1186,6 +1367,15 @@ function ChatScreen() {
   const pumpTick = () => {
     const a = answerRef.current;
     if (a.shown >= a.target.length) {
+      if (a.active && a.complete) {
+        updateThreadFor(a.sessionId, (p) => {
+          const copy = [...p];
+          const idx = copy.map((block) => block.kind).lastIndexOf('agent');
+          if (idx >= 0) copy[idx] = { ...(copy[idx] as Extract<ThreadMessage, { kind: 'agent' }>), streaming: false };
+          return copy;
+        });
+        a.active = false;
+      }
       stopAnswerPump();
       return;
     }
@@ -1205,7 +1395,7 @@ function ChatScreen() {
       // segment in full at its original spot and stop; a new segment starts fresh.
       const idx = copy.map((b) => b.kind).lastIndexOf('agent');
       if (idx >= 0) {
-        copy[idx] = { ...(copy[idx] as { kind: 'agent'; text: string }), text: a.target };
+        copy[idx] = { ...(copy[idx] as { kind: 'agent'; text: string }), text: a.target, streaming: false };
         stopAnswerPump();
         a.active = false;
         return copy;
@@ -1226,8 +1416,9 @@ function ChatScreen() {
       a.sessionId = sessionId;
       a.target = '';
       a.shown = 0;
+      a.complete = false;
       a.lastFeedAt = Date.now();
-      updateThreadFor(sessionId, (p) => [...p, { kind: 'agent', text: '', sentAt: Date.now() }]);
+      updateThreadFor(sessionId, (p) => [...p, { kind: 'agent', text: '', streaming: true, sentAt: Date.now() }]);
     }
     if (typeof d.content === 'string') a.target = d.content;
     else a.target += d.delta ?? '';
@@ -1247,15 +1438,26 @@ function ChatScreen() {
       updateThreadFor(a.sessionId, (p) => {
         const copy = [...p];
         const idx = copy.map((b) => b.kind).lastIndexOf('agent');
-        if (idx >= 0) copy[idx] = { ...(copy[idx] as { kind: 'agent'; text: string }), text };
+        if (idx >= 0) copy[idx] = { ...(copy[idx] as { kind: 'agent'; text: string }), text, streaming: false };
         return copy;
       });
     }
     a.active = false;
     a.target = '';
     a.shown = 0;
+    a.complete = false;
     a.lastFeedAt = 0;
     stopAnswerPump();
+  };
+
+  // Network `done` can arrive while the visual typewriter still has a tail.
+  // Mark Markdown stable only after that tail has drained, so incomplete table
+  // rows remain buffered instead of flashing as pipe-delimited prose.
+  const finishAnswerStream = (sessionId: string) => {
+    const a = answerRef.current;
+    if (!a.active || a.sessionId !== sessionId) return;
+    a.complete = true;
+    ensureAnswerPump();
   };
 
   // Lift the in-progress answer buffer as the rationale for an imminent tool call
@@ -1271,6 +1473,7 @@ function ChatScreen() {
     a.active = false;
     a.target = '';
     a.shown = 0;
+    a.complete = false;
     a.lastFeedAt = 0;
     stopAnswerPump();
     return text || null;
@@ -1281,7 +1484,7 @@ function ChatScreen() {
   // about to replace.
   const resetLiveRender = () => {
     stopAnswerPump();
-    answerRef.current = { sessionId: '', target: '', shown: 0, active: false, lastFeedAt: 0 };
+    answerRef.current = { sessionId: '', target: '', shown: 0, active: false, complete: false, lastFeedAt: 0 };
   };
 
   // Stop the pump if the component unmounts mid-stream.
@@ -1506,6 +1709,7 @@ function ChatScreen() {
       } else if (e.type === 'done') {
         // NOTE: no sealAnswer() here — let the typewriter finish its tail smoothly
         // after the network is done (that trailing type-out is the desired feel).
+        finishAnswerStream(sessionId);
         finalizeThinking(sessionId);
         finishLiveTurn(sessionId, requestId);
         const sid = sessionId;
@@ -1599,7 +1803,7 @@ function ChatScreen() {
     if (!sessionId) return;
     runningSessionIdRef.current = sessionId;
     setWorkProgress({ sessionId });
-    streamHandleRef.current = sseClient.streamText(sessionId, q, buildStreamHandlers(sessionId, requestId));
+    streamHandleRef.current = sseClient.streamText(sessionId, q, approvalMode, webSearchEnabled, buildStreamHandlers(sessionId, requestId));
   };
 
   // Open a DB-backed session: load its persisted messages and make it the live
@@ -2083,6 +2287,8 @@ function ChatScreen() {
                   onClose={() => setSkillsOpen(false)}
                   onEscape={() => composerRef.current?.focus()}
                   onManage={() => { setSkillsOpen(false); manageFromPopover(); }}
+                  webSearchEnabled={webSearchEnabled}
+                  onWebSearchChange={setWebSearchEnabled}
                   initialQuery={inlineQuery}
                   inlineMode
                 />
@@ -2144,33 +2350,47 @@ function ChatScreen() {
                   className="w-full resize-none border-none outline-none bg-transparent text-text-primary text-body-short-02 leading-5 px-4 pt-3.5 pb-1 min-h-[56px] max-h-[200px]"
                 />
                 <div className="flex items-center gap-1.5 px-2.5 pb-2.5">
-                  <Tooltip label="파일 첨부 · 준비 중">
-                    <button
-                      type="button"
-                      disabled
-                      aria-label="파일 첨부 (준비 중)"
-                      className="p-1.5 rounded-lg text-icon-secondary opacity-40 cursor-not-allowed"
-                    >
-                      <Icon name="attachment" size={16} />
-                    </button>
-                  </Tooltip>
                   <div className="relative">
-                    <button
-                      onClick={() => setSkillsOpen((o) => !o)}
-                      className={`flex items-center gap-1.5 px-2.5 h-7 rounded-full border text-caption-01 transition-colors ${
+                    <Tooltip label="스킬·도구 추가">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setApprovalMenuOpen(false);
+                          setSkillsOpen((o) => !o);
+                        }}
+                        aria-label="스킬·도구 추가"
+                        className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
                         skillsOpen
-                          ? 'bg-interactive/15 border-interactive/40 text-blue-30'
-                          : 'border-border-subtle-01 text-text-secondary hover:bg-layer-hover-01 hover:text-text-primary'
-                      }`}
-                    >
-                      <Icon name="skill" size={14} /> 스킬·도구
-                      <Icon name={skillsOpen ? 'chevron-up' : 'chevron-down'} size={12} />
-                    </button>
+                            ? 'bg-interactive/15 text-blue-30'
+                            : 'text-icon-secondary hover:bg-layer-hover-01 hover:text-icon-primary'
+                        }`}
+                      >
+                        <Icon name="add" size={15} />
+                      </button>
+                    </Tooltip>
                     {/* Button-triggered popover — only when NOT in inline "/" mode */}
                     {skillsOpen && !isInlineSlash && (
-                      <SkillsPopover onInsert={insertSkill} onClose={() => setSkillsOpen(false)} onEscape={() => composerRef.current?.focus()} onManage={manageFromPopover} />
+                      <SkillsPopover
+                        onInsert={insertSkill}
+                        onClose={() => setSkillsOpen(false)}
+                        onEscape={() => composerRef.current?.focus()}
+                        onManage={manageFromPopover}
+                        webSearchEnabled={webSearchEnabled}
+                        onWebSearchChange={setWebSearchEnabled}
+                      />
                     )}
                   </div>
+                  <ApprovalModePicker
+                    value={approvalMode}
+                    open={approvalMenuOpen}
+                    onToggle={() => {
+                      setSkillsOpen(false);
+                      setLearnOpen(false);
+                      setApprovalMenuOpen((open) => !open);
+                    }}
+                    onClose={() => setApprovalMenuOpen(false)}
+                    onChange={setApprovalMode}
+                  />
                   {connected && liveSessionId.current && (
                     <div className="relative">
                       <Tooltip label="이 대화를 스킬로 저장">
@@ -2239,7 +2459,7 @@ function ChatScreen() {
                     <button
                       onClick={() => (busy ? stopTurn() : send())}
                       disabled={!busy && !command && !draft.trim()}
-                      className={`w-8 h-8 rounded-full flex items-center justify-center transition-opacity duration-150 ${
+                      className={`w-7 h-7 rounded-full flex items-center justify-center transition-opacity duration-150 ${
                         busy
                           ? 'bg-layer-02 hover:bg-layer-hover-02 border border-border-subtle-01 cursor-pointer'
                           : command || draft.trim()
@@ -2248,7 +2468,7 @@ function ChatScreen() {
                       }`}
                       style={!busy && (command || draft.trim()) ? { background: 'var(--gradient-skill)' } : undefined}
                     >
-                      <Icon name={busy ? 'close' : 'send'} size={16} className={busy ? 'text-text-primary' : 'text-white'} />
+                      <Icon name={busy ? 'close' : 'send'} size={13} className={busy ? 'text-text-primary' : 'text-white'} />
                     </button>
                   </Tooltip>
                 </div>

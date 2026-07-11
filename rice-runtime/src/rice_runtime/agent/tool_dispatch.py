@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Protocol, cast
 
@@ -34,6 +35,7 @@ from ..connector.interfaces import IConnectorService
 from ..core import lexical
 from ..core.types import (
     ApprovalRequest,
+    ApprovalMode,
     SSEEvent,
     ToolCall,
     ToolResult,
@@ -47,6 +49,24 @@ from ..execution.interfaces import IPluginLoader
 from .interfaces import IApprovalGate, TurnView
 
 log = logging.getLogger("rice.agent.dispatch")
+
+# "Approve for me"는 워크스페이스 안의 일반 파일/문서 작성을 자동 승인하되,
+# 임의 셸·외부 시스템·파괴/게시 성격의 동작은 계속 사람에게 묻는다. 이름 패턴은
+# 새 builtin이 추가돼도 위험 동사가 조용히 자동 승인되지 않게 하는 보수적 안전망이다.
+_ELEVATED_TOOL_NAME_RE = re.compile(
+    r"(?:^|[._-])(terminal|shell|exec|execute|delete|remove|destroy|drop|truncate|send|publish|deploy|purchase|payment|admin)(?:$|[._-])",
+    re.IGNORECASE,
+)
+
+
+def _is_potentially_unsafe(call: ToolCall, spec: ToolSpec) -> bool:
+    if spec.source in {"connector", "plugin"}:
+        return True
+    if _ELEVATED_TOOL_NAME_RE.search(call.tool_name):
+        return True
+    # terminal은 이름 검사로 잡히지만, 브릿지/별칭 도구가 command를 직접 받을 때도
+    # 셸 실행을 고위험으로 취급한다.
+    return isinstance(call.arguments.get("command"), str)
 
 class SessionBuiltinTool(Protocol):
     """Builtin callable that needs the current session id.
@@ -188,11 +208,15 @@ class ToolDispatcher:
         approval_timeout_s: int,
         builtins: dict[str, BuiltinTool] | None = None,
         folded_catalog: dict[str, ToolSpec] | None = None,
+        approval_mode: ApprovalMode = "ask",
+        web_search_enabled: bool = True,
     ) -> None:
         self._connectors = connectors
         self._plugins = plugins
         self._approvals = approvals
         self._approval_timeout_s = approval_timeout_s
+        self._approval_mode = approval_mode
+        self._web_search_enabled = web_search_enabled
         self._builtins = builtins or {}
         # connector+plugin 도구 전체(접혔든 아니든) — bridge 도구(tool_search/describe/call)가
         # 이름으로 찾는 대상. fold_tools_for_budget 이 실제로 접었을 때만 쓰이게 되지만,
@@ -205,7 +229,12 @@ class ToolDispatcher:
         self._turn_view: TurnView | None = None
 
     def set_turn_view(self, view: TurnView) -> None:
-        self._turn_view = view
+        self._turn_view = TurnView(
+            user_message=view.user_message,
+            plan=view.plan,
+            turn_messages=view.turn_messages,
+            web_search_enabled=self._web_search_enabled,
+        )
 
     async def dispatch(self, session_id: str, call: ToolCall, spec: ToolSpec) -> AsyncIterator[SSEEvent]:
         yield ev_tool_call(call)
@@ -232,7 +261,12 @@ class ToolDispatcher:
             yield ev_tool_result(res)
             return
 
-        if policy == "approval":
+        needs_approval = policy == "approval" and (
+            self._approval_mode == "ask"
+            or (self._approval_mode == "approve_for_me" and _is_potentially_unsafe(call, spec))
+        )
+
+        if needs_approval:
             req = ApprovalRequest(
                 kind="tool_approval",
                 payload={"tool_name": call.tool_name, "arguments": call.arguments},
