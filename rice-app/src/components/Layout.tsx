@@ -58,16 +58,9 @@ export const Layout: React.FC<LayoutProps> = ({
           <span className="text-body-short-01 font-semibold text-white select-none">
             RICE
           </span>
-          <button
-            type="button"
-            onClick={openCommandPalette}
-            className="electron-no-drag ml-auto flex h-7 items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 text-caption-01 text-shell-muted transition-colors duration-150 hover:bg-white/[0.07] hover:text-white"
-            aria-label="빠른 실행 열기"
-          >
-            <Icon name="search" size={13} />
-            <span>빠른 실행</span>
-            <Kbd className="border-white/10 bg-white/[0.06] text-shell-muted">⌘K</Kbd>
-          </button>
+          <span className="text-caption-01 text-text-helper select-none">
+          Runtime Intelligence & Continuous Evolution
+          </span>
         </header>
       )}
 

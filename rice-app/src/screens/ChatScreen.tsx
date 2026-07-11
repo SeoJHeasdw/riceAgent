@@ -2547,20 +2547,20 @@ function ChatScreen() {
           <button
             type="button"
             onClick={() => setSessionSidebarOpen((o) => !o)}
-            className="electron-no-drag flex h-7 w-7 items-center justify-center rounded-md text-icon-secondary hover:bg-layer-hover-01 hover:text-icon-primary transition-colors"
+            className="electron-no-drag flex h-6 w-6 items-center justify-center rounded-md text-icon-secondary hover:bg-layer-hover-01 hover:text-icon-primary transition-colors"
             aria-label={sessionSidebarOpen ? '대화 목록 접기' : '대화 목록 펼치기'}
             title={sessionSidebarOpen ? '대화 목록 접기' : '대화 목록 펼치기'}
           >
-            <Icon name="sidebar" size={18} />
-          </button>
+            <Icon name="sidebar" size={17} />
+          </button> 
           <Tooltip label="빠른 실행 (⌘K)">
             <button
               type="button"
               onClick={openCommandPalette}
-              className="electron-no-drag flex h-7 w-7 items-center justify-center rounded-md text-icon-secondary transition-colors hover:bg-layer-hover-01 hover:text-icon-primary"
+              className="electron-no-drag flex h-6 w-6 items-center justify-center rounded-md text-icon-secondary transition-colors hover:bg-layer-hover-01 hover:text-icon-primary"
               aria-label="빠른 실행 열기"
             >
-              <Icon name="search" size={16} />
+              <Icon name="search" size={17} />
             </button>
           </Tooltip>
         </div>
