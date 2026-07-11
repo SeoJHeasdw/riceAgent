@@ -168,10 +168,16 @@ class AgentLoop:
         agent_config: AgentConfig | None = None,
         max_output_tokens: int | None = None,
         profile: OrchestrationProfile | None = None,
+        show_thinking: bool = True,
     ) -> None:
         self._provider = provider
         self._dispatcher = dispatcher
         self._temperature = temperature
+        # 모델의 reasoning(thinking) 트레이스를 클라이언트로 흘려보낼지(로컬 LLM
+        # 전용 토글, orchestrator가 kind로 게이팅). False면 thinking SSE 이벤트와
+        # assistant 메타데이터 트레이스를 모두 억제한다 — 모델은 계속 추론하되
+        # (도구 사용 품질·소형 모델 안정성 유지) 사용자에게는 노출하지 않는다.
+        self._show_thinking = show_thinking
         self._context_manager = context_manager
         # 실측 usage 피드백 + 컨텍스트 길이 초과 시 재압축 재시도용
         self._calibrator = token_calibrator
@@ -357,7 +363,12 @@ class AgentLoop:
                             break
                         if chunk.kind == "thinking" and chunk.text:
                             thinking_parts.append(chunk.text)
-                            yield ev_thinking(chunk.text)
+                            # 스트림 노출이 꺼져 있으면(로컬 + show_thinking=False)
+                            # thinking 이벤트를 클라이언트로 보내지 않는다. parts는
+                            # 계속 모은다 — 아래 빈-답변 방어(도구만/침묵 라운드 판정)에
+                            # 여전히 필요하기 때문. 억제는 방출 지점에서만 한다.
+                            if self._show_thinking:
+                                yield ev_thinking(chunk.text)
                         elif chunk.kind == "text" and chunk.text:
                             assistant_parts.append(chunk.text)
                             yield ev_message(delta=chunk.text)
@@ -403,7 +414,10 @@ class AgentLoop:
             # Stash this round's reasoning on the assistant message so it persists
             # for trace reconstruction on reload. Providers ignore metadata when
             # assembling history, so the model never re-sees stale thinking.
-            thinking_text = "".join(thinking_parts)
+            # show_thinking=False면 트레이스를 히스토리에도 남기지 않는다 — 리로드
+            # 시 assistant 메타데이터로도 클라이언트에 건너가지 않도록(백엔드가
+            # 노출 여부의 단일 권위). 라이브 억제(위)와 짝을 이룬다.
+            thinking_text = "".join(thinking_parts) if self._show_thinking else ""
             metadata: dict = {"thinking": thinking_text} if thinking_text else {}
             if pending_plan_meta is not None:
                 # 계획 생성 스냅샷은 턴의 첫 어시스턴트 메시지에 1회 부착(리로드 복원용).

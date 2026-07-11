@@ -73,6 +73,12 @@ class ProviderConfig:
     # settings panel and saves (PUT /settings). The app shows the mandatory
     # model-onboarding flow while this is False, then trusts the saved provider.
     configured: bool = False
+    # Local LLM 전용: 모델의 reasoning(thinking) 트레이스를 대화 스트림으로
+    # 내보낼지. False면 AgentLoop이 thinking SSE 이벤트와 assistant 메타데이터
+    # 트레이스를 모두 억제한다 — 모델은 계속 추론하되(소형 모델 안정성 유지)
+    # 클라이언트로는 한 조각도 흘려보내지 않는다. SaaS provider(Claude 등)에는
+    # 적용하지 않는다(항상 노출): 게이트는 orchestrator가 kind로 판별한다.
+    show_thinking: bool = True
 
 
 @dataclass(frozen=True)

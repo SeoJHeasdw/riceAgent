@@ -918,8 +918,8 @@ function ChatScreen() {
   // 등록 모델·키는 런타임 state.db(SQLite)에 저장된다 — 연결 시 GET /settings로 복원.
   const [modelSettings, setModelSettings] = useState(() => {
     try {
-      const saved = window.localStorage.getItem('rice.chat.thinkingVisible');
-      return { ...defaultModelSettings, thinkingVisible: saved == null ? true : saved === 'true' };
+      const saved = window.localStorage.getItem('rice.chat.showThinking');
+      return { ...defaultModelSettings, showThinking: saved == null ? true : saved === 'true' };
     } catch {
       return defaultModelSettings;
     }
@@ -982,7 +982,7 @@ function ChatScreen() {
     setModelSettings(settings);
     setModelMode(mode);
     try {
-      window.localStorage.setItem('rice.chat.thinkingVisible', String(settings.thinkingVisible));
+      window.localStorage.setItem('rice.chat.showThinking', String(settings.showThinking));
     } catch {
       // 메모리 상태는 현재 앱 세션 동안 계속 적용된다.
     }
@@ -1000,6 +1000,10 @@ function ChatScreen() {
           temperature: settings.temperature,
           base_url: mode === 'local' ? settings.endpoint ?? null : null,
           configured: true,
+          // 로컬 LLM의 thinking 스트림 노출 토글 — 백엔드가 이 값으로 thinking
+          // SSE·메타데이터를 게이팅한다(SaaS는 kind로 무시). 프론트 표시 필터와
+          // 짝을 이뤄 백엔드가 노출의 단일 권위가 된다.
+          show_thinking: settings.showThinking,
         },
         registered_models: settings.registeredModels,
       });
@@ -1062,7 +1066,7 @@ function ChatScreen() {
     void api.getSettings().then(async (res) => {
       if (cancelled || !res.success) return;
       const data = res.data as {
-        provider?: { kind?: string; model?: string; base_url?: string; temperature?: number; configured?: boolean };
+        provider?: { kind?: string; model?: string; base_url?: string; temperature?: number; configured?: boolean; show_thinking?: boolean };
         registered_models?: RegisteredModel[];
       };
       const prov = data?.provider;
@@ -1077,7 +1081,17 @@ function ChatScreen() {
           registeredModels: registered,
           ...(prov.base_url ? { endpoint: prov.base_url } : {}),
           ...(prov.temperature !== undefined ? { temperature: prov.temperature } : {}),
+          // thinking 스트림 노출은 백엔드 config가 단일 권위 — 저장된 값으로 복원
+          // (없으면 이전 localStorage 시드 유지).
+          ...(prov.show_thinking !== undefined ? { showThinking: prov.show_thinking } : {}),
         }));
+        if (prov.show_thinking !== undefined) {
+          try {
+            window.localStorage.setItem('rice.chat.showThinking', String(prov.show_thinking));
+          } catch {
+            // 메모리 상태는 이번 앱 세션 동안 계속 적용된다.
+          }
+        }
 
         // Local 모드일 때만: 설정된 모델이 실제 Ollama에 남아 있는지 확인
         if (prov.kind === 'ollama' && prov.model) {
@@ -2246,7 +2260,7 @@ function ChatScreen() {
                       highlightIndex={highlightMsg}
                       actionsCopyAt={actionsCopyAt}
                       actionsTimeAt={actionsTimeAt}
-                      showThinking={modelMode !== 'local' || modelSettings.thinkingVisible}
+                      showThinking={modelMode !== 'local' || modelSettings.showThinking}
                     />
                   ))
                 )}

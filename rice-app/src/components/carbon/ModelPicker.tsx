@@ -41,8 +41,9 @@ export interface ModelSettings {
   endpoint?: string;
   userModelingEnabled: boolean;
   localStorageOnly: boolean;
-  /** Local LLM이 보내는 thinking trace를 대화 화면에 표시할지 여부 */
-  thinkingVisible: boolean;
+  /** Local LLM이 보내는 thinking trace를 대화 화면에 표시(스트리밍)할지 여부.
+   * 백엔드 provider config의 show_thinking과 짝(카멜/스네이크). */
+  showThinking: boolean;
 }
 
 /** 모델 식별용 경량 타입 (현재는 SaaS 등록 모델 렌더에만 사용) */
@@ -447,7 +448,7 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
                 </div>
               </div>
 
-              <Params localSettings={localSettings} setLocalSettings={setLocalSettings} showThinking />
+              <Params localSettings={localSettings} setLocalSettings={setLocalSettings} local />
             </>
           )}
         </>
@@ -543,12 +544,13 @@ const EmptyState: React.FC<{
   </div>
 );
 
-/* ── Local 응답 설정 (temperature + thinking 표시) ── */
+/* ── Local 응답 설정 (temperature + Show Thinking) ── */
 const Params: React.FC<{
   localSettings: ModelSettings;
   setLocalSettings: React.Dispatch<React.SetStateAction<ModelSettings>>;
-  showThinking?: boolean;
-}> = ({ localSettings, setLocalSettings, showThinking = false }) => (
+  /** Local 모드에서만 Show Thinking 토글을 노출한다(reasoning trace는 로컬 전용). */
+  local?: boolean;
+}> = ({ localSettings, setLocalSettings, local = false }) => (
   <div>
     <div className="text-label-01 text-text-secondary mb-2">응답 설정</div>
     <div className="space-y-4">
@@ -579,12 +581,12 @@ const Params: React.FC<{
       </div>
 
       {/* Local 모델의 reasoning trace는 비용과 무관하지만 사용자가 화면 노출을 선택한다. */}
-      {showThinking && (
+      {local && (
         <div className="border-t border-border-subtle-01 pt-3">
           <Toggle
-            checked={localSettings.thinkingVisible}
-            onChange={(thinkingVisible) => setLocalSettings({ ...localSettings, thinkingVisible })}
-            label="Thinking 표시"
+            checked={localSettings.showThinking}
+            onChange={(showThinking) => setLocalSettings({ ...localSettings, showThinking })}
+            label="Show Thinking"
             description="로컬 모델의 추론 과정을 대화에서 확인합니다"
           />
         </div>

@@ -309,6 +309,72 @@ class _EmptyAfterToolProvider:
             yield ProviderChunk(kind="done", stop_reason="end_turn")
 
 
+class _ThinkingProvider:
+    """thinking 델타 → 본문 → done. show_thinking 게이팅 검증용."""
+
+    name = "fake"
+
+    def capabilities(self):
+        return ProviderCapabilities(native_tool_calling=True)
+
+    async def stream(self, *, system, messages, tools=(), temperature=0.7, **_):
+        yield ProviderChunk(kind="thinking", text="reasoning trace")
+        yield ProviderChunk(kind="text", text="visible answer")
+        yield ProviderChunk(kind="done", stop_reason="end_turn")
+
+
+def _loop_with(provider, *, show_thinking: bool) -> AgentLoop:
+    async def echo(args):
+        return {"ok": True}
+
+    dispatcher = ToolDispatcher(
+        connectors=_NoopService(),
+        plugins=_NoopService(),
+        approvals=ApprovalRegistry(),
+        approval_timeout_s=1,
+        builtins={"echo": echo},
+    )
+    return AgentLoop(provider=provider, dispatcher=dispatcher, show_thinking=show_thinking)
+
+
+@pytest.mark.asyncio
+async def test_show_thinking_on_emits_and_persists_trace():
+    from rice_runtime.core.types import EventType
+
+    result = LoopResult()
+    events = [
+        ev
+        async for ev in _loop_with(_ThinkingProvider(), show_thinking=True).run(
+            _loop_ctx(), "s1", result, asyncio.Event()
+        )
+    ]
+    thinking_evs = [e for e in events if e.type == EventType.THINKING]
+    assert [e.data["text"] for e in thinking_evs] == ["reasoning trace"]
+    assistant = next(m for m in result.history if m.role == "assistant")
+    assert assistant.metadata.get("thinking") == "reasoning trace"
+    assert result.final_message == "visible answer"
+
+
+@pytest.mark.asyncio
+async def test_show_thinking_off_suppresses_events_and_metadata():
+    from rice_runtime.core.types import EventType
+
+    result = LoopResult()
+    events = [
+        ev
+        async for ev in _loop_with(_ThinkingProvider(), show_thinking=False).run(
+            _loop_ctx(), "s1", result, asyncio.Event()
+        )
+    ]
+    # 클라이언트로 thinking이 한 조각도 새지 않는다 — 라이브 이벤트도, 히스토리
+    # 메타데이터도 없다. 모델은 계속 추론하되 노출만 백엔드에서 차단된다.
+    assert [e for e in events if e.type == EventType.THINKING] == []
+    assistant = next(m for m in result.history if m.role == "assistant")
+    assert "thinking" not in assistant.metadata
+    # 본문은 정상적으로 스트리밍·확정된다.
+    assert result.final_message == "visible answer"
+
+
 @pytest.mark.asyncio
 async def test_loop_nudges_empty_answer_after_tool_use():
     provider = _EmptyAfterToolProvider()

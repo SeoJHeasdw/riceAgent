@@ -41,7 +41,7 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
 
   // 저장 의미 있는 변경 여부:
   // mode 전환이나 "로컬 모델 확인" 같은 탐색 행위는 제외하고,
-  // 실제로 저장될 값(modelId · registeredModels · temperature · endpoint · thinking 표시)이
+  // 실제로 저장될 값(modelId · registeredModels · temperature · endpoint · Show Thinking)이
   // 패널을 열 때의 초기값과 달라졌을 때만 dirty로 판단한다.
   const savedModelId = useRef(currentModel);
   const savedSettings = useRef(settings);
@@ -56,7 +56,7 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
     const b = savedSettings.current;
     const paramsChanged =
       a.temperature !== b.temperature ||
-      a.thinkingVisible !== b.thinkingVisible ||
+      a.showThinking !== b.showThinking ||
       (a.endpoint ?? '') !== (b.endpoint ?? '');
     const registeredChanged =
       a.registeredModels.length !== b.registeredModels.length ||

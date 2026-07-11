@@ -397,6 +397,10 @@ class Orchestrator:
                 # 로컬이면 출력 예약도 창 대비 클램프 — 입력 예산 확대의 한 쌍.
                 max_output_tokens=effective_max_output_tokens(cfg, profile),
                 profile=profile,
+                # thinking 스트림 노출은 로컬 LLM 전용 토글(show_thinking)이 정한다.
+                # SaaS(claude 등)는 항상 노출 — 프론트의 표시 규칙과 동일하게 kind로
+                # 게이팅해, 로컬에서 끈 값이 SaaS 전환 후 잘못 새는 것을 막는다.
+                show_thinking=cfg.provider.kind != "ollama" or cfg.provider.show_thinking,
             )
             result = LoopResult()
             # Ollama uses this outer lease to stay loaded throughout planner +

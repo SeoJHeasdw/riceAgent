@@ -14,7 +14,7 @@ export const defaultModelSettings: ModelSettings = {
   endpoint: 'http://localhost:11434',
   userModelingEnabled: true,
   localStorageOnly: false,
-  thinkingVisible: true,
+  showThinking: true,
 };
 
 // Skill categories
