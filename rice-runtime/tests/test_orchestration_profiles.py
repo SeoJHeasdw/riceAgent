@@ -375,12 +375,32 @@ def test_effective_context_config_clamps_to_model_window():
         context=ContextConfig(max_tokens=96_000, retained_tokens=64_000),
     )
     clamped = effective_context_config(cfg, LOCAL_PROFILE)
-    assert clamped.max_tokens == 32_768 - 16_384 - 1_024
+    # 입력 예산은 클램프된 출력 예약(num_ctx/4 = 8192)으로 역산한다 — 예전처럼
+    # 16K 출력 예약이 창의 절반을 먹으면 실효 입력이 15K뿐이라 4~5턴 만에 압축
+    # 모드에 진입했다(KV 캐시 붕괴의 유발자).
+    assert clamped.max_tokens == 32_768 - 8_192 - 1_024
     assert clamped.retained_tokens <= clamped.max_tokens
     # frontier(클램프 off)와 SaaS provider는 그대로
     assert effective_context_config(cfg, FRONTIER_PROFILE).max_tokens == 96_000
     saas = Config(provider=ProviderConfig(kind="claude", model="m"), context=cfg.context)
     assert effective_context_config(saas, LOCAL_PROFILE).max_tokens == 96_000
+
+
+def test_effective_max_output_tokens_clamps_local_only():
+    from rice_runtime.agent.orchestrator import effective_max_output_tokens
+
+    cfg = Config(
+        provider=ProviderConfig(kind="ollama", model="m", num_ctx=32_768, max_output_tokens=16_384)
+    )
+    assert effective_max_output_tokens(cfg, LOCAL_PROFILE) == 8_192  # num_ctx // 4
+    assert effective_max_output_tokens(cfg, FRONTIER_PROFILE) == 16_384
+    # 이미 예약이 작으면 건드리지 않는다 / 작은 창에서도 최소 4K는 보장한다
+    small = Config(provider=ProviderConfig(kind="ollama", model="m", num_ctx=32_768, max_output_tokens=4_096))
+    assert effective_max_output_tokens(small, LOCAL_PROFILE) == 4_096
+    tiny_ctx = Config(provider=ProviderConfig(kind="ollama", model="m", num_ctx=8_192, max_output_tokens=16_384))
+    assert effective_max_output_tokens(tiny_ctx, LOCAL_PROFILE) == 4_096
+    saas = Config(provider=ProviderConfig(kind="claude", model="m", max_output_tokens=16_384))
+    assert effective_max_output_tokens(saas, LOCAL_PROFILE) == 16_384
 
 
 def test_recent_tool_outputs_get_distillation_relief():

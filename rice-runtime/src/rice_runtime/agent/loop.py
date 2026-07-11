@@ -192,8 +192,12 @@ class AgentLoop:
             return None, system_prompt, tuple(messages)
         cm = self._context_manager
         if budget_scale != 1.0:
+            # state를 공유한다: 축소 예산에서 새로 뜬 압축 체크포인트가 세션
+            # 상태에 남아, 재시도 이후 라운드들도 같은(더 빡빡한) 스냅샷 위에
+            # append만 하게 된다 — 컨텍스트 길이 에러의 재발과 프리픽스 재계산을
+            # 동시에 줄인다.
             cm = ConversationContextManager(
-                cm.config, estimate=cm.estimate_fn, budget_scale=budget_scale
+                cm.config, estimate=cm.estimate_fn, budget_scale=budget_scale, state=cm.state
             )
         rendered = cm.render(system_prompt, tuple(messages))
         return rendered, rendered.system_prompt, rendered.history

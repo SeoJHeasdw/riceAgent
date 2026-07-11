@@ -108,7 +108,16 @@ class TokenCalibrator:
         if heuristic_estimate <= 0 or actual_tokens <= 0:
             return
         observed = actual_tokens / heuristic_estimate
-        observed = max(_RATIO_MIN, min(_RATIO_MAX, observed))
+        if observed < _RATIO_MIN:
+            # 프리픽스 KV 캐시 히트: Ollama의 prompt_eval_count(Claude의
+            # input_tokens도 동일)는 캐시에서 재사용된 프리픽스를 빼고 새로
+            # 평가한 토큰만 센다 — 전체 컨텍스트의 실측이 아니다. 이를 하한으로
+            # 클램프해 EMA에 넣으면 비율이 _RATIO_MIN으로 끌려가 예산이 반토막
+            # 과소평가되고, 초과분을 Ollama가 소리 없이 앞에서 자른다. 설계상
+            # 실제 토크나이저 비율은 [_RATIO_MIN, _RATIO_MAX] 안이므로 하한 미만
+            # 관측은 캐시 아티팩트로 보고 통째로 버린다.
+            return
+        observed = min(_RATIO_MAX, observed)
         with self._lock:
             if self._samples == 0:
                 self._ratio = observed

@@ -96,6 +96,10 @@ async def delete_session(session_id: str, c: Container = Depends(get_container))
     # FK 오류로 죽는다(orchestrator.abort_and_drain docstring 참고).
     await c.agent.abort_and_drain(session_id)
     c.sessions.delete(session_id)
+    # 세션 행이 사라진 뒤 오케스트레이터의 세션 스코프 런타임 메모리(동결 렌더
+    # 스냅샷)도 함께 걷는다 — LRU 축출을 기다리며 죽은 트랜스크립트 사본을
+    # 들고 있을 이유가 없다.
+    c.agent.release_session(session_id)
     return {"success": True}
 
 

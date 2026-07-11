@@ -58,10 +58,15 @@ def test_context_manager_masks_distills_and_compresses():
     assert rendered.stats.did_apply_management is True
     assert rendered.stats.omitted_messages > 0
     assert rendered.stats.distilled_tool_outputs >= 1
-    assert "Compressed Conversation Context" in rendered.system_prompt
-    assert "[REDACTED]" in rendered.system_prompt
+    # 압축 요약은 시스템이 아니라 히스토리 선두의 synthetic 메시지다(프리픽스
+    # 캐시 불변식) — 시스템 프롬프트는 렌더가 절대 건드리지 않는다.
+    assert rendered.system_prompt == "sys"
+    summary = rendered.history[0]
+    assert summary.metadata.get("synthetic") == "context_summary"
+    assert "Compressed Conversation Context" in summary.content
+    assert "[REDACTED]" in summary.content
     assert rendered.history[-1].content == "recent question"
-    assert rendered.history[0].role != "tool"  # no orphaned provider tool_result prefix
+    assert all(m.role != "tool" for m in rendered.history[:1])  # no orphaned tool_result prefix
 
 
 def test_context_manager_skips_oversized_middle_message_without_breaking_scan():
@@ -80,8 +85,9 @@ def test_context_manager_skips_oversized_middle_message_without_breaking_scan():
 
     rendered = ConversationContextManager(cfg).render("sys", messages)
 
-    assert [m.content for m in rendered.history] == ["older but still useful", "latest"]
-    assert "Compressed Conversation Context" in rendered.system_prompt
+    real = [m for m in rendered.history if m.metadata.get("synthetic") != "context_summary"]
+    assert [m.content for m in real] == ["older but still useful", "latest"]
+    assert "Compressed Conversation Context" in rendered.history[0].content
 
 
 def test_context_manager_does_not_summarize_wire_repair_drops():
@@ -102,8 +108,103 @@ def test_context_manager_does_not_summarize_wire_repair_drops():
 
     rendered = ConversationContextManager(cfg).render("", messages)
 
-    assert [m.role for m in rendered.history] == ["user"]
+    real = [m for m in rendered.history if m.metadata.get("synthetic") != "context_summary"]
+    assert [m.role for m in real] == ["user"]
+    # wire 수리로 떨어진 도구 결과는 요약에 실리지 않는다(생략과 삭제는 다른 사건).
+    assert all("tool result call_1" not in m.content for m in rendered.history)
     assert "tool result call_1" not in rendered.system_prompt
+
+
+# ── 프리픽스 캐시 불변식 (context_manager ★, 2026-07-11) ─────────────────────
+
+
+def _filler(i: int) -> Message:
+    return Message(role="user", content=f"filler message {i} " + "pad " * 40)
+
+
+_PREFIX_CFG = ContextConfig(
+    max_tokens=600,
+    retained_tokens=200,
+    recent_messages=2,
+    summary_tokens=80,
+    message_threshold_tokens=10_000,
+    tool_output_threshold_tokens=10_000,
+)
+
+
+def test_render_prefix_stable_across_appended_rounds():
+    from rice_runtime.agent.context_manager import ContextRenderState
+
+    state = ContextRenderState()
+    base = [_filler(i) for i in range(20)]  # ≈980tok > 600 → 압축 발동
+    r1 = ConversationContextManager(_PREFIX_CFG, state=state).render("sys", tuple(base))
+    assert r1.history[0].metadata.get("synthetic") == "context_summary"
+
+    # 다음 라운드/턴: 같은 세션 상태, 새 매니저(턴 경계 시뮬레이션) + 라운드 append
+    call = ToolCall(tool_name="lookup", arguments={}, id="call_n")
+    appended = base + [
+        Message(role="assistant", content="", tool_calls=(call,)),
+        Message(role="tool", content="ok", metadata={"tool_call_id": "call_n"}),
+    ]
+    r2 = ConversationContextManager(_PREFIX_CFG, state=state).render("sys", tuple(appended))
+
+    # 프리픽스 불변: r2는 r1의 렌더 결과 그대로로 시작한다(id·본문 동일) — 이게
+    # Ollama KV/Claude prompt cache가 히트하는 조건이다. 요약 재계산 금지.
+    prefix = r2.history[: len(r1.history)]
+    assert [(m.id, m.content) for m in prefix] == [(m.id, m.content) for m in r1.history]
+    assert [m.id for m in r2.history[len(r1.history) :]] == [m.id for m in appended[-2:]]
+
+
+def test_rendered_form_frozen_when_recency_window_slides():
+    from rice_runtime.agent.context_manager import ContextRenderState
+
+    cfg = ContextConfig(
+        max_tokens=100_000,
+        recent_messages=2,
+        tool_output_threshold_tokens=50,
+        tool_output_retained_tokens=30,
+    )
+    state = ContextRenderState()
+    mid = "y" * 400  # 임계(50tok) 초과, 최근 3배 완화(150tok) 안
+    call = ToolCall(tool_name="lookup", arguments={}, id="c1")
+    asst = Message(role="assistant", content="", tool_calls=(call,))
+    tool_msg = Message(role="tool", content=mid, metadata={"tool_call_id": "c1"})
+    tail = Message(role="user", content="check")
+    r1 = ConversationContextManager(cfg, state=state).render("sys", (asst, tool_msg, tail))
+    assert tool_msg.id not in r1.stats.distilled_message_ids  # 최근 → 원문 유지
+
+    # recency 창 밖으로 밀려나도 동결된 원문 형태가 유지된다(창 슬라이딩이
+    # 라운드마다 프리픽스를 깨던 요인 제거 — hysteresis).
+    more = (asst, tool_msg, tail, Message(role="user", content="a"), Message(role="user", content="b"))
+    r2 = ConversationContextManager(cfg, state=state).render("sys", more)
+    assert tool_msg.id not in r2.stats.distilled_message_ids
+    assert r2.history[1].content == mid
+
+    # 대조군: 상태를 공유하지 않는 새 세션이면 같은 입력이 증류된다
+    r3 = ConversationContextManager(cfg).render("sys", more)
+    assert tool_msg.id in r3.stats.distilled_message_ids
+
+
+def test_checkpoint_refreshes_only_when_budget_reexceeded():
+    from rice_runtime.agent.context_manager import ContextRenderState
+
+    state = ContextRenderState()
+    base = [_filler(i) for i in range(20)]
+    cm = ConversationContextManager(_PREFIX_CFG, state=state)
+    r1 = cm.render("sys", tuple(base))
+    summary1 = r1.history[0]
+    assert summary1.metadata.get("synthetic") == "context_summary"
+
+    # 예산 안의 append는 동결 스냅샷 유지 — 요약 id·본문이 그대로다
+    grown = base + [Message(role="user", content="small follow-up")]
+    r2 = cm.render("sys", tuple(grown))
+    assert (r2.history[0].id, r2.history[0].content) == (summary1.id, summary1.content)
+
+    # 예산을 다시 넘기면 그때 딱 한 번 새 체크포인트로 갈아탄다(새 요약 id)
+    grown2 = grown + [_filler(100 + i) for i in range(10)]
+    r3 = cm.render("sys", tuple(grown2))
+    assert r3.history[0].metadata.get("synthetic") == "context_summary"
+    assert r3.history[0].id != summary1.id
 
 
 @pytest.mark.asyncio

@@ -60,6 +60,19 @@ class TestTokenEstimation:
         c = TokenCalibrator()
         assert c.estimate("hello world") == estimate_tokens("hello world")
 
+    def test_calibrator_ignores_cache_hit_artifacts(self):
+        # KV 캐시 히트 시 Ollama prompt_eval_count는 새로 프리필한 suffix만 센다
+        # — 전체 대비 비율이 하한(0.5) 미만인 관측은 실측이 아니라 캐시
+        # 아티팩트이므로 통째로 무시해야 한다(EMA 오염 방지).
+        c = TokenCalibrator()
+        c.observe(10_000, 120)  # 캐시 히트: 새 tail 120토큰만 평가됨
+        assert c.samples == 0
+        assert c.ratio == 1.0
+        # 정상 범위 관측은 여전히 학습된다
+        c.observe(10_000, 8_000)
+        assert c.samples == 1
+        assert 0.7 < c.ratio < 0.9
+
     def test_context_length_error_detection(self):
         assert is_context_length_error(Exception("prompt is too long: 300000 tokens > 200000"))
         assert is_context_length_error(Exception("This model's maximum context length is 200000"))

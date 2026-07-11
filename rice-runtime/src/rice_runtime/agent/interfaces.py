@@ -118,6 +118,12 @@ class IAgent(Protocol):
         land before the rows disappear. True = no turn/drained; False = timed out."""
         ...
 
+    def release_session(self, session_id: str) -> None:
+        """Drop per-session runtime memory (render state 등) after the session's
+        rows are deleted — 삭제된 세션의 동결 렌더 스냅샷이 LRU에서 밀려날 때까지
+        남아있지 않게 하는 위생 훅. idempotent, 존재하지 않는 세션이면 no-op."""
+        ...
+
 
 @runtime_checkable
 class IToolDispatcher(Protocol):

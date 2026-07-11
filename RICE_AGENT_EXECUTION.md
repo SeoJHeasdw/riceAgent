@@ -391,16 +391,38 @@ Drift guard(§3.3)는 프롬프트로 재평가를 *권유*할 뿐이다. 계획
    ReAct 재검증 관찰이 접히면 "검증했다"가 착각이 된다. 방금의 관찰은 원문에
    가깝게, 오래된 관찰은 공격적으로.
 3. **압축(compression)** — 전체가 `max_tokens`(기본 96K)를 넘으면 오래된 메시지를
-   시스템 프롬프트의 `Compressed Conversation Context` 요약 블록으로 접고, 최근
-   `recent_messages`(기본 8)개는 항상 보호한다. **local 프로파일은 예산 자체가
+   `Compressed Conversation Context` 요약으로 접고, 최근 `recent_messages`(기본
+   8)개는 항상 보호한다. 요약은 **히스토리 선두의 synthetic user 메시지**로
+   실린다(2026-07-11 — 이전에는 시스템 프롬프트 끝에 붙어 매 라운드 프롬프트
+   최선두부터 달라졌다; 아래 프리픽스 동결 참고). **local 프로파일은 예산 자체가
    모델 창에서 역산·클램프된다**(§10) — 예산이 num_ctx보다 크면 Ollama가 프롬프트
    앞부분(시스템·도구 스키마)을 소리 없이 자르기 때문이다.
 4. **wire repair** — 압축이 tool_call↔tool_result 인접성을 깨면 고아 조각을
-   정리한다(Claude/OpenAI/Ollama 모두 인접성 제약이 있다).
+   정리한다(Claude/OpenAI/Ollama 모두 인접성 제약이 있다). 매 렌더 최종 시퀀스
+   위에서 도는 순수 함수라 append-only 시퀀스에선 프리픽스가 안정적이다.
 5. **감사(audit)** — 렌더마다 어떤 메시지가 요약으로 대체됐고(omitted), 무엇이
    wire 수리로 조용히 빠졌는지(dropped) id 단위로 `ContextRenderStats`에 남고,
    턴 종료 시 learning ledger에 `context_rendered` 이벤트로 영속화된다.
    "모델이 정확히 뭘 못 봤는가"를 제품이 설명할 수 있어야 한다.
+
+**프리픽스 동결 (2026-07-11, ★불변식의 컨텍스트 매니저 확장)**: 렌더는 결정을
+기억한다(`ContextRenderState`, 세션 스코프 — orchestrator가 세션별 LRU로 보관·
+주입). 실측 진단(qwen3 27b): 4~5턴부터 매 라운드 prefill만 101~132초 — 압축
+요약·증류 형태가 라운드마다 미세하게 달라져 17K+ 토큰 전체가 re-prefill되던 것.
+
+- **형태 동결**: 한 번 렌더된 메시지의 마스킹/증류 형태는 `forms` 캐시에 동결 —
+  recency 창이 밀리거나 캘리브레이터 비율이 흔들려도 이미 렌더된 프리픽스는
+  변하지 않는다(hysteresis). ephemeral 메시지(plan_status tail)는 캐시 제외.
+- **체크포인트 압축**: 압축은 예산을 넘는 순간에만 요약·생략 집합을 새로 계산해
+  동결한다(그 1회만 프리픽스가 깨짐). 이후 렌더는 동결 스냅샷에 새 라운드를
+  append만 한다 — `max_tokens`↔`retained_tokens` 사이 headroom이 자연 hysteresis
+  밴드라, 재압축 주기는 라운드가 아니라 "headroom을 다 쓴 시점"이다. 컨텍스트
+  길이 초과 재시도(0.45배 예산)가 뜬 더 빡빡한 체크포인트도 같은 세션 상태에
+  남아 이후 라운드가 재활용한다.
+- **캘리브레이터 오염 가드**: 프리픽스 캐시 히트 시 Ollama `prompt_eval_count`는
+  새로 평가한 suffix만 세므로, 휴리스틱 대비 비율이 하한(0.5) 미만인 관측은
+  캐시 아티팩트로 보고 버린다 — EMA가 하한으로 끌려가 예산이 과소평가되는
+  것을 막는다(`core/tokens.py`).
 
 **토큰 추정**: CJK 인식 휴리스틱(`core/tokens.py`)으로 시작해, 프로바이더가
 보고하는 실측 input_tokens로 세션 내내 보정된다(`TokenCalibrator`). 컨텍스트 길이
@@ -671,13 +693,25 @@ local, SaaS(claude/openai/watsonx) → frontier. `agent.orchestration_profile`�
 
 - **프리픽스 KV 캐시 (Ollama)**: 서버는 직전 요청과의 최장 공통 프리픽스를
   재사용한다. 이를 깨지 않는 것은 어댑터가 아니라 **렌더링 규율**의 몫 —
-  시스템 프롬프트 턴 내 불변 + 동적 상태 tail(§3.1). divergence가 tail로
-  국한되면 반복당 re-prefill이 전체가 아니라 마지막 라운드 분량이 된다.
+  시스템 프롬프트 턴 내 불변 + 동적 상태 tail(§3.1) + 압축·증류 결정의
+  세션 스코프 동결(§4 프리픽스 동결). divergence가 tail로 국한되면 반복당
+  re-prefill이 전체가 아니라 마지막 라운드 분량이 된다.
 - **`num_ctx` 명시** (`provider.num_ctx`, 기본 32768): 미지정 시 서버 기본
   (대개 4096)이 적용돼 96K 예산의 컨텍스트가 **앞에서부터** 잘린다 — 시스템
   프롬프트·도구 스키마가 먼저 죽는 조용한 대참사(서사 미출력·도구 오호출의
-  근본 원인 중 하나). local 프로파일은 예산을 `num_ctx - max_output_tokens -
-  margin`으로 클램프해 잘림을 컨텍스트 매니저의 지능적 압축으로 바꾼다.
+  근본 원인 중 하나). local 프로파일은 예산을 `num_ctx - max_output - margin`
+  으로 클램프해 잘림을 컨텍스트 매니저의 지능적 압축으로 바꾼다.
+- **출력 예약 클램프 (2026-07-11)**: local 프로파일은 `max_output_tokens`를
+  `min(설정값, max(4096, num_ctx/4))`로 클램프한다
+  (`orchestrator.py::effective_max_output_tokens`). 기본 16K 예약은 32K 창의
+  절반을 먹어 실효 입력 예산이 15.3K뿐이었다 — 4~5턴이면 압축 모드에 진입해
+  프리픽스 캐시가 깨지던 유발자. 클램프 후 입력 예산은 23.5K로, 압축 발동
+  자체가 늦춰진다.
+- **캐시 관측성 (2026-07-11)**: done 응답의 `prompt_eval_count/duration`,
+  `eval_count/duration`, `load_duration`을 INFO 로그로 남긴다
+  (`ollama.py::_log_done_stats`). prefill 토큰 수가 새 tail 분량(수십~수백)이면
+  캐시 히트, 컨텍스트 전체(수천~수만)면 미스 — "130초 thinking"이 재로드인지
+  re-prefill인지 로그 한 줄로 즉답한다.
 - **`keep_alive`** (`provider.keep_alive`, 기본 30m): 턴 중엔 매 호출이 타이머를
   리프레시하지만, 승인 대기(기본 300s)·턴 사이 간격에서 모델이 내려가면 다음
   호출이 콜드 리로드(수십 초)를 문다.
@@ -694,3 +728,10 @@ local, SaaS(claude/openai/watsonx) → frontier. `agent.orchestration_profile`�
 추가로 **rolling breakpoint**를 히스토리 마지막 블록에 찍는다(공식 multi-turn
 패턴) — 반복 i+1이 반복 i까지의 대화를 cache read로 가져온다. SDK 클라이언트도
 인스턴스 수명 동안 재사용한다.
+
+**usage 합산 (2026-07-11)**: Anthropic의 `usage.input_tokens`는 캐시 프리픽스를
+제외한 비캐시 분량만 세므로, done 청크에는 `input_tokens + cache_creation_
+input_tokens + cache_read_input_tokens` 합산치를 싣는다 — 캐시 히트가 잦아질수록
+(위 rolling cache + §4 프리픽스 동결의 효과) 단독 값은 전체의 극소가 되어
+TokenCalibrator의 하한 가드에 전부 버려지고 보정이 멈추기 때문. 합산하면 캐시
+적중과 무관하게 "이 프롬프트의 전체 실측"이 유지된다.

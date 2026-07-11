@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import OrderedDict
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from typing import AsyncIterator, Callable
@@ -72,7 +73,7 @@ from ..core.tokens import TokenCalibrator
 from ..execution.interfaces import IPluginLoader
 from ..learning.interfaces import ILearningService
 from ..prompts.system import ACTION_RULES_EPILOGUE, compose_system_prompt
-from .context_manager import ConversationContextManager
+from .context_manager import ContextRenderState, ConversationContextManager
 from .effect_surfacing import surface_learning_effect
 from .interfaces import IApprovalGate, ITranscript
 from .loop import AgentLoop, LoopResult
@@ -85,6 +86,15 @@ log = logging.getLogger("rice.agent.orchestrator")
 
 # num_ctx 클램프 시 시스템/도구 스키마 밖 여유분(토큰) — 추정 오차 흡수용.
 _MODEL_WINDOW_MARGIN_TOKENS = 1_024
+
+# 로컬 프로파일의 출력 예약 하한/비율 — effective_max_output_tokens 참고.
+_LOCAL_MIN_OUTPUT_TOKENS = 4_096
+_LOCAL_OUTPUT_WINDOW_SHARE = 4  # num_ctx의 1/4
+
+# 세션별 렌더 상태(ContextRenderState) LRU 상한 — 데스크톱 단일 사용자 기준
+# 동시 활성 세션은 한 자릿수다. 넘치면 가장 오래 안 쓴 세션의 동결 스냅샷을
+# 버린다(다음 턴에 재파생될 뿐, 정합성 손실은 없다 — 프리픽스 캐시만 1회 깨진다).
+_RENDER_STATE_SESSIONS_MAX = 16
 
 
 @asynccontextmanager
@@ -103,20 +113,40 @@ async def _provider_activity(provider: ILLMProvider) -> AsyncIterator[None]:
         yield
 
 
+def effective_max_output_tokens(cfg: Config, profile: OrchestrationProfile) -> int:
+    """로컬 프로파일이면 출력 예약이 모델 창을 잠식하지 않게 클램프한다.
+
+    기본 max_output_tokens 16K는 num_ctx 32K의 절반을 출력 예약으로 먹어 실효
+    입력 예산을 15K로 쪼그라뜨렸다 — 4~5턴이면 압축 모드에 진입해 프리픽스
+    캐시가 깨지던 근본 유발자 중 하나. num_ctx의 1/4(최소 4K)로 잡으면 32K 창
+    기준 입력 예산이 15.3K → 23.5K로 늘어 압축 발동 자체가 늦춰진다. 로컬
+    모델의 실제 응답(서사+도구 JSON)은 8K를 넘는 일이 드물다."""
+    base = cfg.provider.max_output_tokens
+    if not profile.clamp_context_to_model_window or cfg.provider.kind != "ollama":
+        return base
+    num_ctx = int(getattr(cfg.provider, "num_ctx", 0) or 0)
+    if num_ctx <= 0:
+        return base
+    return min(base, max(_LOCAL_MIN_OUTPUT_TOKENS, num_ctx // _LOCAL_OUTPUT_WINDOW_SHARE))
+
+
 def effective_context_config(cfg: Config, profile: OrchestrationProfile) -> ContextConfig:
     """로컬 프로파일이면 컨텍스트 예산을 모델 창(num_ctx)에서 역산해 클램프한다.
 
     예산(기본 96K)이 모델 창(예: 32K)보다 크면 Ollama가 프롬프트 앞부분을 소리
     없이 잘라 시스템 프롬프트·도구 스키마부터 죽는다. 클램프는 그 잘림을
     컨텍스트 매니저의 지능적 압축(요약·증류·최근 보호)으로 바꾼다 — "무엇을
-    버릴지"를 서버의 우연이 아니라 런타임이 결정하게 한다."""
+    버릴지"를 서버의 우연이 아니라 런타임이 결정하게 한다. 역산에는 클램프된
+    출력 예약(effective_max_output_tokens)을 쓴다 — 입력·출력이 같은 창을
+    나눠 쓰므로 둘은 한 쌍이다."""
     ctx_cfg = cfg.context
     if not profile.clamp_context_to_model_window or cfg.provider.kind != "ollama":
         return ctx_cfg
     num_ctx = int(getattr(cfg.provider, "num_ctx", 0) or 0)
     if num_ctx <= 0:
         return ctx_cfg
-    input_budget = max(4_096, num_ctx - cfg.provider.max_output_tokens - _MODEL_WINDOW_MARGIN_TOKENS)
+    max_output = effective_max_output_tokens(cfg, profile)
+    input_budget = max(4_096, num_ctx - max_output - _MODEL_WINDOW_MARGIN_TOKENS)
     if input_budget >= ctx_cfg.max_tokens:
         return ctx_cfg
     return replace(
@@ -185,6 +215,9 @@ class Orchestrator:
         # 세션 전반에 걸쳐 토큰 추정을 실측으로 보정하는 싱글턴. None이면
         # 순수 CJK 휴리스틱만 쓴다(테스트/오프라인).
         self._token_calibrator = token_calibrator or TokenCalibrator()
+        # 세션별 렌더 상태(동결 형태 + 압축 체크포인트) — 턴 경계를 넘어 프리픽스
+        # 캐시를 지키는 세션 스코프 메모리(context_manager.py ★ 불변식). LRU 캡.
+        self._render_states: OrderedDict[str, ContextRenderState] = OrderedDict()
         self._aborts: dict[str, asyncio.Event] = {}
         # 세션별 진행 중 턴 락 — 같은 세션 동시 POST /messages 차단. 값은 "턴 종료"
         # 이벤트로, abort_and_drain 이 진행 중 턴이 실제로 끝날 때까지 기다리는 데
@@ -315,11 +348,13 @@ class Orchestrator:
                     # 앞부분 잘림 대신 여기서 지능적으로 압축한다.
                     effective_context_config(cfg, profile),
                     estimate=self._token_calibrator.estimate,
+                    state=self._render_state(session_id),
                 ),
                 token_calibrator=self._token_calibrator,
                 planner=planner,
                 agent_config=cfg.agent,
-                max_output_tokens=cfg.provider.max_output_tokens,
+                # 로컬이면 출력 예약도 창 대비 클램프 — 입력 예산 확대의 한 쌍.
+                max_output_tokens=effective_max_output_tokens(cfg, profile),
                 profile=profile,
             )
             result = LoopResult()
@@ -424,6 +459,25 @@ class Orchestrator:
             if abort is not None:
                 abort.set()
             self._approvals.cancel_session(session_id)
+
+    # ── session-scoped render state ──────────────────────────────────────────
+    def _render_state(self, session_id: str) -> ContextRenderState:
+        """이 세션의 렌더 상태를 LRU로 유지·반환한다. 상태 소실은 안전하다 —
+        다음 렌더가 스냅샷을 재파생하며 프리픽스 캐시만 1회 깨진다."""
+        state = self._render_states.pop(session_id, None)
+        if state is None:
+            state = ContextRenderState()
+        self._render_states[session_id] = state
+        while len(self._render_states) > _RENDER_STATE_SESSIONS_MAX:
+            self._render_states.popitem(last=False)
+        return state
+
+    # ── IAgent.release_session ───────────────────────────────────────────────
+    def release_session(self, session_id: str) -> None:
+        """세션 행 삭제 후 런타임 잔여물 정리(DELETE /sessions 라우트가 호출) —
+        동결 렌더 스냅샷이 죽은 세션의 트랜스크립트 사본을 LRU 축출 때까지
+        들고 있지 않게 한다."""
+        self._render_states.pop(session_id, None)
 
     # ── builtin tool catalog (override/extend in composition root) ───────────
     def _builtin_specs(self):

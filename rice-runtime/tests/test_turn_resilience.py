@@ -275,6 +275,38 @@ def test_claude_stop_sequence_maps_to_end_turn():
     assert _map_stop_reason(None) == "error"
 
 
+@pytest.mark.asyncio
+async def test_claude_input_tokens_include_cache_reads(monkeypatch):
+    """Anthropic usage.input_tokens는 캐시 프리픽스를 제외한 비캐시 분량만 센다 —
+    캘리브레이터에 보고하는 input_tokens는 cache_read/creation을 합산한 전체여야
+    한다. 아니면 rolling cache 히트마다 '전체 대비 극소' 관측이 생겨(=Ollama
+    prompt_eval_count의 캐시 아티팩트와 동일) 보정 신호가 통째로 버려진다."""
+
+    class _Usage:
+        input_tokens = 40
+        cache_creation_input_tokens = 1_000
+        cache_read_input_tokens = 8_000
+        output_tokens = None
+
+    fake_client = _FakeAnthropicClient(
+        [
+            _AnthropicEvent("message_start", message=type("Msg", (), {"usage": _Usage()})()),
+            _AnthropicEvent("content_block_delta", index=0, delta=_AnthropicDelta("text_delta", text="hi")),
+            _AnthropicEvent("message_delta", delta=_AnthropicDelta("", stop_reason="end_turn")),
+            _AnthropicEvent("message_stop"),
+        ]
+    )
+    monkeypatch.setattr("rice_runtime.agent.providers.claude._load_api_key", lambda: "k")
+    monkeypatch.setattr("anthropic.AsyncAnthropic", lambda **kwargs: fake_client)
+    provider = ClaudeProvider(ProviderConfig(kind="claude", model="claude-test"))
+
+    chunks = [c async for c in provider.stream(system="sys", messages=(Message(role="user", content="hi"),))]
+
+    done = chunks[-1]
+    assert done.kind == "done"
+    assert done.input_tokens == 40 + 1_000 + 8_000
+
+
 # ── OpenAI-compat usage 캡처 ──────────────────────────────────────────────────
 
 

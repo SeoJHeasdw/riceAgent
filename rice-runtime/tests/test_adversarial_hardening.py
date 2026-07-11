@@ -111,6 +111,9 @@ async def test_delete_session_drains_active_turn():
         assert not c.agent.is_active(s.id)
         assert c.sessions.get(s.id) is None
         assert len(c.sessions.history(s.id)) == 0
+        # 세션 스코프 렌더 상태(동결 스냅샷)도 함께 걷혔다 — 죽은 세션의
+        # 트랜스크립트 사본이 LRU 축출까지 잔류하지 않는다.
+        assert s.id not in c.agent._render_states
         await asyncio.wait_for(task, timeout=5)  # 소비자도 오류 없이 종료(done 수신)
         assert events and events[-1].type.value == "done"
     finally:

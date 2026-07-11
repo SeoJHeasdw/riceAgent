@@ -239,7 +239,18 @@ class ClaudeProvider(ILLMProvider):
                     if event_type == "message_start":
                         usage = getattr(getattr(event, "message", None), "usage", None)
                         if usage is not None:
-                            input_tokens = getattr(usage, "input_tokens", None)
+                            # Anthropic의 input_tokens는 캐시에서 읽은/새로 쓴 프리픽스를
+                            # **제외**한 비캐시 분량만 센다. 캘리브레이터에는 "이 프롬프트의
+                            # 전체 토큰"이 필요하므로 셋을 합산한다 — rolling cache가 히트할
+                            # 수록 input_tokens 단독은 전체의 극히 일부가 되어(Ollama의
+                            # prompt_eval_count와 같은 캐시 아티팩트) 보정 신호가 사라진다.
+                            base = getattr(usage, "input_tokens", None)
+                            if base is not None:
+                                input_tokens = (
+                                    base
+                                    + (getattr(usage, "cache_creation_input_tokens", None) or 0)
+                                    + (getattr(usage, "cache_read_input_tokens", None) or 0)
+                                )
                             output_tokens = getattr(usage, "output_tokens", None) or output_tokens
                     if event_type == "content_block_start":
                         block = event.content_block

@@ -5,13 +5,31 @@ management layer:
 
 * the durable transcript remains the source of truth;
 * every LLM call receives a rendered view of that transcript;
-* older pressure is compressed into a system-level summary;
+* older pressure is compressed into a summary message at the head of history;
 * tool output is masked/distilled before it is re-sent to the model;
 * recent tool-call adjacency is preserved so provider wire formats stay valid.
 
 It is intentionally smaller than Gemini's graph pipeline. RICE already has a
 clean orchestrator seam, so this module provides the same product behavior
 without importing a large graph engine before we need it.
+
+★ 프리픽스 캐시 불변식 (2026-07-11): 렌더는 **결정을 기억한다**. Ollama(및 Claude
+prompt cache)는 직전 요청과의 최장 공통 프리픽스만 재사용하므로, 라운드마다
+압축 요약·증류 형태가 조금씩 달라지면 매 호출 17K+ 토큰 전체가 re-prefill된다
+(실측 101~132초/호출 — "4~5턴부터 130초" 피드백의 근본 원인). 그래서:
+
+  1. 압축 요약은 시스템 프롬프트가 아니라 **히스토리 선두의 synthetic 메시지**다
+     — 시스템 프롬프트(프롬프트 최선두)는 턴 내 불변으로 남는다.
+  2. 한 번 렌더된 메시지 형태(원문/증류본/마스킹본)는 `ContextRenderState.forms`에
+     동결된다 — recency 창이 밀리거나 캘리브레이터 비율이 흔들려도 이미 렌더된
+     프리픽스는 바뀌지 않는다(hysteresis).
+  3. 압축은 **체크포인트**다: 예산을 넘는 순간에만 요약·생략 집합을 새로 계산해
+     동결하고(그 1회만 프리픽스가 깨진다), 이후 렌더는 동결된 스냅샷에 새 라운드를
+     append만 한다. 재압축은 다시 예산을 넘을 때까지 일어나지 않는다
+     (max_tokens ↔ retained_tokens 사이의 headroom이 자연 hysteresis 밴드).
+
+`ContextRenderState`는 세션 스코프다(orchestrator가 세션별로 보관·주입) — 턴
+경계에서도 동결이 유지돼 턴 시작의 전체 re-prefill을 막는다.
 """
 
 from __future__ import annotations
@@ -110,6 +128,39 @@ class RenderedContext:
     stats: ContextRenderStats
 
 
+@dataclass
+class _RenderedForm:
+    """한 메시지의 동결된 렌더 형태 — 마스킹/증류가 적용된 최종 본문."""
+
+    content: str
+    masked: bool
+    distilled: bool
+
+
+@dataclass(frozen=True)
+class _CompressionCheckpoint:
+    """동결된 압축 스냅샷. 다음 체크포인트까지 모든 렌더가 이 생략 집합과 요약을
+    그대로 재사용한다 — 요약 본문·생략 경계가 렌더 간 불변이어야 프리픽스 캐시가
+    산다. summary_id가 고정이라 요약 메시지는 wire 상 매 렌더 동일하다."""
+
+    omitted_ids: frozenset[str]
+    summary_content: str
+    summary_id: str
+
+
+class ContextRenderState:
+    """세션 스코프 렌더 메모리(모듈 docstring ★ 불변식의 저장소).
+
+    orchestrator가 세션별로 하나를 보관하고 매 턴 ConversationContextManager에
+    주입한다. 주지 않으면(테스트·sub-agent 1회성 렌더) 매니저가 사적 인스턴스를
+    만들어 기존의 무상태 동작과 동일해진다."""
+
+    def __init__(self) -> None:
+        self.forms: dict[str, _RenderedForm] = {}
+        self.checkpoint: _CompressionCheckpoint | None = None
+        self.checkpoint_seq: int = 0
+
+
 # Module-level estimators default to the CJK-aware heuristic (core.tokens). They
 # stay as free functions for back-compat with any direct importer; the class uses
 # its injected estimator (which may be calibration-backed) instead.
@@ -141,9 +192,11 @@ def estimate_context_tokens(
 class ConversationContextManager:
     """Render a bounded provider-facing context from the full transcript.
 
-    The manager is stateless across calls. That keeps the durable session history
-    untouched and lets the orchestrator create a fresh instance per turn from the
-    live config.
+    The durable session history stays untouched; the orchestrator creates a fresh
+    instance per turn from the live config, but injects a session-scoped
+    `ContextRenderState` so render *decisions* (frozen message forms + compression
+    checkpoint) survive across calls and turns — the prefix-cache invariant in the
+    module docstring.
 
     `estimate`: the token estimator used for all budgeting. Defaults
     to the CJK-aware heuristic; the orchestrator injects `TokenCalibrator.estimate`
@@ -158,10 +211,12 @@ class ConversationContextManager:
         *,
         estimate: Callable[[str], int] | None = None,
         budget_scale: float = 1.0,
+        state: ContextRenderState | None = None,
     ) -> None:
         self._config = config
         self._estimate = estimate or _cjk_estimate_tokens
         self._scale = budget_scale
+        self._state = state if state is not None else ContextRenderState()
 
     @property
     def config(self) -> ContextConfig:
@@ -170,6 +225,10 @@ class ConversationContextManager:
     @property
     def estimate_fn(self) -> Callable[[str], int]:
         return self._estimate
+
+    @property
+    def state(self) -> ContextRenderState:
+        return self._state
 
     def _msg_tokens(self, message: Message) -> int:
         return estimate_message_tokens(message, self._estimate)
@@ -194,23 +253,36 @@ class ConversationContextManager:
             return RenderedContext(system_prompt, tuple(messages), stats)
 
         managed, masked_ids, distilled_ids = self._manage_messages(messages)
-        managed, orphan_ids = self._drop_orphaned_tool_prefix(tuple(managed))
+        checkpoint = self._state.checkpoint
 
-        after_manage = self._ctx_tokens(system_prompt, managed)
-        omitted_ids: tuple[str, ...] = ()
-        dropped_msg_ids: list[str] = list(orphan_ids)
-        dropped_call_ids: list[str] = []
-        final_system = system_prompt
-        final_history = tuple(managed)
+        def _apply(msgs: list[Message], cp: _CompressionCheckpoint | None) -> tuple[Message, ...]:
+            return tuple(m for m in msgs if cp is None or m.id not in cp.omitted_ids)
 
-        if after_manage > self._limit(self._config.max_tokens):
-            final_system, final_history, omitted_ids, repair_msg_ids, repair_call_ids = (
-                self._compress_history(system_prompt, final_history)
-            )
-            dropped_msg_ids.extend(repair_msg_ids)
-            dropped_call_ids.extend(repair_call_ids)
+        # 동결된 체크포인트를 적용한 뷰가 예산을 넘는 순간에만 새 체크포인트를
+        # 뜬다(모듈 docstring ★ 3). 새 체크포인트는 형태 캐시도 현재 recency 창
+        # 기준으로 전면 재계산한다 — 어차피 프리픽스가 깨지는 지점이므로, 이때
+        # relief로 원문 유지되던 오래된 관찰들을 접어 예산을 회수한다.
+        assembled = self._assemble(_apply(managed, checkpoint), checkpoint)
+        if self._ctx_tokens(system_prompt, assembled) > self._limit(self._config.max_tokens):
+            managed, masked_ids, distilled_ids = self._manage_messages(messages, refresh=True)
+            checkpoint = self._build_checkpoint(system_prompt, tuple(managed))
+            self._state.checkpoint = checkpoint
+            self._prune_forms(messages)
 
-        after_tokens = self._ctx_tokens(final_system, final_history)
+        visible = _apply(managed, checkpoint)
+        visible, orphan_ids = self._drop_orphaned_tool_prefix(visible)
+        # wire 수리는 매 렌더 최종 시퀀스 위에서 돈다 — 순수 함수이고 블록 지역적
+        # 판정이라 append-only 시퀀스에선 프리픽스가 안정적이며, 체크포인트 생략이
+        # 도구 라운드 중간을 자른 경우의 고아 결과를 결정적으로 걷어낸다.
+        visible, repair_msg_ids, repair_call_ids = _repair_tool_adjacency(visible)
+        final_history = self._assemble(visible, checkpoint)
+
+        omitted_ids = (
+            tuple(m.id for m in messages if m.id in checkpoint.omitted_ids)
+            if checkpoint is not None
+            else ()
+        )
+        after_tokens = self._ctx_tokens(system_prompt, final_history)
         stats = ContextRenderStats(
             estimated_tokens_before=before_tokens,
             estimated_tokens_after=after_tokens,
@@ -226,53 +298,62 @@ class ConversationContextManager:
                 or len(final_history) != messages_before
             ),
             omitted_message_ids=omitted_ids,
-            dropped_message_ids=tuple(dropped_msg_ids),
-            dropped_tool_call_ids=tuple(dropped_call_ids),
+            dropped_message_ids=tuple(orphan_ids) + repair_msg_ids,
+            dropped_tool_call_ids=repair_call_ids,
             distilled_message_ids=distilled_ids,
             masked_message_ids=masked_ids,
         )
-        return RenderedContext(final_system, final_history, stats)
+        return RenderedContext(system_prompt, final_history, stats)
+
+    def _assemble(
+        self, visible: Sequence[Message], checkpoint: _CompressionCheckpoint | None
+    ) -> tuple[Message, ...]:
+        """압축 요약을 히스토리 **선두**의 synthetic user 메시지로 싣는다.
+
+        시스템 프롬프트에 붙이지 않는 이유(모듈 docstring ★ 1): 요약은 체크포인트
+        마다 변하는 텍스트라, 시스템에 실으면 프롬프트 최선두부터 달라져 전체가
+        re-prefill된다. role="user"인 이유: 히스토리 중간/선두 system은 Claude
+        wire에서 떨어져 나가고, 연속 user 메시지는 API가 한 턴으로 합쳐 허용된다
+        (loop.py의 plan_status tail과 같은 규칙)."""
+        if checkpoint is None or not checkpoint.summary_content:
+            return tuple(visible)
+        summary = Message(
+            role="user",
+            content=checkpoint.summary_content,
+            id=checkpoint.summary_id,
+            ts=0,  # 고정 — wire에 안 실리지만 렌더 간 동일 객체 의미를 유지한다
+            metadata={"synthetic": "context_summary", "ephemeral": True},
+        )
+        return (summary,) + tuple(visible)
 
     def _manage_messages(
-        self, messages: Sequence[Message]
+        self, messages: Sequence[Message], *, refresh: bool = False
     ) -> tuple[list[Message], tuple[str, ...], tuple[str, ...]]:
+        """마스킹/증류를 적용하되 형태는 **첫 렌더에 동결**한다(모듈 docstring ★ 2).
+
+        recency 창이 라운드마다 한 칸씩 밀리며 경계의 도구 출력이 원문→증류본으로
+        플립되던 것이 프리픽스를 깨던 요인 — 형태 캐시가 그 플립을 없앤다.
+        `refresh=True`(체크포인트 시점)면 현재 창 기준으로 전면 재계산해 캐시를
+        덮어쓴다. ephemeral 메시지(plan_status 등 렌더 사본 전용 tail)는 캐시하지
+        않는다 — id가 매 라운드 새로 발급돼 캐시만 불린다."""
         managed: list[Message] = []
         masked_ids: list[str] = []
         distilled_ids: list[str] = []
-        # ReAct 재검증 보호: 최근 메시지(마지막 recent_messages개)의 도구 출력은
-        # 증류 임계·보존량을 3배로 완화한다. 모델이 방금 만든 산출물을 read_file로
-        # 확인하는 관찰이 head/tail로 접히면 "검증했다"가 착각이 된다 — 방금의
-        # 관찰은 원문에 가깝게, 오래된 관찰은 공격적으로 접는다. 압축의 suffix
-        # 보호(recent_messages)와 같은 노브를 쓴다.
         recent_start = max(0, len(messages) - self._config.recent_messages)
+        forms = self._state.forms
         for i, message in enumerate(messages):
-            content = message.content
-            masked = _mask_secrets(content)
-            if masked != content:
+            ephemeral = bool(message.metadata.get("ephemeral"))
+            form = None if (refresh or ephemeral) else forms.get(message.id)
+            if form is None:
+                form = self._compute_form(message, recent=i >= recent_start)
+                if not ephemeral:
+                    forms[message.id] = form
+            if form.masked:
                 masked_ids.append(message.id)
-                content = masked
-
-            recency_relief = 3 if i >= recent_start else 1
-            if message.role == "tool" and self._estimate(content) > self._limit(
-                self._config.tool_output_threshold_tokens * recency_relief
-            ):
-                content = _distill_text(
-                    content,
-                    max_tokens=self._limit(self._config.tool_output_retained_tokens * recency_relief),
-                    label="tool output",
-                )
-                distilled_ids.append(message.id)
-            elif message.role != "tool" and self._estimate(content) > self._limit(
-                self._config.message_threshold_tokens
-            ):
-                content = _distill_text(
-                    content,
-                    max_tokens=self._limit(self._config.message_retained_tokens),
-                    label=f"{message.role} message",
-                )
+            if form.distilled:
                 distilled_ids.append(message.id)
 
-            if content == message.content:
+            if form.content == message.content:
                 managed.append(message)
             else:
                 metadata = {
@@ -285,7 +366,7 @@ class ConversationContextManager:
                 managed.append(
                     Message(
                         role=message.role,
-                        content=content,
+                        content=form.content,
                         id=message.id,
                         ts=message.ts,
                         tool_calls=message.tool_calls,
@@ -294,14 +375,49 @@ class ConversationContextManager:
                 )
         return managed, tuple(masked_ids), tuple(distilled_ids)
 
-    def _compress_history(
-        self, system_prompt: str, messages: tuple[Message, ...]
-    ) -> tuple[str, tuple[Message, ...], tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
-        """Returns (system, history, omitted_message_ids, wire-repair-dropped
-        message ids, wire-repair-dropped tool_call ids) — id 단위 감사가 목적
-        (ContextRenderStats docstring 참고)."""
-        if not messages:
-            return system_prompt, messages, (), (), ()
+    def _compute_form(self, message: Message, *, recent: bool) -> _RenderedForm:
+        # ReAct 재검증 보호: 최근 메시지(마지막 recent_messages개)의 도구 출력은
+        # 증류 임계·보존량을 3배로 완화한다. 모델이 방금 만든 산출물을 read_file로
+        # 확인하는 관찰이 head/tail로 접히면 "검증했다"가 착각이 된다 — 방금의
+        # 관찰은 원문에 가깝게, 오래된 관찰은 공격적으로 접는다. 압축의 suffix
+        # 보호(recent_messages)와 같은 노브를 쓴다.
+        content = message.content
+        masked_flag = False
+        masked = _mask_secrets(content)
+        if masked != content:
+            masked_flag = True
+            content = masked
+
+        recency_relief = 3 if recent else 1
+        distilled_flag = False
+        if message.role == "tool" and self._estimate(content) > self._limit(
+            self._config.tool_output_threshold_tokens * recency_relief
+        ):
+            content = _distill_text(
+                content,
+                max_tokens=self._limit(self._config.tool_output_retained_tokens * recency_relief),
+                label="tool output",
+            )
+            distilled_flag = True
+        elif message.role != "tool" and self._estimate(content) > self._limit(
+            self._config.message_threshold_tokens
+        ):
+            content = _distill_text(
+                content,
+                max_tokens=self._limit(self._config.message_retained_tokens),
+                label=f"{message.role} message",
+            )
+            distilled_flag = True
+        return _RenderedForm(content=content, masked=masked_flag, distilled=distilled_flag)
+
+    def _build_checkpoint(
+        self, system_prompt: str, managed: tuple[Message, ...]
+    ) -> _CompressionCheckpoint | None:
+        """예산 초과 시점의 압축 스냅샷을 새로 뜬다 — 렌더당 최대 1회, 이 지점만
+        프리픽스가 깨진다. 요약은 managed(마스킹/증류 적용) 형태 위에서 만든다:
+        시크릿이 요약으로 새지 않게 하는 기존 불변식 유지."""
+        if not managed:
+            return None
 
         target = self._limit(min(self._config.retained_tokens, self._config.max_tokens))
         retained: list[Message] = []
@@ -309,45 +425,39 @@ class ConversationContextManager:
 
         # Always protect a small suffix. This mirrors Gemini's recent-turn
         # protection and keeps the current tool-call adjacency intact.
-        protected_suffix = list(messages[-self._config.recent_messages :])
-        protected_ids = {m.id for m in protected_suffix}
+        protected_ids = {m.id for m in managed[-self._config.recent_messages :]}
 
-        for message in reversed(messages):
+        for message in reversed(managed):
             cost = self._msg_tokens(message)
             if message.id in protected_ids or retained_tokens + cost <= target:
                 retained.append(message)
                 retained_tokens += cost
-            else:
-                continue
 
-        retained.reverse()
-        retained_ids_before_wire_repair = {m.id for m in retained}
-        omitted = [m for m in messages if m.id not in retained_ids_before_wire_repair]
-        retained, dropped_msg_ids, dropped_call_ids = _repair_tool_adjacency(tuple(retained))
-        retained = list(retained)
-
+        retained_ids = {m.id for m in retained}
+        omitted = [m for m in managed if m.id not in retained_ids]
         if not omitted:
-            return system_prompt, tuple(retained), (), dropped_msg_ids, dropped_call_ids
+            # 압축할 것이 없다(전부 보호 suffix 안) — 예산 초과는 용인하고
+            # 프로바이더/재시도 경로에 맡긴다(기존 동작과 동일).
+            return None
 
         summary = _summarize_omitted(omitted, self._config.summary_tokens)
-        final_system = "\n\n".join(
-            part
-            for part in (
-                system_prompt.strip(),
+        self._state.checkpoint_seq += 1
+        return _CompressionCheckpoint(
+            omitted_ids=frozenset(m.id for m in omitted),
+            summary_content=(
                 "## Compressed Conversation Context\n"
                 "Older transcript messages were compressed to keep the active context bounded. "
                 "Use this summary as background, but rely on the retained recent messages for exact details.\n\n"
-                f"{summary}",
-            )
-            if part
+                f"{summary}"
+            ),
+            summary_id=f"ctx-summary-{self._state.checkpoint_seq}",
         )
-        return (
-            final_system,
-            tuple(retained),
-            tuple(m.id for m in omitted),
-            dropped_msg_ids,
-            dropped_call_ids,
-        )
+
+    def _prune_forms(self, messages: Sequence[Message]) -> None:
+        """체크포인트 시점의 캐시 위생 — 현재 트랜스크립트에 없는 id(재생성으로
+        잘린 메시지 등)의 동결 형태를 걷어낸다."""
+        keep = {m.id for m in messages}
+        self._state.forms = {k: v for k, v in self._state.forms.items() if k in keep}
 
     @staticmethod
     def _drop_orphaned_tool_prefix(

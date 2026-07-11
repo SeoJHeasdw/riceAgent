@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections.abc import AsyncIterator, AsyncIterable, Sequence
 from contextlib import asynccontextmanager
 from typing import Any
@@ -32,6 +33,8 @@ from ...core.errors import ProviderError
 from ...core.types import IMAGES_METADATA_KEY, Message, ToolCall, ToolSpec
 from .interfaces import ILLMProvider, ProviderCapabilities, ProviderChunk
 from .ollama_lifecycle import OllamaLifecycleManager, OllamaModelKey
+
+log = logging.getLogger("rice.agent.providers.ollama")
 
 # think:false is a request, not a guarantee: harmony-format reasoning models
 # (gpt-oss etc.) have no true off switch for their analysis pass and can burn the
@@ -133,6 +136,33 @@ def _to_ollama_messages(messages: Sequence[Message]) -> list[dict[str, Any]]:
             entry["images"] = images
         native.append(entry)
     return native
+
+
+def _log_done_stats(item: dict[str, Any], model: str) -> None:
+    """done 청크의 실측 카운트로 프리픽스 캐시 적중을 상시 가시화한다(§10.1 관측성).
+
+    prompt_eval_count는 직전 요청과의 공통 프리픽스 **이후** 새로 프리필한 토큰
+    수다 — 렌더가 프리픽스를 지키고 있으면 라운드당 수십~수백(새 tail 분량),
+    캐시 미스면 컨텍스트 전체(수천~수만 + prefill 수십 초)가 찍힌다. 이 로그
+    한 줄이 "130초 thinking"이 재로드인지 re-prefill인지 즉답한다."""
+    prompt_n = item.get("prompt_eval_count")
+    if prompt_n is None:
+        return
+    prompt_s = (item.get("prompt_eval_duration") or 0) / 1e9
+    eval_n = item.get("eval_count") or 0
+    eval_s = (item.get("eval_duration") or 0) / 1e9
+    load_s = (item.get("load_duration") or 0) / 1e9
+    log.info(
+        "%s done: prefill %d tok in %.2fs (%.0f tok/s), decode %d tok in %.2fs (%.1f tok/s), load %.2fs",
+        model,
+        prompt_n,
+        prompt_s,
+        prompt_n / prompt_s if prompt_s > 0 else 0.0,
+        eval_n,
+        eval_s,
+        eval_n / eval_s if eval_s > 0 else 0.0,
+        load_s,
+    )
 
 
 def _extract_tool_calls(message: dict[str, Any]) -> list[ToolCall]:
@@ -298,6 +328,7 @@ class OllamaProvider(ILLMProvider):
                 content = (item.get("message") or {}).get("content") or ""
             if content:
                 yield ProviderChunk(kind="text", text=content)
+            _log_done_stats(item, self._cfg.model)
             yield ProviderChunk(kind="done", stop_reason="end_turn")
             return
 
@@ -341,6 +372,7 @@ class OllamaProvider(ILLMProvider):
                 for call in _extract_tool_calls(message):
                     yield ProviderChunk(kind="tool_call", tool_call=call)
                 if item.get("done"):
+                    _log_done_stats(item, self._cfg.model)
                     stop_reason = item.get("done_reason") or ("tool_use" if message.get("tool_calls") else "end_turn")
                     yield ProviderChunk(
                         kind="done",
