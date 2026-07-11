@@ -47,14 +47,14 @@ const RowMenu: React.FC<{ items: MenuItem[] }> = ({ items }) => {
         onClick={() => setOpen((o) => !o)}
         title="옵션"
         aria-label="옵션"
-        className={`w-7 h-7 flex items-center justify-center rounded-md transition-colors ${
+        className={`flex h-[28px] w-[28px] items-center justify-center rounded-md transition-colors ${
           open ? 'bg-layer-hover-01' : 'hover:bg-layer-hover-01'
         }`}
       >
         <Icon name="overflow" size={16} className="text-icon-secondary" />
       </button>
       {open && (
-        <div className="absolute top-8 right-0 z-30 min-w-[148px] bg-layer-02 border border-border-subtle-01 rounded-md shadow-elevation-2 overflow-hidden">
+        <div className="absolute top-[30px] right-0 z-30 min-w-[148px] bg-layer-02 border border-border-subtle-01 rounded-md shadow-elevation-2 overflow-hidden">
           {items.map((it, i) => (
             <button
               key={i}
@@ -451,17 +451,18 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpe
 
   return (
     <div className="h-full flex-shrink-0 bg-layer-01 border-l border-border-subtle-01 flex flex-col overflow-hidden" style={{ width }}>
-      {/* header — 스크롤 밖 고정, 채팅의 compact window row와 같은 높이 */}
-      <div className="flex items-center gap-2 px-4 pr-12 h-11 flex-shrink-0 electron-drag">
-          <Icon name="renew" size={16} className="text-icon-primary" />
+      {/* 제목은 패널의 정체성, 우측 버튼은 감사/audit 액션이다. 패널 토글과
+          같은 renew 아이콘을 반복하지 않아 세 컨트롤의 역할이 섞이지 않게 한다. */}
+      <div className="flex items-center gap-2 px-4 pr-12 h-11 flex-shrink-0 border-b border-border-subtle-00 electron-drag">
           <span className="text-label-02 font-semibold text-text-primary">학습 루프</span>
+          <span className="h-1.5 w-1.5 rounded-full bg-support-success/80" title="학습 루프 활성" />
           <button
             type="button"
             onClick={() => setTransparencyOpen(true)}
             title="학습 투명성 — 모델이 본 것/못 본 것, 격리·차단된 메모리, 되돌릴 수 있는 변경"
-            className="electron-no-drag ml-auto flex-shrink-0 flex items-center gap-1 h-[22px] px-2 rounded text-label-micro text-text-secondary hover:bg-layer-hover-01"
+            className="electron-no-drag ml-auto flex h-[28px] flex-shrink-0 items-center gap-1.5 rounded-lg border border-border-subtle-02 bg-layer-02/60 px-2.5 text-caption-01 font-medium text-text-primary transition-colors hover:border-border-strong-01 hover:bg-layer-hover-02"
           >
-            <Icon name="view" size={14} />
+            <Icon name="view" size={14} className="text-blue-40" />
             투명성
           </button>
         </div>
@@ -603,7 +604,7 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpe
 
         {/* learned skills — enable/disable/delete */}
         <PanelSection icon="skill" title="학습한 스킬" count={`${activeSkills}/${skills.length} 활성`}>
-          <div className="flex flex-col gap-0.5">
+          <div className="flex flex-col gap-px">
             {skills.map((s) => {
               const hot = highlightedSkill === s.id;
               // 빌트인: 토글은 서버 상태(active/archived)로 영속하고 삭제 항목은 아예
@@ -626,7 +627,7 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpe
                   ref={(el) => {
                     skillRefs.current[s.id] = el;
                   }}
-                  className={`flex min-h-8 items-center gap-2 bg-layer-01 pl-2.5 pr-1 py-1 rounded-md ${s.enabled ? '' : 'opacity-50'} ${
+                  className={`group/skill flex h-[36px] items-center gap-2 border border-transparent bg-layer-01 pl-2.5 pr-1 rounded-lg transition-colors hover:border-border-subtle-01 hover:bg-layer-hover-01 ${s.enabled ? '' : 'opacity-50'} ${
                     hot ? 'ia-skill-hot outline outline-2 outline-blue-50 -outline-offset-1' : ''
                   }`}
                 >
@@ -636,11 +637,14 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpe
                         <Icon name="sparkle" size={11} className="text-teal-40 opacity-80" />
                       </span>
                     )}
-                    <span className={`min-w-0 truncate text-body-short-01 text-text-primary ${s.enabled ? '' : 'line-through'}`}>
-                      {s.name} <span className="text-text-helper font-mono">{s.ver}</span>
+                    <span className={`min-w-0 flex-1 truncate text-body-short-01 text-text-primary ${s.enabled ? '' : 'line-through'}`}>
+                      {s.name}
                     </span>
-                    <span className="max-w-[112px] truncate text-caption-01 text-text-helper">
-                      {s.uses}회 사용 · {s.trend}
+                    <span className="flex-shrink-0 text-label-micro font-mono text-text-helper">
+                      {s.ver}
+                    </span>
+                    <span className="hidden max-w-[92px] flex-shrink truncate text-caption-01 text-text-helper min-[360px]:block">
+                      {s.uses}회
                     </span>
                     {!s.enabled && <Tag type="gray" size="sm">비활성</Tag>}
                   </div>

@@ -2240,19 +2240,21 @@ function ChatScreen() {
               </div>
             </div>
 
-            {/* 스크롤을 올려 읽는 중일 때만 노출되는 바닥 이동 버튼 */}
+            {/* 읽는 흐름을 가리지 않는 compact floating pill. 새 메시지는 blue dot으로
+                상태를 알리고, 버튼 전체를 강한 primary blue로 칠하지 않는다. */}
             {!isEmpty && !atBottom && (
               <button
                 onClick={jumpToBottom}
-                className={`absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1.5 pl-3 pr-3.5 h-8 rounded-full border text-caption-01 font-medium shadow-elevation-2 transition-colors ${
+                aria-label={hasNewBelow ? '새 메시지로 이동' : '맨 아래로 이동'}
+                title={hasNewBelow ? '새 메시지로 이동' : '맨 아래로 이동'}
+                className={`absolute bottom-3 left-1/2 flex h-[30px] w-[30px] -translate-x-1/2 items-center justify-center rounded-full border shadow-elevation-2 backdrop-blur-md transition-all ${
                   hasNewBelow
-                    ? 'bg-interactive border-interactive text-white hover:bg-interactive-hover'
-                    : 'bg-layer-02 border-border-subtle-01 text-text-secondary hover:bg-layer-hover-02'
+                    ? 'border-blue-50/60 bg-layer-03/95 text-blue-30 hover:border-blue-40 hover:bg-layer-hover-02'
+                    : 'border-border-subtle-02 bg-layer-02/95 text-text-secondary hover:border-border-strong-01 hover:bg-layer-hover-02'
                 }`}
                 style={{ animation: 'jumpBtnIn 160ms cubic-bezier(0.16, 1, 0.3, 1)' }}
               >
                 <Icon name="chevron-down" size={14} />
-                {hasNewBelow ? '새 메시지' : '맨 아래로'}
               </button>
             )}
           </div>
@@ -2565,18 +2567,17 @@ function ChatScreen() {
           </Tooltip>
         </div>
 
-        {/* This stays pinned at the same top-right point while the learning
-            surface expands beneath it. */}
+        {/* 패널의 기능(renew)이 아니라 레이아웃 열기/닫기임을 모양으로 명시한다. */}
         <div className="absolute top-0 right-0 z-30 flex h-11 items-center pr-2 electron-drag">
           <Tooltip label={learningPanelOpen ? '학습 루프 닫기' : '학습 루프 열기'}>
             <button
               type="button"
               onClick={() => setLearningPanelOpen((open) => !open)}
               data-tour="learning-loop"
-              className="electron-no-drag flex h-7 w-7 items-center justify-center rounded-md text-icon-secondary transition-colors hover:bg-layer-hover-01 hover:text-icon-primary"
+              className="electron-no-drag flex h-[28px] w-[28px] items-center justify-center rounded-md text-icon-secondary transition-colors hover:bg-layer-hover-01 hover:text-icon-primary"
               aria-label={learningPanelOpen ? '학습 루프 닫기' : '학습 루프 열기'}
             >
-              <Icon name="renew" size={17} className={learningPanelOpen ? 'rice-learning-toggle-active' : ''} />
+              <Icon name={learningPanelOpen ? 'side-panel-close' : 'side-panel-open'} size={17} />
             </button>
           </Tooltip>
         </div>

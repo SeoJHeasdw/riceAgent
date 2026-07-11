@@ -1108,44 +1108,51 @@ const PatchProposalCard: React.FC<{
   const edited = editing && body !== m.proposedBody;
 
   return (
-    <div className="my-1.5 max-w-[640px]">
-      {/* 스킬 개선 제안 = AI 순간 — ai-tile 그라디언트 보더 고정(색 오버라이드 금지) */}
-      <div className="ai-tile p-4">
-        <div className="flex items-center gap-2 mb-2">
-          <Icon name="renew" size={15} className="text-purple-40 flex-shrink-0" />
-          <span className="text-body-short-01 font-semibold text-text-primary">스킬 개선 제안</span>
-          <Tag type="purple" size="sm">
-            {m.triggerLabel}
-          </Tag>
-        </div>
-
-        {/* skill + version transition */}
-        <div className="flex items-center gap-2 mb-2 flex-wrap">
-          <Icon name="skill" size={14} className="text-icon-secondary flex-shrink-0" />
-          <span className="text-body-short-01 text-text-primary">{m.skillName}</span>
-          <span className="inline-flex items-center gap-1.5 flex-shrink-0 font-mono text-caption-01">
-            <span className="text-text-helper line-through">{m.fromVer}</span>
-            <Icon name="arrow-right" size={12} className="text-icon-secondary" />
-            <span className="text-link-primary font-semibold">{m.toVer}</span>
+    <div className="my-2 max-w-[680px]">
+      {/* 판단해야 하는 정보(무엇/왜/어떻게 바뀌는지)를 헤더 한 덩어리로 묶고,
+          긴 diff는 차분한 작업 표면으로 분리한다. */}
+      <div className="skill-patch-card overflow-hidden rounded-xl border border-border-subtle-02 bg-layer-01">
+        <div className="flex items-start gap-3 border-b border-border-subtle-01 bg-layer-02/45 px-4 py-3.5">
+          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-purple-50/30 bg-purple-60/15">
+            <Icon name="sparkle" size={15} className="text-purple-40" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <span className="text-body-short-01 font-semibold text-text-primary">스킬 개선 제안</span>
+              <Tag type="purple" size="sm">{m.triggerLabel}</Tag>
+            </div>
+            <div className="mt-1 flex min-w-0 items-center gap-1.5">
+              <span className="truncate text-caption-01 font-medium text-text-secondary">{m.skillName}</span>
+              <span className="inline-flex flex-shrink-0 items-center gap-1 font-mono text-label-micro">
+                <span className="text-text-helper line-through">{m.fromVer}</span>
+                <Icon name="arrow-right" size={11} className="text-icon-secondary" />
+                <span className="font-semibold text-blue-30">{m.toVer}</span>
+              </span>
+            </div>
+          </div>
+          <span className="flex-shrink-0 rounded-full border border-border-subtle-02 bg-background/40 px-2 py-1 text-label-micro text-text-helper">
+            검토 필요
           </span>
         </div>
 
         {/* changelog */}
-        <p className="text-caption-01 text-text-secondary mb-3 flex items-start gap-1.5">
-          <Icon name="edit" size={13} className="text-icon-secondary mt-0.5 flex-shrink-0 opacity-80" />
-          {m.changelog}
-        </p>
+        <div className="px-4 pt-3.5">
+          <p className="text-body-short-01 text-text-secondary flex items-start gap-2 leading-relaxed">
+            <Icon name="edit" size={13} className="text-icon-secondary mt-0.5 flex-shrink-0" />
+            {m.changelog}
+          </p>
 
         {/* Phase D 가드 경고 — 시크릿 자동 마스킹 등 */}
         {!!m.warnings?.length && (
-          <div className="mb-3 flex items-start gap-1.5 px-2.5 py-1.5 rounded-md bg-support-warning bg-opacity-10 border border-support-warning border-opacity-30">
+          <div className="mt-3 flex items-start gap-1.5 px-2.5 py-1.5 rounded-md bg-support-warning bg-opacity-10 border border-support-warning border-opacity-30">
             <Icon name="warning" size={13} className="text-support-warning mt-0.5 flex-shrink-0" />
             <p className="text-caption-01 text-text-secondary">{m.warnings.join(' · ')}</p>
           </div>
         )}
+        </div>
 
         {/* diff (or editable body) */}
-        <div className="mb-3 border border-border-subtle-01 rounded-lg overflow-hidden bg-layer-01">
+        <div className="mx-4 mb-3 mt-3 overflow-hidden rounded-lg border border-border-subtle-01 bg-background/35">
           <div className="px-3 py-2 border-b border-border-subtle-01 flex items-center gap-1.5">
             <Icon name="renew" size={12} className="text-icon-secondary opacity-70" />
             <span className="text-caption-01 font-semibold text-text-secondary">
@@ -1171,7 +1178,7 @@ const PatchProposalCard: React.FC<{
               style={{ minHeight: '160px', maxHeight: '260px' }}
             />
           ) : (
-            <div className="py-1 text-label-micro font-mono leading-[18px] max-h-[260px] overflow-y-auto">
+            <div className="py-1 text-label-micro font-mono leading-[18px] max-h-[210px] overflow-y-auto">
               {m.diff.map((line, i) => (
                 <DiffLine key={i} line={line} />
               ))}
@@ -1180,7 +1187,7 @@ const PatchProposalCard: React.FC<{
         </div>
 
         {state === 'pending' ? (
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap border-t border-border-subtle-01 bg-layer-02/25 px-4 py-3">
             <span className="text-caption-01 text-text-helper">
               승인하면 이전 버전은 히스토리에 보관돼요 (롤백 가능).
             </span>
@@ -1208,7 +1215,7 @@ const PatchProposalCard: React.FC<{
             </Button>
           </div>
         ) : state === 'approved' ? (
-          <div className="flex items-center gap-2.5 flex-wrap">
+          <div className="flex items-center gap-2.5 flex-wrap border-t border-border-subtle-01 px-4 py-3">
             <span className="inline-flex items-center gap-1.5 text-caption-01 text-support-success">
               <Icon name="check-circle" size={13} /> {m.toVer}로 개선됨{edited ? ' (편집 반영)' : ''} · 이전 버전 보관
             </span>
@@ -1218,7 +1225,7 @@ const PatchProposalCard: React.FC<{
             </Button>
           </div>
         ) : (
-          <span className="inline-flex items-center gap-1.5 text-caption-01 text-text-helper">
+          <span className="inline-flex items-center gap-1.5 border-t border-border-subtle-01 px-4 py-3 text-caption-01 text-text-helper">
             <Icon name="close" size={13} /> 거부됨 · 본문은 그대로예요 ({m.fromVer})
           </span>
         )}
