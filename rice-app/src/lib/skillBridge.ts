@@ -34,7 +34,7 @@ const cmdFromMarket = (m: MarketSkill): string => {
 };
 
 /**
- * 마켓 스킬을 "내 스킬"(소유 인스턴스)로 materialize 한다.
+ * 마켓 스킬을 "나의 스킬"(소유 인스턴스)로 materialize 한다.
  * 설치 직후라 학습된 규칙은 비어 있고(쓰면서 쌓임), files는 실제 번들을 그대로 들고 온다.
  * upstream.installedVer = latestVer = 설치 버전 → 처음엔 "최신"(업데이트 없음).
  */
@@ -144,8 +144,8 @@ export function ownedSkillFiles(
 
 export { toLearnVer };
 
-// ── 플러그인 브리지 (마켓 Plugin → 내 플러그인) ──────────────────────────────
-// 스킬의 marketSkillToOwned 와 대칭. 설치 시 마켓 Plugin을 "내 플러그인"(MyPlugin)으로
+// ── 플러그인 브리지 (마켓 Plugin → 나의 플러그인) ──────────────────────────────
+// 스킬의 marketSkillToOwned 와 대칭. 설치 시 마켓 Plugin을 "나의 플러그인"(MyPlugin)으로
 // materialize 해 MyPluginsScreen에 즉시 뜨게 한다. marketId 기준 멱등.
 
 /** 설치된 마켓 플러그인의 안정적 소유 id — runtime installed_artifacts id와 맞춘다. */
@@ -220,7 +220,7 @@ export function platformArtifactToPlugin(a: PlatformArtifact): MarketPlugin {
 }
 
 /**
- * 런타임 GET /plugins(PluginInfo) → 내 플러그인(MyPlugin) 폴백 변환.
+ * 런타임 GET /plugins(PluginInfo) → 나의 플러그인(MyPlugin) 폴백 변환.
  * 카탈로그에 매칭이 없을 때만 사용(설치는 됐으나 마켓엔 없는 경우). 풍부한 복원은
  * LearningContext가 platform 카탈로그와 교차참조해 처리한다.
  */

@@ -82,7 +82,7 @@ function PluginMarketScreen() {
     }
 
     const installResult = await installArtifact(plugin.id, 'plugin');
-    // 설치를 "내 플러그인"에도 즉시 반영 (스킬의 installSkillFromMarket 와 대칭).
+    // 설치를 "나의 플러그인"에도 즉시 반영 (스킬의 installSkillFromMarket 와 대칭).
     installPluginFromMarket(plugin, { enabled: installResult?.enabled ?? true });
     if (installResult?.missingConnectors.length) {
       job.done('success', '설치됨 · 커넥터 연결 필요');

@@ -35,7 +35,7 @@ function SkillMarketScreen() {
     setBluePointBalance,
   } = useMarketplace();
 
-  // 설치를 학습 store까지 배선 — 설치한 마켓 스킬이 "내 스킬"에 소유 인스턴스로 등장한다.
+  // 설치를 학습 store까지 배선 — 설치한 마켓 스킬이 "나의 스킬"에 소유 인스턴스로 등장한다.
   const { installSkillFromMarket } = useLearning();
 
   const [selectedCategory, setSelectedCategory] = useState('All');
@@ -207,7 +207,7 @@ function SkillMarketScreen() {
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
               <path d="M17 8l-5-5-5 5M12 3v12" />
             </svg>
-            내 스킬 업로드
+            나의 스킬 업로드
           </button>
         </div>
       </div>

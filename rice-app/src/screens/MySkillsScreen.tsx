@@ -17,7 +17,7 @@ import type { IconName } from '../components/ui';
 import type { ConsolidateProposal, ImpactReport } from '../lib/types';
 
 /**
- * MySkillsScreen ("내 스킬") — full management screen for the user's own learned
+ * MySkillsScreen ("나의 스킬") — full management screen for the user's own learned
  * skills. Master-detail: edit the rules a skill learned, see version history,
  * where it's used, which data it touches, and share to the Skill Market.
  */
@@ -1917,7 +1917,7 @@ function MySkillsScreen() {
         style={{ width: listPanel.width }}
       >
         <div className="px-5 pt-5 pb-3">
-          <h1 className="text-heading-03 font-semibold text-text-primary">내 스킬</h1>
+          <h1 className="text-heading-03 font-semibold text-text-primary">나의 스킬</h1>
         </div>
         {list.map((s) => {
           const on = s.id === effectiveSel;

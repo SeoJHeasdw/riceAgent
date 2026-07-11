@@ -5,8 +5,8 @@ import { platform, api } from '../api';
 
 /**
  * MarketplaceContext — single source of truth for the skill/plugin market,
- * shared across the market screens AND "내 스킬" (so publishing an owned skill
- * actually surfaces it in the market). The install direction (market → 내 스킬)
+ * shared across the market screens AND "나의 스킬" (so publishing an owned skill
+ * actually surfaces it in the market). The install direction (market → 나의 스킬)
  * lives in LearningContext; this owns the catalog + publish/unpublish.
  */
 
@@ -45,9 +45,9 @@ export interface MarketplaceContextValue {
   sponsorSkill: (id: string, amount: number) => Promise<void>;
   /** Publish a user-authored skill (from the author modal); returns the created skill. */
   publishSkill: (draft: SkillDraft) => Skill;
-  /** Publish/replace an already-materialized market skill (from "내 스킬" 공유). */
+  /** Publish/replace an already-materialized market skill (from "나의 스킬" 공유). */
   publishOwnedSkill: (skill: Skill) => Skill;
-  /** Remove a published skill from the market (from "내 스킬" 공유 해제). */
+  /** Remove a published skill from the market (from "나의 스킬" 공유 해제). */
   unpublishSkill: (marketId: string) => void;
   togglePlugin: (id: string, enabled: boolean) => Promise<boolean>;
   filteredSkills: Skill[];
@@ -310,7 +310,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
     return skill;
   }, []);
 
-  // Publish/replace an already-built market skill (from 내 스킬 공유) — upsert by id.
+  // Publish/replace an already-built market skill (from 나의 스킬 공유) — upsert by id.
   const publishOwnedSkill = useCallback((skill: Skill): Skill => {
     setSkills((prev) => {
       const without = prev.filter((s) => s.id !== skill.id);

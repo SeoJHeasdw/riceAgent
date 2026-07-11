@@ -43,14 +43,14 @@ export const TOUR_STEPS: TourStep[] = [
   {
     id: 'my-skills',
     target: 'nav-my-skills',
-    title: '내 스킬',
+    title: '나의 스킬',
     body: '대화에서 자동 생성되거나 직접 만든 스킬을 관리해요. / 명령으로 즉시 실행되고, 쓸수록 자동으로 개선됩니다.',
     placement: 'right',
   },
   {
     id: 'myplugins',
     target: 'nav-myplugins',
-    title: '내 플러그인',
+    title: '나의 플러그인',
     body: '설치한 플러그인을 관리해요. 플러그인은 스킬 묶음으로, 설치하면 에이전트가 해당 분야 전문가가 됩니다.',
     placement: 'right',
   },

@@ -8,10 +8,10 @@ import { api } from '../lib/api';
 import { connectorIdForScope, type MyPlugin } from '../lib/learningData';
 
 /**
- * MyPluginsScreen ("내 플러그인") — management screen for installed plugins.
+ * MyPluginsScreen ("나의 플러그인") — management screen for installed plugins.
  * Master-detail: enable/disable a plugin, see its source/version/author,
  * the skills it provides (invokable via "/" or auto-used), and example
- * prompts to try. Mirrors the "내 스킬" screen.
+ * prompts to try. Mirrors the "나의 스킬" screen.
  */
 
 const FILTERS = ['전체', '활성', '업데이트 있음', '비활성'] as const;
@@ -437,7 +437,7 @@ function MyPluginsScreen() {
         style={{ width: listPanel.width }}
       >
         <div className="px-5 pt-5 pb-3">
-          <h1 className="text-heading-03 font-semibold text-text-primary">내 플러그인</h1>
+          <h1 className="text-heading-03 font-semibold text-text-primary">나의 플러그인</h1>
         </div>
         {list.map((p) => {
           const on = p.id === effectiveSel;

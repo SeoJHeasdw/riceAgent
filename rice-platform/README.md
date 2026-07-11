@@ -96,7 +96,7 @@ schema_version: 1
 type: skill
 name: my-skill
 version: 1.0.0
-display_name: "내 스킬"
+display_name: "나의 스킬"
 description: "스킬 설명"
 category: "개발"
 tags: ["tag1", "tag2"]

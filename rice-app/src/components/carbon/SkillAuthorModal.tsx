@@ -6,7 +6,7 @@ import type { SkillDraft } from '../../hooks/useMarketplace';
 import type { Skill } from '../../lib/types';
 
 /**
- * SkillAuthorModal — "내 스킬 업로드" 게시 마법사.
+ * SkillAuthorModal — "나의 스킬 업로드" 게시 마법사.
  *
  * 스킬 마켓 좌측 레일의 업로드 버튼에서 진입한다. 세 단계로 나뉜 위저드:
  *   1. 기본 정보 — 이름 · 설명 · 카테고리 · 태그 (SKILL.md 파일로 시작도 가능)
@@ -668,7 +668,7 @@ ${tagBlock}
             <p className="text-caption-01 text-text-helper leading-relaxed">
               게시하면 사내 모든 IBMer가 이 스킬을 검색·설치할 수 있어요.
               <br />
-              <span className="text-text-placeholder">언제든 내 스킬에서 비공개로 전환하거나 내릴 수 있어요.</span>
+              <span className="text-text-placeholder">언제든 나의 스킬에서 비공개로 전환하거나 내릴 수 있어요.</span>
             </p>
           </div>
         </div>

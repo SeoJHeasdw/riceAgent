@@ -64,7 +64,7 @@ export const navDestinations: NavDestination[] = [
   {
     id: 'my-skills',
     label: 'My skills',
-    title: '내 스킬',
+    title: '나의 스킬',
     path: '/my-skills',
     description: '내가 만들고 저장한 스킬을 관리해요',
     group: 'workspace',
@@ -80,7 +80,7 @@ export const navDestinations: NavDestination[] = [
   {
     id: 'myplugins',
     label: 'My plugins',
-    title: '내 플러그인',
+    title: '나의 플러그인',
     path: '/my-plugins',
     description: '설치한 플러그인을 관리해요',
     group: 'workspace',

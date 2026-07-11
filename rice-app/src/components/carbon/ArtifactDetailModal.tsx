@@ -394,7 +394,7 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
               {isSkill && (
                 <span className="flex items-center gap-1.5 text-body-short-01 text-text-secondary">
                   <span className="w-1.5 h-1.5 rounded-full bg-blue-50" />
-                  설치됨 · 내 스킬에서 관리
+                  설치됨 · 나의 스킬에서 관리
                 </span>
               )}
 

@@ -1214,7 +1214,7 @@ const PatchProposalCard: React.FC<{
             </span>
             <div className="flex-1" />
             <Button kind="ghost" size="sm" icon={<Icon name="arrow-up-right" size={14} />} onClick={() => onJumpSkill?.(m.skillId)}>
-              내 스킬에서 보기
+              나의 스킬에서 보기
             </Button>
           </div>
         ) : (
