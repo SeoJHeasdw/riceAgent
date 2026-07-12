@@ -577,26 +577,56 @@ class PluginLoader:
         )
 
     async def _install_skill(self, path: str, parsed: ArtifactManifest) -> None:
-        """Install a skill artifact as a FLAT <name>.md in the skills dir.
+        """Install SKILL.md plus its repository-style bundled resources.
 
-        Skill artifacts are a single declarative SKILL.md (CONTRACTS §3.1). Writing
-        it flat (not under skill:<name>/) makes SkillStore.list() pick it up so the
-        prefetch loop actually injects it (the v1 버그#3: market skills never injected).
+        The canonical definition remains the flat ``<name>.md`` so SkillStore.list()
+        and injection stay backwards compatible. Sibling references/scripts are
+        copied to ``skills/<name>/`` where SkillStore exposes them as one virtual
+        repository and ``skill_resource`` can read them.
         """
         staging = Path(tempfile.mkdtemp(prefix="rice-skill-install-"))
         try:
             await self._unpack(path, staging)
-            md_text = self._find_skill_md_text(staging)
-            if md_text is None:
+            md_path = self._find_skill_md_path(staging)
+            if md_path is None:
                 raise ValidationError(
                     f"skill artifact '{parsed.name}' has no SKILL.md to install"
                 )
+            md_text = md_path.read_text(encoding="utf-8")
             md_text = _canonicalize_skill_md(md_text, parsed.name)
             self._paths.skills.mkdir(parents=True, exist_ok=True)
             target = _resolved_within(self._paths.skills, self._paths.skills / f"{parsed.name}.md")
             target.write_text(md_text, encoding="utf-8")
+
+            if md_path.name == "SKILL.md":
+                source_root = md_path.parent
+                bundle_root = _resolved_within(
+                    self._paths.skills, self._paths.skills / parsed.name
+                )
+                bundle_root.mkdir(parents=True, exist_ok=True)
+                for resource in sorted(source_root.rglob("*")):
+                    if not resource.is_file() or resource == md_path:
+                        continue
+                    rel = resource.relative_to(source_root)
+                    if any(part.startswith(".") for part in rel.parts):
+                        continue
+                    if resource.name.lower().startswith("rice-artifact"):
+                        continue
+                    dest = _resolved_within(bundle_root, bundle_root / rel)
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(resource, dest)
         finally:
             shutil.rmtree(staging, ignore_errors=True)
+
+    @staticmethod
+    def _find_skill_md_path(root: Path) -> Path | None:
+        named = sorted(root.rglob("SKILL.md"))
+        if named:
+            return named[0]
+        for md in sorted(root.rglob("*.md")):
+            if not md.name.lower().startswith("rice-artifact"):
+                return md
+        return None
 
     @staticmethod
     def _find_skill_md_text(root: Path) -> str | None:
@@ -605,14 +635,8 @@ class PluginLoader:
         Prefers a file literally named SKILL.md; else the first *.md that is not a
         manifest. Returns its text, or None if nothing usable is found.
         """
-        named = sorted(root.rglob("SKILL.md"))
-        if named:
-            return named[0].read_text(encoding="utf-8")
-        for md in sorted(root.rglob("*.md")):
-            if md.name.lower().startswith("rice-artifact"):
-                continue
-            return md.read_text(encoding="utf-8")
-        return None
+        path = PluginLoader._find_skill_md_path(root)
+        return path.read_text(encoding="utf-8") if path else None
 
     async def _verify_checksum(self, path: str, parsed: ArtifactManifest) -> None:
         """Verify sha256 checksum (CONTRACTS §2.3). Fail-closed on mismatch.

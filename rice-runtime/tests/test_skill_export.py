@@ -114,6 +114,63 @@ async def test_export_round_trips_through_market_install():
     assert installed.version == 1
 
 
+async def test_repository_files_round_trip_and_remain_editable():
+    src_paths = _fresh_paths()
+    src = _service(src_paths)
+    src.create_skill(
+        name="weekly-report-build",
+        body=_BODY + "\nRead references/tone.md before writing.\n",
+        description="Build the weekly report file",
+    )
+    updated = src.update_skill_file(
+        "weekly-report-build",
+        "references/tone.md",
+        "# Tone\n\nKeep the summary concise and write in Korean.\n",
+    )
+    assert updated.version == 2
+    files = {item["path"]: item["content"] for item in src.get_skill_files("weekly-report-build")}
+    assert "SKILL.md" in files
+    assert files["references/tone.md"].startswith("# Tone")
+
+    out = src.export_skill("weekly-report-build")
+    assert (Path(out["artifact_dir"]) / "references" / "tone.md").exists()
+
+    dst_paths = _fresh_paths()
+    loader = PluginLoader(
+        db=Database(":memory:").connect(), sandbox=NoopSandbox(), paths=dst_paths
+    )
+    manifest = dict(out["manifest"])
+    manifest["checksum"] = out["checksum"]
+    await loader.install(path=out["archive_path"], manifest=manifest)
+
+    installed = SkillStore(dst_paths)
+    assert "write in Korean" in installed.read_resource(
+        "weekly-report-build", "references/tone.md"
+    )
+
+
+def test_resource_edit_participates_in_version_rollback():
+    paths = _fresh_paths()
+    svc = _service(paths)
+    svc.create_skill(
+        name="weekly-report-build",
+        body=_BODY,
+        description="Build the weekly report file",
+    )
+    svc.update_skill_file("weekly-report-build", "scripts/run.sh", "echo first\n")
+    assert svc.get_skill("weekly-report-build").version == 2
+    assert any(
+        item["path"] == "scripts/run.sh"
+        for item in svc.get_skill_files("weekly-report-build")
+    )
+
+    new_version = svc.rollback("weekly-report-build", 1)
+    assert new_version == 3
+    assert [item["path"] for item in svc.get_skill_files("weekly-report-build")] == [
+        "SKILL.md"
+    ]
+
+
 # ── 4. 빌트인 export ──────────────────────────────────────────────────────────
 
 def test_builtin_skill_is_exportable():

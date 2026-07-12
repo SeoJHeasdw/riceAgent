@@ -29,6 +29,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import io
+import shutil
 import tarfile
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -87,7 +88,12 @@ def _reproducible_targz(root: Path, arc_root: str) -> bytes:
     return buf.getvalue()
 
 
-def export_skill(skill: SkillData, dest_root: Path) -> SkillExport:
+def export_skill(
+    skill: SkillData,
+    dest_root: Path,
+    *,
+    resources: dict[str, str] | None = None,
+) -> SkillExport:
     """`skill`을 dest_root 아래 artifact 디렉토리 + tar.gz로 내보낸다.
 
     내보내는 SKILL.md는 정규화된 사본이다: state=active(설치 즉시 주입 대상),
@@ -104,12 +110,20 @@ def export_skill(skill: SkillData, dest_root: Path) -> SkillExport:
         absorbed_into=None,
     )
     artifact_dir = dest_root / skill.name
+    shutil.rmtree(artifact_dir, ignore_errors=True)
     artifact_dir.mkdir(parents=True, exist_ok=True)
     manifest = _manifest_for(skill)
     (artifact_dir / "rice-artifact.yaml").write_text(
         _dump_manifest_yaml(manifest), encoding="utf-8"
     )
     (artifact_dir / "SKILL.md").write_text(serialize_skill_md(clean), encoding="utf-8")
+    for rel_path, content in sorted((resources or {}).items()):
+        rel = Path(rel_path)
+        if rel.is_absolute() or ".." in rel.parts or rel.name == "SKILL.md":
+            continue
+        target = artifact_dir / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
 
     data = _reproducible_targz(artifact_dir, skill.name)
     archive_path = dest_root / f"{skill.name}-v{skill.version}.tar.gz"

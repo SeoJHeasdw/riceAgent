@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Button, Icon } from '../ui';
-import { dialogBackdropCls } from '../ui/surfaces';
 import type { Skill, SkillDetail } from '../../lib/learningData';
 import type { SkillFileLanguage } from '../../lib/types';
 import { ownedSkillFiles } from '../../lib/skillBridge';
@@ -137,21 +136,36 @@ export const SkillEditDrawer: React.FC<{
   const [pending, setPending] = useState<EditPatch | null>(null);
   const [editing, setEditing] = useState(false);
   const [body, setBody] = useState('');
+  const [selectedTargetPath, setSelectedTargetPath] = useState(targetPath ?? '');
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // 어떤 파일을 편집 중인지 (헤더·안내·제안에 사용)
+  // 드로어 안에서도 저장소의 모든 파일을 오갈 수 있다. 상세 화면에서 바로 열면
+  // SKILL.md를, 파일 작업공간에서 열면 현재 보던 파일을 첫 대상으로 삼는다.
   const { files } = ownedSkillFiles(skill, detail);
-  const targetFile = (targetPath ? files.find((f) => f.path === targetPath) : undefined) ?? files.find((f) => isSkillMdPath(f.path)) ?? files[0];
+  const defaultTargetPath = (targetPath && files.some((file) => file.path === targetPath))
+    ? targetPath
+    : files.find((file) => isSkillMdPath(file.path))?.path ?? files[0]?.path ?? '';
+  const targetFile = files.find((f) => f.path === selectedTargetPath) ?? files.find((f) => isSkillMdPath(f.path)) ?? files[0];
   const targetName = targetFile?.path.split('/').pop() ?? 'SKILL.md';
   const targetIsSkillMd = isSkillMdPath(targetFile?.path ?? 'SKILL.md');
 
   // 스킬·대상 파일이 바뀌거나 드로어를 다시 열면 대화 초기화
   useEffect(() => {
+    setSelectedTargetPath(defaultTargetPath);
     setMessages([]);
     setInput('');
     setPending(null);
     setEditing(false);
-  }, [skill.id, open, targetPath]);
+  }, [skill.id, open, targetPath, defaultTargetPath]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [open, onClose]);
 
   // 새 메시지/제안이 생기면 맨 아래로 스크롤
   useEffect(() => {
@@ -163,7 +177,7 @@ export const SkillEditDrawer: React.FC<{
   const propose = () => {
     const text = input.trim();
     if (!text || pending) return;
-    const patch = buildPatch(text, skill, detail, targetPath);
+    const patch = buildPatch(text, skill, detail, targetFile?.path);
     setMessages((m) => [
       ...m,
       { role: 'user', text },
@@ -195,20 +209,21 @@ export const SkillEditDrawer: React.FC<{
 
   return (
     <div className="fixed inset-0 z-[60] flex">
-      {/* backdrop */}
-      <div onClick={onClose} className={dialogBackdropCls} />
+      {/* 파일 맥락을 잃지 않도록 블러 없이 가볍게만 어둡힌다. */}
+      <div onClick={onClose} className="absolute inset-0 bg-black/25 animate-fade-in" />
 
       {/* right drawer */}
-      <div className="relative ml-auto h-full w-[440px] max-w-full bg-layer-01 border-l border-border-subtle-01 shadow-elevation-3 z-[61] flex flex-col animate-slide-in-right">
+      <div className="skill-ai-scope relative ml-auto h-full w-[520px] max-w-full bg-layer-01 border-l border-border-subtle-01 shadow-elevation-3 z-[61] flex flex-col animate-slide-in-right">
         {/* header */}
-        <div className="flex-shrink-0 flex items-start gap-2.5 px-5 py-4 border-b border-border-subtle-01">
-          <div className="w-8 h-8 flex-shrink-0 flex items-center justify-center rounded-lg bg-purple-60/15">
-            <Icon name="edit" size={16} className="text-purple-60" />
+        <div className="flex-shrink-0 px-5 py-4 border-b border-border-subtle-01">
+          <div className="flex items-start gap-2.5">
+          <div className="w-9 h-9 flex-shrink-0 flex items-center justify-center rounded-xl border border-blue-50/25 bg-blue-60/15">
+            <Icon name="sparkle" size={17} className="text-blue-30" />
           </div>
           <div className="flex-1 min-w-0">
-            <div className="text-body-short-01 font-semibold text-text-primary">스킬 편집 어시스턴트</div>
+            <div className="text-body-short-02 font-semibold text-text-primary">AI로 스킬 수정</div>
             <div className="text-caption-01 text-text-helper truncate">
-              {skill.name} · 편집 대상 <span className="font-mono text-text-secondary">{targetIsSkillMd ? 'SKILL.md(지침)' : targetName}</span> · 새 버전으로 저장
+              {skill.name} · 제안 확인 후 {skill.ver}의 다음 버전으로 저장
             </div>
           </div>
           <button
@@ -218,6 +233,33 @@ export const SkillEditDrawer: React.FC<{
           >
             <Icon name="close" size={16} />
           </button>
+          </div>
+
+          <label className="mt-4 block">
+            <span className="mb-1.5 block text-caption-01 font-semibold text-text-secondary">수정할 파일</span>
+            <div className="relative">
+              <Icon name="document" size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-icon-secondary" />
+              <select
+                value={targetFile?.path ?? ''}
+                onChange={(event) => {
+                  setSelectedTargetPath(event.target.value);
+                  setMessages([]);
+                  setInput('');
+                  setPending(null);
+                  setEditing(false);
+                }}
+                disabled={!!pending}
+                className="h-9 w-full appearance-none rounded-lg border border-border-subtle-01 bg-background pl-9 pr-9 font-mono text-body-short-01 text-text-primary outline-none transition-colors hover:bg-layer-hover-01 focus:border-blue-50 disabled:opacity-50"
+              >
+                {files.map((file) => (
+                  <option key={file.path} value={file.path}>
+                    {file.path}{isSkillMdPath(file.path) ? ' — 핵심 지침' : ''}
+                  </option>
+                ))}
+              </select>
+              <Icon name="chevron-down" size={13} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-icon-secondary" />
+            </div>
+          </label>
         </div>
 
         {/* conversation */}
@@ -228,9 +270,9 @@ export const SkillEditDrawer: React.FC<{
                 <Icon name="idea" size={15} className="text-icon-primary flex-shrink-0 mt-0.5" />
                 <div className="text-caption-01 text-text-secondary leading-5">
                   {targetIsSkillMd ? (
-                    <>바꾸고 싶은 점을 자연어로 적어주세요. 제안을 <span className="text-text-primary font-semibold">diff로 검토한 뒤 적용</span>하면 새 버전으로 저장돼요. 작동 방식 분석은 저장 후 다시 만들 수 있어요.</>
+                    <>스킬이 언제 어떻게 행동해야 하는지 자연어로 알려주세요. AI 제안을 <span className="text-text-primary font-semibold">변경 내용으로 검토한 뒤 적용</span>하면 새 버전으로 안전하게 저장돼요.</>
                   ) : (
-                    <><span className="font-mono text-text-secondary">{targetName}</span> 를 어떻게 바꿀지 적어주세요. 제안을 <span className="text-text-primary font-semibold">diff로 검토한 뒤 적용</span>하면 새 버전으로 저장돼요.</>
+                    <><span className="font-mono text-text-secondary">{targetFile?.path}</span>가 어떤 역할을 해야 하는지 알려주세요. 다른 파일은 그대로 두고 이 파일의 변경만 먼저 검토할 수 있어요.</>
                   )}
                 </div>
               </div>
@@ -254,8 +296,11 @@ export const SkillEditDrawer: React.FC<{
           {pending && (
             <div className="ai-tile overflow-hidden">
               <div className="flex items-center gap-2 px-3.5 py-2.5 border-b border-border-subtle-01">
-                <Icon name="renew" size={14} className="text-purple-40 flex-shrink-0" />
-                <span className="text-body-short-01 font-semibold text-text-primary">스킬 개선 제안</span>
+                <Icon name="renew" size={14} className="text-blue-40 flex-shrink-0" />
+                <div className="min-w-0">
+                  <div className="text-body-short-01 font-semibold text-text-primary">변경 제안</div>
+                  <div className="truncate font-mono text-label-micro text-text-helper">{pending.targetPath}</div>
+                </div>
                 <span className="ml-auto inline-flex items-center gap-1.5 font-mono text-caption-01">
                   <span className="text-text-helper line-through">{pending.fromVer}</span>
                   <Icon name="arrow-right" size={12} className="text-icon-secondary" />
@@ -272,13 +317,13 @@ export const SkillEditDrawer: React.FC<{
               <div className="m-3.5 border border-border-subtle-01 rounded-lg overflow-hidden bg-layer-01">
                 <div className="px-3 py-1.5 border-b border-border-subtle-01 flex items-center gap-1.5">
                   <Icon name="renew" size={12} className="text-icon-secondary opacity-70" />
-                  <span className="text-caption-01 font-semibold text-text-secondary">{editing ? 'SKILL.md 편집' : '본문 변경 (diff)'}</span>
+                  <span className="text-caption-01 font-semibold text-text-secondary">{editing ? `${pending.targetLabel} 직접 조정` : '바뀌는 내용'}</span>
                   <button
                     onClick={() => setEditing((e) => !e)}
                     className="ml-auto text-caption-01 text-link-primary hover:underline inline-flex items-center gap-1"
                   >
                     <Icon name={editing ? 'view' : 'edit'} size={12} />
-                    {editing ? 'diff 보기' : '편집'}
+                    {editing ? '변경 보기' : '직접 조정'}
                   </button>
                 </div>
                 {editing ? (
@@ -300,11 +345,11 @@ export const SkillEditDrawer: React.FC<{
 
               <div className="flex items-center gap-2 px-3.5 pb-3.5">
                 <Button kind="ghost" size="sm" onClick={dismiss}>
-                  취소
+                  제안 버리기
                 </Button>
                 <div className="flex-1" />
                 <Button kind="primary" size="sm" icon={<Icon name="check" size={14} />} onClick={apply}>
-                  {editing && body !== pending.proposedBody ? '편집 후 적용' : '적용'}
+                  {editing && body !== pending.proposedBody ? '조정한 내용 적용' : '변경 적용'}
                 </Button>
               </div>
             </div>
@@ -336,13 +381,13 @@ export const SkillEditDrawer: React.FC<{
                   propose();
                 }
               }}
-              placeholder={pending ? '먼저 위 제안을 적용하거나 취소하세요' : targetIsSkillMd ? '바꿀 점을 적어주세요… (예: 출력은 항상 한국어로)' : `${targetName} 를 어떻게 바꿀까요…`}
+              placeholder={pending ? '먼저 위 제안을 적용하거나 버려주세요' : targetIsSkillMd ? '원하는 동작을 설명해 주세요… (예: 결과는 항상 한국어로 요약해줘)' : `${targetName}에서 무엇을 바꿀까요?`}
               disabled={!!pending}
               rows={2}
               className="flex-1 resize-none rounded-lg border border-border-subtle-01 bg-background px-3 py-2 text-body-short-01 text-text-primary placeholder:text-text-helper outline-none focus:ring-1 focus:ring-focus disabled:opacity-50"
             />
             <Button kind="primary" size="sm" icon={<Icon name="send" size={14} />} onClick={propose} disabled={!input.trim() || !!pending}>
-              제안
+              변경 제안
             </Button>
           </div>
         </div>

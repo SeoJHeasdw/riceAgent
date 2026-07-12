@@ -282,6 +282,32 @@
     background: linear-gradient(90deg, var(--ai-gradient-start), var(--ai-gradient-end));
   }
 
+  /* My Skills owns the blue domain accent. Keep its AI edit flow distinct from
+     the purple Plugin domain even though both reuse the shared AI tile. */
+  .skill-ai-scope {
+    --ai-gradient-start: #78a9ff;
+    --ai-gradient-end: #0f62fe;
+    --ai-aura: radial-gradient(circle at 0% 0%, rgba(69, 137, 255, 0.2), rgba(15, 98, 254, 0.08) 42%, transparent 72%);
+  }
+
+  .skill-ai-action {
+    border: 1px solid rgba(120, 169, 255, 0.26);
+    background: var(--gradient-skill);
+    box-shadow: 0 5px 18px rgba(15, 98, 254, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  }
+
+  .skill-ai-action:hover {
+    filter: brightness(1.08);
+    box-shadow: 0 7px 22px rgba(15, 98, 254, 0.26), inset 0 1px 0 rgba(255, 255, 255, 0.16);
+    transform: translateY(-1px);
+  }
+
+  .skill-ai-action:active {
+    filter: brightness(0.96);
+    box-shadow: 0 2px 10px rgba(15, 98, 254, 0.18);
+    transform: translateY(0);
+  }
+
   /* AI label — small pill with gradient border + gradient text */
   .ai-label {
     display: inline-flex;

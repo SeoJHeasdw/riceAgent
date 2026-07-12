@@ -80,7 +80,7 @@ from .skill.analyzer import SkillAnalyzer
 from .skill.builtin import BuiltinSkillCatalog
 from .skill.lifecycle import SkillLifecycle
 from .skill.relevance import AUTO_INJECT_THRESHOLD, auto_inject_eligible, score_skills
-from .skill.store import SkillData, SkillStore
+from .skill.store import SkillData, SkillStore, serialize_skill_md
 from .skill.usage import UsageStore
 from .user_model.profile import UserProfile
 
@@ -577,6 +577,17 @@ class LearningService(ILearningService):
             "description": skill.description,
             "body": skill.body,
         }
+        resources = (
+            [path for path, _ in self._skill_store.list_files(skill_id) if path != "SKILL.md"]
+            if not self._builtin_skills.is_builtin(skill_id)
+            else []
+        )
+        if resources:
+            out["resources"] = resources
+            out["resources_note"] = (
+                "Bundled files listed above are not in this body — read one with "
+                "the skill_resource tool (name + path)."
+            )
         if repeat:
             out["note"] = self._REPEAT_VIEW_NOTE
         return out
@@ -593,7 +604,14 @@ class LearningService(ILearningService):
         skill = self._read_any_skill(skill_id)
         if skill is None:
             raise NotFoundError(f"skill {skill_id!r} not found")
-        result = _run_skill_export(skill, self._paths.workspace / "skill-exports")
+        resources = (
+            {path: content for path, content in self._skill_store.list_files(skill_id) if path != "SKILL.md"}
+            if not self._builtin_skills.is_builtin(skill_id)
+            else {}
+        )
+        result = _run_skill_export(
+            skill, self._paths.workspace / "skill-exports", resources=resources
+        )
         self._ledger.record(
             "exported",
             skill_id=skill_id,
@@ -625,12 +643,24 @@ class LearningService(ILearningService):
           - 바이너리 거부: NUL 스니핑 (이미지/아카이브는 텍스트 컨텍스트에 무의미)
         학습/빌트인 스킬은 번들이 없으므로(NotFoundError) 대상이 아니다."""
         name = skill_name.strip()
+        # Learned/user-authored skills use the same resource tool contract as
+        # plugin skills, so SKILL.md references remain live after installation or editing.
+        if not self._builtin_skills.is_builtin(name):
+            try:
+                text = self._skill_store.read_resource(name, rel_path)
+                if len(text.encode("utf-8")) > self._RESOURCE_MAX_BYTES:
+                    raise ValidationError(f"resource {rel_path!r} is too large to load into context")
+                truncated = len(text) > self._RESOURCE_MAX_CHARS
+                out = {"skill": name, "path": rel_path, "content": text[: self._RESOURCE_MAX_CHARS]}
+                if truncated:
+                    out["truncated"] = True
+                return out
+            except NotFoundError:
+                pass
+
         extra = self._extra_skills.get(name)
         if extra is None or not extra.resource_dir:
-            raise NotFoundError(
-                f"skill {name!r} has no bundled resources (only plugin skills with a "
-                "resources list in skill_view support this)"
-            )
+            raise NotFoundError(f"skill {name!r} has no bundled resource {rel_path!r}")
         base = Path(extra.resource_dir).resolve()
         target = (base / rel_path).resolve()
         if target != base and base not in target.parents:
@@ -867,6 +897,7 @@ class LearningService(ILearningService):
         current_path = self._paths.skills / f"{skill_id}.md"
         if current_path.exists():
             self._skill_store.archive_to_history(skill_id, current.version, current_path.read_text(encoding="utf-8"))
+        self._skill_store.archive_resources_to_history(skill_id, current.version)
 
         # ② 새 본문 적용 — edited_body > proposed_body > 현재 본문(둘 다 없을 때만) 순.
         if edited_body is not None:
@@ -1608,6 +1639,7 @@ class LearningService(ILearningService):
                 self._skill_store.archive_to_history(
                     skill_id, current.version, current_path.read_text(encoding="utf-8")
                 )
+            self._skill_store.archive_resources_to_history(skill_id, current.version)
             current.version += 1
             current.body = body
 
@@ -1621,6 +1653,40 @@ class LearningService(ILearningService):
         self._skill_store.write(current)
         if body_changed:
             self.request_analysis(skill_id)  # 직접/AI 편집 저장 → 재분석
+        return self._detail_from(current, self._usage_store.read(skill_id))
+
+    def get_skill_files(self, skill_id: str) -> list[dict[str, str]]:
+        """Return a skill as a repository-like file tree for the management UI."""
+        builtin = self._builtin_skills.get(skill_id)
+        if builtin is not None:
+            return [{"path": "SKILL.md", "content": serialize_skill_md(builtin)}]
+        return [
+            {"path": path, "content": content}
+            for path, content in self._skill_store.list_files(skill_id)
+        ]
+
+    def update_skill_file(self, skill_id: str, path: str, content: str) -> SkillDetail:
+        """Persist a bundled reference/script and publish it as a new skill version."""
+        self._ensure_not_builtin(skill_id, "편집")
+        if path.lower() == "skill.md":
+            from .skill.store import parse_skill_md
+
+            return self.update_skill(skill_id, body=parse_skill_md(content).body)
+
+        current = self._skill_store.read(skill_id)
+        skill_guard.validate_content_size(content, self._config.skill_max_body_chars)
+        content, _ = skill_guard.scrub_secrets(content)
+        current_path = self._paths.skills / f"{skill_id}.md"
+        if current_path.exists():
+            self._skill_store.archive_to_history(
+                skill_id, current.version, current_path.read_text(encoding="utf-8")
+            )
+        self._skill_store.archive_resources_to_history(skill_id, current.version)
+        self._skill_store.write_resource(skill_id, path, content)
+        current.version += 1
+        current.updated_at = now_iso()
+        self._skill_store.write(current)
+        self._usage_store.increment_patch(skill_id)
         return self._detail_from(current, self._usage_store.read(skill_id))
 
     def delete_skill(self, skill_id: str) -> None:

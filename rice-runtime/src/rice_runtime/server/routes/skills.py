@@ -2,6 +2,7 @@
 
   GET   /skills                 list + usage stats (MySkillsScreen)
   GET   /skills/{id}            detail
+  PUT   /skills/{id}/files/{path}  edit bundled reference/script/template
   POST  /skills/curate          manual "스킬 정리" trigger (mode=rules|consolidate, Phase B)
   PATCH /skills/{id}/state      archive / activate
   POST  /skills/{id}/patch      answer a skill_patch_proposed (approve/reject/edit)
@@ -73,6 +74,10 @@ class UpdateSkillIn(BaseModel):
     description: str | None = None
     tags: list[str] | None = None
     state: str | None = None  # active | stale | archived
+
+
+class UpdateSkillFileIn(BaseModel):
+    content: str
 
 
 class PatchIn(BaseModel):
@@ -165,7 +170,26 @@ async def get_skill(skill_id: str, c: Container = Depends(get_container)):
     # (frontmatter)/mentioned(본문 감지) 세 출처가 합류된 상태다.
     return {
         "success": True,
-        "data": {**detail.__dict__, "analysis": c.learning.get_skill_analysis(skill_id)},
+        "data": {
+            **detail.__dict__,
+            "files": c.learning.get_skill_files(skill_id),
+            "analysis": c.learning.get_skill_analysis(skill_id),
+        },
+    }
+
+
+@router.put("/{skill_id}/files/{file_path:path}")
+async def update_skill_file(
+    skill_id: str,
+    file_path: str,
+    body: UpdateSkillFileIn,
+    c: Container = Depends(get_container),
+):
+    """Edit one file in a repository-style skill bundle and publish a new version."""
+    detail = c.learning.update_skill_file(skill_id, file_path, body.content)
+    return {
+        "success": True,
+        "data": {**detail.__dict__, "files": c.learning.get_skill_files(skill_id)},
     }
 
 

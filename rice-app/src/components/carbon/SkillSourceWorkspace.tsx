@@ -26,6 +26,16 @@ const LANG_LABEL: Record<SkillFileLanguage, string> = {
   json: 'JSON',
 };
 
+const fileRole = (path: string): { label: string; description: string } => {
+  const name = path.split('/').pop()?.toLowerCase() ?? path.toLowerCase();
+  if (name === 'skill.md') return { label: '스킬 지침', description: 'AI가 언제, 어떻게 이 스킬을 사용할지 정의해요.' };
+  if (name.startsWith('readme')) return { label: '사용 안내', description: '사람을 위한 설치·사용 설명이에요.' };
+  if (path.startsWith('scripts/') || /\.(sh|py)$/i.test(path)) return { label: '실행 도구', description: '스킬이 실제 작업을 수행할 때 사용하는 코드예요.' };
+  if (/\.(html|htm)$/i.test(path)) return { label: '화면·템플릿', description: '결과물의 화면이나 문서 모양을 만들어요.' };
+  if (/\.json$/i.test(path)) return { label: '설정·데이터', description: '스킬이 참고하는 구조화된 설정이에요.' };
+  return { label: '참고 파일', description: '스킬 실행이나 설명에 함께 사용되는 파일이에요.' };
+};
+
 // SKILL.md 먼저, 그다음 README, 나머지 알파벳 — 루트 파일 정렬
 const rootRank = (name: string) => (/^skill\.md$/i.test(name) ? 0 : /^readme/i.test(name) ? 1 : 2);
 
@@ -82,6 +92,7 @@ export const SkillSourceWorkspace: React.FC<{
   const isMarkdown = active?.language === 'markdown';
   const showRaw = raw || !isMarkdown;
   const folderCount = Object.keys(folders).length;
+  const activeRole = active ? fileRole(active.path) : null;
 
   const copy = async () => {
     if (!active) return;
@@ -104,8 +115,8 @@ export const SkillSourceWorkspace: React.FC<{
           setActivePath(file.path);
           setRaw(false);
         }}
-        className={`group flex items-center gap-2 w-full text-left rounded-md py-1.5 pr-2 text-body-short-01 transition-colors ${
-          indent ? 'pl-7' : 'pl-2.5'
+        className={`group flex items-center gap-2 w-full text-left rounded-lg py-2 pr-2.5 text-body-short-01 transition-colors ${
+          indent ? 'pl-8' : 'pl-2.5'
         } ${
           on
             ? 'bg-layer-selected-01 text-text-primary font-semibold'
@@ -114,38 +125,34 @@ export const SkillSourceWorkspace: React.FC<{
       >
         <FileTypeIcon path={file.path} size={16} />
         <span className="truncate flex-1 min-w-0">{base}</span>
-        {isEntry && (
-          <span className="text-label-micro font-medium text-link-primary bg-layer-02 rounded px-1 py-px flex-shrink-0">정의</span>
-        )}
+        {isEntry && <span className="text-label-micro font-medium text-link-primary flex-shrink-0">핵심</span>}
       </button>
     );
   };
 
   return (
     <div className="fixed inset-0 z-[55] bg-background flex flex-col animate-fade-in">
-      {/* top bar — 닫기는 좌측 "학습으로"(+ESC) 하나로 통일하고, 우측은 편집 대상 파일을 명시한 단일 액션.
-          electron에선 위쪽에 트래픽 라이트용 드래그 스트립을 두어, 좌우로 밀지 않고 height로 겹침을 해소한다. */}
+      {/* 저장소를 개발자 IDE가 아니라 스킬의 '구성'으로 설명하는 상단 바. */}
       <div className="flex-shrink-0 border-b border-border-subtle-01 bg-layer-01">
         {isElectron && <div className="h-7 w-full electron-drag" />}
-        <div className="flex items-center gap-3 px-3 h-12">
+        <div className="flex items-center gap-3 px-4 h-14">
         <button
           onClick={onClose}
-          title="학습 뷰로 돌아가기 (Esc)"
-          className="electron-no-drag inline-flex items-center gap-1.5 h-8 pl-2 pr-3 rounded-lg text-body-short-01 font-semibold text-text-secondary bg-layer-02 border border-border-subtle-01 hover:bg-layer-hover-01 hover:text-text-primary hover:border-border-strong-01 transition-colors flex-shrink-0"
+          title="스킬 상세로 돌아가기 (Esc)"
+          aria-label="스킬 상세로 돌아가기"
+          className="electron-no-drag inline-flex h-9 w-9 items-center justify-center rounded-lg text-text-secondary bg-layer-02 border border-border-subtle-01 hover:bg-layer-hover-01 hover:text-text-primary hover:border-border-strong-01 transition-colors flex-shrink-0"
         >
           <Icon name="arrow-right" size={16} className="rotate-180" />
-          학습으로
         </button>
-        <span className="w-px h-5 bg-border-subtle-01 flex-shrink-0" />
-        <div className="w-7 h-7 flex-shrink-0 flex items-center justify-center rounded-lg bg-blue-60">
-          <Icon name="skill" size={15} className="text-white" />
+        <div className="w-9 h-9 flex-shrink-0 flex items-center justify-center rounded-xl bg-blue-60/15 border border-blue-50/25">
+          <Icon name="folder" size={17} className="text-blue-30" />
         </div>
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="text-body-short-02 font-semibold text-text-primary truncate">{skill.name}</span>
-          <span className="text-caption-01 font-mono text-text-secondary bg-layer-02 border border-border-subtle-01 rounded px-1.5 py-px flex-shrink-0">
-            {skill.ver}
-          </span>
-          <span className="text-caption-01 text-text-helper flex-shrink-0">소스</span>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-body-short-02 font-semibold text-text-primary truncate">{skill.name}</span>
+            <span className="text-caption-01 font-mono text-text-helper">{skill.ver}</span>
+          </div>
+          <div className="text-caption-01 text-text-helper">스킬 구성 · {files.length}개 파일{folderCount > 0 ? ` · ${folderCount}개 폴더` : ''}</div>
         </div>
         <div className="flex-1" />
         {/* 편집 = 지금 보고 있는 파일 대상. 어느 파일인지 라벨에 드러낸다.
@@ -154,11 +161,11 @@ export const SkillSourceWorkspace: React.FC<{
           <button
             onClick={() => active && onEdit(active.path)}
             disabled={!active}
-            title={active ? `${active.path.split('/').pop()} 편집` : '편집'}
-            className="electron-no-drag inline-flex items-center gap-1.5 h-8 pl-2.5 pr-3 rounded-lg text-body-short-01 font-semibold bg-interactive text-text-on-color hover:bg-interactive-hover transition-colors flex-shrink-0 disabled:opacity-40 max-w-[260px]"
+            title={active ? `${active.path}를 AI와 수정` : 'AI로 수정'}
+            className="electron-no-drag inline-flex items-center gap-2 h-9 px-3.5 rounded-lg text-body-short-01 font-semibold bg-interactive text-text-on-color hover:bg-interactive-hover transition-colors flex-shrink-0 disabled:opacity-40 max-w-[300px]"
           >
-            <Icon name="edit" size={14} className="flex-shrink-0" />
-            <span className="truncate">{active ? `${active.path.split('/').pop()} 편집` : '편집'}</span>
+            <Icon name="sparkle" size={14} className="flex-shrink-0" />
+            <span className="truncate">AI로 이 파일 수정</span>
           </button>
         ) : (
           <span
@@ -172,12 +179,12 @@ export const SkillSourceWorkspace: React.FC<{
         </div>
       </div>
 
-      {/* synthesized notice (learned skills have no real files) */}
+      {/* 학습형 스킬은 파일이 자동 구성됐다는 provenance만 조용히 알린다. */}
       {synthesized && (
         <div className="flex-shrink-0 flex items-center gap-2 px-5 py-2 bg-interactive/8 border-b border-border-subtle-01">
           <Icon name="idea" size={14} className="text-icon-primary flex-shrink-0" />
           <span className="text-caption-01 text-text-secondary">
-            이 스킬은 대화로 학습돼 <span className="text-text-primary font-semibold">정의가 자동 구성</span>됐어요. 작동 방식은 학습 뷰에서 해석해 보여주고, 본문은 위 <span className="font-semibold">편집</span>으로 다듬을 수 있어요.
+            대화에서 배운 내용을 바탕으로 기본 파일 구성이 만들어졌어요. 원하는 파일을 고른 뒤 AI에게 자연어로 수정을 요청할 수 있습니다.
           </span>
         </div>
       )}
@@ -185,12 +192,19 @@ export const SkillSourceWorkspace: React.FC<{
       {/* body: tree + content */}
       <div className="flex-1 min-h-0 flex">
         {/* tree */}
-        <div className="w-[260px] flex-shrink-0 border-r border-border-subtle-01 bg-layer-01 overflow-y-auto py-3 px-2">
+        <div className="w-[296px] flex-shrink-0 border-r border-border-subtle-01 bg-layer-01 overflow-y-auto p-3">
+          <div className="mb-3 rounded-xl border border-border-subtle-01 bg-background p-3">
+            <div className="flex items-center gap-2 text-body-short-01 font-semibold text-text-primary">
+              <Icon name="skill" size={15} className="text-blue-30" />
+              하나의 스킬, 여러 파일
+            </div>
+            <p className="mt-1.5 text-caption-01 leading-4 text-text-helper">
+              <span className="font-mono text-text-secondary">SKILL.md</span>는 지침을, 나머지 파일은 실행 도구와 참고 자료를 담아요.
+            </p>
+          </div>
           <div className="flex items-center gap-1.5 px-2.5 pb-2">
-            <span className="text-caption-01 font-semibold uppercase tracking-wider text-text-helper">구성</span>
-            <span className="text-caption-01 text-text-helper">
-              · 파일 {files.length}{folderCount > 0 ? ` · 폴더 ${folderCount}` : ''}
-            </span>
+            <span className="text-caption-01 font-semibold text-text-secondary">파일</span>
+            <span className="ml-auto text-caption-01 text-text-helper">{files.length}</span>
           </div>
           {roots.map((f) => (
             <FileRow key={f.path} file={f} />
@@ -201,7 +215,7 @@ export const SkillSourceWorkspace: React.FC<{
               <div key={dir} className="mt-0.5">
                 <button
                   onClick={() => setCollapsed((c) => ({ ...c, [dir]: !c[dir] }))}
-                  className="flex items-center gap-1.5 w-full text-left rounded-md px-2.5 py-1.5 text-body-short-01 text-text-secondary hover:bg-layer-hover-01 transition-colors"
+                  className="flex items-center gap-1.5 w-full text-left rounded-lg px-2.5 py-2 text-body-short-01 text-text-secondary hover:bg-layer-hover-01 transition-colors"
                 >
                   <Icon name="chevron-down" size={13} className={`text-icon-secondary transition-transform ${isCollapsed ? '-rotate-90' : ''}`} />
                   <span className="text-icon-secondary">
@@ -219,14 +233,15 @@ export const SkillSourceWorkspace: React.FC<{
         {/* content */}
         <div className="flex-1 min-w-0 flex flex-col bg-background">
           {/* file toolbar */}
-          <div className="flex-shrink-0 flex items-center gap-2 px-5 h-11 border-b border-border-subtle-01">
+          <div className="flex-shrink-0 flex items-center gap-3 px-5 h-14 border-b border-border-subtle-01 bg-layer-01">
             {active && <FileTypeIcon path={active.path} size={15} />}
-            <span className="text-body-short-01 font-mono text-text-secondary truncate">{active?.path}</span>
-            {active && (
-              <span className="text-caption-01 text-text-helper bg-layer-02 border border-border-subtle-01 rounded px-1.5 py-px flex-shrink-0">
-                {LANG_LABEL[active.language]}
-              </span>
-            )}
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-body-short-01 font-mono font-semibold text-text-primary truncate">{active?.path}</span>
+                {active && <span className="text-label-micro text-text-helper">{LANG_LABEL[active.language]}</span>}
+              </div>
+              {activeRole && <div className="text-caption-01 text-text-helper truncate">{activeRole.label} · {activeRole.description}</div>}
+            </div>
             <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
               {isMarkdown && (
                 <div className="flex items-center rounded-md bg-layer-02 p-0.5">
@@ -236,7 +251,7 @@ export const SkillSourceWorkspace: React.FC<{
                       !raw ? 'bg-layer-01 text-text-primary shadow-elevation-1' : 'text-text-helper hover:text-text-primary'
                     }`}
                   >
-                    Preview
+                      미리보기
                   </button>
                   <button
                     onClick={() => setRaw(true)}
@@ -244,7 +259,7 @@ export const SkillSourceWorkspace: React.FC<{
                       raw ? 'bg-layer-01 text-text-primary shadow-elevation-1' : 'text-text-helper hover:text-text-primary'
                     }`}
                   >
-                    Raw
+                      원문
                   </button>
                 </div>
               )}
@@ -264,11 +279,11 @@ export const SkillSourceWorkspace: React.FC<{
             {!active ? (
               <div className="h-full flex items-center justify-center text-body-short-01 text-text-helper">파일이 없어요.</div>
             ) : showRaw ? (
-              <pre className="px-6 py-5 text-code-02 font-mono leading-5 text-text-primary whitespace-pre-wrap break-words">
+              <pre className="mx-auto max-w-[980px] px-10 py-8 text-code-02 font-mono leading-6 text-text-primary whitespace-pre-wrap break-words">
                 {active.content}
               </pre>
             ) : (
-              <div className="px-8 py-6 max-w-[820px]">
+              <div className="mx-auto max-w-[920px] px-10 py-8">
                 <Markdown source={active.content} />
               </div>
             )}

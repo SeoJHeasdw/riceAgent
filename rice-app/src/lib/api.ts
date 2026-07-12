@@ -219,6 +219,12 @@ class ApiClient {
   ): Promise<ApiResponse> {
     return this.send('PUT', `/skills/${id}`, patch);
   }
+  /** 저장소형 스킬의 개별 reference/script 파일 편집. 서버가 전체 스킬 버전을
+   *  올리고 이전 파일 스냅샷을 history에 함께 보관한다. */
+  updateSkillFile(id: string, filePath: string, content: string): Promise<ApiResponse> {
+    const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
+    return this.send('PUT', `/skills/${encodeURIComponent(id)}/files/${encodedPath}`, { content });
+  }
   /** 스킬 → 마켓 artifact 내보내기 (POST /skills/{id}/export) — Skill Market
    *  공개(publish)의 실체. 워크스페이스 skill-exports/ 아래에 platform/git-ready
    *  디렉토리와 install-ready tar.gz(+sha256 checksum)를 만든다. */

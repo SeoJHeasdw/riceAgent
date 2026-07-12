@@ -159,7 +159,7 @@ category: expert                          # 마켓 필터용 (PLATFORM_DESIGN ca
 tags: ["wxo", "ibm", "troubleshooting"]   # 마켓 검색/필터용
 author: { name: "...", team: "..." }
 entrypoint:                   # type별 상이
-  # skill:  선언적 절차 (SKILL.md — 실행 코드 없음, sandbox 불필요)
+  # skill:  선언적 절차 (SKILL.md + 선택적 references/scripts/templates)
   # plugin: 지식 패키지 (skills/ 디렉토리 + 요구 Connector)
 requires:
   runtime: ">=0.1"
@@ -172,12 +172,14 @@ checksum: sha256-...          # 다운로드 무결성 (RUNTIME_DESIGN 문서 9�
 ```
 artifact.tar.gz (skill)              artifact.tar.gz (plugin)
 ├── rice-artifact.yaml               ├── rice-artifact.yaml
-└── SKILL.md                         └── skills/                 # SKILL.md 묶음 (RUNTIME_DESIGN 문서 4장과 동일 형식)
-   (선언적 절차 — 실행 코드 없음)         └── */SKILL.md           #   + manifest의 requires.connectors로 외부 접근 선언
+├── SKILL.md                         └── skills/                 # SKILL.md 묶음 (RUNTIME_DESIGN 문서 4장과 동일 형식)
+├── references/ (선택)                   └── */SKILL.md           #   + manifest의 requires.connectors로 외부 접근 선언
+├── scripts/ (선택)
+└── templates/ (선택)
 ```
 
 핵심 설계:
-- ★ **skill = 선언적 절차(SKILL.md)** — 실행 코드가 없어 sandbox 경계(RUNTIME_DESIGN 문서 5장) 대상이 아님. 가장 안전하며 Skill Market의 기본 단위.
+- ★ **skill = 선언적 절차(SKILL.md) + 선택적 번들 파일** — references/scripts/templates는 절차가 읽는 리소스이며, 포함됐다는 이유만으로 자동 실행 권한을 얻지 않는다. 원자적 실행과 외부 접근은 아래 Connector/도구 승인 경계를 그대로 통과한다.
 - ★ **plugin = skills 묶음 + 요구 Connector(들)** — "Plugin은 머리에 추가되는 전문성"(PRODUCT_IDEA)과 일치. 외부 서비스 접근·원자적 실행 도구가 필요하면 `requires.connectors`로 선언하고, 해당 실행/접근은 **Connector(MCP) 레이어**가 담당한다.
 
 → 마켓 artifact(skill·plugin) 자체는 **선언적**이므로 sandbox를 우회한다. 실제 코드 실행/외부 접근의 sandbox 경계(RUNTIME_DESIGN 5장)는 **Connector(MCP 서버) 및 plugin이 포함한 connector 코드**에 적용된다.
@@ -186,7 +188,7 @@ artifact.tar.gz (skill)              artifact.tar.gz (plugin)
 1. ★ Phase 1은 프로토타입 Connector(Gmail OAuth)만; MCP 서버 일반 어댑터는 Phase 2 확장 포인트로 명시
 2. 처음부터 광범위한 MCP 서버 형식 채택 — 생태계 호환 ↑, 그러나 데모 복잡도와 패키징(Node/uv 의존) 부담 ↑
 
-**manifest/레이아웃**: 마켓 패키지의 실체는 `rice-artifact.yaml`(schema_version·type·name·version·requires.connectors·checksum 등) + skill은 `SKILL.md` 단일 파일, plugin은 `skills/` 묶음으로 고정한다. 이 스키마가 runtime·platform·app 3곳의 단일 출처다(5장).
+**manifest/레이아웃**: 마켓 패키지의 실체는 `rice-artifact.yaml`(schema_version·type·name·version·requires.connectors·checksum 등) + skill은 루트 `SKILL.md`와 선택적 번들 파일, plugin은 `skills/` 묶음으로 고정한다. 이 스키마가 runtime·platform·app 3곳의 단일 출처다(5장).
 
 ### 2.3 설치 흐름
 
@@ -284,6 +286,7 @@ requires:
 ### 6.1 Skill CRUD (신규 — §1.3 보강)
 - `POST /skills` `{name(kebab), body, description?, tags?}` → 사용자 직접 스킬 생성(source=`user`).
 - `PUT /skills/{id}` `{body?, description?, tags?, state?}` → 직접 편집. **본문 변경 시 version+1 + .history 보관**.
+- `PUT /skills/{id}/files/{file_path}` `{content}` → 번들 reference/script/template 파일 편집. **version+1 + 해당 버전의 전체 번들 스냅샷 보관**.
 - `DELETE /skills/{id}` → 본문·usage·history 사이드카 모두 삭제.
 
 ### 6.2 HITL 승인 응답 코드 (§1.2 준수)
@@ -294,7 +297,7 @@ requires:
 - `POST /artifacts/install` 에 선택 필드 **`checksum`** 추가 — 앱이 platform download 응답의 `X-Checksum` 헤더 값을 그대로 전달하면 manifest.checksum 보다 우선해 검증한다(빈 값이면 dev 모드).
 - `POST /artifacts/install` 은 **`path` 또는 `url`** 을 받는다. `path`는 Electron main이 저장한 로컬 tar.gz, `url`은 브라우저 dev용 localhost platform `/artifacts/{id}/download` URL이다. 원격 URL은 거부한다.
 - manifest `version` 은 YAML 숫자(`1.0`)로 와도 문자열로 정규화(과거: ValidationError).
-- skill artifact 는 설치 시 **평면 `~/.rice/skills/<name>.md`** 로 배치되어 학습 루프 주입·lifecycle 대상이 된다.
+- skill artifact의 정본 `SKILL.md`는 설치 시 **평면 `~/.rice/skills/<name>.md`** 로 정규화되어 기존 학습 루프 주입·lifecycle 대상이 된다. 함께 든 번들 파일은 `~/.rice/skills/<name>/` 아래 원래 상대경로로 보존되며, 관리 UI와 `skill_resource`가 `SKILL.md`를 루트로 한 하나의 가상 저장소처럼 노출한다.
 - plugin 의 `skills/<sub>/SKILL.md`(표준 레이아웃)도 주입 대상에 포함(과거: 평면 `*.md` 만). platform tarball의 최상위 `<artifact_id>/` 폴더는 runtime 설치 시 벗겨 `~/.rice/plugins/plugin:<name>/skills/...` 로 정규화한다.
 
 ### 6.4 Plugin 활성화 게이트 (§4.4 실행)

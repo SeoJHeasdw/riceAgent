@@ -149,6 +149,7 @@ class SkillLifecycle:
         current = self._store.read(name)
         current_text = (self._paths.skills / f"{name}.md").read_text(encoding="utf-8")
         self._store.archive_to_history(name, current.version, current_text)
+        self._store.archive_resources_to_history(name, current.version)
 
         # 복원: version 은 현재+1
         new_version = current.version + 1
@@ -164,4 +165,5 @@ class SkillLifecycle:
             updated_at=now_iso(),
         )
         self._store.write(restored)
+        self._store.restore_resources_from_history(name, version)
         return new_version

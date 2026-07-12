@@ -396,6 +396,14 @@ class ILearningService(Protocol):
         version to .history/ and bumps version (so diff/rollback still work)."""
         ...
 
+    def get_skill_files(self, skill_id: str) -> list[dict[str, str]]:
+        """Return SKILL.md and its bundled references/scripts as one file tree."""
+        ...
+
+    def update_skill_file(self, skill_id: str, path: str, content: str) -> SkillDetail:
+        """Persist one bundled file and bump the skill version."""
+        ...
+
     def delete_skill(self, skill_id: str) -> None:
         """Delete a skill + its usage/history sidecars (DELETE /skills/{id})."""
         ...

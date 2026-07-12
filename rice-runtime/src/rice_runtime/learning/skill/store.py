@@ -19,6 +19,8 @@ SKILL.md 포맷 (LEARNING_LOOP §2):
 디렉토리 레이아웃 (RicePaths §paths.skill_history):
   ~/.rice/skills/<name>.md               ← 현재 버전
   ~/.rice/skills/<name>/.history/v1.md   ← 버전 히스토리
+  ~/.rice/skills/<name>/references/...   ← 선택적 번들 파일
+  ~/.rice/skills/<name>/scripts/...      ← 선택적 번들 파일
 
 WHY: 스킬은 파일시스템에 사는 첫-클래스 아티팩트다. 마켓 artifact와 동일 포맷이라
 plugin 제공 스킬과 호환된다 (CONTRACTS §2.2). SQLite 에 넣지 않는 이유는 사용자가
@@ -228,6 +230,28 @@ class SkillStore:
     def _history_dir(self, name: str) -> Path:
         return self._paths.skill_history(name)
 
+    def _bundle_dir(self, name: str) -> Path:
+        """Bundled references/scripts for a learned skill.
+
+        The canonical definition stays at ``<name>.md`` for backwards-compatible
+        injection, while repository files live under ``<name>/`` beside its
+        hidden history directory. The API presents both as one virtual tree with
+        ``SKILL.md`` at the root.
+        """
+        return self._paths.skills / name
+
+    def _resource_path(self, name: str, rel_path: str) -> Path:
+        rel = Path(rel_path)
+        if rel.is_absolute() or not rel.parts or any(part in ("", ".", "..") for part in rel.parts):
+            raise ValidationError(f"Invalid skill resource path: {rel_path!r}")
+        if rel.parts[0] == ".history" or rel.name.lower() == "skill.md":
+            raise ValidationError(f"Reserved skill resource path: {rel_path!r}")
+        base = self._bundle_dir(name).resolve()
+        target = (base / rel).resolve()
+        if base not in target.parents:
+            raise ValidationError(f"Skill resource path escapes bundle: {rel_path!r}")
+        return target
+
     # ── 읽기 ─────────────────────────────────────────────────────────────────
 
     def read(self, name: str) -> SkillData:
@@ -270,6 +294,35 @@ class SkillStore:
                 pass
         return result
 
+    def list_files(self, name: str) -> list[tuple[str, str]]:
+        """Return the virtual repository tree: canonical SKILL.md + text resources."""
+        skill = self.read(name)
+        files: list[tuple[str, str]] = [("SKILL.md", serialize_skill_md(skill))]
+        bundle = self._bundle_dir(name)
+        if not bundle.is_dir():
+            return files
+        for path in sorted(bundle.rglob("*")):
+            if not path.is_file():
+                continue
+            rel = path.relative_to(bundle)
+            if ".history" in rel.parts or any(part.startswith(".") for part in rel.parts):
+                continue
+            try:
+                data = path.read_bytes()
+                if b"\x00" in data[:1024]:
+                    continue
+                files.append((rel.as_posix(), data.decode("utf-8")))
+            except (OSError, UnicodeDecodeError):
+                continue
+        return files
+
+    def read_resource(self, name: str, rel_path: str) -> str:
+        self.read(name)  # validate skill existence first
+        path = self._resource_path(name, rel_path)
+        if not path.is_file():
+            raise NotFoundError(f"Resource {rel_path!r} not found for skill {name!r}")
+        return path.read_text(encoding="utf-8")
+
     # ── 쓰기 ─────────────────────────────────────────────────────────────────
 
     @staticmethod
@@ -285,6 +338,48 @@ class SkillStore:
         """스킬을 파일시스템에 원자적으로 직렬화한다. 디렉토리가 없으면 생성한다."""
         self._paths.skills.mkdir(parents=True, exist_ok=True)
         self._atomic_write_text(self._skill_path(skill.name), serialize_skill_md(skill))
+
+    def write_resource(self, name: str, rel_path: str, content: str) -> None:
+        """Atomically create or replace a UTF-8 file inside a skill bundle."""
+        self.read(name)
+        path = self._resource_path(name, rel_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self._atomic_write_text(path, content)
+
+    def archive_resources_to_history(self, name: str, version: int) -> None:
+        """Snapshot non-hidden bundle files alongside a SKILL.md history revision."""
+        bundle = self._bundle_dir(name)
+        snapshot = self._history_dir(name) / f"v{version}.files"
+        shutil.rmtree(snapshot, ignore_errors=True)
+        # An empty directory is an intentional snapshot too: rolling back to a
+        # pre-resource version must remove files added later.
+        snapshot.mkdir(parents=True, exist_ok=True)
+        if not bundle.is_dir():
+            return
+        for path in sorted(bundle.rglob("*")):
+            if not path.is_file():
+                continue
+            rel = path.relative_to(bundle)
+            if ".history" in rel.parts or any(part.startswith(".") for part in rel.parts):
+                continue
+            dest = snapshot / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, dest)
+
+    def restore_resources_from_history(self, name: str, version: int) -> None:
+        """Restore a resource snapshot if that historical revision has one."""
+        snapshot = self._history_dir(name) / f"v{version}.files"
+        if not snapshot.is_dir():
+            return
+        bundle = self._bundle_dir(name)
+        for path in list(bundle.rglob("*")) if bundle.exists() else []:
+            if path.is_file() and ".history" not in path.relative_to(bundle).parts:
+                path.unlink()
+        for path in sorted(snapshot.rglob("*")):
+            if path.is_file():
+                dest = bundle / path.relative_to(snapshot)
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(path, dest)
 
     def delete(self, name: str) -> None:
         """스킬 본문 파일과 히스토리 디렉토리를 삭제한다 (DELETE /skills/{id}).
