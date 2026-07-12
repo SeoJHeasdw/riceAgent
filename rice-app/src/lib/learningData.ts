@@ -144,6 +144,8 @@ export interface SkillVersion {
   when: string;
   note: string;
   current?: boolean;
+  /** 런타임이 보관한 해당 버전의 전체 SKILL.md 스냅샷. */
+  body?: string;
   /** 이 버전 시점의 규칙 스냅샷 (읽기 전용 보기·복원용) */
   rules?: SkillVersionRule[];
   /** 이 버전의 실측 성과 — 복원 판단·버전 비교에 사용 */
@@ -262,6 +264,14 @@ export interface RuntimeSkillAnalysis {
   warnings: string[];
 }
 
+/** GET /skills/{id}/history의 버전 스냅샷 payload. */
+export interface RuntimeSkillVersion {
+  version: number;
+  updated_at: string;
+  /** frontmatter를 포함한 전체 SKILL.md 원문. */
+  body: string;
+}
+
 /** 런타임 분석 payload → 프론트 SkillAnalysis (snake→camel). */
 export function runtimeAnalysisToSkillAnalysis(raw: RuntimeSkillAnalysis): SkillAnalysis {
   return {
@@ -285,6 +295,9 @@ export interface SkillDetail {
   shared: boolean;
   rules: SkillRule[];
   versions: SkillVersion[];
+  /** 런타임 히스토리 조회 상태. undefined면 마켓/로컬 전용 detail이다. */
+  historyStatus?: 'idle' | 'loading' | 'loaded' | 'error';
+  historyError?: string;
   usage: SkillUsage[];
   permissions: SkillPermission[];
   /** 워크플로형(절차적) 스킬의 단계 — kind==='workflow' 일 때만 채워짐 */

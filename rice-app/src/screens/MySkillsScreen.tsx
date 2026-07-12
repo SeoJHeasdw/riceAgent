@@ -8,12 +8,13 @@ import { LearningImpactPanel } from '../components/carbon/LearningImpactPanel';
 import { SkillSourceWorkspace } from '../components/carbon/SkillSourceWorkspace';
 import { SkillPublishDialog } from '../components/carbon/SkillPublishDialog';
 import { SkillEditDrawer, type EditPatch } from '../components/carbon/SkillEditDrawer';
+import { Markdown } from '../components/carbon/Markdown';
 import { IMPACT_REPORT, runtimeAnalysisToSkillAnalysis } from '../lib/learningData';
 import { ownedSkillFiles, ownedToMarketSkill, publishedMarketId } from '../lib/skillBridge';
 import { languageFromPath } from '../lib/skillFiles';
 import { api } from '../lib/api';
 import { useToast } from '../lib/toast/ToastContext';
-import type { RuntimeSkillAnalysis, Skill, SkillAnalysisConfidence, SkillAnalysisToolMention, SkillDetail, SkillOrigin, SkillStep, SkillUpstream, SkillVersion } from '../lib/learningData';
+import type { RuntimeSkillAnalysis, RuntimeSkillVersion, Skill, SkillAnalysisConfidence, SkillAnalysisToolMention, SkillDetail, SkillOrigin, SkillStep, SkillUpstream, SkillVersion } from '../lib/learningData';
 import type { IconName } from '../components/ui';
 import type { ConsolidateProposal, ImpactReport } from '../lib/types';
 
@@ -285,8 +286,58 @@ type ResolvedUnderstanding = {
   warnings: string[];
 };
 
+type RuntimeSkillDetailPayload = {
+  name: string;
+  version: number;
+  description: string;
+  body?: string;
+  tags?: string[];
+  source?: string | null;
+  analysis?: RuntimeSkillAnalysis | null;
+};
+
 const stripFrontmatter = (content: string): string =>
   content.replace(/^---\s*[\s\S]*?\n---\s*/m, '').trim();
+
+const runtimeSkillSource = (data: RuntimeSkillDetailPayload): string => {
+  const frontmatter = [
+    `name: ${data.name}`,
+    `version: ${data.version}`,
+    `description: ${data.description}`,
+    ...(data.tags?.length ? [`tags: [${data.tags.join(', ')}]`] : []),
+    ...(data.source ? [`source: ${data.source}`] : []),
+  ].join('\n');
+  return `---\n${frontmatter}\n---\n\n${data.body ?? ''}`;
+};
+
+const versionWhen = (value: string): string => {
+  if (!value) return '저장 시각 없음';
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString('ko-KR');
+};
+
+const runtimeVersionList = (
+  current: RuntimeSkillDetailPayload,
+  history: RuntimeSkillVersion[],
+): SkillVersion[] => [
+  {
+    ver: `v${current.version}`,
+    when: '현재 적용 중',
+    note: '현재 런타임에 적용된 SKILL.md',
+    current: true,
+    body: runtimeSkillSource(current),
+  },
+  ...history
+    .filter((entry) => entry.version !== current.version)
+    .sort((a, b) => b.version - a.version)
+    .map((entry): SkillVersion => ({
+      ver: `v${entry.version}`,
+      when: versionWhen(entry.updated_at),
+      note: `서버에 보관된 v${entry.version} 원본`,
+      current: false,
+      body: entry.body,
+    })),
+];
 
 const cleanMdLine = (line: string): string =>
   line
@@ -512,10 +563,10 @@ const VersionChipMenu: React.FC<{
                   ) : (
                     <button
                       onClick={() => { onSwitch(v); setOpen(false); }}
-                      title={`${v.ver}(으)로 전환`}
-                      className="group/sw flex-shrink-0 inline-flex items-center gap-1 text-caption-01 font-semibold text-support-error border border-support-error/50 rounded px-2 py-1 hover:bg-support-error hover:text-white hover:border-support-error transition-colors"
+                      title={`${v.ver}(으)로 복원`}
+                      className="group/sw flex-shrink-0 inline-flex h-6 items-center gap-1 rounded border border-border-subtle-02 px-1.5 text-label-micro font-semibold text-text-secondary transition-colors hover:border-border-strong-01 hover:bg-layer-hover-01 hover:text-text-primary"
                     >
-                      <Icon name="renew" size={12} className="transition-transform group-hover/sw:rotate-180" /> 전환
+                      <Icon name="renew" size={10} className="transition-transform group-hover/sw:rotate-180" /> 복원
                     </button>
                   )}
                 </div>
@@ -561,10 +612,12 @@ const VersionSnapshot: React.FC<{
   const rules = version.rules ?? [];
   const added = rules.filter((r) => r.added).length;
   const m = version.metrics;
+  const hasRuleComparison = rules.length > 0 || (currentVersion?.rules?.length ?? 0) > 0;
 
   // ── 복원 판단 근거 (현재 버전이 아닐 때만) ──
   const decision = (() => {
     if (version.current || !currentVersion) return null;
+    if (!hasRuleComparison && !(m && currentVersion.metrics)) return null;
     const curTexts = new Set((currentVersion.rules ?? []).map((r) => normRule(r.text)));
     const viewTexts = new Set(rules.map((r) => normRule(r.text)));
     const gain = rules.filter((r) => !curTexts.has(normRule(r.text))); // 복원하면 다시 생기는 규칙
@@ -625,6 +678,18 @@ const VersionSnapshot: React.FC<{
             <span className="inline-flex items-center gap-1 text-caption-01 text-text-helper">
               <Icon name="user" size={11} /> {version.author}
             </span>
+          )}
+          {!version.current && (
+            <Button
+              kind="secondary"
+              size="xs"
+              className="ml-auto"
+              icon={<Icon name="renew" size={12} />}
+              onClick={onRestore}
+              title="이 원문을 새 버전으로 복원합니다. 기존 기록은 유지됩니다."
+            >
+              {version.ver} 복원
+            </Button>
           )}
         </div>
         <p className="mt-2 text-body-short-01 leading-5 text-text-secondary">{version.note}</p>
@@ -696,46 +761,53 @@ const VersionSnapshot: React.FC<{
           </div>
         )}
 
-        <div className="mt-6">
-          <div className="flex items-center mb-2.5">
-            <span className="text-caption-01 font-semibold uppercase tracking-wider text-text-secondary">
-              이 버전의 규칙 · {rules.length}
-            </span>
-            {added > 0 && <span className="ml-auto text-caption-01 text-link-primary">+{added} 이 버전에서 추가</span>}
-          </div>
-          <div className="flex flex-col gap-px bg-border-subtle-01 rounded-lg overflow-hidden">
-            {rules.map((r, i) => (
-              <div
-                key={i}
-                className={`flex items-start gap-2.5 bg-background px-3.5 py-2.5 border-l-2 ${
-                  r.added ? 'border-l-blue-50' : 'border-l-transparent'
-                }`}
-              >
-                <Icon
-                  name={r.added ? 'add' : 'check'}
-                  size={15}
-                  className={`mt-0.5 flex-shrink-0 ${r.added ? 'text-link-primary' : 'text-icon-secondary opacity-55'}`}
-                />
-                <span className="flex-1 min-w-0 text-body-short-01 text-text-primary leading-[18px]">{r.text}</span>
-                {r.added && <Tag type="blue" size="sm">추가됨</Tag>}
-              </div>
-            ))}
-            {rules.length === 0 && (
-              <div className="bg-background px-3.5 py-3.5 text-caption-01 text-text-helper">이 버전의 규칙 스냅샷이 없어요.</div>
-            )}
-          </div>
-        </div>
-
-        {version.current ? (
-          <div className="mt-6 pt-4 border-t border-border-subtle-01 flex items-center gap-1.5 text-caption-01 text-text-helper">
-            <Icon name="check-circle" size={14} className="text-support-success" /> 지금 적용 중인 버전이에요.
+        {version.body ? (
+          <div className="mt-6">
+            <div className="mb-2.5 flex items-center gap-2">
+              <span className="text-caption-01 font-semibold uppercase tracking-wider text-text-secondary">
+                이 버전의 SKILL.md
+              </span>
+              <span className="text-caption-01 text-text-helper">서버에 보관된 읽기 전용 원문</span>
+            </div>
+            <div className="max-w-[920px] overflow-x-auto rounded-lg border border-border-subtle-01 bg-background px-4 py-3 [&_h1]:!mb-2 [&_h1]:!text-heading-03 [&_h2]:!mb-1.5 [&_h2]:!mt-4 [&_h2]:!text-body-short-02 [&_h3]:!mt-3 [&_h3]:!text-body-short-01 [&_li]:!text-caption-01 [&_p]:!text-caption-01">
+              <Markdown source={version.body} />
+            </div>
           </div>
         ) : (
-          <div className="mt-6 pt-4 border-t border-border-subtle-01 flex items-center gap-3 flex-wrap">
-            <Button kind="danger" size="sm" icon={<Icon name="renew" size={15} />} onClick={onRestore}>
-              이 버전 복원
-            </Button>
-            <span className="text-caption-01 text-text-helper">복원하면 새 버전으로 저장돼요. 기록은 지워지지 않아요.</span>
+          <div className="mt-6">
+            <div className="flex items-center mb-2.5">
+              <span className="text-caption-01 font-semibold uppercase tracking-wider text-text-secondary">
+                이 버전의 규칙 · {rules.length}
+              </span>
+              {added > 0 && <span className="ml-auto text-caption-01 text-link-primary">+{added} 이 버전에서 추가</span>}
+            </div>
+            <div className="flex flex-col gap-px bg-border-subtle-01 rounded-lg overflow-hidden">
+              {rules.map((r, i) => (
+                <div
+                  key={i}
+                  className={`flex items-start gap-2.5 bg-background px-3.5 py-2.5 border-l-2 ${
+                    r.added ? 'border-l-blue-50' : 'border-l-transparent'
+                  }`}
+                >
+                  <Icon
+                    name={r.added ? 'add' : 'check'}
+                    size={15}
+                    className={`mt-0.5 flex-shrink-0 ${r.added ? 'text-link-primary' : 'text-icon-secondary opacity-55'}`}
+                  />
+                  <span className="flex-1 min-w-0 text-body-short-01 text-text-primary leading-[18px]">{r.text}</span>
+                  {r.added && <Tag type="blue" size="sm">추가됨</Tag>}
+                </div>
+              ))}
+              {rules.length === 0 && (
+                <div className="bg-background px-3.5 py-3.5 text-caption-01 text-text-helper">이 버전의 규칙 스냅샷이 없어요.</div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {version.current && (
+          <div className="mt-5 pt-3 border-t border-border-subtle-01 flex items-center gap-1.5 text-caption-01 text-text-helper">
+            <Icon name="check-circle" size={14} className="text-support-success" /> 지금 적용 중인 버전이에요.
           </div>
         )}
       </div>
@@ -1135,6 +1207,84 @@ const SkillDetailView: React.FC<{
   const [confirmUnshare, setConfirmUnshare] = useState(false);
   const [analysisRefreshing, setAnalysisRefreshing] = useState(false);
   const [analysisFeedback, setAnalysisFeedback] = useState<AnalysisRefreshFeedback | null>(null);
+
+  const loadRuntimeSkillDetail = React.useCallback(async (targetSkillId: string): Promise<boolean> => {
+    setDetails((prev) => {
+      const cur = prev[targetSkillId];
+      if (!cur || cur.historyStatus === undefined) return prev;
+      return {
+        ...prev,
+        [targetSkillId]: { ...cur, historyStatus: 'loading', historyError: undefined },
+      };
+    });
+
+    const [detailRes, historyRes] = await Promise.all([
+      api.getSkill(targetSkillId),
+      api.getSkillHistory(targetSkillId),
+    ]);
+    if (!detailRes.success || !detailRes.data) {
+      setDetails((prev) => {
+        const cur = prev[targetSkillId];
+        if (!cur || cur.historyStatus === undefined) return prev;
+        return {
+          ...prev,
+          [targetSkillId]: {
+            ...cur,
+            historyStatus: 'error',
+            historyError: detailRes.error || '스킬 상세를 불러오지 못했어요.',
+          },
+        };
+      });
+      return false;
+    }
+
+    const data = detailRes.data as RuntimeSkillDetailPayload;
+    const source = runtimeSkillSource(data);
+    const history = historyRes.success && Array.isArray(historyRes.data) ? historyRes.data : null;
+
+    setSkills((prev) => prev.map((item) => (
+      item.id === targetSkillId ? { ...item, ver: `v${data.version}` } : item
+    )));
+    setDetails((prev) => {
+      const cur = prev[targetSkillId];
+      if (!cur) return prev;
+      const files = [...(cur.files ?? [])];
+      const skillMdIndex = files.findIndex((file) => file.path.toLowerCase().endsWith('skill.md'));
+      const skillMd = { path: 'SKILL.md', language: languageFromPath('SKILL.md'), content: source } as const;
+      if (skillMdIndex >= 0) files[skillMdIndex] = { ...files[skillMdIndex], content: source };
+      else files.unshift(skillMd);
+
+      const currentVersion: SkillVersion = {
+        ver: `v${data.version}`,
+        when: '현재 적용 중',
+        note: '현재 런타임에 적용된 SKILL.md',
+        current: true,
+        body: source,
+      };
+      const versions = history
+        ? runtimeVersionList(data, history)
+        : [
+            currentVersion,
+            ...cur.versions
+              .filter((version) => version.ver !== currentVersion.ver)
+              .map((version) => ({ ...version, current: false })),
+          ];
+      return {
+        ...prev,
+        [targetSkillId]: {
+          ...cur,
+          summary: data.description || cur.summary,
+          analysis: data.analysis ? runtimeAnalysisToSkillAnalysis(data.analysis) : cur.analysis,
+          files,
+          versions,
+          historyStatus: history ? 'loaded' : 'error',
+          historyError: history ? undefined : (historyRes.error || '버전 히스토리를 불러오지 못했어요.'),
+        },
+      };
+    });
+    return true;
+  }, [setDetails, setSkills]);
+
   // leaving a skill closes any open version snapshot / 확인 모달 / 분석 상태 / 소스·편집
   useEffect(() => {
     setSnapVer(null);
@@ -1150,52 +1300,13 @@ const SkillDetailView: React.FC<{
     setConfirmDelete(false);
   }, [skillId]);
 
-  // 런타임 스킬의 실제 SKILL.md 본문 + 분석 사이드카 lazy load — 목록 API(GET
-  // /skills)는 본문/분석을 내려주지 않으므로 상세를 처음 열 때 GET /skills/{id}로
-  // 채운다. 빌트인 스킬의 "소스 보기"가 진짜 본문(교보재)을 보여주는 경로이자,
-  // "스킬 이해" 패널이 서버 분석(observed/declared/mentioned 도구 단서 포함)을
-  // 받는 경로다. 런타임 오프라인/목데이터면 조용히 유지(원문 미리보기 폴백).
+  // 런타임 상세 + 실제 버전 히스토리를 함께 hydrate한다. 마켓/로컬 전용 detail은
+  // historyStatus가 undefined라 기존 로컬 스냅샷을 그대로 유지한다.
+  const runtimeBacked = skillId ? details[skillId]?.historyStatus !== undefined : false;
   useEffect(() => {
-    if (!skillId) return;
-    const current = details[skillId];
-    if (!current || (current.files && current.files.length && current.analysis)) return;
-    let cancelled = false;
-    void api.getSkill(skillId).then((res) => {
-      if (cancelled || !res.success || !res.data) return;
-      const data = res.data as {
-        name: string; version: number; description: string;
-        body?: string; tags?: string[]; source?: string | null;
-        analysis?: RuntimeSkillAnalysis | null;
-      };
-      if (!data.body && !data.analysis) return;
-      const fm = [
-        `name: ${data.name}`,
-        `version: ${data.version}`,
-        `description: ${data.description}`,
-        ...(data.tags?.length ? [`tags: [${data.tags.join(', ')}]`] : []),
-        ...(data.source ? [`source: ${data.source}`] : []),
-      ].join('\n');
-      const md = `---\n${fm}\n---\n\n${data.body ?? ''}`;
-      setDetails((prev) => {
-        const cur = prev[skillId];
-        if (!cur) return prev;
-        const keepFiles = !!(cur.files && cur.files.length);
-        if (keepFiles && cur.analysis) return prev;
-        return {
-          ...prev,
-          [skillId]: {
-            ...cur,
-            summary: data.description || cur.summary,
-            analysis: data.analysis ? runtimeAnalysisToSkillAnalysis(data.analysis) : cur.analysis,
-            files: keepFiles || !data.body
-              ? cur.files
-              : [{ path: 'SKILL.md', language: languageFromPath('SKILL.md'), content: md }],
-          },
-        };
-      });
-    });
-    return () => { cancelled = true; };
-  }, [skillId, details, setDetails]);
+    if (!skillId || !runtimeBacked) return;
+    void loadRuntimeSkillDetail(skillId);
+  }, [skillId, runtimeBacked, loadRuntimeSkillDetail]);
 
   const skill = skills.find((s) => s.id === skillId);
   const detail = skillId ? details[skillId] : undefined;
@@ -1261,19 +1372,8 @@ const SkillDetailView: React.FC<{
     }
   };
 
-  // restore a past version: save it as a new current version (history kept).
-  // 런타임에도 반영(POST /skills/{id}/rollback) — 서버가 히스토리 보관·version+1·
-  // 분석 사이드카 재분석 enqueue 까지 수행한다. 서버가 매긴 버전 번호가 정본이라
-  // 응답으로 로컬 낙관 갱신을 보정한다. 런타임이 모르는 스킬(목/로컬 전용)이면
-  // 404가 돌아올 뿐이라 무해하다.
-  const restore = (version: SkillVersion) => {
+  const restoreLocalVersion = (version: SkillVersion) => {
     const newVer = bumpVer(skill.ver);
-    void api.rollbackSkill(skillId, verNum(version.ver)).then((res) => {
-      const serverVer = res.success ? (res.data as { version?: number } | undefined)?.version : undefined;
-      if (serverVer && `v${serverVer}` !== newVer) {
-        setSkills((a) => a.map((x) => (x.id === skillId ? { ...x, ver: `v${serverVer}` } : x)));
-      }
-    });
     setSkills((a) => a.map((x) => (x.id === skillId ? { ...x, ver: newVer } : x)));
     patch((d) => ({
       ...d,
@@ -1296,6 +1396,46 @@ const SkillDetailView: React.FC<{
       ],
     }));
     setSnapVer(null);
+  };
+
+  // 런타임 버전 복원은 낙관 갱신하지 않는다. 서버가 현재 원본 보관 → 과거 본문
+  // 복원 → 새 단조 증가 버전 발급을 모두 마친 뒤, 상세/히스토리를 다시 읽어 UI를
+  // 서버 정본과 맞춘다. 마켓/로컬 fixture만 기존 로컬 스냅샷 경로를 사용한다.
+  const restore = async (version: SkillVersion) => {
+    if (detail.historyStatus === undefined) {
+      restoreLocalVersion(version);
+      return;
+    }
+
+    const progress = toast.progress({
+      label: `${version.ver} 복원 중`,
+      sublabel: `${skill.name} · 현재 버전을 보관하고 새 버전으로 복원하고 있어요`,
+    });
+    try {
+      const res = await api.rollbackSkill(skillId, verNum(version.ver));
+      if (!res.success || !res.data) {
+        const reason = res.error ? ` · ${res.error}` : '';
+        progress.done('error', '버전 복원 실패');
+        toast.notify({ message: `${version.ver} 복원에 실패했어요${reason}`, variant: 'error' });
+        return;
+      }
+
+      const refreshed = await loadRuntimeSkillDetail(skillId);
+      if (!refreshed) {
+        setSkills((prev) => prev.map((item) => (
+          item.id === skillId ? { ...item, ver: `v${res.data!.version}` } : item
+        )));
+        progress.done('success', `${version.ver} 복원 완료`);
+        toast.notify({ message: '복원은 완료됐지만 화면 재조회에 실패했어요. 다시 열어 확인하세요.', variant: 'warning' });
+      } else {
+        progress.done('success', `${version.ver} → v${res.data.version} 복원 완료`);
+      }
+      setSnapVer(null);
+    } catch (error) {
+      const reason = error instanceof Error ? ` · ${error.message}` : '';
+      progress.done('error', '버전 복원 실패');
+      toast.notify({ message: `버전 복원 중 오류가 발생했어요${reason}`, variant: 'error' });
+    }
   };
 
   // 편집 어시스턴트 적용 — patch 승인 → version++ + 대상 파일 갱신 + 활동 기록.
@@ -1348,13 +1488,13 @@ const SkillDetailView: React.FC<{
   const confirmModal = confirmRestore && (
     <ConfirmDialog
       open
-      tone="danger"
+      tone="primary"
       title="이 버전으로 복원할까요?"
       confirmLabel={`${confirmRestore.ver}(으)로 복원`}
       confirmIcon="renew"
       onClose={() => setConfirmRestore(null)}
       onConfirm={() => {
-        restore(confirmRestore);
+        void restore(confirmRestore);
         setConfirmRestore(null);
       }}
       description={
@@ -1482,50 +1622,76 @@ const SkillDetailView: React.FC<{
         {/* version history — 빌트인은 본문 불변이라 히스토리·복원이 없다 */}
         {!builtin && (
         <div>
-          <SectionLabel right={<span className="text-caption-01 text-text-helper normal-case">항목을 눌러 버전 내용 보기 · 복원</span>}>
-            버전 히스토리 · {detail.versions.length}
+          <SectionLabel
+            right={detail.historyStatus === 'loading' ? (
+              <span className="inline-flex items-center gap-1.5 text-caption-01 text-text-helper normal-case">
+                <Icon name="renew" size={11} className="animate-spin" /> 서버 히스토리 불러오는 중
+              </span>
+            ) : detail.historyStatus === 'error' ? (
+              <button
+                onClick={() => void loadRuntimeSkillDetail(skillId)}
+                className="inline-flex items-center gap-1 text-caption-01 font-semibold text-support-warning normal-case hover:underline"
+              >
+                <Icon name="renew" size={11} /> 다시 불러오기
+              </button>
+            ) : (
+              <span className="text-caption-01 text-text-helper normal-case">항목을 눌러 원문 보기 · 복원</span>
+            )}
+          >
+            버전 히스토리 · {detail.historyStatus === 'loading' ? '…' : detail.versions.length}
           </SectionLabel>
-          <div>
+          {detail.historyStatus === 'error' && (
+            <div className="mb-3 flex items-start gap-2 rounded-lg border border-support-warning/35 bg-support-warning/10 px-3 py-2.5 text-caption-01 text-text-secondary">
+              <Icon name="warning" size={13} className="mt-0.5 flex-shrink-0 text-support-warning" />
+              <span>서버 버전 기록을 불러오지 못했어요. 현재 버전만 표시 중입니다{detail.historyError ? ` · ${detail.historyError}` : ''}</span>
+            </div>
+          )}
+          <div className="max-w-[780px]">
             {detail.versions.map((v, i) => (
-              <div key={v.ver} className="flex gap-3">
+              <div key={v.ver} className="flex gap-2">
                 <div className="flex flex-col items-center flex-shrink-0">
                   <div
-                    className={`w-2.5 h-2.5 rounded-full mt-3.5 ${v.current ? 'bg-blue-50 ring-[3px] ring-blue-100' : 'bg-layer-03'}`}
+                    className={`mt-2.5 h-2 w-2 rounded-full ${v.current ? 'bg-blue-50 ring-2 ring-blue-100' : 'bg-layer-03'}`}
                   />
-                  {i < detail.versions.length - 1 && <div className="w-px flex-1 min-h-[22px] bg-border-strong-01" />}
+                  {i < detail.versions.length - 1 && <div className="min-h-[14px] w-px flex-1 bg-border-strong-01" />}
                 </div>
                 <button
                   onClick={() => setSnapVer(v.ver)}
-                  className="flex items-center gap-2.5 flex-1 min-w-0 text-left bg-layer-01 border border-border-subtle-01 rounded-lg px-3 py-2.5 mb-2.5 hover:bg-layer-hover-01 transition-colors"
+                  className="mb-1.5 flex min-w-0 flex-1 items-center gap-2 rounded-md border border-border-subtle-01 bg-layer-01 px-2.5 py-1.5 text-left transition-colors hover:border-border-subtle-02 hover:bg-layer-hover-01"
                 >
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-body-short-01 font-semibold text-text-primary font-mono">{v.ver}</span>
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <span className="font-mono text-caption-01 font-semibold text-text-primary">{v.ver}</span>
                       {v.current && (
-                        <Tag type="blue" size="sm">
+                        <span className="rounded bg-blue-60/20 px-1.5 py-px text-label-micro font-semibold text-blue-30">
                           현재
-                        </Tag>
+                        </span>
                       )}
-                      <span className="text-caption-01 text-text-helper">{v.when}</span>
+                      <span className="truncate text-label-micro text-text-helper">{v.when}</span>
                       {v.author && (
-                        <span className="inline-flex items-center gap-1 text-caption-01 text-text-helper">
+                        <span className="inline-flex items-center gap-1 text-label-micro text-text-helper">
                           <Icon name="user" size={10} /> {v.author}
                         </span>
                       )}
                     </div>
-                    <div className="text-body-short-01 text-text-secondary mt-0.5">{v.note}</div>
+                    <div className="mt-px truncate text-caption-01 text-text-secondary">{v.note}</div>
                     {v.metrics && (
-                      <div className="flex items-center gap-3 mt-1.5 text-caption-01 font-mono text-text-helper">
+                      <div className="mt-1 flex items-center gap-2 text-label-micro font-mono text-text-helper">
                         <span>성공률 {pctStr(v.metrics.successRate)}</span>
                         <span>· {v.metrics.uses}회</span>
                         {v.metrics.avgTurns != null && <span>· {v.metrics.avgTurns}턴</span>}
                       </div>
                     )}
                   </div>
-                  <Icon name="arrow-right" size={16} className="text-icon-secondary opacity-50 flex-shrink-0" />
+                  <Icon name="arrow-right" size={13} className="flex-shrink-0 text-icon-secondary opacity-45" />
                 </button>
               </div>
             ))}
+            {detail.historyStatus === 'loaded' && detail.versions.length === 1 && (
+              <div className="rounded-lg border border-border-subtle-01 bg-layer-01 px-3.5 py-3 text-caption-01 text-text-helper">
+                아직 보관된 과거 버전이 없어요. 다음 본문 변경부터 이전 버전이 여기에 저장됩니다.
+              </div>
+            )}
           </div>
         </div>
         )}

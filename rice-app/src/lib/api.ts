@@ -13,7 +13,7 @@ import type {
   LearningEvent,
   RuntimeMemory,
 } from './types';
-import type { RuntimeSkillAnalysis } from './learningData';
+import type { RuntimeSkillAnalysis, RuntimeSkillVersion } from './learningData';
 
 /** POST /skills/{id}/export 응답 — 학습 스킬을 마켓 artifact로 내보낸 결과.
  *  artifact_dir는 platform/git-ready 디렉토리, archive_path는 install-ready
@@ -265,11 +265,11 @@ class ApiClient {
     });
   }
   /** version history (diff · rollback UI) */
-  getSkillHistory(id: string): Promise<ApiResponse> {
-    return this.get(`/skills/${id}/history`);
+  getSkillHistory(id: string): Promise<ApiResponse<RuntimeSkillVersion[]>> {
+    return this.get<RuntimeSkillVersion[]>(`/skills/${id}/history`);
   }
-  rollbackSkill(id: string, version: number): Promise<ApiResponse> {
-    return this.send('POST', `/skills/${id}/rollback`, { version });
+  rollbackSkill(id: string, version: number): Promise<ApiResponse<{ version: number }>> {
+    return this.send<{ version: number }>('POST', `/skills/${id}/rollback`, { version });
   }
   /** Rebuild the explanatory SKILL.md analysis sidecar. Does not modify the skill
    *  body — the runtime regenerates `<name>.analysis.json` only. Response is the

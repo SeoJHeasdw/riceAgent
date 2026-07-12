@@ -163,6 +163,7 @@ function runtimeSkillToDetail(s: {
     shared: false,
     rules: [],
     versions: [{ ver: `v${s.version}`, when: s.last_used_at ?? '알 수 없음', note: '런타임 동기화', current: true }],
+    historyStatus: 'idle',
     usage: [],
     permissions: [],
   };
