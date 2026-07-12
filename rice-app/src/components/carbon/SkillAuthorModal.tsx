@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { Button, Icon, Modal } from '../ui';
 import { SkillCard } from './SkillCard';
-import { skillCategories } from '../../lib/mockData';
+import { skillCategoryCodes, type SkillCategoryCode } from '../../lib/mockData';
 import type { SkillDraft } from '../../hooks/useMarketplace';
 import type { Skill } from '../../lib/types';
 
@@ -20,19 +22,44 @@ import type { Skill } from '../../lib/types';
  * 게시 후에는 동일 모달 안에서 완료 화면(생성된 카드 + "마켓에서 보기")을 보여준다.
  */
 
-const STEPS = ['기본 정보', '스킬 정의', '검토 · 게시'] as const;
-const CATEGORIES = skillCategories.filter((c) => c !== 'All');
+const CATEGORY_CODES = skillCategoryCodes.filter((c) => c !== 'all') as SkillCategoryCode[];
 const MAX_TAGS = 6;
 
-// 카테고리별 추천 태그 — 입력을 가볍게 시작하도록 돕는 힌트
-const TAG_SUGGESTIONS: Record<string, string[]> = {
-  '데이터 분석': ['데이터', '분석', '시각화', 'excel'],
-  자동화: ['자동화', '워크플로', '스케줄'],
-  연동: ['api', '연동', 'webhook'],
-  개발: ['코드', '리뷰', '배포', 'git'],
-  커뮤니케이션: ['slack', '알림', '메일'],
-  생산성: ['문서', '요약', '템플릿'],
-};
+/**
+ * 카테고리 code → 번역 함수.
+ * t()의 키 타입이 정적이라 템플릿 리터럴로 동적 조회 불가 → 명시적 맵으로 처리.
+ */
+function getCategoryLabel(code: SkillCategoryCode, t: TFunction<'skills'>): string {
+  const map: Record<SkillCategoryCode, () => string> = {
+    all: () => t('market.categoryAll'),
+    dataAnalysis: () => t('market.categoryDataAnalysis'),
+    automation: () => t('market.categoryAutomation'),
+    integration: () => t('market.categoryIntegration'),
+    dev: () => t('market.categoryDev'),
+    communication: () => t('market.categoryCommunication'),
+    productivity: () => t('market.categoryProductivity'),
+  };
+  return map[code]?.() ?? code;
+}
+
+/**
+ * 추천 태그: 카탈로그의 쉼표 구분 문자열을 배열로 변환.
+ * 동적 키 조회 불가 → 명시적 맵으로 처리.
+ */
+function getTagSuggestions(code: SkillCategoryCode | '', t: TFunction<'skills'>): string[] {
+  if (!code || code === 'all') return [];
+  const map: Record<SkillCategoryCode, () => string> = {
+    all: () => '',
+    dataAnalysis: () => t('author.tagSuggestionDataAnalysis'),
+    automation: () => t('author.tagSuggestionAutomation'),
+    integration: () => t('author.tagSuggestionIntegration'),
+    dev: () => t('author.tagSuggestionDev'),
+    communication: () => t('author.tagSuggestionCommunication'),
+    productivity: () => t('author.tagSuggestionProductivity'),
+  };
+  const raw = map[code]?.() ?? '';
+  return raw.split(',').map((s) => s.trim()).filter(Boolean);
+}
 
 const inputCls =
   'w-full h-9 px-3 bg-field-01 text-text-primary text-body-short-01 border border-border-strong-01 rounded-lg outline-none transition-colors focus:border-focus focus:ring-1 focus:ring-focus placeholder:text-text-placeholder';
@@ -71,10 +98,19 @@ export const SkillAuthorModal: React.FC<SkillAuthorModalProps> = ({
   onPublish,
   onViewInMarket,
 }) => {
+  const { t } = useTranslation('skills');
+
+  const STEPS = [
+    t('author.step0Label'),
+    t('author.step1Label'),
+    t('author.step2Label'),
+  ] as const;
+
   const [step, setStep] = useState(0);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [category, setCategory] = useState('');
+  // category 상태는 stable code ('dataAnalysis' 등) 저장 — 렌더 시 t()로 표시
+  const [category, setCategory] = useState<SkillCategoryCode | ''>('');
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
   const [version, setVersion] = useState('1.0.0');
@@ -107,11 +143,11 @@ export const SkillAuthorModal: React.FC<SkillAuthorModalProps> = ({
     }
   }, [open]);
 
-  // 기본 정보로부터 자동 생성되는 SKILL.md 템플릿
+  // 기본 정보로부터 자동 생성되는 SKILL.md 템플릿 (모델용 프롬프트 — 번역 대상 아님)
   const generatedDef = useMemo(() => {
     const slug = slugify(name) || 'my-skill';
     const tagBlock = tags.length
-      ? tags.map((t) => `- ${t}`).join('\n')
+      ? tags.map((tag) => `- ${tag}`).join('\n')
       : '- 어떤 상황에서 이 스킬을 쓰면 좋은지 적어주세요.';
     return `---
 name: ${slug}
@@ -151,12 +187,12 @@ ${tagBlock}
 
   // ── 태그 칩 입력 ──
   const addTag = (raw: string) => {
-    const t = raw.trim().replace(/^#/, '');
-    if (!t || tags.includes(t) || tags.length >= MAX_TAGS) {
+    const trimTag = raw.trim().replace(/^#/, '');
+    if (!trimTag || tags.includes(trimTag) || tags.length >= MAX_TAGS) {
       setTagInput('');
       return;
     }
-    setTags((prev) => [...prev, t]);
+    setTags((prev) => [...prev, trimTag]);
     setTagInput('');
   };
   const onTagKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -167,7 +203,12 @@ ${tagBlock}
       setTags((prev) => prev.slice(0, -1));
     }
   };
-  const suggestions = (TAG_SUGGESTIONS[category] ?? []).filter((t) => !tags.includes(t));
+
+  // 추천 태그 — 함수 분리로 타입 안전 동적 조회
+  const suggestions = useMemo(
+    () => getTagSuggestions(category, t).filter((s) => !tags.includes(s)),
+    [category, tags, t],
+  );
 
   // ── 파일 불러오기 (SKILL.md) ──
   const applyFile = (file: File) => {
@@ -197,11 +238,11 @@ ${tagBlock}
   };
 
   const handlePublish = () => {
-    if (!canPublish) return;
+    if (!canPublish || !category) return;
     const skill = onPublish({
       name: trimmedName,
       description: description.trim(),
-      category,
+      category, // stable code 저장
       tags,
       version: version.trim() || '1.0.0',
       team: team.trim() || undefined,
@@ -212,18 +253,14 @@ ${tagBlock}
 
   // 비활성 "다음/게시" 위에 hover 시 안내 문구
   const blockedReason =
-    step === 0
-      ? '이름·설명을 입력하고 카테고리를 선택하세요'
-      : step === 1
-      ? 'SKILL.md 본문을 작성하세요'
-      : '';
+    step === 0 ? t('author.blocked0') : step === 1 ? t('author.blocked1') : '';
 
   // ───────────────────────── 완료 화면 ─────────────────────────
   if (published) {
     const successFooter = (
       <div className="flex items-center justify-between w-full">
         <Button kind="ghost" size="sm" onClick={onClose} className="!h-8">
-          닫기
+          {t('author.doneCloseBtn')}
         </Button>
         <Button
           kind="primary"
@@ -232,12 +269,12 @@ ${tagBlock}
           onClick={() => onViewInMarket?.(published)}
           className="!h-8"
         >
-          마켓에서 보기
+          {t('author.doneViewBtn')}
         </Button>
       </div>
     );
     return (
-      <Modal open={open} onClose={onClose} title="게시 완료" size="md" footer={successFooter}>
+      <Modal open={open} onClose={onClose} title={t('author.doneTitle')} size="md" footer={successFooter}>
         <div className="flex flex-col items-center text-center px-2">
           {/* 체크 배지 */}
           <div className="relative mb-4">
@@ -246,10 +283,9 @@ ${tagBlock}
               <Icon name="check" size={32} className="text-support-success" />
             </div>
           </div>
-          <h3 className="text-heading-03 font-semibold text-text-primary">스킬이 마켓에 게시됐어요</h3>
+          <h3 className="text-heading-03 font-semibold text-text-primary">{t('author.doneHeading')}</h3>
           <p className="mt-1.5 text-body-short-01 text-text-secondary max-w-sm">
-            이제 다른 IBMer가 <span className="text-text-primary font-medium">{published.name}</span>을(를) 찾아
-            설치하고 후원할 수 있어요.
+            {t('author.doneBody', { name: published.name })}
           </p>
 
           {/* 게시된 카드 미리보기 */}
@@ -266,7 +302,7 @@ ${tagBlock}
     <div className="flex items-center justify-between w-full">
       {step === 0 ? (
         <Button kind="ghost" size="sm" onClick={onClose} className="!h-8">
-          취소
+          {t('author.cancelBtn')}
         </Button>
       ) : (
         <Button
@@ -276,7 +312,7 @@ ${tagBlock}
           onClick={() => goStep(step - 1)}
           className="!h-8"
         >
-          이전
+          {t('author.backBtn')}
         </Button>
       )}
 
@@ -289,7 +325,7 @@ ${tagBlock}
             disabled={step === 0 ? !step0Valid : !step1Valid}
             className="!h-8"
           >
-            다음
+            {t('author.nextBtn')}
             <Icon name="arrow-right" size={15} className="ml-1.5" />
           </Button>
         ) : (
@@ -301,7 +337,7 @@ ${tagBlock}
             icon={<Icon name="share" size={15} />}
             className="!h-8"
           >
-            마켓에 게시
+            {t('author.publishBtn')}
           </Button>
         )}
         {blockedReason && (step === 0 ? !step0Valid : step === 1 ? !step1Valid : false) && (
@@ -315,7 +351,7 @@ ${tagBlock}
   );
 
   return (
-    <Modal open={open} onClose={onClose} title="스킬 게시" size="md" footer={footer}>
+    <Modal open={open} onClose={onClose} title={t('author.modalTitle')} size="md" footer={footer}>
       {/* 숨겨진 파일 입력 — 단계 1·2 양쪽에서 트리거 */}
       <input
         ref={fileRef}
@@ -398,10 +434,10 @@ ${tagBlock}
             </span>
             <div className="min-w-0">
               <div className="text-body-short-01 font-semibold text-text-primary">
-                {fileName ? `불러옴 · ${fileName}` : '이미 SKILL.md가 있나요?'}
+                {fileName ? t('author.fileLoadedTitle', { fileName }) : t('author.filePickTitle')}
               </div>
               <div className="text-caption-01 text-text-helper truncate">
-                {fileName ? '내용을 불러와 자동으로 채웠어요' : '파일을 끌어다 놓거나 클릭해서 불러오기'}
+                {fileName ? t('author.fileLoadedHint') : t('author.filePickHint')}
               </div>
             </div>
             {fileName && <Icon name="check-circle" size={18} className="ml-auto text-support-success flex-shrink-0" />}
@@ -409,20 +445,20 @@ ${tagBlock}
 
           <div className="flex items-center gap-3">
             <span className="flex-1 h-px bg-border-subtle-01" />
-            <span className="text-caption-01 text-text-helper">또는 직접 입력</span>
+            <span className="text-caption-01 text-text-helper">{t('author.dividerOr')}</span>
             <span className="flex-1 h-px bg-border-subtle-01" />
           </div>
 
           {/* 이름 */}
           <div>
             <label className="text-label-01 text-text-secondary mb-1.5 block">
-              스킬 이름 <span className="text-support-error">*</span>
+              {t('author.fieldNameLabel')} <span className="text-support-error">*</span>
             </label>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="예: Excel 데이터 분석기"
+              placeholder={t('author.fieldNamePlaceholder')}
               maxLength={48}
               className={inputCls}
             />
@@ -431,32 +467,34 @@ ${tagBlock}
           {/* 설명 */}
           <div>
             <label className="text-label-01 text-text-secondary mb-1.5 block">
-              한 줄 설명 <span className="text-support-error">*</span>
+              {t('author.fieldDescLabel')} <span className="text-support-error">*</span>
             </label>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="이 스킬이 어떤 일을 하는지 한두 문장으로 설명하세요"
+              placeholder={t('author.fieldDescPlaceholder')}
               rows={2}
               maxLength={140}
               className={`${inputCls} h-auto py-2.5 resize-none leading-relaxed`}
             />
-            <div className="text-caption-01 text-text-helper text-right mt-1">{description.length}/140</div>
+            <div className="text-caption-01 text-text-helper text-right mt-1">
+              {t('author.fieldDescCounter', { count: description.length })}
+            </div>
           </div>
 
           {/* 카테고리 */}
           <div>
             <label className="text-label-01 text-text-secondary mb-2 block">
-              카테고리 <span className="text-support-error">*</span>
+              {t('author.fieldCategoryLabel')} <span className="text-support-error">*</span>
             </label>
             <div className="flex flex-wrap gap-1.5">
-              {CATEGORIES.map((c) => {
-                const active = c === category;
+              {CATEGORY_CODES.map((code) => {
+                const active = code === category;
                 return (
                   <button
-                    key={c}
+                    key={code}
                     type="button"
-                    onClick={() => setCategory(c)}
+                    onClick={() => setCategory(code)}
                     aria-pressed={active}
                     className={`px-2.5 h-7 rounded-lg border text-body-short-01 transition-colors duration-150 ${
                       active
@@ -464,7 +502,7 @@ ${tagBlock}
                         : 'border-border-subtle-01 bg-background text-text-secondary hover:bg-layer-hover-01 hover:border-border-strong-01'
                     }`}
                   >
-                    {c}
+                    {getCategoryLabel(code, t)}
                   </button>
                 );
               })}
@@ -474,23 +512,24 @@ ${tagBlock}
           {/* 태그 */}
           <div>
             <label className="text-label-01 text-text-secondary mb-1.5 block">
-              태그 <span className="text-text-placeholder font-normal">· 최대 {MAX_TAGS}개</span>
+              {t('author.fieldTagLabel')}{' '}
+              <span className="text-text-placeholder font-normal">{t('author.fieldTagMax', { max: MAX_TAGS })}</span>
             </label>
             <div
               className="flex flex-wrap items-center gap-1.5 min-h-10 px-2 py-1.5 bg-field-01 border border-border-strong-01 rounded-lg focus-within:border-focus focus-within:ring-1 focus-within:ring-focus transition-colors"
               onClick={(e) => (e.currentTarget.querySelector('input') as HTMLInputElement | null)?.focus()}
             >
-              {tags.map((t) => (
+              {tags.map((tag) => (
                 <span
-                  key={t}
+                  key={tag}
                   className="inline-flex items-center gap-1 h-6 pl-2 pr-1 rounded-full bg-layer-02 ring-1 ring-inset ring-border-subtle-02 text-text-secondary text-caption-01"
                 >
-                  {t}
+                  {tag}
                   <button
                     type="button"
-                    onClick={() => setTags((prev) => prev.filter((x) => x !== t))}
+                    onClick={() => setTags((prev) => prev.filter((x) => x !== tag))}
                     className="w-4 h-4 flex items-center justify-center rounded-full hover:bg-layer-hover-02"
-                    aria-label={`${t} 제거`}
+                    aria-label={t('author.fieldTagRemoveAriaLabel', { tag })}
                   >
                     <Icon name="close" size={11} />
                   </button>
@@ -503,7 +542,7 @@ ${tagBlock}
                   onChange={(e) => setTagInput(e.target.value)}
                   onKeyDown={onTagKeyDown}
                   onBlur={() => addTag(tagInput)}
-                  placeholder={tags.length ? '추가…' : 'Enter로 태그 추가'}
+                  placeholder={tags.length ? t('author.fieldTagInputMorePlaceholder') : t('author.fieldTagInputPlaceholder')}
                   className="flex-1 min-w-[100px] h-7 bg-transparent text-body-short-01 text-text-primary outline-none placeholder:text-text-placeholder"
                 />
               )}
@@ -528,13 +567,14 @@ ${tagBlock}
           {/* 팀 (선택) */}
           <div>
             <label className="text-label-01 text-text-secondary mb-1.5 block">
-              팀 <span className="text-text-placeholder font-normal">· 선택</span>
+              {t('author.fieldTeamLabel')}{' '}
+              <span className="text-text-placeholder font-normal">{t('author.fieldTeamOptional')}</span>
             </label>
             <input
               type="text"
               value={team}
               onChange={(e) => setTeam(e.target.value)}
-              placeholder="예: 데이터 분석"
+              placeholder={t('author.fieldTeamPlaceholder')}
               maxLength={32}
               className={inputCls}
             />
@@ -548,8 +588,7 @@ ${tagBlock}
           <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg bg-layer-02 border border-border-subtle-01">
             <Icon name="idea" size={15} className="text-icon-secondary flex-shrink-0 mt-0.5" />
             <p className="text-caption-01 text-text-helper leading-relaxed">
-              SKILL.md는 에이전트가 이 스킬을 <span className="text-text-secondary font-medium">언제·어떻게 사용할지</span>{' '}
-              담는 정의예요. 기본 정보로 초안을 채워뒀으니 자유롭게 다듬으세요.
+              {t('author.step1Hint')}
             </p>
           </div>
 
@@ -559,7 +598,7 @@ ${tagBlock}
               <Icon name="document" size={16} className="text-icon-secondary" />
               <span className="font-mono">SKILL.md</span>
               {!defTouched && (
-                <span className="text-caption-01 text-text-helper">· 기본 정보로 자동 생성됨</span>
+                <span className="text-caption-01 text-text-helper">{t('author.defAutoLabel')}</span>
               )}
             </div>
             <div className="flex items-center gap-1.5">
@@ -573,7 +612,7 @@ ${tagBlock}
                   className="inline-flex items-center gap-1 text-caption-01 text-text-secondary hover:text-text-primary transition-colors"
                 >
                   <Icon name="renew" size={13} />
-                  초안 다시 생성
+                  {t('author.defRegenBtn')}
                 </button>
               )}
               <button
@@ -582,7 +621,7 @@ ${tagBlock}
                 className="inline-flex items-center gap-1 px-2 h-7 rounded-md border border-border-subtle-01 bg-layer-02 text-caption-01 text-text-secondary hover:bg-layer-hover-01 hover:text-text-primary transition-colors"
               >
                 <Icon name="export" size={13} />
-                파일 불러오기
+                {t('author.defLoadFileBtn')}
               </button>
             </div>
           </div>
@@ -601,7 +640,7 @@ ${tagBlock}
           {/* 버전 + 번들 파일 */}
           <div className="flex items-end gap-4">
             <div className="w-32">
-              <label className="text-label-01 text-text-secondary mb-1.5 block">버전</label>
+              <label className="text-label-01 text-text-secondary mb-1.5 block">{t('author.fieldVersionLabel')}</label>
               <input
                 type="text"
                 value={version}
@@ -613,8 +652,8 @@ ${tagBlock}
             <div className="flex-1 flex items-center gap-2 h-10 px-3 rounded-lg bg-layer-02 border border-border-subtle-01">
               <Icon name="document" size={14} className="text-icon-secondary flex-shrink-0" />
               <span className="text-caption-01 text-text-secondary font-mono">SKILL.md</span>
-              <span className="text-caption-01 text-text-helper">· {effectiveDef.length.toLocaleString()}자</span>
-              <span className="ml-auto text-caption-01 text-text-helper">번들에 포함됨</span>
+              <span className="text-caption-01 text-text-helper">{t('author.defCharCount', { count: effectiveDef.length.toLocaleString() })}</span>
+              <span className="ml-auto text-caption-01 text-text-helper">{t('author.defBundleNote')}</span>
             </div>
           </div>
         </div>
@@ -624,7 +663,7 @@ ${tagBlock}
       {step === 2 && (
         <div className="space-y-4 animate-fade-in">
           <p className="text-body-short-01 text-text-secondary">
-            마켓에 이렇게 보여요. 확인 후 게시하세요.
+            {t('author.step2Preview')}
           </p>
 
           {/* 실시간 카드 미리보기 */}
@@ -634,7 +673,7 @@ ${tagBlock}
                 id="preview"
                 name={trimmedName}
                 description={description.trim()}
-                author="나"
+                author={t('author.previewAuthorMe')}
                 team={team.trim() || undefined}
                 downloads={0}
                 rating={0}
@@ -650,11 +689,11 @@ ${tagBlock}
           {/* 요약 메타 */}
           <div className="grid grid-cols-2 gap-px bg-border-subtle-01 rounded-lg overflow-hidden">
             {([
-              ['카테고리', category],
-              ['버전', version.trim() || '1.0.0'],
-              ['태그', tags.length ? tags.join(', ') : '없음'],
-              ['정의', `SKILL.md · ${effectiveDef.length.toLocaleString()}자`],
-            ] as const).map(([k, v]) => (
+              [t('author.metaCategory'), category ? getCategoryLabel(category, t) : ''],
+              [t('author.metaVersion'), version.trim() || '1.0.0'],
+              [t('author.metaTags'), tags.length ? tags.join(', ') : t('author.metaTagsNone')],
+              [t('author.metaDef'), t('author.metaDefValue', { count: effectiveDef.length.toLocaleString() })],
+            ] as [string, string][]).map(([k, v]) => (
               <div key={k} className="bg-layer-01 px-3.5 py-2.5">
                 <div className="text-caption-01 text-text-helper">{k}</div>
                 <div className="text-body-short-01 text-text-primary truncate">{v}</div>
@@ -666,9 +705,9 @@ ${tagBlock}
           <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg bg-layer-02 border border-border-subtle-01">
             <Icon name="share" size={15} className="text-icon-secondary flex-shrink-0 mt-0.5" />
             <p className="text-caption-01 text-text-helper leading-relaxed">
-              게시하면 사내 모든 IBMer가 이 스킬을 검색·설치할 수 있어요.
+              {t('author.scopeHint')}
               <br />
-              <span className="text-text-placeholder">언제든 나의 스킬에서 비공개로 전환하거나 내릴 수 있어요.</span>
+              <span className="text-text-placeholder">{t('author.scopeUnpublishHint')}</span>
             </p>
           </div>
         </div>

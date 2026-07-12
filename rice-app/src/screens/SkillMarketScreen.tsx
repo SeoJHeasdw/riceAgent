@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { TwoColumnLayout } from '../components/TwoColumnLayout';
 import { SkillCard } from '../components/carbon/SkillCard';
 import { MarketplaceHeader } from '../components/carbon/MarketplaceHeader';
@@ -12,14 +13,30 @@ import { useMarketplace } from '../hooks/useMarketplace';
 import { useResizable } from '../hooks/useResizable';
 import { useLearning } from '../lib/learning/LearningContext';
 import { Icon, ResizeHandle } from '../components/ui';
-import { skillCategories } from '../lib/mockData';
+import { skillCategoryCodes, type SkillCategoryCode } from '../lib/mockData';
 import { Skill } from '../lib/types';
 
 /**
  * SkillMarketScreen - Marketplace for discovering and installing skills
  */
 
+// 카테고리 code → 번역 함수. t()가 정적 키만 수용하므로 명시적 맵을 사용.
+// (SkillAuthorModal의 getCategoryLabel과 동일 패턴)
+function getCategoryLabel(code: SkillCategoryCode, t: ReturnType<typeof useTranslation<'skills'>>['t']): string {
+  const map: Record<SkillCategoryCode, string> = {
+    all: t('market.categoryAll'),
+    dataAnalysis: t('market.categoryDataAnalysis'),
+    automation: t('market.categoryAutomation'),
+    integration: t('market.categoryIntegration'),
+    dev: t('market.categoryDev'),
+    communication: t('market.categoryCommunication'),
+    productivity: t('market.categoryProductivity'),
+  };
+  return map[code] ?? code;
+}
+
 function SkillMarketScreen() {
+  const { t } = useTranslation('skills');
   const {
     filteredSkills,
     catalogLoading,
@@ -38,7 +55,8 @@ function SkillMarketScreen() {
   // 설치를 학습 store까지 배선 — 설치한 마켓 스킬이 "나의 스킬"에 소유 인스턴스로 등장한다.
   const { installSkillFromMarket } = useLearning();
 
-  const [selectedCategory, setSelectedCategory] = useState('All');
+  // selectedCategory는 stable code 저장 — 렌더 시 t()로 표시
+  const [selectedCategory, setSelectedCategory] = useState<SkillCategoryCode>('all');
   const [sponsorModalSkill, setSponsorModalSkill] = useState<Skill | null>(null);
   const [detailModalSkill, setDetailModalSkill] = useState<Skill | null>(null);
   const [authorOpen, setAuthorOpen] = useState(false);
@@ -55,23 +73,23 @@ function SkillMarketScreen() {
     storageKey: 'rice.panel.skillmarket',
   });
 
-  // Filter by category
+  // Filter by category — 'all'은 전체 표시
   const categoryFilteredSkills = filteredSkills.filter(
-    (skill) => selectedCategory === 'All' || skill.category === selectedCategory
+    (skill) => selectedCategory === 'all' || skill.category === selectedCategory
   );
 
-  // Sort options
+  // Sort options — stable code 저장, 렌더 시 t()로 표시
   const sortOptions = [
-    { value: 'popular', label: '인기순' },
-    { value: 'recent', label: '최신순' },
-    { value: 'rating', label: '평점순' },
-    { value: 'sponsored', label: '후원 많은 순' },
+    { value: 'popular', label: t('market.sortPopular') },
+    { value: 'recent', label: t('market.sortRecent') },
+    { value: 'rating', label: t('market.sortRating') },
+    { value: 'sponsored', label: t('market.sortSponsored') },
   ];
 
   // Handle skill installation
   const handleInstall = async (skill: Skill) => {
     setDetailModalSkill(null);
-    const job = toast.progress({ label: '다운로드 중', sublabel: skill.name, progress: 0 });
+    const job = toast.progress({ label: t('market.toastDownloading'), sublabel: skill.name, progress: 0 });
 
     // Simulate download progress
     for (let i = 0; i <= 50; i += 10) {
@@ -79,7 +97,7 @@ function SkillMarketScreen() {
       job.update({ progress: i });
     }
 
-    job.update({ label: '설치 중', progress: 50 });
+    job.update({ label: t('market.toastInstalling'), progress: 50 });
 
     // Simulate installation progress
     for (let i = 50; i <= 100; i += 10) {
@@ -90,7 +108,7 @@ function SkillMarketScreen() {
     await installArtifact(skill.id, 'skill');
     // 학습 store에 소유 인스턴스로 materialize (origin:installed, upstream 기록).
     installSkillFromMarket(skill);
-    job.done('success', '설치 완료');
+    job.done('success', t('market.toastInstallDone'));
     // The toast lingers, then animates itself out automatically.
   };
 
@@ -98,7 +116,7 @@ function SkillMarketScreen() {
   const handleUninstall = async (skill: Skill) => {
     setDetailModalSkill(null);
     await uninstallArtifact(skill.id, 'skill');
-    showToast(`${skill.name}이(가) 제거되었습니다`, 'info');
+    showToast(t('market.toastUninstalled', { name: skill.name }), 'info');
   };
 
   // Handle sponsorship
@@ -106,7 +124,7 @@ function SkillMarketScreen() {
     if (sponsorModalSkill) {
       await sponsorSkill(sponsorModalSkill.id, amount);
       setBluePointBalance(bluePointBalance - amount);
-      showToast(`${sponsorModalSkill.author}에게 ${amount.toLocaleString()} BP를 후원했습니다`);
+      showToast(t('market.toastSponsored', { author: sponsorModalSkill.author, amount: amount.toLocaleString() }));
       setSponsorModalSkill(null);
     }
   };
@@ -120,14 +138,14 @@ function SkillMarketScreen() {
   useEffect(() => {
     if (!highlightId) return;
     highlightRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    const t = setTimeout(() => setHighlightId(null), 2800);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => setHighlightId(null), 2800);
+    return () => clearTimeout(timer);
   }, [highlightId]);
 
   // Surface a skill in the grid regardless of current filters (recent + All + no search).
   const surfaceSkill = (skill: Skill) => {
     setSearchQuery('');
-    setSelectedCategory('All');
+    setSelectedCategory('all');
     setSortBy('recent');
     setHighlightId(skill.id);
   };
@@ -136,7 +154,7 @@ function SkillMarketScreen() {
   const handlePublish = (draft: Parameters<typeof publishSkill>[0]) => {
     const skill = publishSkill(draft);
     surfaceSkill(skill);
-    showToast(`${skill.name}을(를) 마켓에 게시했어요`, 'success');
+    showToast(t('market.toastPublished', { name: skill.name }), 'success');
     return skill;
   };
 
@@ -154,7 +172,7 @@ function SkillMarketScreen() {
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M12 2l2.4 7.2H22l-6 4.8 2.4 7.2-6.4-4.8L5.6 21.2 8 14 2 9.2h7.6z" />
               </svg>
-              내 IBM 블루 포인트
+              {t('market.railBalanceLabel')}
             </div>
             <div className="text-heading-03 font-semibold text-white leading-none tracking-tight tabular-nums">
               {bluePointBalance.toLocaleString()}
@@ -164,29 +182,31 @@ function SkillMarketScreen() {
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 19V5M5 12l7-7 7 7" />
               </svg>
-              이번 달 +3,200
+              {t('market.railMonthlyChange', { amount: '3,200' })}
             </div>
           </div>
         </div>
 
         {/* Categories */}
         <div className="text-caption-01 font-semibold uppercase tracking-wider text-text-helper px-4 py-1.5">
-          카테고리
+          {t('market.railCategoriesTitle')}
         </div>
         <div className="flex-1 overflow-y-auto px-2 space-y-0.5">
-          {skillCategories.map((category) => {
-            const isActive = category === selectedCategory;
+          {skillCategoryCodes.map((code) => {
+            const isActive = code === selectedCategory;
             return (
               <button
-                key={category}
-                onClick={() => setSelectedCategory(category)}
+                key={code}
+                onClick={() => setSelectedCategory(code)}
                 className={`flex w-full items-center text-left border-none px-2.5 py-2 text-body-short-01 rounded-lg transition-colors truncate ${
                   isActive
                     ? 'bg-blue-60/12 text-blue-30 font-semibold ring-1 ring-inset ring-blue-50/25'
                     : 'bg-transparent text-text-secondary hover:bg-blue-60/[0.06] hover:text-text-primary'
                 }`}
               >
-                <span className="truncate">{category}</span>
+                <span className="truncate">
+                  {getCategoryLabel(code, t)}
+                </span>
               </button>
             );
           })}
@@ -207,7 +227,7 @@ function SkillMarketScreen() {
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
               <path d="M17 8l-5-5-5 5M12 3v12" />
             </svg>
-            나의 스킬 업로드
+            {t('market.railUploadBtn')}
           </button>
         </div>
       </div>
@@ -224,8 +244,8 @@ function SkillMarketScreen() {
       {/* Main Content */}
       <div className="flex-1 min-w-0 overflow-y-auto bg-background">
         <MarketplaceHeader
-          title="스킬 마켓"
-          subtitle="IBMer가 만든 스킬을 다운로드하고 블루 포인트로 제작자를 후원하세요"
+          title={t('market.title')}
+          subtitle={t('market.subtitle')}
           searchValue={searchQuery}
           onSearchChange={setSearchQuery}
           sortValue={sortBy}
@@ -266,8 +286,8 @@ function SkillMarketScreen() {
               <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl border border-blue-50/20 bg-blue-60/10 text-blue-30">
                 <Icon name="search" size={22} />
               </div>
-              <div className="text-body-long-01">스킬을 찾지 못했습니다</div>
-              <div className="text-caption-01 mt-1">검색어나 필터를 조정해보세요</div>
+              <div className="text-body-long-01">{t('market.emptyTitle')}</div>
+              <div className="text-caption-01 mt-1">{t('market.emptyHint')}</div>
             </div>
           )}
         </div>

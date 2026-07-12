@@ -43,6 +43,28 @@ export interface SkillUpstream {
   latestVer?: string;
 }
 
+/**
+ * Skill.trend 에 저장되는 안정적 코드.
+ * UI 라벨은 렌더 시 chat:learning.trend* 키로 번역한다.
+ * 레거시 자유 문자열과 공존할 수 있도록 string 의 서브타입으로 정의하되,
+ * 새 코드는 반드시 이 값 중 하나를 사용한다.
+ *
+ * 렌더 헬퍼: src/lib/learningData.ts 의 renderTrend(code, t)
+ */
+export type TrendCode =
+  | 'trend_just_now'
+  | 'trend_new'
+  | 'trend_improved'
+  | 'trend_improved_short'
+  | 'trend_just_created'
+  | 'trend_consolidated'
+  | 'trend_consolidated_new'
+  // 런타임 동적 코드 (LearningContext runtimeSkillToLearning)
+  | 'trend_not_used_yet'
+  | 'trend_in_use'
+  | 'trend_used_today'
+  | `trend_days_ago:${number}`;
+
 export interface Skill {
   id: string;
   name: string;
@@ -55,6 +77,10 @@ export interface Skill {
   friction?: number;
   /** 자동 라우팅에 실패해 모델이 수동으로 로딩한 횟수. */
   routingMiss?: number;
+  /**
+   * stable code (TrendCode) 또는 레거시 자유 문자열.
+   * 렌더 시 renderTrend(trend, t) 로 변환해 표시한다.
+   */
   trend: string;
   enabled: boolean;
   hot?: boolean;
@@ -143,6 +169,8 @@ export interface SkillVersion {
   ver: string;
   when: string;
   note: string;
+  /** note가 stable code일 때 보간용 파라미터. renderVersionNote()가 t()에 전달한다. */
+  noteParams?: Record<string, string>;
   current?: boolean;
   /** 런타임이 보관한 해당 버전의 전체 SKILL.md 스냅샷. */
   body?: string;
@@ -288,9 +316,27 @@ export function runtimeAnalysisToSkillAnalysis(raw: RuntimeSkillAnalysis): Skill
   };
 }
 
+/**
+ * SkillDetail.createdFrom / lastUsed 에 저장되는 stable code.
+ * 렌더 헬퍼 renderCreatedFrom(code, t) / renderLastUsed(code, t) 로 번역한다.
+ */
+export type CreatedFromCode =
+  | 'created_from_chat'
+  | 'created_from_chat_auto'
+  | 'created_from_loop'
+  | 'created_from_patch'
+  | 'created_from_builtin';
+
+export type LastUsedCode =
+  | 'last_used_just_now'
+  | 'last_used_never'
+  | `last_used_iso:${string}`;
+
 export interface SkillDetail {
   summary: string;
+  /** stable CreatedFromCode 또는 레거시 자유 문자열 — renderCreatedFrom()으로 렌더 */
   createdFrom: string;
+  /** stable LastUsedCode 또는 ISO 날짜 또는 레거시 자유 문자열 — renderLastUsed()으로 렌더 */
   lastUsed: string;
   shared: boolean;
   rules: SkillRule[];
@@ -676,14 +722,19 @@ export interface MyPlugin {
  * 커넥터가 노출하는 각 도구를 에이전트가 언제 호출할 수 있는지에 대한 정책.
  * 도구 자체는 제공자가 정의하므로 사용자가 임의로 추가/삭제하지 않고, "언제 쓸 수
  * 있는가"만 설정한다(실제 Claude 커넥터 권한 모델과 동일).
+ *
+ * stable code — UI 라벨은 connectors.detail.permAllow/permApproval/permBlock 으로 번역.
  */
-export type ScopePermission = '항상 허용' | '승인 필요' | '차단';
+export type ScopePermission = 'allow' | 'approval' | 'block';
 
 export interface ConnectorScope {
   name: string;
-  /** '읽기' = 읽기 전용 도구, '쓰기'/'실행' = 쓰기·실행 도구 (그룹·기본 권한 결정) */
-  mode: string;
-  /** 생략 시 mode로 추정: 읽기→'항상 허용', 그 외→'승인 필요' */
+  /**
+   * stable mode code — UI 그룹 헤더 라벨은 connectors.detail.toolGroupRead/Write/Exec 으로 번역.
+   * 'read' = 읽기 전용 도구, 'write' = 쓰기·삭제 도구, 'exec' = 실행 도구.
+   */
+  mode: 'read' | 'write' | 'exec';
+  /** 생략 시 mode로 추정: read→'allow', 그 외→'approval' */
   permission?: ScopePermission;
   /** 원격 MCP 서버가 tools/list 로 제공한 도구 설명 — 사용자가 무슨 도구인지 판단하는 근거 */
   description?: string;
@@ -749,10 +800,14 @@ export interface Connector {
 /**
  * 제공사(또는 MCP 서버)가 도구·권한을 갱신했을 때 표시되는 사용 가능한 업데이트.
  * 적용하면 {@link addsTools}가 커넥터의 도구 목록에 합쳐진다.
+ *
+ * 번역 원칙: version/note를 직접 저장하지 않고 diff 수치만 저장해 렌더 시 번역한다.
  */
 export interface ConnectorUpdate {
-  version: string;
-  note: string;
+  /** 추가된 도구 수 (렌더 시 connectors.detail.update.added 키로 번역) */
+  addedCount?: number;
+  /** 제거된 도구 수 (렌더 시 connectors.detail.update.removed 키로 번역) */
+  removedCount?: number;
   /** 이 업데이트로 새로 노출되는 도구 (적용 시 scopes에 추가) */
   addsTools?: ConnectorScope[];
 }
@@ -772,11 +827,11 @@ export const CONNECTORS: Connector[] = [
     lastSync: '방금',
     summary: '분기 매출 조회·스키마 점검에 쓰는 운영 데이터베이스 연결이에요.',
     scopes: [
-      { name: '연결된 데이터베이스의 스키마·테이블 목록을 조회합니다.', mode: '읽기' },
-      { name: '특정 테이블의 컬럼·타입·인덱스를 설명합니다.', mode: '읽기' },
-      { name: '읽기 전용 SQL(SELECT) 쿼리를 실행합니다.', mode: '읽기' },
-      { name: '쿼리 실행 계획(EXPLAIN)을 조회합니다.', mode: '읽기' },
-      { name: 'INSERT·UPDATE·DELETE 문을 실행합니다.', mode: '쓰기', permission: '승인 필요' },
+      { name: '연결된 데이터베이스의 스키마·테이블 목록을 조회합니다.', mode: 'read' },
+      { name: '특정 테이블의 컬럼·타입·인덱스를 설명합니다.', mode: 'read' },
+      { name: '읽기 전용 SQL(SELECT) 쿼리를 실행합니다.', mode: 'read' },
+      { name: '쿼리 실행 계획(EXPLAIN)을 조회합니다.', mode: 'read' },
+      { name: 'INSERT·UPDATE·DELETE 문을 실행합니다.', mode: 'write', permission: 'approval' },
     ],
     usedBy: [
       { kind: '스킬', name: '분기 매출 요약', icon: 'skill' },
@@ -796,13 +851,13 @@ export const CONNECTORS: Connector[] = [
     lastSync: '10분 전',
     summary: '요약·리포트를 채널로 보내고 멘션을 읽어옵니다.',
     scopes: [
-      { name: '워크스페이스의 채널 목록을 조회합니다.', mode: '읽기' },
-      { name: '채널의 최근 메시지를 읽어옵니다.', mode: '읽기' },
-      { name: '워크스페이스 전체에서 메시지를 검색합니다.', mode: '읽기' },
-      { name: '사용자를 멘션한 메시지를 조회합니다.', mode: '읽기' },
-      { name: '채널에 메시지를 게시합니다.', mode: '쓰기' },
-      { name: '스레드에 답글을 작성합니다.', mode: '쓰기' },
-      { name: '채널에 파일을 업로드합니다.', mode: '쓰기' },
+      { name: '워크스페이스의 채널 목록을 조회합니다.', mode: 'read' },
+      { name: '채널의 최근 메시지를 읽어옵니다.', mode: 'read' },
+      { name: '워크스페이스 전체에서 메시지를 검색합니다.', mode: 'read' },
+      { name: '사용자를 멘션한 메시지를 조회합니다.', mode: 'read' },
+      { name: '채널에 메시지를 게시합니다.', mode: 'write' },
+      { name: '스레드에 답글을 작성합니다.', mode: 'write' },
+      { name: '채널에 파일을 업로드합니다.', mode: 'write' },
     ],
     usedBy: [{ kind: '자동화', name: '주간 매출 리포트 → Slack', icon: 'flow' }],
     examples: ['이번 주 요약을 #sales-report 채널로 보내줘'],
@@ -818,12 +873,12 @@ export const CONNECTORS: Connector[] = [
     lastSync: '1시간 전',
     summary: '메일 초안 작성·발송과 일정 확인에 사용합니다.',
     scopes: [
-      { name: '받은 편지함의 메일 목록을 조회합니다.', mode: '읽기' },
-      { name: '특정 메일의 본문·첨부를 가져옵니다.', mode: '읽기' },
-      { name: '지정한 기간의 캘린더 일정을 읽어옵니다.', mode: '읽기' },
-      { name: '메일 초안을 생성합니다.', mode: '쓰기' },
-      { name: '메일을 발송합니다.', mode: '쓰기', permission: '승인 필요' },
-      { name: '캘린더 일정을 생성합니다.', mode: '쓰기' },
+      { name: '받은 편지함의 메일 목록을 조회합니다.', mode: 'read' },
+      { name: '특정 메일의 본문·첨부를 가져옵니다.', mode: 'read' },
+      { name: '지정한 기간의 캘린더 일정을 읽어옵니다.', mode: 'read' },
+      { name: '메일 초안을 생성합니다.', mode: 'write' },
+      { name: '메일을 발송합니다.', mode: 'write', permission: 'approval' },
+      { name: '캘린더 일정을 생성합니다.', mode: 'write' },
     ],
     usedBy: [{ kind: '대화', name: '임원 보고 메일 초안', icon: 'chat' }],
     examples: ['이 요약으로 임원 보고 메일 초안 만들어줘'],
@@ -837,12 +892,12 @@ export const CONNECTORS: Connector[] = [
     status: 'disconnected',
     summary: '스프린트·이슈를 읽어 회고 정리에 활용합니다.',
     scopes: [
-      { name: 'JQL로 이슈를 검색합니다.', mode: '읽기' },
-      { name: '특정 이슈의 상세 정보를 조회합니다.', mode: '읽기' },
-      { name: '보드의 스프린트 목록을 가져옵니다.', mode: '읽기' },
-      { name: '새 이슈를 생성합니다.', mode: '쓰기' },
-      { name: '이슈에 댓글을 추가합니다.', mode: '쓰기' },
-      { name: '이슈의 상태를 전환합니다.', mode: '쓰기' },
+      { name: 'JQL로 이슈를 검색합니다.', mode: 'read' },
+      { name: '특정 이슈의 상세 정보를 조회합니다.', mode: 'read' },
+      { name: '보드의 스프린트 목록을 가져옵니다.', mode: 'read' },
+      { name: '새 이슈를 생성합니다.', mode: 'write' },
+      { name: '이슈에 댓글을 추가합니다.', mode: 'write' },
+      { name: '이슈의 상태를 전환합니다.', mode: 'write' },
     ],
     usedBy: [{ kind: '스킬', name: '회의록 액션아이템 추출', icon: 'skill' }],
     examples: ['이번 스프린트 회고를 정리해줘'],
@@ -856,11 +911,11 @@ export const CONNECTORS: Connector[] = [
     status: 'disconnected',
     summary: '문서를 읽어 요약하거나 결과 파일을 저장합니다.',
     scopes: [
-      { name: '파일·폴더 목록을 조회합니다.', mode: '읽기' },
-      { name: '이름이나 내용으로 파일을 검색합니다.', mode: '읽기' },
-      { name: '문서 내용을 읽거나 내보냅니다.', mode: '읽기' },
-      { name: '새 파일을 생성합니다.', mode: '쓰기' },
-      { name: '기존 파일을 수정합니다.', mode: '쓰기' },
+      { name: '파일·폴더 목록을 조회합니다.', mode: 'read' },
+      { name: '이름이나 내용으로 파일을 검색합니다.', mode: 'read' },
+      { name: '문서 내용을 읽거나 내보냅니다.', mode: 'read' },
+      { name: '새 파일을 생성합니다.', mode: 'write' },
+      { name: '기존 파일을 수정합니다.', mode: 'write' },
     ],
     usedBy: [],
     examples: ['이 폴더의 문서들을 요약해줘'],
@@ -876,10 +931,10 @@ export const CONNECTORS: Connector[] = [
     lastSync: '어제',
     summary: '워크플로를 스케줄·트리거로 자동 실행합니다.',
     scopes: [
-      { name: '사용 가능한 워크플로 목록을 조회합니다.', mode: '읽기' },
-      { name: '워크플로 실행 상태·기록을 확인합니다.', mode: '읽기' },
-      { name: '워크플로를 실행합니다.', mode: '실행', permission: '승인 필요' },
-      { name: '워크플로 스케줄을 등록·변경합니다.', mode: '실행', permission: '승인 필요' },
+      { name: '사용 가능한 워크플로 목록을 조회합니다.', mode: 'read' },
+      { name: '워크플로 실행 상태·기록을 확인합니다.', mode: 'read' },
+      { name: '워크플로를 실행합니다.', mode: 'exec', permission: 'approval' },
+      { name: '워크플로 스케줄을 등록·변경합니다.', mode: 'exec', permission: 'approval' },
     ],
     usedBy: [{ kind: '자동화', name: '분기 매출 요약 · 매주 월 08:00', icon: 'flow' }],
     examples: ['매주 월요일 아침 리포트 자동화를 만들어줘'],
@@ -896,27 +951,27 @@ export const CONNECTORS: Connector[] = [
     summary: '메일을 읽어 요약하거나 임원 보고 메일을 작성·발송합니다. 프로토타입 기본 커넥터예요.',
     // 실제 Google Gmail 커넥터가 노출하는 도구 (읽기 3 · 쓰기/삭제 9)
     scopes: [
-      { name: "Retrieves a specific email thread from the authenticated user's Gmail account.", mode: '읽기' },
-      { name: 'Lists user labels.', mode: '읽기' },
-      { name: "Searches for email threads from the authenticated user's Gmail account.", mode: '읽기' },
-      { name: "Creates a new draft email in the authenticated user's Gmail account.", mode: '쓰기' },
-      { name: 'Creates a new label.', mode: '쓰기' },
-      { name: 'Deletes a label.', mode: '쓰기', permission: '승인 필요' },
-      { name: 'Adds labels to a message.', mode: '쓰기' },
-      { name: 'Adds labels to a thread.', mode: '쓰기' },
-      { name: "Lists draft emails from the authenticated user's Gmail account.", mode: '쓰기' },
-      { name: 'Removes labels from a message.', mode: '쓰기' },
-      { name: 'Removes labels from a thread.', mode: '쓰기' },
-      { name: 'Modifies an existing label.', mode: '쓰기' },
+      { name: "Retrieves a specific email thread from the authenticated user's Gmail account.", mode: 'read' },
+      { name: 'Lists user labels.', mode: 'read' },
+      { name: "Searches for email threads from the authenticated user's Gmail account.", mode: 'read' },
+      { name: "Creates a new draft email in the authenticated user's Gmail account.", mode: 'write' },
+      { name: 'Creates a new label.', mode: 'write' },
+      { name: 'Deletes a label.', mode: 'write', permission: 'approval' },
+      { name: 'Adds labels to a message.', mode: 'write' },
+      { name: 'Adds labels to a thread.', mode: 'write' },
+      { name: "Lists draft emails from the authenticated user's Gmail account.", mode: 'write' },
+      { name: 'Removes labels from a message.', mode: 'write' },
+      { name: 'Removes labels from a thread.', mode: 'write' },
+      { name: 'Modifies an existing label.', mode: 'write' },
     ],
     usedBy: [{ kind: '대화', name: '임원 보고 메일 발송', icon: 'chat' }],
     examples: ['받은 편지함에서 이번 주 중요 메일만 요약해줘', '이 요약으로 임원 보고 메일 초안 만들어줘'],
     update: {
-      version: 'v2026.6',
-      note: '메일 발송·휴지통 이동 도구가 추가되었습니다.',
+      addedCount: 2,
+      removedCount: 0,
       addsTools: [
-        { name: 'Sends an email message.', mode: '쓰기', permission: '승인 필요' },
-        { name: 'Moves a message to trash.', mode: '쓰기', permission: '승인 필요' },
+        { name: 'Sends an email message.', mode: 'write', permission: 'approval' },
+        { name: 'Moves a message to trash.', mode: 'write', permission: 'approval' },
       ],
     },
   },
@@ -939,18 +994,18 @@ export const CONNECTORS: Connector[] = [
       args: ['-y', '@modelcontextprotocol/server-filesystem', '/Users/jaehoseo/Desktop'],
     },
     scopes: [
-      { name: 'read_file', mode: '읽기' },
-      { name: 'write_file', mode: '쓰기' },
-      { name: 'list_directory', mode: '읽기' },
+      { name: 'read_file', mode: 'read' },
+      { name: 'write_file', mode: 'write' },
+      { name: 'list_directory', mode: 'read' },
     ],
     usedBy: [{ kind: '스킬', name: '로컬 문서 요약', icon: 'skill' }],
     examples: ['바탕화면의 마크다운 파일들을 정리해줘'],
     update: {
-      version: 'v0.7.0',
-      note: '서버에 파일 이동·검색 도구가 추가되었습니다.',
+      addedCount: 2,
+      removedCount: 0,
       addsTools: [
-        { name: 'move_file', mode: '쓰기', permission: '승인 필요' },
-        { name: 'search_files', mode: '읽기' },
+        { name: 'move_file', mode: 'write', permission: 'approval' },
+        { name: 'search_files', mode: 'read' },
       ],
     },
   },
@@ -971,9 +1026,9 @@ export const CONNECTORS: Connector[] = [
       args: ['mcp-server-git', '--repository', '/Users/jaehoseo/Desktop/vswrk/bob/rice'],
     },
     scopes: [
-      { name: 'git_log', mode: '읽기' },
-      { name: 'git_diff', mode: '읽기' },
-      { name: 'git_status', mode: '읽기' },
+      { name: 'git_log', mode: 'read' },
+      { name: 'git_diff', mode: 'read' },
+      { name: 'git_status', mode: 'read' },
     ],
     usedBy: [{ kind: '대화', name: '변경사항 리뷰', icon: 'chat' }],
     examples: ['최근 커밋들의 변경 요약해줘'],
@@ -1139,5 +1194,111 @@ export const CONNECTOR_CATALOG: CatalogConnector[] = [
     comingSoon: true,
   },
 ];
+
+// ── i18n 렌더 헬퍼 ─────────────────────────────────────────────────
+// 상태에는 stable code를 저장하고, 렌더 시점에 t() 를 받아 번역한다.
+// 파라미터 t는 'chat' 네임스페이스로 호출된 useTranslation().t 이어야 한다.
+//
+// react-i18next TFunction 은 복잡한 오버로드 타입이라 직접 받으면 TS 오류가 난다.
+// i18next apiError.ts 패턴과 동일하게 unknown 캐스트 래퍼를 사용한다.
+// 호출 측: `(tChat as unknown as TFnChat)` 혹은 `wrapT(tChat)` 헬퍼를 이용한다.
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type TFnChat = (key: string, opts?: Record<string, unknown>) => string;
+
+/**
+ * react-i18next TFunction → TFnChat 변환.
+ * `const tFn = wrapT(useTranslation('chat').t)` 패턴으로 사용한다.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function wrapT(t: any): TFnChat {
+  return t as TFnChat;
+}
+
+/**
+ * Skill.trend → 번역 문자열.
+ * stable TrendCode는 chat:learning.trend* 키로 매핑된다.
+ * 매핑되지 않는 레거시 문자열은 그대로 반환한다.
+ */
+export function renderTrend(trend: string, t: TFnChat): string {
+  switch (trend) {
+    case 'trend_just_now':       return t('learning.trendJustNow');
+    case 'trend_new':            return t('learning.trendNew');
+    case 'trend_improved':       return t('learning.trendImproved');
+    case 'trend_improved_short': return t('learning.trendImprovedShort');
+    case 'trend_just_created':   return t('learning.trendJustCreated');
+    case 'trend_consolidated':   return t('learning.trendConsolidated');
+    case 'trend_consolidated_new': return t('learning.trendConsolidatedNew');
+    case 'trend_not_used_yet':   return t('learning.trendNotUsedYet');
+    case 'trend_in_use':         return t('learning.trendInUse');
+    case 'trend_used_today':     return t('learning.trendUsedToday');
+    default: {
+      // trend_days_ago:<N> 패턴
+      if (trend.startsWith('trend_days_ago:')) {
+        const days = parseInt(trend.split(':')[1], 10);
+        return t('learning.trendDaysAgo', { count: days });
+      }
+      // 레거시 자유 문자열 — 그대로 반환
+      return trend;
+    }
+  }
+}
+
+/**
+ * SkillDetail.createdFrom → 번역 문자열.
+ * stable CreatedFromCode는 chat:learning.createdFrom* 키로 매핑된다.
+ */
+export function renderCreatedFrom(code: string, t: TFnChat): string {
+  switch (code) {
+    case 'created_from_chat':      return t('learning.createdFromChat');
+    case 'created_from_chat_auto': return t('learning.createdFromChatAuto');
+    case 'created_from_loop':      return t('learning.createdFromLoop');
+    case 'created_from_patch':     return t('learning.sourcePatch');
+    case 'created_from_builtin':   return t('learning.createdFromBuiltin');
+    default:                       return code; // 레거시 자유 문자열
+  }
+}
+
+/**
+ * SkillDetail.lastUsed → 번역 문자열.
+ * 'last_used_just_now' / 'last_used_never' → 카탈로그 문자열.
+ * 'last_used_iso:<ISO>' → 앱 로케일로 포맷된 날짜.
+ * ISO 날짜 문자열 직접 저장 → 앱 로케일 포맷.
+ */
+export function renderLastUsed(code: string, t: TFnChat, locale: string): string {
+  if (code === 'last_used_just_now') return t('learning.lastUsedJustNow');
+  if (code === 'last_used_never')    return t('learning.lastUsedNever');
+  const isoPayload = code.startsWith('last_used_iso:') ? code.slice('last_used_iso:'.length) : code;
+  const d = new Date(isoPayload);
+  if (!isNaN(d.getTime())) {
+    return d.toLocaleDateString(locale === 'ko' ? 'ko-KR' : 'en-US');
+  }
+  return code; // 레거시 자유 문자열
+}
+
+/**
+ * SkillVersion.when → 번역/포맷된 날짜 문자열.
+ * stable LastUsedCode, ISO 날짜, 또는 레거시 자유 문자열을 처리한다.
+ */
+export function renderVersionWhen(when: string, t: TFnChat, locale: string): string {
+  return renderLastUsed(when, t, locale);
+}
+
+/**
+ * SkillVersion.note → 번역 문자열.
+ * stable note code (noteAutoCreated, noteFromChat, noteLoopApproved, noteRuntimeSync, noteInstalled)는
+ * 카탈로그로 매핑하고, 나머지 동적 changelog 문자열은 그대로 반환한다.
+ * noteParams는 stable code일 때 i18next 보간 파라미터로 전달된다.
+ */
+export function renderVersionNote(note: string, t: TFnChat, noteParams?: Record<string, string>): string {
+  switch (note) {
+    case 'noteAutoCreated':  return t('learning.noteAutoCreated');
+    case 'noteFromChat':     return t('learning.noteFromChat');
+    case 'noteLoopApproved': return t('learning.noteLoopApproved');
+    case 'noteRuntimeSync':  return t('learning.noteRuntimeSync');
+    case 'noteInstalled':    return t('learning.noteInstalled', noteParams ?? {});
+    default:                 return note; // 동적 changelog 또는 레거시 자유 문자열
+  }
+}
 
 // Made with Bob

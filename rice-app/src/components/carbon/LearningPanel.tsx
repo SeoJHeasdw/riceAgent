@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Icon, Tag } from '../ui';
 import type { IconName } from '../ui/Icon';
 import { useLearning } from '../../lib/learning/LearningContext';
@@ -30,7 +31,7 @@ interface MenuItem {
   onClick: () => void;
 }
 
-const RowMenu: React.FC<{ items: MenuItem[] }> = ({ items }) => {
+const RowMenu: React.FC<{ items: MenuItem[]; menuTitle: string }> = ({ items, menuTitle }) => {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -45,8 +46,8 @@ const RowMenu: React.FC<{ items: MenuItem[] }> = ({ items }) => {
     <div ref={ref} className="relative flex-shrink-0">
       <button
         onClick={() => setOpen((o) => !o)}
-        title="옵션"
-        aria-label="옵션"
+        title={menuTitle}
+        aria-label={menuTitle}
         className={`flex h-[28px] w-[28px] items-center justify-center rounded-md transition-colors ${
           open ? 'bg-layer-hover-01' : 'hover:bg-layer-hover-01'
         }`}
@@ -99,13 +100,25 @@ const SignalRow: React.FC<{ s: UserSignal; onEdit: (v: string) => void; onRemove
   onEdit,
   onRemove,
 }) => {
+  const { t } = useTranslation('chat');
   const [editing, setEditing] = useState(false);
   const [val, setVal] = useState(s.value);
+
+  /** stable code → 번역. 레거시 자유 문자열은 그대로 표시 */
+  const renderLabel = (raw: string): string => {
+    if (raw === 'signal_label_fact') return t('learning.signalLabelFact');
+    if (raw === 'signal_label_preference') return t('learning.signalLabelPreference');
+    return raw;
+  };
+  const renderSource = (raw: string): string => {
+    if (raw === 'signal_source_runtime') return t('learning.signalSourceRuntime');
+    return raw;
+  };
 
   if (editing) {
     return (
       <div className="flex flex-col gap-1.5 bg-layer-02 px-2.5 py-2 rounded-md">
-        <div className="text-caption-01 text-text-helper">{s.label}</div>
+        <div className="text-caption-01 text-text-helper">{renderLabel(s.label)}</div>
         <textarea
           value={val}
           onChange={(e) => setVal(e.target.value)}
@@ -123,7 +136,7 @@ const SignalRow: React.FC<{ s: UserSignal; onEdit: (v: string) => void; onRemove
           }}
           className="min-h-24 w-full resize-y rounded-md border border-border-strong-01 bg-field-01 px-2.5 py-2 text-body-short-01 leading-relaxed text-text-primary outline-none focus:border-focus"
         />
-        <span className="text-label-micro text-text-helper">⌘ Enter로 저장 · Esc로 취소</span>
+        <span className="text-label-micro text-text-helper">{t('learning.signalEditSave')}</span>
         <div className="flex gap-1.5 justify-end">
           <button
             onClick={() => {
@@ -132,7 +145,7 @@ const SignalRow: React.FC<{ s: UserSignal; onEdit: (v: string) => void; onRemove
             }}
             className="px-2 h-7 text-caption-01 text-link-primary hover:bg-layer-hover-01 rounded"
           >
-            취소
+            {t('learning.signalEditCancel')}
           </button>
           <button
             onClick={() => {
@@ -141,7 +154,7 @@ const SignalRow: React.FC<{ s: UserSignal; onEdit: (v: string) => void; onRemove
             }}
             className="px-2 h-7 text-caption-01 bg-interactive text-white rounded hover:bg-interactive-hover"
           >
-            저장
+            {t('learning.signalEditConfirm')}
           </button>
         </div>
       </div>
@@ -152,22 +165,22 @@ const SignalRow: React.FC<{ s: UserSignal; onEdit: (v: string) => void; onRemove
     <div className="group flex items-center gap-2.5 py-1">
       <div className="min-w-0 flex-1">
         {/* label은 그룹 헤더로 승격됐으므로 행에는 출처만 */}
-        <div className="text-caption-01 text-text-helper">{s.source}</div>
+        <div className="text-caption-01 text-text-helper">{renderSource(s.source)}</div>
         <div className="text-body-short-01 text-text-primary whitespace-pre-wrap">{s.value}</div>
       </div>
       <div className="flex flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
         <button
           onClick={() => setEditing(true)}
-          title="수정"
-          aria-label="수정"
+          title={t('learning.signalEditButton')}
+          aria-label={t('learning.signalEditButton')}
           className="w-7 h-7 flex items-center justify-center rounded-md text-icon-secondary hover:bg-layer-hover-01"
         >
           <Icon name="edit" size={14} />
         </button>
         <button
           onClick={onRemove}
-          title="이 신호 삭제"
-          aria-label="이 신호 삭제"
+          title={t('learning.signalRemoveButton')}
+          aria-label={t('learning.signalRemoveButton')}
           className="w-7 h-7 flex items-center justify-center rounded-md text-icon-secondary hover:bg-layer-hover-01"
         >
           <Icon name="close" size={14} />
@@ -190,7 +203,9 @@ const ProposalCard: React.FC<{
   onDismiss: () => void;
   /** jump to the conversation (and message) the evidence came from */
   onOpenSource?: (conversationId: string, messageIndex?: number) => void;
-}> = ({ p, onAccept, onDismiss, onOpenSource }) => {
+  laterLabel: string;
+}> = ({ p, onAccept, onDismiss, onOpenSource, laterLabel }) => {
+  const { t } = useTranslation('chat');
   const m = PROPOSAL_META[p.kind];
   return (
     <div className="bg-layer-01 border border-border-subtle-01 rounded-lg p-3">
@@ -205,12 +220,12 @@ const ProposalCard: React.FC<{
           {p.source && (
             <button
               onClick={() => onOpenSource?.(p.source!.conversationId, p.source!.messageIndex)}
-              title="근거가 된 대화 열기"
+              title={t('learning.sourceObservedFrom').trim()}
               className="mt-1.5 inline-flex items-center gap-1 text-caption-01 text-link-primary hover:underline"
             >
               <Icon name="chat" size={11} className="flex-shrink-0" />
               <span className="truncate">
-                「{p.source.title}」{p.source.count ? ` · ${p.source.count}회 관찰` : ' 에서'}
+                「{p.source.title}」{p.source.count ? t('learning.sourceObservedCount', { count: p.source.count }) : t('learning.sourceObservedFrom')}
               </span>
               <Icon name="arrow-up-right" size={11} className="opacity-70 flex-shrink-0" />
             </button>
@@ -243,7 +258,7 @@ const ProposalCard: React.FC<{
               onClick={onDismiss}
               className="h-7 px-2.5 rounded-md text-caption-01 text-text-secondary hover:bg-layer-hover-01 transition-colors"
             >
-              나중에
+              {laterLabel}
             </button>
           </div>
         </div>
@@ -253,35 +268,34 @@ const ProposalCard: React.FC<{
 };
 
 // ── 제안함(suggestion inbox) 카드 — 런타임 skill_suggestions 실배선 ──
-const SUGGESTION_KIND_META: Record<SkillSuggestion['kind'], { icon: IconName; tint: string; label: string }> = {
-  create: { icon: 'add', tint: 'text-support-success', label: '신규 스킬' },
-  patch: { icon: 'edit', tint: 'text-link-primary', label: '개선' },
-  archive: { icon: 'trash', tint: 'text-text-error', label: '보관' },
-};
-
-const SUGGESTION_ORIGIN_LABELS: Record<string, string> = {
-  discovery: '패턴 발굴',
-  timeout: '응답 없던 제안',
-  review: '대화 리뷰',
-  learn: '수동 학습',
-  agent: '에이전트 발의',
-  consolidation: '통합 정리',
-};
-
 const SuggestionCard: React.FC<{
   s: SkillSuggestion;
   onDecide: (approved: boolean) => void;
   deciding: boolean;
 }> = ({ s, onDecide, deciding }) => {
-  const m = SUGGESTION_KIND_META[s.kind];
+  const { t } = useTranslation('chat');
+  const kindIconMap: Record<SkillSuggestion['kind'], { icon: IconName; tint: string }> = {
+    create: { icon: 'add', tint: 'text-support-success' },
+    patch: { icon: 'edit', tint: 'text-link-primary' },
+    archive: { icon: 'trash', tint: 'text-text-error' },
+  };
+  const originKeyMap: Record<string, string> = {
+    discovery: t('learning.suggestionOriginDiscovery'),
+    timeout: t('learning.suggestionOriginTimeout'),
+    review: t('learning.suggestionOriginReview'),
+    learn: t('learning.suggestionOriginLearn'),
+    agent: t('learning.suggestionOriginAgent'),
+    consolidation: t('learning.suggestionOriginConsolidation'),
+  };
+  const m = kindIconMap[s.kind];
   const adds = s.payload.diff?.lines.filter((l) => l.type === 'add').length ?? 0;
   const dels = s.payload.diff?.lines.filter((l) => l.type === 'remove').length ?? 0;
   const versionText =
     s.kind === 'archive'
-      ? '보관 제안'
+      ? t('learning.suggestionVersionArchive')
       : s.payload.from_version === 0
-        ? 'v1 신규'
-        : `v${s.payload.from_version}→v${s.payload.to_version}`;
+        ? t('learning.suggestionVersionNew')
+        : t('learning.suggestionVersionUpgrade', { from: s.payload.from_version, to: s.payload.to_version });
   return (
     <div className="bg-layer-01 border border-border-subtle-01 rounded-lg p-3">
       <div className="flex items-start gap-2.5">
@@ -299,7 +313,7 @@ const SuggestionCard: React.FC<{
           <div className="flex items-center gap-2 mt-1.5 text-caption-01 text-text-helper">
             <span className="inline-flex items-center gap-1">
               <Icon name="renew" size={11} className="opacity-70" />
-              {SUGGESTION_ORIGIN_LABELS[s.origin] ?? s.origin}
+              {originKeyMap[s.origin] ?? s.origin}
             </span>
             {s.kind !== 'archive' && (adds > 0 || dels > 0) && (
               <span className="font-mono">
@@ -309,7 +323,7 @@ const SuggestionCard: React.FC<{
             )}
             {(s.payload.warnings?.length ?? 0) > 0 && (
               <span className="inline-flex items-center gap-1 text-support-warning">
-                <Icon name="warning" size={11} /> 민감정보 마스킹됨
+                <Icon name="warning" size={11} /> {t('learning.suggestionWarnMasked')}
               </span>
             )}
           </div>
@@ -319,14 +333,14 @@ const SuggestionCard: React.FC<{
               disabled={deciding}
               className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-caption-01 font-semibold bg-interactive text-white hover:bg-interactive-hover transition-colors disabled:opacity-50"
             >
-              <Icon name="check" size={13} /> {s.kind === 'archive' ? '보관 승인' : '반영'}
+              <Icon name="check" size={13} /> {s.kind === 'archive' ? t('learning.suggestionApproveArchive') : t('learning.suggestionApprove')}
             </button>
             <button
               onClick={() => onDecide(false)}
               disabled={deciding}
               className="h-7 px-2.5 rounded-md text-caption-01 text-text-secondary hover:bg-layer-hover-01 transition-colors disabled:opacity-50"
             >
-              거부
+              {t('learning.suggestionReject')}
             </button>
           </div>
         </div>
@@ -336,6 +350,7 @@ const SuggestionCard: React.FC<{
 };
 
 export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpenConversation }) => {
+  const { t } = useTranslation('chat');
   const {
     skills,
     setSkills,
@@ -376,15 +391,15 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpe
     const ok = await decideSuggestion(s.id, approved);
     setDecidingId(null);
     if (!ok) {
-      showFlash('결정을 전달하지 못했어요 · 런타임 연결을 확인하세요');
+      showFlash(t('learning.flashDecideFailed'));
       return;
     }
     showFlash(
       approved
         ? s.kind === 'archive'
-          ? `${s.skill_id} 보관됨`
-          : `${s.skill_id} 반영됨 · My Skills에서 확인`
-        : '제안을 거부했어요 · 같은 제안은 당분간 다시 오지 않습니다',
+          ? t('learning.flashArchived', { id: s.skill_id })
+          : t('learning.flashApplied', { id: s.skill_id })
+        : t('learning.flashRejected'),
     );
   };
 
@@ -393,7 +408,7 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpe
     setDiscovering(true);
     const added = await discoverNow();
     setDiscovering(false);
-    showFlash(added > 0 ? `반복 패턴 ${added}건을 찾았어요` : '새로 발굴된 패턴이 없어요');
+    showFlash(added > 0 ? t('learning.flashDiscoverFound', { count: added }) : t('learning.flashDiscoverNone'));
   };
 
   // accept a loop proposal → mutate real state so it lands in My Skills too
@@ -403,38 +418,42 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpe
       setDetails((d) => {
         const cur = d[target];
         if (!cur) return d;
-        const ruleSource = p.source ? `관찰 승격 · ${p.source.title}` : '관찰에서 승격';
+        // rule source는 관찰 대화 제목을 포함하는 동적 문자열이라 번역 결과를 저장해야 한다.
+        // 언어 변경 시에는 다음 승인부터 새 언어로 저장된다 (히스토리 레코드라 허용 범위).
+        const ruleSource = p.source
+          ? t('learning.ruleSourceObserved', { title: p.source.title })
+          : t('learning.ruleSourceObservedFallback');
         return {
           ...d,
           [target]: { ...cur, rules: [...cur.rules, { id: `pr${Date.now()}`, text: p.rule!, source: ruleSource, on: true }] },
         };
       });
-      showFlash('규칙을 반영했어요 · My Skills에서 확인');
+      showFlash(t('learning.flashRuleApplied'));
     } else if (p.kind === 'tool' && p.tool) {
       const id = `us${Date.now()}`;
       const tool = p.tool;
       setSkills((a) => [
         ...a,
-        { id, name: tool.name, ver: 'v1', uses: 0, trend: '새로 생성', enabled: true, command: tool.command },
+        { id, name: tool.name, ver: 'v1', uses: 0, trend: 'trend_new', enabled: true, command: tool.command },
       ]);
       setDetails((d) => ({
         ...d,
         [id]: {
           summary: tool.summary,
-          createdFrom: '반복 작업에서 자동 생성',
-          lastUsed: '방금',
+          createdFrom: 'created_from_loop',
+          lastUsed: 'last_used_just_now',
           shared: false,
           rules: [],
-          versions: [{ ver: 'v1', when: '방금', note: '루프 제안 승인으로 생성', current: true, rules: [] }],
+          versions: [{ ver: 'v1', when: 'last_used_just_now', note: t('learning.noteLoopApproved'), current: true, rules: [] }],
           usage: [],
           permissions: [],
         },
       }));
-      showFlash('새 도구를 저장했어요 · My Skills에서 확인');
+      showFlash(t('learning.flashToolSaved'));
     } else if (p.kind === 'prune' && p.targetSkillId) {
       const target = p.targetSkillId;
       setSkills((a) => a.map((x) => (x.id === target ? { ...x, state: 'stale' as const } : x)));
-      showFlash('Stale로 표시했어요 · My Skills에서 확인');
+      showFlash(t('learning.flashMarkedStale'));
     }
     setProposals((arr) => arr.filter((x) => x.id !== p.id));
   };
@@ -454,16 +473,16 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpe
       {/* 제목은 패널의 정체성, 우측 버튼은 감사/audit 액션이다. 패널 토글과
           같은 renew 아이콘을 반복하지 않아 세 컨트롤의 역할이 섞이지 않게 한다. */}
       <div className="flex items-center gap-2 px-4 pr-6 h-11 flex-shrink-0 border-b border-border-subtle-00 electron-drag">
-          <span className="text-label-02 font-semibold text-text-primary">학습 루프</span>
-          <span className="h-1.5 w-1.5 rounded-full bg-support-success/80" title="학습 루프 활성" />
+          <span className="text-label-02 font-semibold text-text-primary">{t('learning.panelTitle')}</span>
+          <span className="h-1.5 w-1.5 rounded-full bg-support-success/80" title={t('learning.panelActiveIndicatorTitle')} />
           <button
             type="button"
             onClick={() => setTransparencyOpen(true)}
-            title="학습 투명성 — 모델이 본 것/못 본 것, 격리·차단된 메모리, 되돌릴 수 있는 변경"
+            title={t('learning.transparencyTitle')}
             className="electron-no-drag ml-auto flex h-[28px] flex-shrink-0 items-center gap-1.5 rounded-lg border border-border-subtle-02 bg-layer-02/60 px-2.5 text-caption-01 font-medium text-text-primary transition-colors hover:border-border-strong-01 hover:bg-layer-hover-02"
           >
             <Icon name="view" size={14} className="text-blue-40" />
-            투명성
+            {t('learning.transparencyButton')}
           </button>
         </div>
 
@@ -475,7 +494,7 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpe
           <div className="flex items-center gap-2 px-4 pt-3.5 pb-2">
             <Icon name="download" size={16} className="text-link-primary" />
             <span className="text-caption-01 font-semibold uppercase tracking-wider text-text-secondary">
-              제안함
+              {t('learning.sectionInbox')}
             </span>
             <span className="ai-label">
               <span className="ai-label__text">AI</span>
@@ -486,11 +505,11 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpe
             <button
               onClick={handleDiscover}
               disabled={discovering}
-              title="최근 대화들에서 반복 패턴을 발굴합니다 (LLM 호출)"
+              title={t('learning.discoverTitle')}
               className="ml-auto inline-flex items-center gap-1 h-6 px-2 rounded-md text-caption-01 text-text-secondary hover:bg-layer-hover-01 hover:text-text-primary transition-colors disabled:opacity-50"
             >
               <Icon name="search" size={12} className={discovering ? 'animate-pulse' : ''} />
-              {discovering ? '발굴 중…' : '패턴 발굴'}
+              {discovering ? t('learning.discoverButtonBusy') : t('learning.discoverButton')}
             </button>
           </div>
           <div className="px-4 pb-3.5 flex flex-col gap-2">
@@ -504,7 +523,7 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpe
             ))}
             {suggestions.length === 0 && (
               <span className="text-caption-01 text-text-helper">
-                대기 중인 제안이 없어요. 시간이 지나면 발굴·리뷰 제안이 쌓입니다.
+                {t('learning.inboxEmpty')}
               </span>
             )}
           </div>
@@ -516,7 +535,7 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpe
             <div className="flex items-center gap-2 px-4 pt-3.5 pb-2">
               <Icon name="idea" size={16} className="text-link-primary" />
               <span className="text-caption-01 font-semibold uppercase tracking-wider text-text-secondary">
-                검토 대기 · 루프 제안
+                {t('learning.sectionProposals')}
               </span>
               {proposals.length > 0 && (
                 <span className="ml-auto text-caption-01 text-text-helper font-mono">{proposals.length}</span>
@@ -535,6 +554,7 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpe
                   onAccept={() => acceptProposal(p)}
                   onDismiss={() => setProposals((arr) => arr.filter((x) => x.id !== p.id))}
                   onOpenSource={onOpenConversation}
+                  laterLabel={t('learning.proposalLater')}
                 />
               ))}
             </div>
@@ -543,7 +563,7 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpe
 
         {/* user model — grouped memory card. 같은 label끼리 묶고, 반복 항목은
             preview 2개 + count로 접어 raw log처럼 쌓이지 않게 한다. */}
-        <PanelSection icon="user" title="나에 대한 모델" count={`신호 ${signals.length}`}>
+        <PanelSection icon="user" title={t('learning.sectionUserModel')} count={t('learning.userModelSignalCount', { count: signals.length })}>
           <div className="flex flex-col gap-3">
             {Array.from(
               signals.reduce((m, u) => {
@@ -559,7 +579,11 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpe
               return (
                 <div key={label}>
                   <div className="flex items-center gap-1.5 mb-1">
-                    <span className="text-caption-01 font-semibold text-text-secondary">{label}</span>
+                    <span className="text-caption-01 font-semibold text-text-secondary">
+                      {label === 'signal_label_fact' ? t('learning.signalLabelFact')
+                        : label === 'signal_label_preference' ? t('learning.signalLabelPreference')
+                        : label}
+                    </span>
                     {items.length > 1 && (
                       <span className="text-caption-01 text-text-helper font-mono">{items.length}</span>
                     )}
@@ -570,7 +594,7 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpe
                         key={u.id}
                         s={u}
                         onEdit={(v) =>
-                          setSignals((arr) => arr.map((x) => (x.id === u.id ? { ...x, value: v, source: '명시적 교정' } : x)))
+                          setSignals((arr) => arr.map((x) => (x.id === u.id ? { ...x, value: v, source: t('learning.signalSourceEdited') } : x)))
                         }
                         // 런타임 메모리(mem_*)는 서버에서도 삭제된다 — HITL 없는 유일한
                         // 학습 경로의 사후 통제 수단(Self-Improvement v3 위생).
@@ -589,7 +613,7 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpe
                         }
                         className="self-start text-caption-01 text-text-helper hover:text-text-secondary transition-colors"
                       >
-                        {expanded ? '접기' : `외 ${hiddenCount}개 더 보기`}
+                        {expanded ? t('learning.collapse') : t('learning.expandMore', { count: hiddenCount })}
                       </button>
                     )}
                   </div>
@@ -597,13 +621,13 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpe
               );
             })}
             {signals.length === 0 && (
-              <span className="text-caption-01 text-text-helper">아직 학습된 신호가 없어요. 대화에서 자동으로 쌓입니다.</span>
+              <span className="text-caption-01 text-text-helper">{t('learning.userModelEmpty')}</span>
             )}
           </div>
         </PanelSection>
 
         {/* learned skills — enable/disable/delete */}
-        <PanelSection icon="skill" title="학습한 스킬" count={`${activeSkills}/${skills.length} 활성`}>
+        <PanelSection icon="skill" title={t('learning.sectionSkills')} count={t('learning.skillActiveCount', { active: activeSkills, total: skills.length })}>
           <div className="flex flex-col gap-px">
             {skills.map((s) => {
               const hot = highlightedSkill === s.id;
@@ -633,7 +657,7 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpe
                 >
                   <div className="flex flex-1 min-w-0 items-center gap-1.5">
                     {builtin && (
-                      <span title="기본 내장 스킬 — 활성/비활성만 가능" className="flex-shrink-0">
+                      <span title={t('learning.skillBuiltinTitle')} className="flex-shrink-0">
                         <Icon name="sparkle" size={11} className="text-teal-40 opacity-80" />
                       </span>
                     )}
@@ -644,15 +668,16 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpe
                       {s.ver}
                     </span>
                     <span className="hidden max-w-[92px] flex-shrink truncate text-caption-01 text-text-helper min-[360px]:block">
-                      {s.uses}회
+                      {t('learning.skillUsageCount', { count: s.uses })}
                     </span>
-                    {!s.enabled && <Tag type="gray" size="sm">비활성</Tag>}
+                    {!s.enabled && <Tag type="gray" size="sm">{t('learning.skillInactive')}</Tag>}
                   </div>
                   <RowMenu
+                    menuTitle={t('learning.rowMenuTitle')}
                     items={[
                       {
                         icon: s.enabled ? 'view-off' : 'view',
-                        label: s.enabled ? '비활성화' : '활성화',
+                        label: s.enabled ? t('learning.skillMenuDisable') : t('learning.skillMenuEnable'),
                         onClick: toggleSkill,
                       },
                       ...(builtin
@@ -660,7 +685,7 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpe
                         : [
                             {
                               icon: 'trash' as IconName,
-                              label: '삭제',
+                              label: t('learning.skillMenuDelete'),
                               danger: true,
                               onClick: () => setSkills((arr) => arr.filter((x) => x.id !== s.id)),
                             },
@@ -671,7 +696,7 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpe
               );
             })}
             {skills.length === 0 && (
-              <span className="text-caption-01 text-text-helper">아직 학습된 스킬이 없어요. 대화를 나누면 자동으로 자라납니다.</span>
+              <span className="text-caption-01 text-text-helper">{t('learning.skillEmpty')}</span>
             )}
           </div>
         </PanelSection>

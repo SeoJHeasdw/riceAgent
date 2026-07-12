@@ -1,0 +1,163 @@
+{
+  "title": "Connectors",
+  "localMcp": "Local MCP",
+  "developerTag": "Developer",
+
+  "meta": {
+    "fallbackSummary": "{{type}} connector",
+    "justNow": "just now",
+    "localHttpCategory": "HTTP MCP",
+    "localStdioCategory": "Local MCP",
+    "localHttpProvider": "Local MCP · http",
+    "localStdioProvider": "Local MCP · stdio",
+    "localSummaryRunning": "A local MCP server registered in .mcp.json. Found {{count}} tools.",
+    "localSummaryIdle": "A local MCP server registered in .mcp.json. Refresh to discover its tools.",
+    "gmail": {
+      "category": "Mail",
+      "connectedSummary": "Once connected, the agent can use the mail tools provided by the remote MCP server.",
+      "connectableSummary": "Connecting opens Google sign-in in your browser, then lets you use mail search, read, and send tools.",
+      "examples": ["Summarise recent important emails from my inbox", "Draft a reply with this content"]
+    },
+    "calendar": {
+      "category": "Calendar",
+      "connectedSummary": "Once connected, the agent can use the calendar tools provided by the remote MCP server.",
+      "connectableSummary": "Connecting opens Google sign-in in your browser, then lets you query, create, and respond to events.",
+      "examples": ["What's on my schedule today?", "Book a team meeting for tomorrow at 3 pm"]
+    },
+    "drive": {
+      "category": "Storage",
+      "connectedSummary": "Once connected, the agent can use the Drive tools provided by the remote MCP server.",
+      "connectableSummary": "Connecting opens Google sign-in in your browser, then lets you search, read, and create files.",
+      "examples": ["Find my recently edited documents", "Create a new doc with this content"]
+    }
+  },
+
+  "kindTab": {
+    "remote": "Remote",
+    "localMcp": "Local MCP"
+  },
+
+  "summary": {
+    "connectedConnectors": "Connected connectors",
+    "runningMcpServers": "Running MCP servers",
+    "unit": "",
+    "stopped": "stopped",
+    "needsConnection": "needs connection",
+    "updates": "updates"
+  },
+
+  "filter": {
+    "label": "Filter",
+    "all": "All",
+    "connected": "Connected",
+    "needsConnection": "Needs connection",
+    "hasUpdate": "Has update"
+  },
+
+  "rail": {
+    "tipLocal": "Local MCP servers run code directly on your computer. Only register servers from trusted sources.",
+    "tipRemote": "Connectors are the gateway for agents to access external accounts and data. Only allow what you need."
+  },
+
+  "list": {
+    "addServer": "Register server",
+    "add": "Add",
+    "browse": "Browse",
+    "addCustom": "Add custom",
+    "noLocalEmpty": "No local MCP servers registered.",
+    "noRemoteEmpty": "No matching connectors.",
+    "registerServer": "Register server",
+    "addConnector": "Add connector",
+    "statusRunning": "Running",
+    "statusConnected": "Connected",
+    "statusStopped": "Stopped",
+    "statusNeedsConnection": "Needs connection",
+    "updateBadge": "Update"
+  },
+
+  "detail": {
+    "noSelection": "Select a connector.",
+    "tagConnected": "Connected",
+    "tagNeedsConnection": "Needs connection",
+    "tagReconnectNeeded": "Reconnection needed",
+    "btnRemove": "Remove",
+    "btnCancel": "Cancel",
+    "btnConfirmRemove": "Remove",
+    "confirmRemovePrompt": "Really remove?",
+    "btnConnecting": "Waiting for browser login…",
+    "btnRefreshing": "Refreshing…",
+    "btnProcessing": "Processing…",
+    "btnRefresh": "Refresh",
+    "btnStop": "Stop",
+    "btnRun": "Run",
+    "btnDisconnect": "Disconnect",
+    "btnReconnect": "Reconnect",
+    "btnConnect": "Connect",
+    "update": {
+      "newServerVersion": "New server version",
+      "newVersion": "New version",
+      "available": "available",
+      "btnApply": "Update",
+      "added": "{{count}} tools added",
+      "removed": "{{count}} removed",
+      "versionLabel": "{{count}} changes",
+      "note": "The remote server updated its tools — {{summary}}."
+    },
+    "localWarning": "This server <strong>runs code directly on your computer</strong>. Only run commands from trusted sources.",
+    "localWarning_pre": "This server ",
+    "localWarning_strong": "runs code directly on your computer",
+    "localWarning_post": ". Only run commands from trusted sources.",
+    "resyncTitleLocal": "Re-spawn the server to refresh the tool list",
+    "resyncTitleRemote": "Reload the tool list from the remote MCP server",
+    "sectionInfo": "Info",
+    "metaTransport": "Transport",
+    "metaTransportHttp": "HTTP (local)",
+    "metaTransportStdio": "stdio (local process)",
+    "metaCategory": "Category",
+    "metaEndpoint": "Command / Endpoint",
+    "metaLastVerified": "Last verified",
+    "metaProvider": "Provider",
+    "metaAccount": "Account",
+    "metaLastSync": "Last sync",
+    "resyncLabel": "Restart",
+    "resyncLabelRemote": "Refresh tools",
+    "resyncLabelBusy": "Refreshing…",
+    "sectionTools": "Tool permissions · {{count}}",
+    "toolsDesc_remote": "Tools provided by {{provider}}. Decide when the agent may call each tool —",
+    "toolsDesc_local": "Tools exposed by this server. Decide when the agent may call each tool —",
+    "toolsEmpty_connectedLocal": "This server exposes no tools.",
+    "toolsEmpty_connectedRemote": "This connector provides no tools.",
+    "toolsEmpty_disconnectedLocal": "Run the server to see its tools.",
+    "toolsEmpty_disconnectedRemote": "Connect to see available tools.",
+    "toolGroupRead": "Read-only tools",
+    "toolGroupWrite": "Write / delete tools",
+    "toolGroupExec": "Execute tools",
+    "permSetAll": "Set all",
+    "permAllow": "Allow",
+    "permApproval": "Approval",
+    "permBlock": "Block",
+    "permAllowFull": "Always allow",
+    "permApprovalFull": "Needs approval",
+    "permBlockFull": "Block",
+    "toolExpand": "More",
+    "toolCollapse": "Less",
+    "sectionUsedBy": "Used by · {{count}}",
+    "usedByDesc": "Skills, plugins, and automations that call tools in this connector.",
+    "usedByEmpty": "No skills or plugins use this connector yet."
+  },
+
+  "toast": {
+    "connectStart": "Starting connection",
+    "browserLoginWaiting": "Waiting for browser login",
+    "loginTimeout": "Login timed out. Please try again.",
+    "connectSuccess": "{{name}} connected",
+    "connectFail": "Could not start connection for {{name}}.",
+    "disconnectFail": "Failed to disconnect {{name}}.",
+    "resyncFail": "Could not refresh the tool list.",
+    "refreshLocalFail": "Could not refresh the local MCP server.",
+    "removeLocalFail": "Failed to remove {{name}}.",
+    "applyUpdateFail": "Could not apply the update.",
+    "permSaveFail": "Could not save permission change.",
+    "customConnectFail": "Could not start connection. Check your input and try again."
+  }
+}

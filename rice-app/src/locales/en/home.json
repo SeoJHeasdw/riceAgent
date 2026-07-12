@@ -1,0 +1,75 @@
+{
+  "greeting": {
+    "lateNight": "Burning the midnight oil",
+    "morning": "Good morning",
+    "afternoon": "Good afternoon",
+    "evening": "Good evening"
+  },
+  "hero": {
+    "headline": "What shall we do today?",
+    "description": "RICE learns your work style as you chat and saves repetitive tasks as skills. Pick up where you left off.",
+    "newChat": "Start a new chat",
+    "browseSkills": "Browse Skill Market"
+  },
+  "learning": {
+    "sectionTitle": "Learning status",
+    "proposals": "{{count}} pending suggestion",
+    "proposals_other": "{{count}} pending suggestions",
+    "statSavedSkills": "Saved skills",
+    "statTotalUses": "Total uses",
+    "statAutoImproved": "Auto-improved",
+    "statLearnedSignals": "Learned signals",
+    "emptyTitle": "Nothing learned yet",
+    "emptyDesc": "Start a chat and your work patterns and skills will accumulate here — getting faster with every use."
+  },
+  "topSkills": {
+    "sectionTitle": "Frequently used skills",
+    "viewAll": "View all",
+    "hot": "Popular",
+    "usageCount": "{{count}} uses",
+    "patchCount": "{{count}} improvements",
+    "newSkill": "Create a new skill",
+    "newSkillDesc": "Save repetitive tasks as skills from chat"
+  },
+  "nav": {
+    "groups": {
+      "workspace": "Workspace",
+      "market": "Marketplace",
+      "system": "Connections & Settings"
+    },
+    "destinations": {
+      "home": {
+        "title": "Home",
+        "description": "See all features and navigate at a glance"
+      },
+      "chat": {
+        "title": "Chat",
+        "description": "Chat with the agent to get things done"
+      },
+      "my-skills": {
+        "title": "My Skills",
+        "description": "Manage skills you've created and saved"
+      },
+      "myplugins": {
+        "title": "My Plugins",
+        "description": "Manage your installed plugins"
+      },
+      "skills": {
+        "title": "Skill Market",
+        "description": "Find and add community skills"
+      },
+      "plugins": {
+        "title": "Plugin Market",
+        "description": "Browse plugins that extend your capabilities"
+      },
+      "connectors": {
+        "title": "Connectors",
+        "description": "Connect external accounts and data sources"
+      },
+      "settings": {
+        "title": "Settings",
+        "description": "Configure your model and app environment"
+      }
+    }
+  }
+}

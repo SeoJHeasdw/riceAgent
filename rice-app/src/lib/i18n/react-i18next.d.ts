@@ -9,6 +9,8 @@ import type chat from '../../locales/ko/chat.json';
 import type skills from '../../locales/ko/skills.json';
 import type plugins from '../../locales/ko/plugins.json';
 import type errors from '../../locales/ko/errors.json';
+import type connectors from '../../locales/ko/connectors.json';
+import type home from '../../locales/ko/home.json';
 
 declare module 'i18next' {
   interface CustomTypeOptions {
@@ -20,6 +22,8 @@ declare module 'i18next' {
       skills: typeof skills;
       plugins: typeof plugins;
       errors: typeof errors;
+      connectors: typeof connectors;
+      home: typeof home;
     };
   }
 }

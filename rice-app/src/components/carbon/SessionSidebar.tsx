@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Icon } from '../ui';
 
 /**
@@ -31,8 +32,10 @@ export interface SessionSidebarProps {
   onOpenModelSettings?: () => void;
 }
 
-// Group sessions by time period
-const groupSessions = (sessions: Session[]): Array<{ name: string; items: Session[] }> => {
+// Stable group keys (not translated) — translation happens at render time.
+type GroupKey = 'groupToday' | 'groupYesterday' | 'groupLast7Days' | 'groupLast30Days' | 'groupOlder';
+
+const groupSessions = (sessions: Session[]): Array<{ key: GroupKey; items: Session[] }> => {
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const yesterday = new Date(today);
@@ -42,12 +45,12 @@ const groupSessions = (sessions: Session[]): Array<{ name: string; items: Sessio
   const lastMonth = new Date(today);
   lastMonth.setMonth(lastMonth.getMonth() - 1);
 
-  const groups: Array<{ name: string; items: Session[] }> = [
-    { name: '오늘', items: [] },
-    { name: '어제', items: [] },
-    { name: '최근 7일', items: [] },
-    { name: '최근 30일', items: [] },
-    { name: '이전', items: [] },
+  const groups: Array<{ key: GroupKey; items: Session[] }> = [
+    { key: 'groupToday', items: [] },
+    { key: 'groupYesterday', items: [] },
+    { key: 'groupLast7Days', items: [] },
+    { key: 'groupLast30Days', items: [] },
+    { key: 'groupOlder', items: [] },
   ];
 
   sessions.forEach((session) => {
@@ -80,6 +83,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   modelMode = 'saas',
   onOpenModelSettings,
 }) => {
+  const { t } = useTranslation('chat');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [hoveredSession, setHoveredSession] = useState<string | null>(null);
@@ -126,7 +130,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
               size={17}
               className="flex-shrink-0 text-icon-secondary group-hover:text-icon-primary transition-colors"
             />
-            새 대화
+            {t('sessionSidebar.newChat')}
           </button>
 
           {searchOpen ? (
@@ -140,12 +144,12 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                 onKeyDown={(e) => {
                   if (e.key === 'Escape') closeSearch();
                 }}
-                placeholder="대화 검색"
+                placeholder={t('sessionSidebar.searchPlaceholder')}
                 className="flex-1 min-w-0 bg-transparent border-none outline-none text-text-primary text-body-short-01 font-sans placeholder:text-text-placeholder"
               />
               <button
                 onClick={closeSearch}
-                title="검색 닫기"
+                title={t('sessionSidebar.searchClose')}
                 className="p-0.5 -mr-0.5 rounded hover:bg-layer-hover-02 transition-colors"
               >
                 <Icon name="close" size={13} className="text-icon-secondary" />
@@ -161,7 +165,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                 size={17}
                 className="flex-shrink-0 text-icon-secondary group-hover:text-icon-primary transition-colors"
               />
-              대화 검색
+              {t('sessionSidebar.searchButton')}
             </button>
           )}
         </div>
@@ -170,13 +174,13 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         <div className="flex-1 overflow-y-auto overflow-x-hidden px-2 py-1">
           {groupedSessions.length === 0 ? (
             <div className="px-4 py-8 text-center text-body-short-01 text-text-helper">
-              {searchQuery ? '검색 결과가 없어요' : '아직 대화가 없어요'}
+              {searchQuery ? t('sessionSidebar.emptySearch') : t('sessionSidebar.emptyDefault')}
             </div>
           ) : (
             groupedSessions.map((group) => (
-              <div key={group.name} className="mb-1.5">
+              <div key={group.key} className="mb-1.5">
                 <div className="text-caption-01 font-medium text-text-helper px-2 pt-2 pb-0.5">
-                  {group.name}
+                  {t(`sessionSidebar.${group.key}`)}
                 </div>
                 {/* 컴팩트 한 줄 행 — 시점은 그룹 헤더가 말해주므로 행에는 제목만 */}
                 <div className="space-y-px">
@@ -215,7 +219,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                               onDeleteSession(session.id);
                             }}
                             className="absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded-md text-icon-secondary hover:bg-layer-hover-02 hover:text-support-error transition-colors"
-                            title="대화 삭제"
+                            title={t('sessionSidebar.deleteSession')}
                           >
                             <Icon name="trash" size={13} />
                           </button>
@@ -235,7 +239,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
             onClick={onOpenModelSettings}
             data-tour="model-settings"
             className="flex items-center gap-2.5 border-t border-border-subtle-01 px-3 py-3 text-left flex-shrink-0 hover:bg-layer-hover-01 transition-colors"
-            title="모델 설정"
+            title={t('sessionSidebar.modelSettings')}
           >
             <div className="w-7 h-6 flex-shrink-0 flex items-center justify-center rounded-lg bg-layer-02 border border-border-subtle-02">
               <Icon
@@ -247,7 +251,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
             <div className="flex-1 min-w-0">
               <div className="text-body-short-01 text-text-primary truncate">{modelName}</div>
               <div className="text-caption-01 text-text-helper">
-                {modelMode === 'local' ? '로컬 · Ollama' : 'SaaS · watsonx'}
+                {modelMode === 'local' ? t('sessionSidebar.modelLocal') : t('sessionSidebar.modelSaas')}
               </div>
             </div>
             <Icon name="settings" size={15} className="text-icon-secondary flex-shrink-0" />

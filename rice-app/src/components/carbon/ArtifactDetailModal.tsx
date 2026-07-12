@@ -1,4 +1,5 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Button, Icon, Tag, Toggle } from '../ui';
 import { dialogBackdropCls } from '../ui/surfaces';
 import { Skill, Plugin, SkillFile, PlatformArtifact } from '../../lib/types';
@@ -32,6 +33,8 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
   onSponsor,
   onToggle,
 }) => {
+  const { t: tSkills } = useTranslation('skills');
+  const { t: tPlugins } = useTranslation('plugins');
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   useDialogA11y({ open: isOpen && !!artifact, dialogRef, onClose });
@@ -121,13 +124,13 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
               </h2>
               {!isSkill && (
                 <Tag type="purple" size="sm">
-                  솔루션 전문가
+                  {tPlugins('detail.expertTag')}
                 </Tag>
               )}
             </div>
             <div className="text-caption-01 text-text-helper">
               {isSkill && skill ? `${skill.author}${skill.team ? ` · ${skill.team}` : ''} · v${skill.version}` : ''}
-              {!isSkill && plugin ? `제공: ${plugin.provider} · v${plugin.version}` : ''}
+              {!isSkill && plugin ? tPlugins('detail.providerMeta', { provider: plugin.provider, version: plugin.version }) : ''}
             </div>
             {isSkill && skill?.forkedFrom && (
               <div className="mt-1 inline-flex items-center gap-1 text-caption-01 text-text-helper">
@@ -135,14 +138,14 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
                   <circle cx="6" cy="6" r="3" /><circle cx="18" cy="6" r="3" /><circle cx="12" cy="18" r="3" />
                   <path d="M6 9v3a3 3 0 003 3h6a3 3 0 003-3V9M12 15v0" />
                 </svg>
-                원작 <span className="text-text-secondary">{skill.forkedFrom.author}{skill.forkedFrom.team ? ` · ${skill.forkedFrom.team}` : ''}</span> · {skill.author} 개선 (파생본)
+                {tSkills('market.detail.forkedFrom')}{' '}<span className="text-text-secondary">{skill.forkedFrom.author}{skill.forkedFrom.team ? ` · ${skill.forkedFrom.team}` : ''}</span>{' '}· {skill.author} {tSkills('market.detail.forkedImprovement')}
               </div>
             )}
           </div>
           <button
             onClick={onClose}
             className="w-8 h-8 flex items-center justify-center rounded-lg text-icon-secondary hover:text-icon-primary hover:bg-layer-hover-01 transition-colors flex-shrink-0"
-            aria-label="상세 정보 닫기"
+            aria-label={tSkills('market.detail.closeAriaLabel')}
           >
             <Icon name="close" size={16} />
           </button>
@@ -160,10 +163,10 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
               {/* Stats */}
               <div className="grid grid-cols-3 gap-2 mb-4">
                 {[
-                  { label: '다운로드', value: skill.downloads.toLocaleString(), icon: <Icon name="download" size={15} />, tone: 'text-text-primary' },
+                  { label: tSkills('market.detail.statDownloads'), value: skill.downloads.toLocaleString(), icon: <Icon name="download" size={15} />, tone: 'text-text-primary' },
                   {
-                    label: '평점',
-                    value: skill.rating > 0 ? skill.rating : '신규',
+                    label: tSkills('market.detail.statRating'),
+                    value: skill.rating > 0 ? skill.rating : tSkills('market.detail.statRatingNew'),
                     icon: (
                       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M12 2.5l2.9 5.9 6.5.95-4.7 4.6 1.1 6.5L12 17.4l-5.8 3.05 1.1-6.5-4.7-4.6 6.5-.95L12 2.5z" />
@@ -172,7 +175,7 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
                     tone: 'text-text-primary',
                   },
                   {
-                    label: '리워드',
+                    label: tSkills('market.detail.statReward'),
                     value: `${skill.points.toLocaleString()} BP`,
                     icon: (
                       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -196,7 +199,7 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
 
               {/* Tags */}
               <div className="mb-4">
-                <div className="text-label-01 text-text-secondary mb-2">태그</div>
+                <div className="text-label-01 text-text-secondary mb-2">{tSkills('market.detail.sectionTags')}</div>
                 <div className="flex flex-wrap gap-2">
                   {skill.tags.map((tag) => (
                     <Tag key={tag} type="blue" size="sm" className="bg-blue-60/12 text-blue-30 border border-blue-50/20">
@@ -210,7 +213,7 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
               {platformArtifact && (platformArtifact.license || platformArtifact.bundled_resources.length > 0) && (
                 <div className="mb-5 flex flex-wrap items-center gap-2">
                   {platformArtifact.license && (
-                    <Tag type="gray" size="sm">라이선스 · {platformArtifact.license}</Tag>
+                    <Tag type="gray" size="sm">{tSkills('market.detail.packageLicense', { license: platformArtifact.license })}</Tag>
                   )}
                   {platformArtifact.bundled_resources.map((r) => (
                     <Tag key={r} type="outline" size="sm">{r}/</Tag>
@@ -221,17 +224,17 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
               {/* Bundled files (README / SKILL.md / scripts …) */}
               <div className="mb-4">
                 <div className="flex items-center gap-2 mb-2">
-                  <div className="text-label-01 text-text-secondary">파일</div>
-                  <span className="text-caption-01 text-text-helper">SKILL.md와 번들 리소스</span>
+                  <div className="text-label-01 text-text-secondary">{tSkills('market.detail.sectionFiles')}</div>
+                  <span className="text-caption-01 text-text-helper">{tSkills('market.detail.sectionFilesHint')}</span>
                 </div>
                 {isPlatformSkill ? (
                   platformFiles === null ? (
-                    <div className="px-1 py-3 text-caption-01 text-text-helper">파일 불러오는 중…</div>
+                    <div className="px-1 py-3 text-caption-01 text-text-helper">{tSkills('market.detail.filesLoading')}</div>
                   ) : platformFiles.length ? (
                     // key로 강제 remount → SkillFileBrowser의 초기 선택이 첫 파일로 잡힌다.
                     <SkillFileBrowser key={platformFiles.map((f) => f.path).join('|')} files={platformFiles} />
                   ) : (
-                    <div className="px-1 py-3 text-caption-01 text-text-helper">표시할 파일이 없습니다.</div>
+                    <div className="px-1 py-3 text-caption-01 text-text-helper">{tSkills('market.detail.filesEmpty')}</div>
                   )
                 ) : (
                   <SkillFileBrowser files={getSkillFiles(skill)} />
@@ -246,9 +249,9 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
               {/* Slim composition summary — counts at a glance */}
               <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 mb-4.5">
                 {[
-                  { label: '스킬', value: plugin.skills?.length ?? plugin.skillCount, accent: 'text-blue-50' },
-                  { label: '커넥터', value: plugin.connectors?.length ?? 0, accent: 'text-teal-40' },
-                  { label: '지식', value: plugin.knowledge?.length ?? 0, accent: 'text-magenta-50' },
+                  { label: tPlugins('detail.sectionSkills'), value: plugin.skills?.length ?? plugin.skillCount, accent: 'text-blue-50' },
+                  { label: tPlugins('detail.sectionConnectors'), value: plugin.connectors?.length ?? 0, accent: 'text-teal-40' },
+                  { label: tPlugins('detail.sectionKnowledge'), value: plugin.knowledge?.length ?? 0, accent: 'text-magenta-50' },
                 ].map((s) => (
                   <span key={s.label} className="inline-flex items-baseline gap-1.5">
                     <span className={`text-heading-02 font-semibold tabular-nums ${s.accent}`}>{s.value}</span>
@@ -260,7 +263,7 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
               {/* Capabilities (gains) — compact tag row */}
               <div className="mb-5">
                 <div className="text-label-01 text-text-secondary uppercase tracking-wider mb-2">
-                  핵심 역량
+                  {tPlugins('detail.sectionCapabilities')}
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {plugin.gains.split('·').map((gain, i) => (
@@ -275,12 +278,12 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
               {plugin.skills && plugin.skills.length > 0 && (
                 <div className="mb-5">
                   <div className="flex items-center gap-2 mb-2.5">
-                    <span className="text-label-01 text-text-secondary uppercase tracking-wider">스킬</span>
+                    <span className="text-label-01 text-text-secondary uppercase tracking-wider">{tPlugins('detail.sectionSkills')}</span>
                     <span className="text-caption-01 font-mono text-text-helper bg-layer-02 border border-border-subtle-01 rounded-full px-1.5 leading-5">
                       {plugin.skills.length}
                     </span>
                     <span className="ml-auto text-caption-01 text-text-helper">
-                      채팅에서 <span className="font-mono text-text-secondary">/</span> 로 호출
+                      {tPlugins('detail.sectionSkillsHint')}
                     </span>
                   </div>
                   <div className="flex flex-col gap-px bg-border-subtle-01 rounded-xl overflow-hidden">
@@ -303,7 +306,7 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
               {plugin.connectors && plugin.connectors.length > 0 && (
                 <div className="mb-5">
                   <div className="flex items-center gap-2 mb-2.5">
-                    <span className="text-label-01 text-text-secondary uppercase tracking-wider">연결되는 커넥터</span>
+                    <span className="text-label-01 text-text-secondary uppercase tracking-wider">{tPlugins('detail.sectionConnectors')}</span>
                     <span className="text-caption-01 font-mono text-text-helper bg-layer-02 border border-border-subtle-01 rounded-full px-1.5 leading-5">
                       {plugin.connectors.length}
                     </span>
@@ -326,7 +329,7 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
               {plugin.knowledge && plugin.knowledge.length > 0 && (
                 <div className="mb-5">
                   <div className="flex items-center gap-2 mb-2.5">
-                    <span className="text-label-01 text-text-secondary uppercase tracking-wider">보유 지식</span>
+                    <span className="text-label-01 text-text-secondary uppercase tracking-wider">{tPlugins('detail.sectionKnowledge')}</span>
                     <span className="text-caption-01 font-mono text-text-helper bg-layer-02 border border-border-subtle-01 rounded-full px-1.5 leading-5">
                       {plugin.knowledge.length}
                     </span>
@@ -351,7 +354,7 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
               {/* Use cases */}
               <div className="mb-5">
                 <div className="text-label-01 text-text-secondary uppercase tracking-wider mb-2.5">
-                  활용 사례
+                  {tPlugins('detail.sectionUseCases')}
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {plugin.useCases.map((useCase) => (
@@ -366,7 +369,7 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
 
           {/* Version info */}
           <div className="text-caption-01 text-text-helper">
-            버전 {artifact.version}
+            {tSkills('market.detail.versionLabel', { version: artifact.version })}
           </div>
         </div>
 
@@ -381,12 +384,14 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
                     checked={artifact.enabled}
                     onChange={onToggle}
                     tone="purple"
-                    aria-label={`${artifact.name} ${artifact.enabled ? '비활성화' : '활성화'}`}
+                    aria-label={artifact.enabled
+                      ? tSkills('market.detail.toggleAriaDisable', { name: artifact.name })
+                      : tSkills('market.detail.toggleAriaEnable', { name: artifact.name })}
                   />
                   <span className="flex items-center gap-1.5 flex-1 min-w-0">
                     <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${artifact.enabled ? 'bg-support-success' : 'bg-text-helper'}`} />
                     <span className="text-body-short-01 text-text-secondary truncate">
-                      {artifact.enabled ? '에이전트가 사용 중' : '일시정지됨'}
+                      {artifact.enabled ? tSkills('market.detail.toggleActiveLabel') : tSkills('market.detail.togglePausedLabel')}
                     </span>
                   </span>
                 </>
@@ -395,13 +400,13 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
               {isSkill && (
                 <span className="flex items-center gap-1.5 text-body-short-01 text-text-secondary">
                   <span className="w-1.5 h-1.5 rounded-full bg-blue-50" />
-                  설치됨 · 나의 스킬에서 관리
+                  {tSkills('market.detail.installedManage')}
                 </span>
               )}
 
               {builtinPlugin ? (
                 <span className="ml-auto text-caption-01 text-text-helper">
-                  RICE 기본 내장 · 활성/비활성만 가능
+                  {tPlugins('detail.builtinNote')}
                 </span>
               ) : (
                 <Button
@@ -411,7 +416,7 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
                   className="ml-auto border-support-error/35 bg-transparent text-text-error hover:bg-support-error/10 hover:border-support-error/70"
                   icon={<Icon name="trash" size={14} />}
                 >
-                  제거
+                  {tPlugins('detail.uninstallBtn')}
                 </Button>
               )}
             </div>
@@ -419,7 +424,7 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
             <div className="flex items-center gap-2.5">
               {isSkill && skill && (
                 <span className="text-caption-01 text-text-helper">
-                  <span className="font-mono font-semibold text-interactive">{skill.points.toLocaleString()} BP</span> 리워드
+                  <span className="font-mono font-semibold text-interactive">{skill.points.toLocaleString()} BP</span>{' '}{tSkills('market.detail.rewardSuffix')}
                 </span>
               )}
               <div className="flex-1" />
@@ -434,11 +439,11 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
                     </svg>
                   }
                 >
-                  후원
+                  {tSkills('market.detail.sponsorBtn')}
                 </Button>
               )}
               <Button kind="primary" size="sm" onClick={onInstall} icon={<Icon name="download" size={14} />}>
-                {isSkill ? '스킬 설치' : '전문가 설치'}
+                {isSkill ? tSkills('market.detail.installBtn') : tPlugins('detail.installBtn')}
               </Button>
             </div>
           )}

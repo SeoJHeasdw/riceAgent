@@ -1,0 +1,163 @@
+{
+  "title": "커넥터",
+  "localMcp": "로컬 MCP",
+  "developerTag": "개발자",
+
+  "meta": {
+    "fallbackSummary": "{{type}} 커넥터",
+    "justNow": "방금",
+    "localHttpCategory": "HTTP MCP",
+    "localStdioCategory": "로컬 MCP",
+    "localHttpProvider": "로컬 MCP · http",
+    "localStdioProvider": "로컬 MCP · stdio",
+    "localSummaryRunning": ".mcp.json 에 등록된 로컬 MCP 서버예요. 도구 {{count}}개를 확인했어요.",
+    "localSummaryIdle": ".mcp.json 에 등록된 로컬 MCP 서버예요. 새로고침하면 노출 도구를 확인할 수 있어요.",
+    "gmail": {
+      "category": "메일",
+      "connectedSummary": "연결하면 원격 MCP 서버가 제공하는 메일 도구를 에이전트가 사용할 수 있어요.",
+      "connectableSummary": "연결하면 브라우저에서 구글 로그인이 열리고, 이후 메일 검색·읽기·발송 도구를 쓸 수 있어요.",
+      "examples": ["받은 편지함에서 최근 중요한 메일 요약해줘", "이 내용으로 초안 작성해줘"]
+    },
+    "calendar": {
+      "category": "일정",
+      "connectedSummary": "연결하면 원격 MCP 서버가 제공하는 캘린더 도구를 에이전트가 사용할 수 있어요.",
+      "connectableSummary": "연결하면 브라우저에서 구글 로그인이 열리고, 이후 일정 조회·생성·응답 도구를 쓸 수 있어요.",
+      "examples": ["오늘 일정 알려줘", "내일 오후 3시에 팀 미팅 잡아줘"]
+    },
+    "drive": {
+      "category": "스토리지",
+      "connectedSummary": "연결하면 원격 MCP 서버가 제공하는 드라이브 도구를 에이전트가 사용할 수 있어요.",
+      "connectableSummary": "연결하면 브라우저에서 구글 로그인이 열리고, 이후 파일 검색·읽기·생성 도구를 쓸 수 있어요.",
+      "examples": ["최근 수정한 문서 찾아줘", "이 내용으로 새 문서 만들어줘"]
+    }
+  },
+
+  "kindTab": {
+    "remote": "원격",
+    "localMcp": "로컬 MCP"
+  },
+
+  "summary": {
+    "connectedConnectors": "연결된 커넥터",
+    "runningMcpServers": "실행 중인 MCP 서버",
+    "unit": "개",
+    "stopped": "중지됨",
+    "needsConnection": "연결 필요",
+    "updates": "업데이트"
+  },
+
+  "filter": {
+    "label": "필터",
+    "all": "전체",
+    "connected": "연결됨",
+    "needsConnection": "연결 필요",
+    "hasUpdate": "업데이트 있음"
+  },
+
+  "rail": {
+    "tipLocal": "로컬 MCP는 내 컴퓨터에서 직접 실행됩니다. 신뢰할 수 있는 서버만 등록하세요.",
+    "tipRemote": "커넥터는 에이전트가 외부 계정·데이터에 접근하는 통로예요. 필요한 범위만 허용하세요."
+  },
+
+  "list": {
+    "addServer": "서버 등록",
+    "add": "추가",
+    "browse": "둘러보기",
+    "addCustom": "커스텀 추가",
+    "noLocalEmpty": "등록된 로컬 MCP 서버가 없어요.",
+    "noRemoteEmpty": "해당하는 커넥터가 없어요.",
+    "registerServer": "서버 등록",
+    "addConnector": "커넥터 추가",
+    "statusRunning": "실행 중",
+    "statusConnected": "연결됨",
+    "statusStopped": "중지됨",
+    "statusNeedsConnection": "연결 필요",
+    "updateBadge": "업데이트"
+  },
+
+  "detail": {
+    "noSelection": "커넥터를 선택하세요.",
+    "tagConnected": "연결됨",
+    "tagNeedsConnection": "연결 필요",
+    "tagReconnectNeeded": "재연결 필요",
+    "btnRemove": "제거",
+    "btnCancel": "취소",
+    "btnConfirmRemove": "제거",
+    "confirmRemovePrompt": "정말 제거할까요?",
+    "btnConnecting": "브라우저에서 로그인 대기…",
+    "btnRefreshing": "새로고침 중…",
+    "btnProcessing": "처리 중…",
+    "btnRefresh": "새로고침",
+    "btnStop": "중지",
+    "btnRun": "실행",
+    "btnDisconnect": "연결 해제",
+    "btnReconnect": "재연결",
+    "btnConnect": "연결",
+    "update": {
+      "newServerVersion": "새 서버 버전",
+      "newVersion": "새 버전",
+      "available": "사용 가능",
+      "btnApply": "업데이트",
+      "added": "도구 {{count}}개 추가",
+      "removed": "{{count}}개 제거",
+      "versionLabel": "{{count}}건 변경",
+      "note": "원격 서버가 도구를 갱신했어요 — {{summary}}."
+    },
+    "localWarning": "이 서버는 <strong>내 컴퓨터에서 직접 코드를 실행</strong>합니다. 신뢰할 수 있는 출처의 명령만 실행하세요.",
+    "localWarning_pre": "이 서버는 ",
+    "localWarning_strong": "내 컴퓨터에서 직접 코드를 실행",
+    "localWarning_post": "합니다. 신뢰할 수 있는 출처의 명령만 실행하세요.",
+    "resyncTitleLocal": "서버를 다시 spawn 해 도구 목록을 새로 확인합니다",
+    "resyncTitleRemote": "원격 MCP 서버에서 도구 목록을 다시 불러옵니다",
+    "sectionInfo": "정보",
+    "metaTransport": "전송 방식",
+    "metaTransportHttp": "HTTP (로컬)",
+    "metaTransportStdio": "stdio (로컬 실행)",
+    "metaCategory": "분류",
+    "metaEndpoint": "실행/엔드포인트",
+    "metaLastVerified": "마지막 확인",
+    "metaProvider": "제공자",
+    "metaAccount": "계정",
+    "metaLastSync": "마지막 동기화",
+    "resyncLabel": "재시작",
+    "resyncLabelRemote": "도구 새로고침",
+    "resyncLabelBusy": "새로고침 중…",
+    "sectionTools": "도구 권한 · {{count}}",
+    "toolsDesc_remote": "{{provider}}가 제공하는 도구예요. 에이전트가 각 도구를 언제 호출할 수 있는지 정하세요 —",
+    "toolsDesc_local": "이 서버가 노출하는 도구예요. 에이전트가 각 도구를 언제 호출할 수 있는지 정하세요 —",
+    "toolsEmpty_connectedLocal": "이 서버가 노출한 도구가 없어요.",
+    "toolsEmpty_connectedRemote": "이 커넥터가 제공하는 도구가 없어요.",
+    "toolsEmpty_disconnectedLocal": "실행하면 노출 도구를 확인할 수 있어요.",
+    "toolsEmpty_disconnectedRemote": "연결하면 제공되는 도구가 표시돼요.",
+    "toolGroupRead": "읽기 전용 도구",
+    "toolGroupWrite": "쓰기·삭제 도구",
+    "toolGroupExec": "실행 도구",
+    "permSetAll": "모두 설정",
+    "permAllow": "항상",
+    "permApproval": "승인",
+    "permBlock": "차단",
+    "permAllowFull": "항상 허용",
+    "permApprovalFull": "승인 필요",
+    "permBlockFull": "차단",
+    "toolExpand": "더보기",
+    "toolCollapse": "접기",
+    "sectionUsedBy": "이 커넥터를 사용하는 항목 · {{count}}",
+    "usedByDesc": "이 커넥터의 도구를 호출하는 스킬 · 플러그인 · 자동화예요.",
+    "usedByEmpty": "아직 이 커넥터의 도구를 쓰는 스킬·플러그인이 없어요."
+  },
+
+  "toast": {
+    "connectStart": "연결 시작 중",
+    "browserLoginWaiting": "브라우저에서 로그인 대기 중",
+    "loginTimeout": "로그인 대기 시간이 초과됐어요. 다시 시도해주세요.",
+    "connectSuccess": "{{name}} 연결됨",
+    "connectFail": "{{name}} 연결을 시작하지 못했어요.",
+    "disconnectFail": "{{name}} 연결 해제에 실패했어요.",
+    "resyncFail": "도구 목록을 새로고침하지 못했어요.",
+    "refreshLocalFail": "로컬 MCP 서버를 새로고침하지 못했어요.",
+    "removeLocalFail": "{{name}} 제거에 실패했어요.",
+    "applyUpdateFail": "업데이트를 적용하지 못했어요.",
+    "permSaveFail": "권한 변경을 저장하지 못했어요.",
+    "customConnectFail": "연결을 시작하지 못했어요. 입력값을 확인하고 다시 시도하세요."
+  }
+}

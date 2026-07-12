@@ -1,15 +1,19 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation, Trans } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { Button, Icon, Tag, ResizeHandle, Toggle, ConfirmDialog, OverflowMenu } from '../components/ui';
 import { useResizable } from '../hooks/useResizable';
 import { useLearning } from '../lib/learning/LearningContext';
 import { useMarketplace } from '../hooks/useMarketplace';
+import { useI18n } from '../lib/i18n/I18nContext';
 import { LearningImpactPanel } from '../components/carbon/LearningImpactPanel';
 import { SkillSourceWorkspace } from '../components/carbon/SkillSourceWorkspace';
 import { SkillPublishDialog } from '../components/carbon/SkillPublishDialog';
 import { SkillEditDrawer, type EditPatch } from '../components/carbon/SkillEditDrawer';
 import { Markdown } from '../components/carbon/Markdown';
-import { IMPACT_REPORT, runtimeAnalysisToSkillAnalysis } from '../lib/learningData';
+import { apiErrorMessage } from '../lib/i18n/apiError';
+import { IMPACT_REPORT, runtimeAnalysisToSkillAnalysis, renderTrend, renderCreatedFrom, renderLastUsed, renderVersionWhen, renderVersionNote, wrapT } from '../lib/learningData';
 import { ownedSkillFiles, ownedToMarketSkill, publishedMarketId } from '../lib/skillBridge';
 import { languageFromPath } from '../lib/skillFiles';
 import { api } from '../lib/api';
@@ -26,26 +30,24 @@ import type { ConsolidateProposal, ImpactReport } from '../lib/types';
 
 // 필터를 3축으로 그룹핑 — 출처(내가 만듦/설치/학습) · 상태(생명주기) · 사용성.
 // 출처가 새 직교 축이라, 한 줄로 평평히 두지 않고 섹션 라벨로 묶는다.
-type Filter =
-  | '전체'
-  | '기본 내장'
-  | '직접 제작'
-  | '설치됨'
-  | '학습됨'
+type FilterKey =
+  | 'all'
+  | 'builtin'
+  | 'authored'
+  | 'installed'
+  | 'learned'
   | 'stale'
-  | '보관됨'
-  | '자주 사용'
-  | '최근 학습'
-  | '초안'
-  | '공유됨'
-  | '비활성';
+  | 'archived'
+  | 'frequent'
+  | 'recent'
+  | 'draft'
+  | 'shared'
+  | 'inactive';
 
-const FILTER_GROUPS: { label: string | null; items: Filter[] }[] = [
-  { label: null, items: ['전체'] },
-  { label: '출처', items: ['기본 내장', '직접 제작', '설치됨', '학습됨'] },
-  { label: '상태', items: ['stale', '보관됨'] },
-  { label: '사용성', items: ['자주 사용', '최근 학습', '초안', '공유됨', '비활성'] },
-];
+type Filter = FilterKey;
+
+/** skills 네임스페이스 번역 함수 타입 */
+type TSkills = TFunction<'skills'>;
 
 // 생명주기 상태 배지 메타 (LEARNING_LOOP_DESIGN 5.1)
 // ── 통합 상태축 — 생명주기(state)와 주입(enabled)을 하나의 사용자 표현으로 합친다.
@@ -53,13 +55,12 @@ const FILTER_GROUPS: { label: string | null; items: Filter[] }[] = [
 // 쓰는 "주입 여부"의 진실로 유지하고, UI에서는 여기 단일 status로만 투영한다.
 type SkillStatus = 'active' | 'stale' | 'archived' | 'inactive';
 
-const STATUS_META: Record<SkillStatus, { label: string; tag: 'gray' | 'yellow'; dot: string; text: string; desc: string }> = {
-  active:   { label: '활성',   tag: 'gray',   dot: 'bg-support-success', text: 'text-support-success', desc: '대화에 주입 중' },
-  stale:    { label: 'Stale',  tag: 'yellow', dot: 'bg-support-warning', text: 'text-support-warning', desc: '사용이 줄어 재확인 권장 · 주입 중' },
-  archived: { label: '보관',   tag: 'gray',   dot: 'bg-icon-secondary',  text: 'text-text-helper',     desc: '오래 미사용 · 주입 중단' },
-  inactive: { label: '비활성', tag: 'gray',   dot: 'bg-icon-secondary',  text: 'text-text-helper',     desc: '수동으로 주입 끔' },
+const STATUS_TAG: Record<SkillStatus, 'gray' | 'yellow'> = {
+  active: 'gray', stale: 'yellow', archived: 'gray', inactive: 'gray',
 };
-
+const STATUS_DOT: Record<SkillStatus, string> = {
+  active: 'bg-support-success', stale: 'bg-support-warning', archived: 'bg-icon-secondary', inactive: 'bg-icon-secondary',
+};
 /** 생명주기 상태 (큐레이터 내부용, 미설정 = active) */
 const skillState = (s: Skill): NonNullable<Skill['state']> => s.state ?? 'active';
 
@@ -77,11 +78,11 @@ const skillStatus = (s: Skill): SkillStatus => {
 const isInjected = (st: SkillStatus) => st === 'active' || st === 'stale';
 
 // ── 출처(provenance) — 내가 만든 것 vs 다운받은 것 vs 앱 내장 (git fork 모델) ──
-const ORIGIN_META: Record<SkillOrigin, { label: string; icon: IconName; cls: string }> = {
-  learned: { label: '학습됨', icon: 'idea', cls: 'text-icon-primary' },
-  installed: { label: '설치됨', icon: 'download', cls: 'text-link-primary' },
-  authored: { label: '직접 제작', icon: 'user', cls: 'text-purple-60' },
-  builtin: { label: '기본 내장', icon: 'sparkle', cls: 'text-teal-40' },
+const ORIGIN_ICON: Record<SkillOrigin, IconName> = {
+  learned: 'idea', installed: 'download', authored: 'user', builtin: 'sparkle',
+};
+const ORIGIN_CLS: Record<SkillOrigin, string> = {
+  learned: 'text-icon-primary', installed: 'text-link-primary', authored: 'text-purple-60', builtin: 'text-teal-40',
 };
 /** 현재 출처 반환 (미설정 = learned) */
 const skillOrigin = (s: Skill): SkillOrigin => s.origin ?? 'learned';
@@ -110,29 +111,67 @@ const ARCHIVE_DAYS = 7;
 const ruleState = (idleDays: number): NonNullable<Skill['state']> =>
   idleDays >= ARCHIVE_DAYS ? 'archived' : idleDays >= STALE_DAYS ? 'stale' : 'active';
 
-/** 배지·버튼 툴팁에 붙는 "왜 이 상태인지" 사유 */
-const statusReason = (s: Skill): string => {
-  const idle = s.idleDays ?? 0;
-  switch (skillStatus(s)) {
-    case 'stale':    return `${idle}일 미사용 — 정리를 고려하세요 · 주입 중`;
-    case 'archived': return `${idle}일 미사용 · 주입 중단 — 필요하면 다시 활성화하세요`;
-    case 'inactive': return '수동으로 주입을 껐어요 — 대화에 주입되지 않아요';
-    default:         return idle > 0 ? `${idle}일 전 사용 · 주입 중` : '주입 중 · 정상';
-  }
-};
+// ── 정적 번역 키 매핑 (동적 키 조합 대신 컴파일 타임에 검증) ──
+const STATUS_LABEL_KEYS = {
+  active:   'mySkills.statusActive',
+  stale:    'mySkills.statusStale',
+  archived: 'mySkills.statusArchived',
+  inactive: 'mySkills.statusInactive',
+} as const satisfies Record<SkillStatus, `mySkills.status${'Active'|'Stale'|'Archived'|'Inactive'}`>;
+
+const STATUS_DESC_KEYS = {
+  active:   'mySkills.statusActiveDesc',
+  stale:    'mySkills.statusStaleDesc',
+  archived: 'mySkills.statusArchivedDesc',
+  inactive: 'mySkills.statusInactiveDesc',
+} as const satisfies Record<SkillStatus, `mySkills.status${'Active'|'Stale'|'Archived'|'Inactive'}Desc`>;
+
+const ORIGIN_LABEL_KEYS = {
+  learned:   'mySkills.originLearned',
+  installed: 'mySkills.originInstalled',
+  authored:  'mySkills.originAuthored',
+  builtin:   'mySkills.originBuiltin',
+} as const satisfies Record<SkillOrigin, `mySkills.origin${'Learned'|'Installed'|'Authored'|'Builtin'}`>;
+
+const CONFIDENCE_LABEL_KEYS = {
+  high:   'mySkills.confidenceHigh',
+  medium: 'mySkills.confidenceMedium',
+  low:    'mySkills.confidenceLow',
+} as const satisfies Record<SkillAnalysisConfidence, `mySkills.confidence${'High'|'Medium'|'Low'}`>;
+
+const TOOL_KIND_LABEL_KEYS = {
+  observed: 'mySkills.toolKindObserved',
+  declared: 'mySkills.toolKindDeclared',
+  mentioned: 'mySkills.toolKindMentioned',
+} as const satisfies Record<'observed'|'declared'|'mentioned', `mySkills.toolKind${'Observed'|'Declared'|'Mentioned'}`>;
+
+/** 배지·버튼 툴팁에 붙는 "왜 이 상태인지" 사유 — t() 를 받아야 하므로 factory */
+const makeStatusReason = (t: TSkills) =>
+  (s: Skill): string => {
+    const idle = s.idleDays ?? 0;
+    switch (skillStatus(s)) {
+      case 'stale':    return t('mySkills.statusReasonStale', { idle });
+      case 'archived': return t('mySkills.statusReasonArchived', { idle });
+      case 'inactive': return t('mySkills.statusReasonInactive');
+      default:         return idle > 0
+        ? t('mySkills.statusReasonActiveIdle', { idle })
+        : t('mySkills.statusReasonActiveOk');
+    }
+  };
 
 // 초안 = 갓 생성돼 아직 안 다듬어진 스킬 (v1 · 사용 적음)
 const isDraft = (s: Skill) => s.ver === 'v1' && s.uses < 5;
 
 // 상태 배지 — active 만 생략(기본값), stale·보관·비활성은 표시
 const StatusBadge: React.FC<{ s: Skill }> = ({ s }) => {
+  const { t } = useTranslation('skills');
+  const statusReason = makeStatusReason(t);
   const st = skillStatus(s);
   if (st === 'active') return null;
-  const m = STATUS_META[st];
   return (
     <span title={statusReason(s)}>
-      <Tag type={m.tag} size="sm">
-        {m.label}
+      <Tag type={STATUS_TAG[st]} size="sm">
+        {t(STATUS_LABEL_KEYS[st])}
       </Tag>
     </span>
   );
@@ -140,10 +179,11 @@ const StatusBadge: React.FC<{ s: Skill }> = ({ s }) => {
 
 // 목록 행의 출처 글리프 — 내가 만든 것/설치한 것을 한눈에 구분 (학습=💡 설치=⬇ 제작=👤)
 const OriginGlyph: React.FC<{ s: Skill }> = ({ s }) => {
-  const m = ORIGIN_META[skillOrigin(s)];
+  const { t } = useTranslation('skills');
+  const origin = skillOrigin(s);
   return (
-    <span title={`출처: ${m.label}`} className="flex-shrink-0">
-      <Icon name={m.icon} size={11} className={`${m.cls} opacity-80`} />
+    <span title={t('mySkills.originGlyphTitle', { label: t(ORIGIN_LABEL_KEYS[origin]) })} className="flex-shrink-0">
+      <Icon name={ORIGIN_ICON[origin]} size={11} className={`${ORIGIN_CLS[origin]} opacity-80`} />
     </span>
   );
 };
@@ -156,10 +196,11 @@ const StatusControl: React.FC<{
   skill: Skill;
   onSet: (next: SkillStatus) => void;
 }> = ({ skill, onSet }) => {
+  const { t } = useTranslation('skills');
+  const statusReason = makeStatusReason(t);
   const [open, setOpen] = useState(false);
   const ref = React.useRef<HTMLDivElement>(null);
   const st = skillStatus(skill);
-  const m = STATUS_META[st];
 
   // 외부 클릭 닫기
   React.useEffect(() => {
@@ -169,7 +210,7 @@ const StatusControl: React.FC<{
     return () => document.removeEventListener('mousedown', h);
   }, [open]);
 
-  const targets = SETTABLE_STATUSES.filter((t) => t !== st);
+  const targets = SETTABLE_STATUSES.filter((tgt) => tgt !== st);
 
   return (
     <div ref={ref} className="relative flex-shrink-0">
@@ -182,27 +223,26 @@ const StatusControl: React.FC<{
           : 'border-border-strong-01 text-text-helper'
         }`}
       >
-        <span className={`w-1.5 h-1.5 rounded-full ${m.dot}`} />
-        {m.label}
+        <span className={`w-1.5 h-1.5 rounded-full ${STATUS_DOT[st]}`} />
+        {t(STATUS_LABEL_KEYS[st])}
         <Icon name="chevron-down" size={11} className="opacity-60" />
       </button>
       {open && (
         <div className="absolute top-full left-0 mt-1 z-50 min-w-[208px] bg-background border border-border-subtle-01 rounded-lg shadow-elevation-2 overflow-hidden">
           <div className="px-3 py-2 text-caption-01 text-text-helper border-b border-border-subtle-01">
-            상태 변경 · 주입 여부가 함께 정해져요
+            {t('mySkills.statusChangeHint')}
           </div>
-          {targets.map((t) => {
-            const tm = STATUS_META[t];
+          {targets.map((tgt) => {
             return (
               <button
-                key={t}
-                onClick={() => { onSet(t); setOpen(false); }}
+                key={tgt}
+                onClick={() => { onSet(tgt); setOpen(false); }}
                 className="flex items-start gap-2.5 w-full text-left px-3 py-2 hover:bg-layer-hover-01 transition-colors"
               >
-                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 mt-1.5 ${tm.dot}`} />
+                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 mt-1.5 ${STATUS_DOT[tgt]}`} />
                 <span className="min-w-0">
-                  <span className="block text-body-short-01 text-text-primary">{tm.label}</span>
-                  <span className="block text-caption-01 text-text-helper">{tm.desc}</span>
+                  <span className="block text-body-short-01 text-text-primary">{t(STATUS_LABEL_KEYS[tgt])}</span>
+                  <span className="block text-caption-01 text-text-helper">{t(STATUS_DESC_KEYS[tgt])}</span>
                 </span>
               </button>
             );
@@ -219,19 +259,20 @@ const BuiltinStatusToggle: React.FC<{
   skill: Skill;
   onSet: (next: SkillStatus) => void;
 }> = ({ skill, onSet }) => {
+  const { t } = useTranslation('skills');
   const on = skillState(skill) === 'active';
   return (
     <span
       className="inline-flex items-center gap-2 border border-border-subtle-01 rounded-md pl-2.5 pr-1.5 py-1"
-      title={on ? '대화에 주입 중 — 끄면 주입이 중단돼요' : '주입 꺼짐 — 켜면 다시 대화에 주입돼요'}
+      title={on ? t('mySkills.builtinToggleOnTitle') : t('mySkills.builtinToggleOffTitle')}
     >
       <span className={`text-caption-01 font-semibold ${on ? 'text-support-success' : 'text-text-helper'}`}>
-        {on ? '활성' : '비활성'}
+        {on ? t('mySkills.builtinActiveLabel') : t('mySkills.builtinInactiveLabel')}
       </span>
       <Toggle
         checked={on}
         onChange={() => onSet(on ? 'archived' : 'active')}
-        aria-label={`${skill.name} ${on ? '비활성화' : '활성화'}`}
+        aria-label={on ? t('mySkills.builtinToggleAriaDisable', { name: skill.name }) : t('mySkills.builtinToggleAriaEnable', { name: skill.name })}
       />
     </span>
   );
@@ -247,18 +288,18 @@ const SectionLabel: React.FC<{ children: React.ReactNode; right?: React.ReactNod
 // ── 정보 텍스처 헬퍼 ───────────────────────────────────────────────
 const pctStr = (n: number) => `${Math.round(n * 100)}%`;
 
-const CONFIDENCE_META: Record<SkillAnalysisConfidence, { label: string; cls: string }> = {
-  high: { label: '신뢰 높음', cls: 'text-support-success' },
-  medium: { label: '신뢰 보통', cls: 'text-text-secondary' },
-  low: { label: '추정', cls: 'text-support-warning' },
+const CONFIDENCE_CLS: Record<SkillAnalysisConfidence, string> = {
+  high: 'text-support-success',
+  medium: 'text-text-secondary',
+  low: 'text-support-warning',
 };
 
 const ConfidencePill: React.FC<{ value?: SkillAnalysisConfidence }> = ({ value = 'low' }) => {
-  const meta = CONFIDENCE_META[value];
+  const { t } = useTranslation('skills');
   return (
-    <span className={`inline-flex items-center gap-1 text-caption-01 font-semibold ${meta.cls}`}>
+    <span className={`inline-flex items-center gap-1 text-caption-01 font-semibold ${CONFIDENCE_CLS[value]}`}>
       <span className="h-1.5 w-1.5 rounded-full bg-current" />
-      {meta.label}
+      {t(CONFIDENCE_LABEL_KEYS[value])}
     </span>
   );
 };
@@ -333,20 +374,23 @@ const runtimeSkillSource = (data: RuntimeSkillDetailPayload): string => {
   return `---\n${frontmatter}\n---\n\n${data.body ?? ''}`;
 };
 
-const versionWhen = (value: string): string => {
-  if (!value) return '저장 시각 없음';
+const versionWhen = (value: string, tFn: TSkills, locale: string): string => {
+  if (!value) return tFn('mySkills.versionWhenNone');
   const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString('ko-KR');
+  const localeTag = locale === 'ko' ? 'ko-KR' : 'en-US';
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString(localeTag);
 };
 
 const runtimeVersionList = (
   current: RuntimeSkillDetailPayload,
   history: RuntimeSkillVersion[],
+  tFn: TSkills,
+  locale: string,
 ): SkillVersion[] => [
   {
     ver: `v${current.version}`,
-    when: '현재 적용 중',
-    note: '현재 런타임에 적용된 SKILL.md',
+    when: tFn('mySkills.versionCurrentApplied'),
+    note: tFn('mySkills.versionCurrentNote'),
     current: true,
     body: runtimeSkillSource(current),
   },
@@ -355,8 +399,8 @@ const runtimeVersionList = (
     .sort((a, b) => b.version - a.version)
     .map((entry): SkillVersion => ({
       ver: `v${entry.version}`,
-      when: versionWhen(entry.updated_at),
-      note: `서버에 보관된 v${entry.version} 원본`,
+      when: versionWhen(entry.updated_at, tFn, locale),
+      note: tFn('mySkills.versionArchivedNote', { ver: entry.version }),
       current: false,
       body: entry.body,
     })),
@@ -387,14 +431,19 @@ const findMarkdownSection = (body: string, headingPattern: RegExp): string[] => 
   return out;
 };
 
-const stepCandidatesFromBody = (body: string): ResolvedAnalysisStep[] => {
+const stepCandidatesFromBody = (
+  body: string,
+  tFn: TSkills,
+): ResolvedAnalysisStep[] => {
   const section = findMarkdownSection(body, /(workflow|how it works|steps|procedure|절차|작동 방식|사용 방법|흐름)/i);
   const source = section.length ? section : body.split('\n');
   return source
     .filter((line) => /^\s*(?:[-*+]\s+|\d+[.)]\s+)/.test(line))
     .map((line): ResolvedAnalysisStep => ({
       title: sentenceForTitle(line),
-      description: section.length ? '원문의 절차 섹션에서 감지됨' : '원문 목록 구조에서 감지된 단계 후보',
+      description: section.length
+        ? tFn('mySkills.analysisStepDescSection')
+        : tFn('mySkills.analysisStepDescBody'),
       confidence: section.length ? 'medium' : 'low',
       evidence: cleanMdLine(line),
     }))
@@ -405,14 +454,14 @@ const stepCandidatesFromBody = (body: string): ResolvedAnalysisStep[] => {
 // 본문 도구 섹션의 항목 — 출처 분리 원칙상 body 에서 온 건 전부 'mentioned'(언급
 // 후보)다. declared 는 frontmatter(tools:)/manifest 선언만이 정본이고 그건 서버
 // 분석 payload 로만 온다 (learning/skill/analysis.py 계약).
-const toolNamesFromSection = (body: string): ResolvedToolSignal[] =>
+const toolNamesFromSection = (body: string, tFn: TSkills): ResolvedToolSignal[] =>
   findMarkdownSection(body, /(tools|tooling|사용 도구|도구)/i)
     .filter((line) => /^\s*(?:[-*+]\s+|\d+[.)]\s+)/.test(line))
     .map((line): ResolvedToolSignal => ({
       name: sentenceForTitle(line),
       kind: 'mentioned',
       confidence: 'medium',
-      basis: 'SKILL.md 도구 섹션',
+      basis: tFn('mySkills.analysisBasisSection'),
       evidence: cleanMdLine(line),
     }))
     .filter((t) => t.name.length > 0)
@@ -427,14 +476,14 @@ const KNOWN_TOOL_PATTERNS: { name: string; pattern: RegExp }[] = [
   { name: 'connector', pattern: /\b(gmail|calendar|drive|slack|salesforce|connector|oauth|api)\b/i },
 ];
 
-const mentionedToolsFromBody = (body: string): ResolvedToolSignal[] =>
+const mentionedToolsFromBody = (body: string, tFn: TSkills): ResolvedToolSignal[] =>
   KNOWN_TOOL_PATTERNS
     .filter((t) => t.pattern.test(body))
     .map((t): ResolvedToolSignal => ({
       name: t.name,
       kind: 'mentioned',
       confidence: 'low',
-      basis: '본문 키워드 감지',
+      basis: tFn('mySkills.analysisBasisKeyword'),
     }));
 
 const dedupeTools = (tools: ResolvedToolSignal[]): ResolvedToolSignal[] => {
@@ -455,7 +504,11 @@ const skillMdBody = (skill: Skill, detail: SkillDetail): string => {
   return stripFrontmatter(skillMd?.content ?? '');
 };
 
-const resolveUnderstanding = (skill: Skill, detail: SkillDetail): ResolvedUnderstanding => {
+const resolveUnderstanding = (
+  skill: Skill,
+  detail: SkillDetail,
+  tFn: TSkills,
+): ResolvedUnderstanding => {
   const body = skillMdBody(skill, detail);
   const analysis = detail.analysis;
   // 사이드카가 실재하면(missing 이 아니면) 서버 분석이 정본 — stale 이어도 클라이언트
@@ -478,7 +531,7 @@ const resolveUnderstanding = (skill: Skill, detail: SkillDetail): ResolvedUnders
     ? analysisSteps
     : workflowSteps.length
       ? workflowSteps
-      : stepCandidatesFromBody(body);
+      : stepCandidatesFromBody(body, tFn);
 
   // 도구 단서: 서버 payload 는 이미 observed(실행 로그)/declared(frontmatter 선언)/
   // mentioned(본문 감지) 세 출처가 합류된 결과라 그대로 신뢰한다. 사이드카가 없을
@@ -489,18 +542,26 @@ const resolveUnderstanding = (skill: Skill, detail: SkillDetail): ResolvedUnders
   }));
   const tools = hasAnalysis
     ? dedupeTools(serverTools)
-    : dedupeTools([...toolNamesFromSection(body), ...mentionedToolsFromBody(body)]);
+    : dedupeTools([...toolNamesFromSection(body, tFn), ...mentionedToolsFromBody(body, tFn)]);
 
   const sourceLabel = !hasAnalysis
-    ? '원문 미리보기'
+    ? tFn('mySkills.analysisSourcePreview')
     : analysis?.source === 'llm'
-      ? 'AI 분석'
-      : '자동 분석 (규칙 기반)';
+      ? tFn('mySkills.analysisSourceLlm')
+      : tFn('mySkills.analysisSourceHeuristic');
+
+  const statusLabel = !hasAnalysis
+    ? tFn('mySkills.analysisStatusPending')
+    : analysis!.status === 'fresh'
+      ? tFn('mySkills.analysisStatusFresh')
+      : analysis!.status === 'stale'
+        ? tFn('mySkills.analysisStatusStale')
+        : tFn('mySkills.analysisStatusFailed');
 
   return {
     summary: analysis?.summary?.trim() || detail.summary,
     sourceLabel,
-    statusLabel: !hasAnalysis ? '분석 대기' : analysis!.status === 'fresh' ? '최신' : analysis!.status === 'stale' ? '재분석 권장' : '분석 실패',
+    statusLabel,
     confidence: analysis?.confidence ?? (hasAnalysis ? 'medium' : 'low'),
     analyzedAt: analysis?.analyzedAt,
     stale: !analysis || analysis.status !== 'fresh',
@@ -510,10 +571,11 @@ const resolveUnderstanding = (skill: Skill, detail: SkillDetail): ResolvedUnders
   };
 };
 
-const ToolKindMeta: Record<ResolvedToolSignal['kind'], { label: string; icon: IconName; cls: string }> = {
-  observed: { label: '실제 사용', icon: 'check-circle', cls: 'text-support-success' },
-  declared: { label: '선언됨', icon: 'rule', cls: 'text-link-primary' },
-  mentioned: { label: '언급 후보', icon: 'search', cls: 'text-support-warning' },
+const TOOL_KIND_ICON: Record<ResolvedToolSignal['kind'], IconName> = {
+  observed: 'check-circle', declared: 'rule', mentioned: 'search',
+};
+const TOOL_KIND_CLS: Record<ResolvedToolSignal['kind'], string> = {
+  observed: 'text-support-success', declared: 'text-link-primary', mentioned: 'text-support-warning',
 };
 
 // next version label, e.g. v3 → v4
@@ -530,6 +592,9 @@ const VersionChipMenu: React.FC<{
   onView: (ver: string) => void;
   onSwitch: (v: SkillVersion) => void;
 }> = ({ versions, currentVer, onView, onSwitch }) => {
+  const { t } = useTranslation('skills');
+  const { t: tChatRaw, i18n } = useTranslation('chat');
+  const tChat = wrapT(tChatRaw);
   const [open, setOpen] = useState(false);
   const ref = React.useRef<HTMLDivElement>(null);
 
@@ -545,7 +610,7 @@ const VersionChipMenu: React.FC<{
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen((o) => !o)}
-        title="버전 전환 · 내용 보기"
+        title={t('mySkills.versionChipTitle')}
         aria-haspopup="listbox"
         aria-expanded={open}
         className="inline-flex items-center gap-1 text-caption-01 font-mono text-text-secondary bg-layer-02 border border-border-subtle-01 rounded px-1.5 py-px hover:bg-layer-hover-01"
@@ -556,7 +621,7 @@ const VersionChipMenu: React.FC<{
       {open && (
         <div className="absolute top-full left-0 mt-1 z-50 w-[268px] bg-background border border-border-subtle-01 rounded-lg shadow-elevation-2 overflow-hidden">
           <div className="px-3 py-2 text-caption-01 text-text-helper border-b border-border-subtle-01 normal-case">
-            버전을 선택해 전환하거나 내용을 봅니다
+            {t('mySkills.versionChipHint')}
           </div>
           <div className="max-h-[280px] overflow-y-auto">
             {versions.map((v) => {
@@ -568,28 +633,28 @@ const VersionChipMenu: React.FC<{
                 >
                   <button
                     onClick={() => { onView(v.ver); setOpen(false); }}
-                    title="이 버전 내용 보기"
+                    title={t('mySkills.versionViewTitle')}
                     className="flex-1 min-w-0 text-left"
                   >
                     <div className="flex items-center gap-1.5">
                       <span className="text-body-short-01 font-mono font-semibold text-text-primary">{v.ver}</span>
-                      {isCurrent && <Tag type="blue" size="sm">현재</Tag>}
-                      <span className="text-caption-01 text-text-helper">{v.when}</span>
+                      {isCurrent && <Tag type="blue" size="sm">{t('mySkills.versionCurrentTag')}</Tag>}
+                      <span className="text-caption-01 text-text-helper">{renderVersionWhen(v.when, tChat, i18n.language)}</span>
                       {v.metrics && (
-                        <span className="ml-auto text-caption-01 font-mono text-text-helper flex-shrink-0">성공률 {pctStr(v.metrics.successRate)}</span>
+                        <span className="ml-auto text-caption-01 font-mono text-text-helper flex-shrink-0">{t('mySkills.metricSuccessRate')} {pctStr(v.metrics.successRate)}</span>
                       )}
                     </div>
-                    <div className="text-caption-01 text-text-helper truncate mt-0.5">{v.note}</div>
+                    <div className="text-caption-01 text-text-helper truncate mt-0.5">{renderVersionNote(v.note, tChat, v.noteParams)}</div>
                   </button>
                   {isCurrent ? (
                     <Icon name="check" size={14} className="text-link-primary flex-shrink-0" />
                   ) : (
                     <button
                       onClick={() => { onSwitch(v); setOpen(false); }}
-                      title={`${v.ver}(으)로 복원`}
+                      title={t('mySkills.versionRestoreBtnTitle', { ver: v.ver })}
                       className="group/sw flex-shrink-0 inline-flex h-6 items-center gap-1 rounded border border-border-subtle-02 px-1.5 text-label-micro font-semibold text-text-secondary transition-colors hover:border-border-strong-01 hover:bg-layer-hover-01 hover:text-text-primary"
                     >
-                      <Icon name="renew" size={10} className="transition-transform group-hover/sw:rotate-180" /> 복원
+                      <Icon name="renew" size={10} className="transition-transform group-hover/sw:rotate-180" /> {t('mySkills.versionRestoreBtn')}
                     </button>
                   )}
                 </div>
@@ -614,12 +679,12 @@ const compareTone = (view?: number, cur?: number, lowerBetter = false): 'good' |
 const TONE_CLS = { good: 'text-support-success', bad: 'text-support-error', neutral: 'text-text-primary' } as const;
 
 // 복원 판단 카드의 지표 한 줄 — 이 버전 값 vs 현재 값
-const CompareRow: React.FC<{ label: string; view: string; cur: string; tone: 'good' | 'bad' | 'neutral' }> = ({ label, view, cur, tone }) => (
+const CompareRow: React.FC<{ label: string; view: string; cur: string; tone: 'good' | 'bad' | 'neutral'; curLabel: string }> = ({ label, view, cur, tone, curLabel }) => (
   <div className="flex items-center gap-2 py-1.5">
     <span className="text-caption-01 text-text-helper w-20 flex-shrink-0">{label}</span>
     <span className={`text-body-short-01 font-mono font-semibold ${TONE_CLS[tone]}`}>{view}</span>
     <Icon name="arrow-right" size={12} className="text-icon-secondary opacity-40" />
-    <span className="text-body-short-01 font-mono text-text-helper">{cur} <span className="text-caption-01">현재</span></span>
+    <span className="text-body-short-01 font-mono text-text-helper">{cur} <span className="text-caption-01">{curLabel}</span></span>
   </div>
 );
 
@@ -632,6 +697,9 @@ const VersionSnapshot: React.FC<{
   onBack: () => void;
   onRestore: () => void;
 }> = ({ skillName, version, currentVersion, onBack, onRestore }) => {
+  const { t } = useTranslation('skills');
+  const { t: tChatRaw, i18n } = useTranslation('chat');
+  const tChat = wrapT(tChatRaw);
   const rules = version.rules ?? [];
   const added = rules.filter((r) => r.added).length;
   const m = version.metrics;
@@ -643,8 +711,8 @@ const VersionSnapshot: React.FC<{
     if (!hasRuleComparison && !(m && currentVersion.metrics)) return null;
     const curTexts = new Set((currentVersion.rules ?? []).map((r) => normRule(r.text)));
     const viewTexts = new Set(rules.map((r) => normRule(r.text)));
-    const gain = rules.filter((r) => !curTexts.has(normRule(r.text))); // 복원하면 다시 생기는 규칙
-    const lose = (currentVersion.rules ?? []).filter((r) => !viewTexts.has(normRule(r.text))); // 복원하면 사라지는 규칙
+    const gain = rules.filter((r) => !curTexts.has(normRule(r.text)));
+    const lose = (currentVersion.rules ?? []).filter((r) => !viewTexts.has(normRule(r.text)));
     const cM = currentVersion.metrics;
     let verdict: 'restore' | 'caution' | 'neutral' = 'neutral';
     if (m && cM) {
@@ -659,22 +727,22 @@ const VersionSnapshot: React.FC<{
       cls: 'border-support-success/40 bg-support-success/10',
       icon: 'growth' as IconName,
       iconCls: 'text-support-success',
-      title: `이 버전이 현재(${currentVersion?.ver})보다 성공률이 높았어요`,
-      body: '복원을 고려해볼 만해요. 아래 규칙 차이를 확인하세요.',
+      title: t('mySkills.verdictRestoreTitle', { ver: currentVersion?.ver }),
+      body: t('mySkills.verdictRestoreBody'),
     },
     caution: {
       cls: 'border-support-warning/40 bg-support-warning/10',
       icon: 'warning' as IconName,
       iconCls: 'text-support-warning',
-      title: `현재(${currentVersion?.ver}) 버전이 더 좋은 성과를 내고 있어요`,
-      body: '복원하면 성과가 낮았던 설정으로 되돌아갑니다. 신중히 결정하세요.',
+      title: t('mySkills.verdictCautionTitle', { ver: currentVersion?.ver }),
+      body: t('mySkills.verdictCautionBody'),
     },
     neutral: {
       cls: 'border-border-subtle-01 bg-layer-01',
       icon: 'idea' as IconName,
       iconCls: 'text-icon-primary',
-      title: '현재 버전과 성과 차이가 뚜렷하지 않아요',
-      body: '아래 규칙 차이를 보고 결정하세요.',
+      title: t('mySkills.verdictNeutralTitle'),
+      body: t('mySkills.verdictNeutralBody'),
     },
   } as const;
 
@@ -695,8 +763,10 @@ const VersionSnapshot: React.FC<{
       <div className="px-7 pt-6 pb-10">
         <div className="flex items-center gap-2.5 flex-wrap">
           <h2 className="text-heading-03 font-light font-mono text-text-primary">{version.ver}</h2>
-          {version.current ? <Tag type="blue" size="sm">현재 버전</Tag> : <Tag type="gray" size="sm">이전 버전</Tag>}
-          <span className="text-caption-01 text-text-helper">{version.when}</span>
+          {version.current
+            ? <Tag type="blue" size="sm">{t('mySkills.versionCurrentTagFull')}</Tag>
+            : <Tag type="gray" size="sm">{t('mySkills.versionPreviousTag')}</Tag>}
+          <span className="text-caption-01 text-text-helper">{renderVersionWhen(version.when, tChat, i18n.language)}</span>
           {version.author && (
             <span className="inline-flex items-center gap-1 text-caption-01 text-text-helper">
               <Icon name="user" size={11} /> {version.author}
@@ -709,23 +779,23 @@ const VersionSnapshot: React.FC<{
               className="ml-auto"
               icon={<Icon name="renew" size={12} />}
               onClick={onRestore}
-              title="이 원문을 새 버전으로 복원합니다. 기존 기록은 유지됩니다."
+              title={t('mySkills.versionRestoreTitle')}
             >
-              {version.ver} 복원
+              {t('mySkills.versionRestoreBtn2', { ver: version.ver })}
             </Button>
           )}
         </div>
-        <p className="mt-2 text-body-short-01 leading-5 text-text-secondary">{version.note}</p>
+        <p className="mt-2 text-body-short-01 leading-5 text-text-secondary">{renderVersionNote(version.note, tChat, version.noteParams)}</p>
 
         {/* 이 버전의 성과 지표 칩 */}
         {m && (
           <div className="flex gap-4 mt-4 flex-wrap">
             {([
-              ['성공률', pctStr(m.successRate)],
-              ['사용', `${m.uses}회`],
-              ...(m.avgTurns != null ? [['평균 처리', `${m.avgTurns}턴`] as const] : []),
-              ...(m.editRate != null ? [['사후 수정', pctStr(m.editRate)] as const] : []),
-            ] as const).map(([k, v]) => (
+              [t('mySkills.metricSuccessRate'), pctStr(m.successRate)],
+              [t('mySkills.metricUses'), t('mySkills.metricUsesUnit', { value: m.uses })],
+              ...(m.avgTurns != null ? [[t('mySkills.metricAvgTurns'), t('mySkills.metricTurnsUnit', { value: m.avgTurns })]] : []),
+              ...(m.editRate != null ? [[t('mySkills.metricEditRate'), pctStr(m.editRate)]] : []),
+            ]).map(([k, v]) => (
               <div key={k}>
                 <div className="text-caption-01 text-text-helper">{k}</div>
                 <div className="text-body-short-01 font-mono text-text-primary">{v}</div>
@@ -748,12 +818,12 @@ const VersionSnapshot: React.FC<{
             {/* 지표 대비 */}
             {m && decision.cM && (
               <div className="mt-3 pt-3 border-t border-border-subtle-01/60">
-                <CompareRow label="성공률" view={pctStr(m.successRate)} cur={pctStr(decision.cM.successRate)} tone={compareTone(m.successRate, decision.cM.successRate)} />
+                <CompareRow label={t('mySkills.metricSuccessRate')} view={pctStr(m.successRate)} cur={pctStr(decision.cM.successRate)} tone={compareTone(m.successRate, decision.cM.successRate)} curLabel={t('mySkills.metricCurrentLabel')} />
                 {m.avgTurns != null && decision.cM.avgTurns != null && (
-                  <CompareRow label="평균 처리" view={`${m.avgTurns}턴`} cur={`${decision.cM.avgTurns}턴`} tone={compareTone(m.avgTurns, decision.cM.avgTurns, true)} />
+                  <CompareRow label={t('mySkills.metricAvgTurns')} view={t('mySkills.metricTurnsUnit', { value: m.avgTurns })} cur={t('mySkills.metricTurnsUnit', { value: decision.cM.avgTurns })} tone={compareTone(m.avgTurns, decision.cM.avgTurns, true)} curLabel={t('mySkills.metricCurrentLabel')} />
                 )}
                 {m.editRate != null && decision.cM.editRate != null && (
-                  <CompareRow label="사후 수정" view={pctStr(m.editRate)} cur={pctStr(decision.cM.editRate)} tone={compareTone(m.editRate, decision.cM.editRate, true)} />
+                  <CompareRow label={t('mySkills.metricEditRate')} view={pctStr(m.editRate)} cur={pctStr(decision.cM.editRate)} tone={compareTone(m.editRate, decision.cM.editRate, true)} curLabel={t('mySkills.metricCurrentLabel')} />
                 )}
               </div>
             )}
@@ -761,21 +831,21 @@ const VersionSnapshot: React.FC<{
             {/* 복원 시 규칙 변화 */}
             <div className="mt-3 pt-3 border-t border-border-subtle-01/60 flex flex-col gap-2">
               {decision.lose.length === 0 && decision.gain.length === 0 ? (
-                <div className="text-caption-01 text-text-helper">현재 버전과 규칙이 동일해요.</div>
+                <div className="text-caption-01 text-text-helper">{t('mySkills.versionSnapshotRulesSame')}</div>
               ) : (
                 <>
                   {decision.lose.map((r, i) => (
                     <div key={`lose-${i}`} className="flex items-center gap-2 text-body-short-01">
                       <Icon name="close" size={13} className="text-support-error flex-shrink-0" />
                       <span className="text-text-secondary line-through decoration-support-error/50">{r.text}</span>
-                      <span className="text-caption-01 text-support-error flex-shrink-0 ml-auto">사라짐</span>
+                      <span className="text-caption-01 text-support-error flex-shrink-0 ml-auto">{t('mySkills.versionSnapshotRuleLose')}</span>
                     </div>
                   ))}
                   {decision.gain.map((r, i) => (
                     <div key={`gain-${i}`} className="flex items-center gap-2 text-body-short-01">
                       <Icon name="add" size={13} className="text-support-success flex-shrink-0" />
                       <span className="text-text-primary">{r.text}</span>
-                      <span className="text-caption-01 text-support-success flex-shrink-0 ml-auto">다시 추가</span>
+                      <span className="text-caption-01 text-support-success flex-shrink-0 ml-auto">{t('mySkills.versionSnapshotRuleGain')}</span>
                     </div>
                   ))}
                 </>
@@ -788,9 +858,9 @@ const VersionSnapshot: React.FC<{
           <div className="mt-6">
             <div className="mb-2.5 flex items-center gap-2">
               <span className="text-caption-01 font-semibold uppercase tracking-wider text-text-secondary">
-                이 버전의 SKILL.md
+                {t('mySkills.versionSnapshotSectionTitle')}
               </span>
-              <span className="text-caption-01 text-text-helper">서버에 보관된 읽기 전용 원문</span>
+              <span className="text-caption-01 text-text-helper">{t('mySkills.versionSnapshotReadOnly')}</span>
             </div>
             <div className="max-w-[920px] overflow-x-auto rounded-lg border border-border-subtle-01 bg-background px-4 py-3 [&_h1]:!mb-2 [&_h1]:!text-heading-03 [&_h2]:!mb-1.5 [&_h2]:!mt-4 [&_h2]:!text-body-short-02 [&_h3]:!mt-3 [&_h3]:!text-body-short-01 [&_li]:!text-caption-01 [&_p]:!text-caption-01">
               <Markdown source={version.body} />
@@ -800,9 +870,9 @@ const VersionSnapshot: React.FC<{
           <div className="mt-6">
             <div className="flex items-center mb-2.5">
               <span className="text-caption-01 font-semibold uppercase tracking-wider text-text-secondary">
-                이 버전의 규칙 · {rules.length}
+                {t('mySkills.versionSnapshotRulesTitle', { count: rules.length })}
               </span>
-              {added > 0 && <span className="ml-auto text-caption-01 text-link-primary">+{added} 이 버전에서 추가</span>}
+              {added > 0 && <span className="ml-auto text-caption-01 text-link-primary">{t('mySkills.versionSnapshotRulesAdded', { count: added })}</span>}
             </div>
             <div className="flex flex-col gap-px bg-border-subtle-01 rounded-lg overflow-hidden">
               {rules.map((r, i) => (
@@ -818,11 +888,11 @@ const VersionSnapshot: React.FC<{
                     className={`mt-0.5 flex-shrink-0 ${r.added ? 'text-link-primary' : 'text-icon-secondary opacity-55'}`}
                   />
                   <span className="flex-1 min-w-0 text-body-short-01 text-text-primary leading-[18px]">{r.text}</span>
-                  {r.added && <Tag type="blue" size="sm">추가됨</Tag>}
+                  {r.added && <Tag type="blue" size="sm">{t('mySkills.versionSnapshotRuleAdded')}</Tag>}
                 </div>
               ))}
               {rules.length === 0 && (
-                <div className="bg-background px-3.5 py-3.5 text-caption-01 text-text-helper">이 버전의 규칙 스냅샷이 없어요.</div>
+                <div className="bg-background px-3.5 py-3.5 text-caption-01 text-text-helper">{t('mySkills.versionSnapshotNoRules')}</div>
               )}
             </div>
           </div>
@@ -830,7 +900,7 @@ const VersionSnapshot: React.FC<{
 
         {version.current && (
           <div className="mt-5 pt-3 border-t border-border-subtle-01 flex items-center gap-1.5 text-caption-01 text-text-helper">
-            <Icon name="check-circle" size={14} className="text-support-success" /> 지금 적용 중인 버전이에요.
+            <Icon name="check-circle" size={14} className="text-support-success" /> {t('mySkills.versionCurrentAppliedNote')}
           </div>
         )}
       </div>
@@ -845,6 +915,7 @@ const ProvenanceStrip: React.FC<{
   detail: SkillDetail;
   onOpenMarket: () => void;
 }> = ({ skill, detail, onOpenMarket }) => {
+  const { t } = useTranslation('skills');
   const origin = skillOrigin(skill);
 
   if (origin === 'builtin') {
@@ -853,10 +924,9 @@ const ProvenanceStrip: React.FC<{
         <div className="flex items-start gap-2 text-caption-01">
           <Icon name="sparkle" size={14} className="text-teal-40 flex-shrink-0 mt-px" />
           <span className="text-text-secondary leading-4">
-            <span className="text-text-primary font-semibold">RICE 기본 내장 스킬</span> — 앱과 함께
-            제공되고 업데이트돼요. 활성/비활성만 전환할 수 있고{' '}
-            <span className="text-text-primary">삭제·수정·마켓 공유는 지원하지 않아요.</span>{' '}
-            소스 보기로 SKILL.md 작성법을 참고해 나만의 스킬을 만들어 보세요.
+            <span className="text-text-primary font-semibold">{t('mySkills.provenanceBuiltinTitle')}</span> — {t('mySkills.provenanceBuiltinDesc')}{' '}
+            <span className="text-text-primary">{t('mySkills.provenanceBuiltinReadOnly')}</span>{' '}
+            {t('mySkills.provenanceBuiltinSourceHint')}
           </span>
         </div>
       </div>
@@ -868,7 +938,7 @@ const ProvenanceStrip: React.FC<{
       <div className="mt-3 inline-flex items-center gap-2 rounded-lg border border-border-subtle-01 bg-layer-01 px-3 py-2 text-caption-01">
         <Icon name="user" size={14} className="text-purple-60 flex-shrink-0" />
         <span className="text-text-secondary">
-          내가 직접 제작{skill.shared ? ' · Skill Market에 공유됨' : ''}
+          {t('mySkills.provenanceAuthoredBase')}{skill.shared ? t('mySkills.provenanceAuthoredShared') : ''}
         </span>
       </div>
     );
@@ -884,15 +954,15 @@ const ProvenanceStrip: React.FC<{
           <Icon name="download" size={14} className="text-link-primary flex-shrink-0" />
           <span className="text-text-secondary">
             <span className="text-text-primary font-semibold">{u.author}</span>
-            {u.team ? ` · ${u.team}` : ''} 에서 설치
+            {u.team ? ` · ${u.team}` : ''}{t('mySkills.provenanceInstalledFrom')}
           </span>
           <span className="w-px h-3 bg-border-strong-01" />
-          <span className="font-mono text-text-helper">{u.installedVer} 기준</span>
+          <span className="font-mono text-text-helper">{t('mySkills.provenanceInstalledBasis', { ver: u.installedVer })}</span>
           {diverged > 0 && (
             <>
               <span className="w-px h-3 bg-border-strong-01" />
               <span className="inline-flex items-center gap-1 text-support-success">
-                <Icon name="growth" size={12} /> 내 개선 {diverged}건
+                <Icon name="growth" size={12} /> {t('mySkills.provenanceInstalledDiverge', { count: diverged })}
               </span>
             </>
           )}
@@ -901,14 +971,18 @@ const ProvenanceStrip: React.FC<{
           <div className="mt-2 pt-2 border-t border-border-subtle-01 flex items-center gap-2 flex-wrap">
             <Icon name="renew" size={14} className="text-support-warning flex-shrink-0" />
             <span className="text-caption-01 text-text-secondary">
-              원작자가 <span className="font-mono font-semibold text-text-primary">{u.latestVer}</span>를 올렸어요 — 당신은{' '}
-              <span className="font-mono">{u.installedVer}</span> 기준 + 내 개선 {diverged}건
+              <Trans
+                i18nKey="mySkills.provenanceUpstreamDesc"
+                ns="skills"
+                values={{ latestVer: u.latestVer, installedVer: u.installedVer, basis: t('mySkills.provenanceInstalledBasis', { ver: '' }), diverge: t('mySkills.provenanceInstalledDiverge', { count: diverged }) }}
+                components={{ ver: <span className="font-mono font-semibold text-text-primary" /> }}
+              />
             </span>
             <button
               onClick={onOpenMarket}
               className="ml-auto inline-flex items-center gap-1 text-caption-01 font-semibold text-link-primary hover:underline flex-shrink-0"
             >
-              마켓에서 업데이트 <Icon name="arrow-up-right" size={12} />
+              {t('mySkills.provenanceUpstreamMarket')} <Icon name="arrow-up-right" size={12} />
             </button>
           </div>
         )}
@@ -945,20 +1019,17 @@ const downloadSkillBundle = (skill: Skill, detail: SkillDetail) => {
 // 소스 보기 런처 — 아이콘만 남기면 의미 발견성이 떨어진다.
 // 스킬의 차별점(소스 열람·편집 가능)을 텍스트로 드러내되, 플러그인 헤더보다 무겁지 않게 유지한다.
 const SourceLauncher: React.FC<{ skill: Skill; detail: SkillDetail; onOpen: () => void }> = ({ skill, detail, onOpen }) => {
+  const { t } = useTranslation('skills');
   const { files } = ownedSkillFiles(skill, detail);
   const readOnly = isBuiltinSkill(skill);
   return (
     <button
       onClick={onOpen}
-      title={
-        readOnly
-          ? '기본 내장 SKILL.md를 전체 화면으로 보기 (읽기 전용) — 스킬 작성법 참고용'
-          : '이 스킬의 파일(SKILL.md·scripts…)을 전체 화면으로 보기'
-      }
+      title={readOnly ? t('mySkills.sourceLauncherReadOnlyTitle') : t('mySkills.sourceLauncherTitle')}
       className="group inline-flex h-9 items-center gap-2 rounded-lg border border-border-subtle-01 bg-layer-01 px-3 text-body-short-01 font-semibold text-text-secondary hover:border-blue-50/45 hover:bg-layer-hover-01 hover:text-text-primary transition-colors flex-shrink-0"
     >
       <Icon name="folder" size={15} className="text-icon-secondary group-hover:text-blue-30" />
-      파일 구성
+      {t('mySkills.sourceLauncherLabel')}
       <span className="text-caption-01 font-normal text-text-helper">{files.length}</span>
       <Icon name="arrow-right" size={13} className="text-icon-secondary opacity-70" />
     </button>
@@ -977,20 +1048,9 @@ const ToolSignalGroup: React.FC<{
     </div>
     {tools.length ? (
       <div className="flex flex-wrap gap-1.5">
-        {tools.map((tool) => {
-          const meta = ToolKindMeta[tool.kind];
-          return (
-            <span
-              key={`${tool.kind}-${tool.name}`}
-              title={tool.evidence || tool.basis || meta.label}
-              className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-border-subtle-01 bg-layer-01 px-2 py-1 text-caption-01 text-text-secondary"
-            >
-              <Icon name={meta.icon} size={12} className={`${meta.cls} flex-shrink-0`} />
-              <span className="truncate font-mono">{tool.name}</span>
-              {tool.confidence === 'low' && <span className="text-support-warning">추정</span>}
-            </span>
-          );
-        })}
+        {tools.map((tool) => (
+          <ToolSignalItem key={`${tool.kind}-${tool.name}`} tool={tool} />
+        ))}
       </div>
     ) : (
       <div className="text-caption-01 text-text-helper leading-4">{empty}</div>
@@ -998,7 +1058,23 @@ const ToolSignalGroup: React.FC<{
   </div>
 );
 
+// ToolSignalItem은 useTranslation이 필요해 별도 컴포넌트로 분리
+const ToolSignalItem: React.FC<{ tool: ResolvedToolSignal }> = ({ tool }) => {
+  const { t } = useTranslation('skills');
+  return (
+    <span
+      title={tool.evidence || tool.basis || t(TOOL_KIND_LABEL_KEYS[tool.kind])}
+      className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-border-subtle-01 bg-layer-01 px-2 py-1 text-caption-01 text-text-secondary"
+    >
+      <Icon name={TOOL_KIND_ICON[tool.kind]} size={12} className={`${TOOL_KIND_CLS[tool.kind]} flex-shrink-0`} />
+      <span className="truncate font-mono">{tool.name}</span>
+      {tool.confidence === 'low' && <span className="text-support-warning">{t('mySkills.toolKindLowConfidence')}</span>}
+    </span>
+  );
+};
+
 const SkillRoutingMetrics: React.FC<{ skill: Skill }> = ({ skill }) => {
+  const { t } = useTranslation('skills');
   const injected = skill.injected ?? 0;
   const friction = skill.friction ?? 0;
   const routingMiss = skill.routingMiss ?? 0;
@@ -1007,14 +1083,14 @@ const SkillRoutingMetrics: React.FC<{ skill: Skill }> = ({ skill }) => {
   const engagementRate = injected > 0 ? Math.round((skill.uses / injected) * 100) : null;
   const metrics = [
     {
-      label: '노출 대비 관여',
+      label: t('mySkills.routingEngagement'),
       value: engagementRate == null ? '—' : `${engagementRate}%`,
-      helper: injected > 0 ? `${skill.uses}회 관여 / ${injected}회 노출` : '자동 노출 데이터 없음',
-      title: '관여에는 명시 호출과 수동 로딩도 포함되어 100%를 넘을 수 있는 방향성 지표입니다.',
+      helper: injected > 0 ? t('mySkills.routingEngagementHelper', { uses: skill.uses, injected }) : t('mySkills.routingEngagementNoData'),
+      title: t('mySkills.routingEngagementTitle'),
     },
-    { label: '자동 노출', value: `${injected}회`, helper: '전문 자동 주입', title: '관련도 라우터가 스킬 전문을 자동 주입한 횟수입니다.' },
-    { label: '마찰 신호', value: `${friction}회`, helper: '교정·실패 동시 감지', title: '스킬이 관여한 턴에서 교정 또는 실패 신호가 함께 감지된 횟수입니다.' },
-    { label: '라우팅 미스', value: `${routingMiss}회`, helper: '수동 로딩으로 발견', title: '자동 라우터가 찾지 못해 모델이 skill_view로 직접 로딩한 횟수입니다.' },
+    { label: t('mySkills.routingInjected'), value: t('mySkills.telemetryEngagementUnit', { count: injected }), helper: t('mySkills.routingInjectedHelper'), title: t('mySkills.routingInjectedTitle') },
+    { label: t('mySkills.routingFriction'), value: t('mySkills.telemetryEngagementUnit', { count: friction }), helper: t('mySkills.routingFrictionHelper'), title: t('mySkills.routingFrictionTitle') },
+    { label: t('mySkills.routingMiss'), value: t('mySkills.telemetryEngagementUnit', { count: routingMiss }), helper: t('mySkills.routingMissHelper'), title: t('mySkills.routingMissTitle') },
   ];
 
   return (
@@ -1049,10 +1125,12 @@ const SkillUnderstandingPanel: React.FC<{
   onRefresh: () => void;
   onOpenConnectors: () => void;
 }> = ({ skill, detail, refreshing, feedback, onRefresh, onOpenConnectors }) => {
-  const understanding = useMemo(() => resolveUnderstanding(skill, detail), [skill, detail]);
-  const observed = understanding.tools.filter((t) => t.kind === 'observed');
-  const declared = understanding.tools.filter((t) => t.kind === 'declared');
-  const mentioned = understanding.tools.filter((t) => t.kind === 'mentioned');
+  const { t } = useTranslation('skills');
+  const { language } = useI18n();
+  const understanding = useMemo(() => resolveUnderstanding(skill, detail, t), [skill, detail, t]);
+  const observed = understanding.tools.filter((tool) => tool.kind === 'observed');
+  const declared = understanding.tools.filter((tool) => tool.kind === 'declared');
+  const mentioned = understanding.tools.filter((tool) => tool.kind === 'mentioned');
   const feedbackMeta = feedback ? ANALYSIS_FEEDBACK_META[feedback.tone] : null;
 
   return (
@@ -1063,14 +1141,14 @@ const SkillUnderstandingPanel: React.FC<{
             onClick={onRefresh}
             disabled={refreshing}
             className="inline-flex items-center gap-1.5 rounded-md border border-border-subtle-01 px-2 py-1 text-caption-01 font-semibold text-text-secondary hover:bg-layer-hover-01 hover:text-text-primary disabled:opacity-50"
-            title="SKILL.md를 다시 분석해 설명용 메타데이터를 갱신합니다"
+            title={t('mySkills.analysisRefreshTitle')}
           >
             <Icon name="renew" size={12} className={refreshing ? 'animate-spin text-icon-primary' : 'text-icon-secondary'} />
-            {refreshing ? '분석 중…' : 'AI 분석 새로고침'}
+            {refreshing ? t('mySkills.analysisRefreshBusy') : t('mySkills.analysisRefreshBtn')}
           </button>
         }
       >
-        스킬 이해
+        {t('mySkills.understandingTitle')}
       </SectionLabel>
 
       <div className="rounded-lg border border-border-subtle-01 bg-layer-01">
@@ -1083,7 +1161,9 @@ const SkillUnderstandingPanel: React.FC<{
             </Tag>
             <ConfidencePill value={understanding.confidence} />
             {understanding.analyzedAt && (
-              <span className="text-caption-01 text-text-helper">{new Date(understanding.analyzedAt).toLocaleString('ko-KR')}</span>
+              <span className="text-caption-01 text-text-helper">
+                {new Date(understanding.analyzedAt).toLocaleString(language === 'ko' ? 'ko-KR' : 'en-US')}
+              </span>
             )}
           </div>
           <p className="mt-2 max-w-[840px] text-body-short-01 leading-5 text-text-secondary">{understanding.summary}</p>
@@ -1104,8 +1184,8 @@ const SkillUnderstandingPanel: React.FC<{
           <div className="bg-background p-4">
             <div className="mb-3 flex items-center gap-2">
               <Icon name="flow" size={15} className="text-icon-secondary" />
-              <span className="text-body-short-01 font-semibold text-text-primary">작동 방식</span>
-              <span className="text-caption-01 text-text-helper">원문 해석</span>
+              <span className="text-body-short-01 font-semibold text-text-primary">{t('mySkills.understandingFlowTitle')}</span>
+              <span className="text-caption-01 text-text-helper">{t('mySkills.understandingFlowHint')}</span>
             </div>
             {understanding.steps.length ? (
               <div className="flex flex-col gap-2.5">
@@ -1131,7 +1211,7 @@ const SkillUnderstandingPanel: React.FC<{
               </div>
             ) : (
               <div className="rounded-md border border-border-subtle-01 bg-layer-01 px-3 py-2.5 text-caption-01 text-text-helper">
-                아직 구조화된 절차를 보여줄 근거가 없어요. 원문은 소스 보기에서 확인할 수 있습니다.
+                {t('mySkills.understandingFlowEmpty')}
               </div>
             )}
           </div>
@@ -1139,25 +1219,25 @@ const SkillUnderstandingPanel: React.FC<{
           <div className="bg-background p-4">
             <div className="mb-3 flex items-center gap-2">
               <Icon name="tools" size={15} className="text-icon-secondary" />
-              <span className="text-body-short-01 font-semibold text-text-primary">도구 단서</span>
+              <span className="text-body-short-01 font-semibold text-text-primary">{t('mySkills.understandingToolTitle')}</span>
               <button
                 onClick={onOpenConnectors}
                 className="ml-auto inline-flex items-center gap-1 text-caption-01 text-link-primary hover:underline"
               >
-                권한 관리 <Icon name="arrow-up-right" size={11} />
+                {t('mySkills.understandingPermissionLink')} <Icon name="arrow-up-right" size={11} />
               </button>
             </div>
             <div className="grid gap-4">
-              <ToolSignalGroup title="실제로 사용된 도구" tools={observed} empty="아직 실행 로그 기반 도구 기록이 없어요." />
-              <ToolSignalGroup title="선언된 도구" tools={declared} empty="manifest나 명시 섹션에서 선언된 도구가 없어요." />
-              <ToolSignalGroup title="본문 언급 후보" tools={mentioned} empty="본문에서 도구 후보를 찾지 못했어요." />
+              <ToolSignalGroup title={t('mySkills.toolGroupObserved')} tools={observed} empty={t('mySkills.toolGroupObservedEmpty')} />
+              <ToolSignalGroup title={t('mySkills.toolGroupDeclared')} tools={declared} empty={t('mySkills.toolGroupDeclaredEmpty')} />
+              <ToolSignalGroup title={t('mySkills.toolGroupMentioned')} tools={mentioned} empty={t('mySkills.toolGroupMentionedEmpty')} />
             </div>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 border-t border-border-subtle-01 px-4 py-2.5 text-caption-01 text-text-helper">
           <Icon name="lock" size={12} className="text-icon-secondary" />
-          분석 결과는 설명용입니다. 실제 실행과 권한은 런타임 도구 정책과 승인 흐름이 결정합니다.
+          {t('mySkills.analysisDisclaimer')}
           {understanding.warnings.map((w, i) => (
             <span key={i} className="inline-flex items-center gap-1 text-support-warning">
               <Icon name="warning" size={11} /> {w}
@@ -1170,16 +1250,20 @@ const SkillUnderstandingPanel: React.FC<{
 };
 
 const SkillTelemetryPanel: React.FC<{ skill: Skill; detail: SkillDetail }> = ({ skill, detail }) => {
-  const origin = ORIGIN_META[skillOrigin(skill)];
-  const metrics = [
-    { label: '관여', value: `${skill.uses}회`, helper: skill.trend },
-    { label: '본문 개선', value: `${skill.patches ?? 0}회`, helper: '승인된 변경 기준' },
-    { label: '최근 사용', value: detail.lastUsed, helper: statusReason(skill) },
-    { label: '출처', value: origin.label, helper: detail.createdFrom },
+  const { t, i18n } = useTranslation('skills');
+  const tChat = wrapT(useTranslation('chat').t);
+  const statusReason = makeStatusReason(t);
+  const origin = skillOrigin(skill);
+  const originLabel = t(ORIGIN_LABEL_KEYS[origin]);
+  const metrics: Array<{ label: string; value: string | undefined; helper: string | undefined }> = [
+    { label: t('mySkills.telemetryEngagement'), value: t('mySkills.telemetryEngagementUnit', { count: skill.uses }), helper: renderTrend(skill.trend, tChat) },
+    { label: t('mySkills.telemetryPatch'), value: t('mySkills.telemetryPatchUnit', { count: skill.patches ?? 0 }), helper: t('mySkills.telemetryPatchHelper') },
+    { label: t('mySkills.telemetryLastUsed'), value: renderLastUsed(detail.lastUsed, tChat, i18n.language), helper: statusReason(skill) },
+    { label: t('mySkills.telemetryOrigin'), value: originLabel, helper: renderCreatedFrom(detail.createdFrom, tChat) },
   ];
   return (
     <div>
-      <SectionLabel>실사용 근거</SectionLabel>
+      <SectionLabel>{t('mySkills.telemetryTitle')}</SectionLabel>
       <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border-subtle-01 bg-border-subtle-01 md:grid-cols-4">
         {metrics.map((m) => (
           <div key={m.label} className="min-w-0 bg-background px-3.5 py-3">
@@ -1201,6 +1285,9 @@ const SkillDetailView: React.FC<{
   skillId: string | null;
   onSetStatus: (id: string, next: SkillStatus) => void;
 }> = ({ skillId, onSetStatus }) => {
+  const { t } = useTranslation('skills');
+  const tChat = wrapT(useTranslation('chat').t);
+  const { language } = useI18n();
   const navigate = useNavigate();
   const { skills, setSkills, details, setDetails } = useLearning();
   const { publishOwnedSkill, unpublishSkill } = useMarketplace();
@@ -1245,7 +1332,7 @@ const SkillDetailView: React.FC<{
           [targetSkillId]: {
             ...cur,
             historyStatus: 'error',
-            historyError: detailRes.error || '스킬 상세를 불러오지 못했어요.',
+            historyError: detailRes.error || t('mySkills.historyErrorLoading'),
           },
         };
       });
@@ -1275,13 +1362,13 @@ const SkillDetailView: React.FC<{
 
       const currentVersion: SkillVersion = {
         ver: `v${data.version}`,
-        when: '현재 적용 중',
-        note: '현재 런타임에 적용된 SKILL.md',
+        when: t('mySkills.versionCurrentApplied'),
+        note: t('mySkills.versionCurrentNote'),
         current: true,
         body: source,
       };
       const versions = history
-        ? runtimeVersionList(data, history)
+        ? runtimeVersionList(data, history, t, language)
         : [
             currentVersion,
             ...cur.versions
@@ -1297,12 +1384,12 @@ const SkillDetailView: React.FC<{
           files,
           versions,
           historyStatus: history ? 'loaded' : 'error',
-          historyError: history ? undefined : (historyRes.error || '버전 히스토리를 불러오지 못했어요.'),
+          historyError: history ? undefined : (historyRes.error || t('mySkills.historyVersionError')),
         },
       };
     });
     return true;
-  }, [setDetails, setSkills]);
+  }, [setDetails, setSkills, t, language]);
 
   // leaving a skill closes any open version snapshot / 확인 모달 / 분석 상태 / 소스·편집
   useEffect(() => {
@@ -1331,7 +1418,7 @@ const SkillDetailView: React.FC<{
   const detail = skillId ? details[skillId] : undefined;
 
   if (!skill || !detail || !skillId) {
-    return <div className="flex-1 flex items-center justify-center text-body-short-02 text-text-helper">스킬을 선택하세요.</div>;
+    return <div className="flex-1 flex items-center justify-center text-body-short-02 text-text-helper">{t('mySkills.selectSkillHint')}</div>;
   }
 
   const builtin = isBuiltinSkill(skill);
@@ -1345,8 +1432,8 @@ const SkillDetailView: React.FC<{
     setAnalysisRefreshing(true);
     setAnalysisFeedback(null);
     const progress = toast.progress({
-      label: '스킬 분석 중',
-      sublabel: `${skill.name} · 분석 결과를 생성하고 저장하고 있어요`,
+      label: t('mySkills.analysisProgressLabel'),
+      sublabel: t('mySkills.analysisProgressSublabel', { name: skill.name }),
     });
     try {
       const res = await api.refreshSkillAnalysis(skillId);
@@ -1357,35 +1444,30 @@ const SkillDetailView: React.FC<{
           if (!cur) return prev;
           return { ...prev, [skillId]: { ...cur, analysis: mapped } };
         });
+        const localeTag = language === 'ko' ? 'ko-KR' : 'en-US';
         const savedAt = mapped.analyzedAt
-          ? new Date(mapped.analyzedAt).toLocaleString('ko-KR')
-          : '방금';
+          ? new Date(mapped.analyzedAt).toLocaleString(localeTag)
+          : t('mySkills.versionRestoreWhen');
         if (mapped.source === 'llm') {
-          setAnalysisFeedback({ tone: 'success', message: `AI 분석 저장 완료 · ${savedAt}` });
-          progress.done('success', 'AI 분석 저장 완료');
+          setAnalysisFeedback({ tone: 'success', message: t('mySkills.analysisFeedbackSuccess', { savedAt }) });
+          progress.done('success', t('mySkills.analysisProgressDone'));
         } else if (mapped.status === 'failed') {
-          setAnalysisFeedback({
-            tone: 'warning',
-            message: `AI 호출 실패 · 규칙 기반 분석 저장 완료 · ${savedAt}`,
-          });
+          setAnalysisFeedback({ tone: 'warning', message: t('mySkills.analysisFeedbackWarnLlm', { savedAt }) });
           progress.dismiss();
-          toast.notify({ message: 'AI 호출에 실패해 규칙 기반 분석 결과를 저장했어요.', variant: 'warning' });
+          toast.notify({ message: t('mySkills.analysisFeedbackLlmFallback'), variant: 'warning' });
         } else {
-          setAnalysisFeedback({
-            tone: 'warning',
-            message: `규칙 기반 분석 저장 완료 · ${savedAt} · LLM 연결 시 더 풍부해져요`,
-          });
-          progress.done('success', '원문 기반 분석 저장 완료');
+          setAnalysisFeedback({ tone: 'warning', message: t('mySkills.analysisFeedbackWarnHeuristic', { savedAt }) });
+          progress.done('success', t('mySkills.analysisProgressDoneHeuristic'));
         }
         return;
       }
       const reason = res.error ? ` · ${res.error}` : '';
-      setAnalysisFeedback({ tone: 'error', message: `분석을 갱신하지 못했어요${reason}` });
-      progress.done('error', '스킬 분석 실패');
+      setAnalysisFeedback({ tone: 'error', message: t('mySkills.analysisFeedbackError', { reason }) });
+      progress.done('error', t('mySkills.analysisProgressFail'));
     } catch (error) {
       const reason = error instanceof Error ? ` · ${error.message}` : '';
-      setAnalysisFeedback({ tone: 'error', message: `분석 결과를 반영하지 못했어요${reason}` });
-      progress.done('error', '스킬 분석 실패');
+      setAnalysisFeedback({ tone: 'error', message: t('mySkills.analysisFeedbackErrorCatch', { reason }) });
+      progress.done('error', t('mySkills.analysisProgressFail'));
     } finally {
       setAnalysisRefreshing(false);
     }
@@ -1400,14 +1482,14 @@ const SkillDetailView: React.FC<{
       rules: (version.rules ?? []).map((r, i) => ({
         id: `rv${Date.now()}-${i}`,
         text: r.text,
-        source: `${version.ver}에서 복원`,
+        source: t('mySkills.versionRestoreSource', { ver: version.ver }),
         on: true,
       })),
       versions: [
         {
           ver: newVer,
-          when: '방금',
-          note: `${version.ver} 복원`,
+          when: t('mySkills.versionRestoreWhen'),
+          note: t('mySkills.versionRestoreNote', { ver: version.ver }),
           current: true,
           rules: (version.rules ?? []).map((r) => ({ text: r.text })),
         },
@@ -1427,15 +1509,15 @@ const SkillDetailView: React.FC<{
     }
 
     const progress = toast.progress({
-      label: `${version.ver} 복원 중`,
-      sublabel: `${skill.name} · 현재 버전을 보관하고 새 버전으로 복원하고 있어요`,
+      label: t('mySkills.restoreProgressLabel', { ver: version.ver }),
+      sublabel: t('mySkills.restoreProgressSublabel', { name: skill.name }),
     });
     try {
       const res = await api.rollbackSkill(skillId, verNum(version.ver));
       if (!res.success || !res.data) {
         const reason = res.error ? ` · ${res.error}` : '';
-        progress.done('error', '버전 복원 실패');
-        toast.notify({ message: `${version.ver} 복원에 실패했어요${reason}`, variant: 'error' });
+        progress.done('error', t('mySkills.restoreProgressFail'));
+        toast.notify({ message: t('mySkills.restoreErrorMsg', { ver: version.ver, reason }), variant: 'error' });
         return;
       }
 
@@ -1444,16 +1526,16 @@ const SkillDetailView: React.FC<{
         setSkills((prev) => prev.map((item) => (
           item.id === skillId ? { ...item, ver: `v${res.data!.version}` } : item
         )));
-        progress.done('success', `${version.ver} 복원 완료`);
-        toast.notify({ message: '복원은 완료됐지만 화면 재조회에 실패했어요. 다시 열어 확인하세요.', variant: 'warning' });
+        progress.done('success', t('mySkills.restoreProgressDone', { ver: version.ver }));
+        toast.notify({ message: t('mySkills.restoreReloadWarn'), variant: 'warning' });
       } else {
-        progress.done('success', `${version.ver} → v${res.data.version} 복원 완료`);
+        progress.done('success', t('mySkills.restoreProgressDoneNew', { from: version.ver, to: `v${res.data.version}` }));
       }
       setSnapVer(null);
     } catch (error) {
       const reason = error instanceof Error ? ` · ${error.message}` : '';
-      progress.done('error', '버전 복원 실패');
-      toast.notify({ message: `버전 복원 중 오류가 발생했어요${reason}`, variant: 'error' });
+      progress.done('error', t('mySkills.restoreProgressFail'));
+      toast.notify({ message: t('mySkills.restoreErrorCatch', { reason }), variant: 'error' });
     }
   };
 
@@ -1477,7 +1559,7 @@ const SkillDetailView: React.FC<{
       if (!result.success) {
         if (detail.historyStatus !== undefined) {
           toast.notify({
-            message: `${p.targetLabel} 변경을 저장하지 못했어요${result.error ? ` — ${result.error}` : ''}`,
+            message: t('mySkills.editSaveFailMsg', { targetLabel: p.targetLabel }) + (result.error ? ` — ${apiErrorMessage(result)}` : ''),
             variant: 'warning',
           });
         }
@@ -1504,21 +1586,21 @@ const SkillDetailView: React.FC<{
         versions: [
           {
             ver: p.toVer,
-            when: '방금',
+            when: t('mySkills.versionEditWhen'),
             note: p.changelog,
             current: true,
-            author: '편집 어시스턴트',
+            author: t('mySkills.versionEditAuthor'),
             rules: d.rules.map((r) => ({ text: r.text })),
           },
           ...d.versions.map((v) => ({ ...v, current: false })),
         ],
         activity: [
-          { when: '방금', text: `편집 어시스턴트로 ${p.toVer} 발행 — ${p.targetLabel}: ${p.changelog}`, kind: 'edit' as const },
+          { when: t('mySkills.versionEditWhen'), text: t('mySkills.activityEditText', { toVer: p.toVer, targetLabel: p.targetLabel, changelog: p.changelog }), kind: 'edit' as const },
           ...(d.activity ?? []),
         ],
       };
     });
-    setAnalysisFeedback({ tone: 'warning', message: '본문이 바뀌었어요. AI 분석을 새로고침하세요.' });
+    setAnalysisFeedback({ tone: 'warning', message: t('mySkills.analysisFeedbackBodyChanged') });
   };
 
   // 복원 확인 팝업 — 칩 메뉴의 "전환"과 스냅샷의 "이 버전 복원" 두 경로가 모두 거친다.
@@ -1526,8 +1608,8 @@ const SkillDetailView: React.FC<{
     <ConfirmDialog
       open
       tone="primary"
-      title="이 버전으로 복원할까요?"
-      confirmLabel={`${confirmRestore.ver}(으)로 복원`}
+      title={t('mySkills.restoreConfirmTitle')}
+      confirmLabel={t('mySkills.restoreConfirmLabel', { ver: confirmRestore.ver })}
       confirmIcon="renew"
       onClose={() => setConfirmRestore(null)}
       onConfirm={() => {
@@ -1535,11 +1617,15 @@ const SkillDetailView: React.FC<{
         setConfirmRestore(null);
       }}
       description={
-        <>
-          지금 적용 중인 지침이 <span className="font-mono font-semibold text-text-primary">{confirmRestore.ver}</span> 시점의
-          지침으로 교체돼요. 복원은 새 버전(<span className="font-mono">{bumpVer(skill.ver)}</span>)으로 저장되며, 기존 버전
-          기록은 지워지지 않아요.
-        </>
+        <Trans
+          i18nKey="mySkills.restoreConfirmDesc"
+          ns="skills"
+          values={{ ver: confirmRestore.ver, newVer: bumpVer(skill.ver) }}
+          components={{
+            ver: <span className="font-mono font-semibold text-text-primary" />,
+            newVer: <span className="font-mono" />,
+          }}
+        />
       }
     />
   );
@@ -1592,12 +1678,12 @@ const SkillDetailView: React.FC<{
               )}
               {builtin && (
                 <Tag type="teal" size="sm">
-                  기본 내장
+                  {t('mySkills.headerBuiltinTag')}
                 </Tag>
               )}
               {skill.shared && (
                 <Tag type="purple" size="sm">
-                  공유됨
+                  {t('mySkills.headerSharedTag')}
                 </Tag>
               )}
               {/* 상태 컨트롤 — 빌트인은 활성/비활성 토글 하나, 그 외는 활성/Stale/보관/비활성 */}
@@ -1617,18 +1703,18 @@ const SkillDetailView: React.FC<{
                   className="mt-1 inline-flex items-center gap-1 text-caption-01 font-semibold text-link-primary hover:underline"
                   aria-expanded={summaryOpen}
                 >
-                  {summaryOpen ? '접기' : '더 보기'}
+                  {summaryOpen ? t('mySkills.headerSummaryCollapse') : t('mySkills.headerSummaryExpand')}
                   <Icon name={summaryOpen ? 'chevron-up' : 'chevron-down'} size={12} />
                 </button>
               )}
             </div>
             <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-3 text-caption-01">
               {([
-                ['사용', `${skill.uses}회`],
-                ['개선', `${skill.patches ?? 0}회`],
-                ['생성', detail.createdFrom],
-                ['최근 사용', detail.lastUsed],
-              ] as const).map(([k, v]) => (
+                [t('mySkills.headerUsesLabel'), t('mySkills.headerUsesUnit', { count: skill.uses })],
+                [t('mySkills.headerPatchLabel'), t('mySkills.headerPatchUnit', { count: skill.patches ?? 0 })],
+                [t('mySkills.headerCreatedLabel'), renderCreatedFrom(detail.createdFrom, tChat)],
+                [t('mySkills.headerLastUsedLabel'), renderLastUsed(detail.lastUsed, tChat, language)],
+              ]).map(([k, v]) => (
                 <span key={k} className="inline-flex items-baseline gap-1.5 text-text-helper">
                   <span>{k}</span>
                   <span className="text-text-secondary">{v}</span>
@@ -1642,11 +1728,11 @@ const SkillDetailView: React.FC<{
             {!builtin && (
               <button
                 onClick={() => { setEditTarget(undefined); setEditOpen(true); }}
-                title="AI에게 자연어로 변경을 요청하고, 변경 내용을 검토한 뒤 적용합니다"
+                title={t('mySkills.headerAiEditTitle')}
                 className="skill-ai-action inline-flex h-9 items-center gap-2 rounded-lg px-3.5 text-body-short-01 font-semibold text-white transition-all"
               >
                 <Icon name="sparkle" size={15} />
-                AI로 수정
+                {t('mySkills.headerAiEditBtn')}
               </button>
             )}
             <SourceLauncher skill={skill} detail={detail} onOpen={() => setWorkspaceOpen(true)} />
@@ -1672,29 +1758,31 @@ const SkillDetailView: React.FC<{
         <div>
           <div className="mb-2.5 flex max-w-[780px] items-center gap-3">
             <span className="text-caption-01 font-semibold uppercase tracking-wider text-text-secondary">
-              버전 히스토리 · {detail.historyStatus === 'loading' ? '…' : detail.versions.length}
+              {detail.historyStatus === 'loading'
+                ? t('mySkills.versionTitleLoading')
+                : t('mySkills.versionTitle', { count: detail.versions.length })}
             </span>
             {detail.historyStatus === 'loading' ? (
               <span className="inline-flex items-center gap-1.5 text-caption-01 text-text-helper">
-                <Icon name="renew" size={11} className="animate-spin" /> 불러오는 중
+                <Icon name="renew" size={11} className="animate-spin" /> {t('mySkills.historyLoading')}
               </span>
             ) : detail.historyStatus === 'error' ? (
               <button
                 onClick={() => void loadRuntimeSkillDetail(skillId)}
                 className="inline-flex items-center gap-1 text-caption-01 font-semibold text-support-warning hover:underline"
               >
-                <Icon name="renew" size={11} /> 다시 불러오기
+                <Icon name="renew" size={11} /> {t('mySkills.historyRetry')}
               </button>
             ) : (
               <span className="text-caption-01 text-text-helper">
-                {detail.versions.length > 1 ? '원문 보기 · 이전 버전 복원' : '현재 버전 원문 보기'}
+                {detail.versions.length > 1 ? t('mySkills.historyViewNote') : t('mySkills.historyViewSingle')}
               </span>
             )}
           </div>
           {detail.historyStatus === 'error' && (
             <div className="mb-3 flex items-start gap-2 rounded-lg border border-support-warning/35 bg-support-warning/10 px-3 py-2.5 text-caption-01 text-text-secondary">
               <Icon name="warning" size={13} className="mt-0.5 flex-shrink-0 text-support-warning" />
-              <span>서버 버전 기록을 불러오지 못했어요. 현재 버전만 표시 중입니다{detail.historyError ? ` · ${detail.historyError}` : ''}</span>
+              <span>{t('mySkills.historyError')}{detail.historyError ? ` · ${detail.historyError}` : ''}</span>
             </div>
           )}
           <div className="max-w-[780px]">
@@ -1715,22 +1803,22 @@ const SkillDetailView: React.FC<{
                       <span className="font-mono text-caption-01 font-semibold text-text-primary">{v.ver}</span>
                       {v.current && (
                         <span className="rounded bg-blue-60/20 px-1.5 py-px text-label-micro font-semibold text-blue-30">
-                          현재
+                          {t('mySkills.versionCurrentTag')}
                         </span>
                       )}
-                      <span className="truncate text-label-micro text-text-helper">{v.when}</span>
+                      <span className="truncate text-label-micro text-text-helper">{renderVersionWhen(v.when, tChat, language)}</span>
                       {v.author && (
                         <span className="inline-flex items-center gap-1 text-label-micro text-text-helper">
                           <Icon name="user" size={10} /> {v.author}
                         </span>
                       )}
                     </div>
-                    <div className="mt-px truncate text-caption-01 text-text-secondary">{v.note}</div>
+                    <div className="mt-px truncate text-caption-01 text-text-secondary">{renderVersionNote(v.note, tChat, v.noteParams)}</div>
                     {v.metrics && (
                       <div className="mt-1 flex items-center gap-2 text-label-micro font-mono text-text-helper">
-                        <span>성공률 {pctStr(v.metrics.successRate)}</span>
-                        <span>· {v.metrics.uses}회</span>
-                        {v.metrics.avgTurns != null && <span>· {v.metrics.avgTurns}턴</span>}
+                        <span>{t('mySkills.metricSuccessRate')} {pctStr(v.metrics.successRate)}</span>
+                        <span>· {t('mySkills.metricUsesUnit', { value: v.metrics.uses })}</span>
+                        {v.metrics.avgTurns != null && <span>· {t('mySkills.metricTurnsUnit', { value: v.metrics.avgTurns })}</span>}
                       </div>
                     )}
                   </div>
@@ -1752,7 +1840,7 @@ const SkillDetailView: React.FC<{
           <>
             <span className="inline-flex items-center gap-1.5 text-caption-01 text-text-helper">
               <Icon name="sparkle" size={13} className="text-teal-40" />
-              기본 내장 스킬 — 활성/비활성만 전환할 수 있어요
+              {t('mySkills.headerBuiltinHint')}
             </span>
             <div className="flex-1" />
             <Button
@@ -1761,19 +1849,19 @@ const SkillDetailView: React.FC<{
               icon={<Icon name="export" size={14} />}
               onClick={() => downloadSkillBundle(skill, detail)}
             >
-              내보내기
+              {t('mySkills.exportBtnLabel')}
             </Button>
           </>
         ) : (
           <>
             <span className="inline-flex items-center gap-1.5 text-caption-01 text-text-helper">
               <Icon name="lock" size={12} />
-              AI 변경은 검토 후 새 버전으로 적용돼요
+              {t('mySkills.headerAiEditLockHint')}
             </span>
             {/* 공유됨이면 마켓 게시 상태를 인라인으로 알려준다 (메뉴 안에 숨지 않게) */}
             {skill.shared && (
-              <span className="inline-flex items-center gap-1 text-caption-01 text-purple-60" title="Skill Market에 공개됨">
-                <Icon name="share" size={13} /> 마켓에 공개됨
+              <span className="inline-flex items-center gap-1 text-caption-01 text-purple-60" title={t('mySkills.headerSharedMarketTitle')}>
+                <Icon name="share" size={13} /> {t('mySkills.headerSharedMarketLabel')}
               </span>
             )}
             <div className="flex-1" />
@@ -1783,10 +1871,10 @@ const SkillDetailView: React.FC<{
               direction="up"
               items={[
                 skill.shared
-                  ? { label: '마켓에서 내리기', icon: 'share', onClick: () => setConfirmUnshare(true) }
-                  : { label: 'Skill Market에 공유', icon: 'share', onClick: () => setPublishOpen(true) },
-                { label: '내보내기', icon: 'export', onClick: () => downloadSkillBundle(skill, detail) },
-                { label: '삭제', icon: 'trash', tone: 'danger', onClick: () => setConfirmDelete(true) },
+                  ? { label: t('mySkills.menuUnshareLabel'), icon: 'share', onClick: () => setConfirmUnshare(true) }
+                  : { label: t('mySkills.menuShareLabel'), icon: 'share', onClick: () => setPublishOpen(true) },
+                { label: t('mySkills.menuExportLabel'), icon: 'export', onClick: () => downloadSkillBundle(skill, detail) },
+                { label: t('mySkills.menuDeleteLabel'), icon: 'trash', tone: 'danger', onClick: () => setConfirmDelete(true) },
               ]}
             />
           </>
@@ -1796,18 +1884,16 @@ const SkillDetailView: React.FC<{
       <ConfirmDialog
         open={confirmDelete}
         tone="danger"
-        title={`'${skill.name}' 스킬을 삭제할까요?`}
-        confirmLabel="삭제"
+        title={t('mySkills.deleteConfirmTitle', { name: skill.name })}
+        confirmLabel={t('mySkills.deleteConfirmLabel')}
         confirmIcon="trash"
         onClose={() => setConfirmDelete(false)}
         onConfirm={() => {
           setSkills((a) => a.filter((x) => x.id !== skillId));
-          // 런타임에도 반영 — 로컬만 지우면 새로고침 때 부활한다. 런타임이 모르는
-          // 스킬(목/로컬 전용)이면 404가 돌아올 뿐이라 무해하다.
           void api.deleteSkill(skillId);
           setConfirmDelete(false);
         }}
-        description="삭제하면 스킬 본문, 분석 메타데이터, 버전 히스토리가 모두 사라지며 되돌릴 수 없어요."
+        description={t('mySkills.deleteConfirmDesc')}
       />
 
       {/* Skill Market 공개 — 무엇이 공개되는지 미리보기로 보여주고 한 번 더 묻는 전용 흐름 */}
@@ -1819,22 +1905,17 @@ const SkillDetailView: React.FC<{
         onConfirm={() => {
           setSkills((a) => a.map((x) => (x.id === skillId ? { ...x, shared: true } : x)));
           // 설치형 재공유 시 원작자 attribution 유지 (ownedToMarketSkill 내부 처리)
-          publishOwnedSkill(ownedToMarketSkill(skill, detail));
+          // author:'me' sentinel을 현재 언어로 번역해 마켓 카드에 표시
+          publishOwnedSkill({ ...ownedToMarketSkill(skill, detail), author: t('author.previewAuthorMe') });
           setPublishOpen(false);
           // 공개의 실체 — 런타임이 워크스페이스 skill-exports/ 아래에 유통 가능한
           // artifact(디렉토리 + tar.gz + checksum)를 만든다. 유통본과 원본의
           // 계보는 없다(관계 단절). 실패해도 마켓 카드(로컬)는 유지 — 재시도 가능.
           void api.exportSkill(skillId).then((res) => {
             if (res.success && res.data) {
-              toast.notify({
-                message: `유통 패키지가 준비됐어요 — 워크스페이스 skill-exports/${skill.name}`,
-                variant: 'success',
-              });
+              toast.notify({ message: t('mySkills.exportSuccessMsg', { name: skill.name }), variant: 'success' });
             } else {
-              toast.notify({
-                message: `유통 패키지 생성에 실패했어요${res.error ? ` — ${res.error}` : ''}`,
-                variant: 'warning',
-              });
+              toast.notify({ message: t('mySkills.exportFailMsg', { error: res.error ? ` — ${res.error}` : '' }), variant: 'warning' });
             }
           });
         }}
@@ -1843,8 +1924,8 @@ const SkillDetailView: React.FC<{
       <ConfirmDialog
         open={confirmUnshare}
         tone="danger"
-        title={`'${skill.name}'을(를) 마켓에서 내릴까요?`}
-        confirmLabel="마켓에서 내리기"
+        title={t('mySkills.unshareConfirmTitle', { name: skill.name })}
+        confirmLabel={t('mySkills.unshareConfirmLabel')}
         confirmIcon="close"
         onClose={() => setConfirmUnshare(false)}
         onConfirm={() => {
@@ -1852,7 +1933,7 @@ const SkillDetailView: React.FC<{
           unpublishSkill(publishedMarketId(skill.id));
           setConfirmUnshare(false);
         }}
-        description="다른 사용자는 더 이상 이 스킬을 새로 설치할 수 없어요. 이미 설치한 사용자에겐 영향이 없어요."
+        description={t('mySkills.unshareConfirmDesc')}
       />
 
       {/* 소스 워크스페이스(풀스크린 IDE) — 편집은 보고 있는 파일을 대상으로 chat-patch 드로어를 띄운다 */}
@@ -1881,9 +1962,11 @@ const SkillDetailView: React.FC<{
 };
 
 function MySkillsScreen() {
+  const { t } = useTranslation('skills');
+  const tChat = wrapT(useTranslation('chat').t);
   const navigate = useNavigate();
   const { skills, setSkills, hydrating } = useLearning();
-  const [filter, setFilter] = useState<Filter>('전체');
+  const [filter, setFilter] = useState<Filter>('all');
   const [sel, setSel] = useState<string | null>('s1');
   // "학습 효과" (Learning Impact) panel swaps into the detail pane (LE-1: keep 7 screens)
   const [showImpact, setShowImpact] = useState(false);
@@ -1907,6 +1990,7 @@ function MySkillsScreen() {
   const [consolidating, setConsolidating] = useState(false);
   const [consolidateProposals, setConsolidateProposals] = useState<ConsolidateProposal[]>([]);
   const [consolidateNote, setConsolidateNote] = useState<string | null>(null);
+  const [consolidateNoteTone, setConsolidateNoteTone] = useState<'error' | 'info'>('info');
 
   // 하나로 합친 스킬 라이브러리 패널. 필터와 목록을 분리된 두 열로 두면
   // 작은 화면에서 상세 작업공간을 지나치게 압박하므로 한 패널 안에서 탐색한다.
@@ -1917,21 +2001,47 @@ function MySkillsScreen() {
     storageKey: 'rice.panel.myskills-list',
   });
 
-  const match = (s: (typeof skills)[number]) =>
-    filter === '전체' ||
-    (filter === '기본 내장' && skillOrigin(s) === 'builtin') ||
-    (filter === '직접 제작' && skillOrigin(s) === 'authored') ||
-    (filter === '설치됨' && skillOrigin(s) === 'installed') ||
-    (filter === '학습됨' && skillOrigin(s) === 'learned') ||
-    (filter === '자주 사용' && s.uses >= 10) ||
-    (filter === '최근 학습' && ['+1 방금', '새로 생성'].includes(s.trend)) ||
-    (filter === '초안' && isDraft(s)) ||
-    (filter === '공유됨' && !!s.shared) ||
-    (filter === '비활성' && skillStatus(s) === 'inactive') ||
-    (filter === 'stale' && skillStatus(s) === 'stale') ||
-    (filter === '보관됨' && skillStatus(s) === 'archived');
+  const FILTER_GROUPS: { labelKey: 'mySkills.filterGroupOrigin' | 'mySkills.filterGroupStatus' | 'mySkills.filterGroupUsability' | null; items: Filter[] }[] = [
+    { labelKey: null, items: ['all'] },
+    { labelKey: 'mySkills.filterGroupOrigin', items: ['builtin', 'authored', 'installed', 'learned'] },
+    { labelKey: 'mySkills.filterGroupStatus', items: ['stale', 'archived'] },
+    { labelKey: 'mySkills.filterGroupUsability', items: ['frequent', 'recent', 'draft', 'shared', 'inactive'] },
+  ];
 
-  const list = skills.filter(match);
+  const FILTER_LABEL: Record<Filter, string> = {
+    all: t('mySkills.filterAll'),
+    builtin: t('mySkills.filterBuiltin'),
+    authored: t('mySkills.filterAuthored'),
+    installed: t('mySkills.filterInstalled'),
+    learned: t('mySkills.filterLearned'),
+    stale: t('mySkills.filterStale'),
+    archived: t('mySkills.filterArchived'),
+    frequent: t('mySkills.filterFrequent'),
+    recent: t('mySkills.filterRecent'),
+    draft: t('mySkills.filterDraft'),
+    shared: t('mySkills.filterShared'),
+    inactive: t('mySkills.filterInactive'),
+  };
+
+  const list = useMemo(
+    () =>
+      skills.filter(
+        (s) =>
+          filter === 'all' ||
+          (filter === 'builtin' && skillOrigin(s) === 'builtin') ||
+          (filter === 'authored' && skillOrigin(s) === 'authored') ||
+          (filter === 'installed' && skillOrigin(s) === 'installed') ||
+          (filter === 'learned' && skillOrigin(s) === 'learned') ||
+          (filter === 'frequent' && s.uses >= 10) ||
+          (filter === 'recent' && (s.hot === true || s.ver === 'v1')) ||
+          (filter === 'draft' && isDraft(s)) ||
+          (filter === 'shared' && !!s.shared) ||
+          (filter === 'inactive' && skillStatus(s) === 'inactive') ||
+          (filter === 'stale' && skillStatus(s) === 'stale') ||
+          (filter === 'archived' && skillStatus(s) === 'archived'),
+      ),
+    [skills, filter],
+  );
   const active = skills.filter((s) => skillStatus(s) === 'active').length;
   const shared = skills.filter((s) => s.shared).length;
 
@@ -1968,7 +2078,11 @@ function MySkillsScreen() {
     skills.forEach((s) => {
       const next = ruleState(s.idleDays ?? 0);
       if (next !== skillState(s) && next !== 'active') {
-        moves.push(`${s.name} → ${next === 'stale' ? 'Stale' : '보관'} (${s.idleDays ?? 0}일 미사용)`);
+        moves.push(t('mySkills.curateTransitionReason', {
+          name: s.name,
+          transition: next === 'stale' ? t('mySkills.curateTransitionStale') : t('mySkills.curateTransitionArchived'),
+          idle: s.idleDays ?? 0,
+        }));
       }
     });
 
@@ -1980,7 +2094,7 @@ function MySkillsScreen() {
       }),
     );
 
-    setCurateNote(moves.length ? moves.join(' · ') : '전이 대상 없음 — 모두 신선합니다');
+    setCurateNote(moves.length ? moves.join(' · ') : t('mySkills.curateNoteNone'));
     setTimeout(() => setCurating(false), 600);
   };
 
@@ -1997,16 +2111,18 @@ function MySkillsScreen() {
     const res = await api.consolidateSkills();
     setConsolidating(false);
     if (!res.success || !res.data) {
-      setConsolidateNote(`통합 분석 실패: ${res.error ?? '알 수 없는 오류'}`);
+      setConsolidateNote(t('mySkills.consolidateFailNote', { error: res.error ? apiErrorMessage(res) : t('mySkills.consolidateFailNoteUnknown') }));
+      setConsolidateNoteTone('error');
       return;
     }
     const { proposals } = res.data;
     setConsolidateProposals(proposals);
     setConsolidateNote(
       proposals.length
-        ? `${proposals.length}건의 통합 제안을 찾았습니다 — 아래에서 검토하세요.`
-        : '통합할 만한 유사/중복 스킬을 찾지 못했습니다.',
+        ? t('mySkills.consolidateFoundNote', { count: proposals.length })
+        : t('mySkills.consolidateNoneNote'),
     );
+    setConsolidateNoteTone('info');
   };
 
   /** 통합 제안 1건 승인/거부. 승인 시 실제로 적용된 결과(서버 응답)로 로컬 skills
@@ -2024,14 +2140,14 @@ function MySkillsScreen() {
         setSkills((arr) => {
           if (arr.some((s) => s.id === p.skill_id)) {
             return arr.map((s) =>
-              s.id === p.skill_id ? { ...s, ver: `v${newVersion}`, patches: (s.patches ?? 0) + 1, trend: '통합됨' } : s,
+              s.id === p.skill_id ? { ...s, ver: `v${newVersion}`, patches: (s.patches ?? 0) + 1, trend: 'trend_consolidated' } : s,
             );
           }
           return [
             ...arr,
             {
               id: p.skill_id, name: p.skill_id, ver: `v${newVersion}`, uses: 0,
-              trend: '통합 생성', enabled: true, patches: 0, command: p.skill_id, state: 'active' as const,
+              trend: 'trend_consolidated_new', enabled: true, patches: 0, command: p.skill_id, state: 'active' as const,
             },
           ];
         });
@@ -2049,7 +2165,7 @@ function MySkillsScreen() {
 
   // keep selection valid as skills change
   const selectedExists = sel && list.some((s) => s.id === sel);
-  const effectiveSel = selectedExists ? sel : list[0]?.id ?? (filter !== '전체' ? null : skills[0]?.id) ?? null;
+  const effectiveSel = selectedExists ? sel : list[0]?.id ?? (filter !== 'all' ? null : skills[0]?.id) ?? null;
 
   return (
     <div className="flex flex-1 min-w-0 bg-background overflow-hidden">
@@ -2061,26 +2177,26 @@ function MySkillsScreen() {
         <div className="flex-shrink-0 border-b border-border-subtle-01 px-4 pt-5 pb-4">
           <div className="domain-summary domain-summary--skill overflow-hidden rounded-xl text-white">
             <div className="p-4">
-              <div className="text-caption-01 text-white/70">나의 스킬</div>
+              <div className="text-caption-01 text-white/70">{t('mySkills.libraryTitle')}</div>
               <div className="mt-1 text-heading-03 font-semibold leading-none text-white tabular-nums">
                 {skills.length}
-                <span className="ml-1 text-body-short-01 font-normal text-white/70">개</span>
+                {t('mySkills.libraryUnit') && <span className="ml-1 text-body-short-01 font-normal text-white/70">{t('mySkills.libraryUnit')}</span>}
               </div>
               <div className="mt-2 flex gap-3 text-caption-01 text-white/80">
-                <span>{active} 활성</span>
-                <span>{shared} 공유됨</span>
+                <span>{t('mySkills.libraryActiveLabel', { count: active })}</span>
+                <span>{t('mySkills.librarySharedLabel', { count: shared })}</span>
               </div>
             </div>
             <button
               onClick={() => setShowImpact(true)}
               aria-pressed={showImpact}
-              title="스킬 적용 전후의 학습 효과 보기"
+              title={t('mySkills.libraryImpactBtnTitle')}
               className="domain-summary__action flex w-full items-center gap-2 border-t px-4 py-2.5 text-left transition-colors"
             >
               <Icon name="growth" size={15} className="flex-shrink-0 text-white" />
               <div className="min-w-0 flex-1">
-                <div className="text-body-short-01 font-semibold text-white">학습 효과</div>
-                <div className="text-caption-01 text-white/70">스킬 적용 전후 비교</div>
+                <div className="text-body-short-01 font-semibold text-white">{t('mySkills.libraryImpactTitle')}</div>
+                <div className="text-caption-01 text-white/70">{t('mySkills.libraryImpactDesc')}</div>
               </div>
               <Icon name="arrow-right" size={14} className="flex-shrink-0 text-white/70" />
             </button>
@@ -2088,7 +2204,7 @@ function MySkillsScreen() {
 
           <div className="mt-3 flex items-center gap-1 text-caption-01">
             <label className="relative w-[116px] flex-shrink-0 rounded-md transition-colors hover:bg-layer-hover-01">
-              <span className="sr-only">스킬 필터</span>
+              <span className="sr-only">{t('mySkills.listFilterLabel')}</span>
               <select
                 value={filter}
                 onChange={(event) => {
@@ -2098,8 +2214,8 @@ function MySkillsScreen() {
                 className="h-8 w-full appearance-none border-0 bg-transparent pl-2 pr-7 text-caption-01 font-semibold text-text-secondary outline-none"
               >
                 {FILTER_GROUPS.map((group) => (
-                  <optgroup key={group.label ?? '_all'} label={group.label ?? '기본'}>
-                    {group.items.map((item) => <option key={item}>{item}</option>)}
+                  <optgroup key={group.labelKey ?? '_all'} label={group.labelKey ? t(group.labelKey) : t('mySkills.filterGroupDefault')}>
+                    {group.items.map((item) => <option key={item} value={item}>{FILTER_LABEL[item]}</option>)}
                   </optgroup>
                 ))}
               </select>
@@ -2109,18 +2225,18 @@ function MySkillsScreen() {
             <button
               onClick={curateSkills}
               disabled={curating || consolidating}
-              title={curateNote ?? '오래 안 쓴 스킬을 정리합니다'}
+              title={curateNote ?? t('mySkills.curateBtnTitle')}
               className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-caption-01 font-semibold text-text-secondary transition-colors hover:bg-layer-hover-01 hover:text-text-primary disabled:opacity-50"
             >
               <Icon name="renew" size={13} className={curating ? 'animate-spin' : ''} />
-              정리
+              {t('mySkills.curateBtn')}
             </button>
             <div className="relative flex-shrink-0">
               <button
                 onClick={() => void runConsolidate()}
                 disabled={consolidating || curating}
-                title="AI가 유사하거나 중복된 스킬을 찾아 통합을 제안합니다"
-                aria-label={consolidating ? 'AI 통합 제안 분석 중' : 'AI 통합 제안'}
+                title={t('mySkills.consolidateBtnTitleFull')}
+                aria-label={consolidating ? t('mySkills.consolidateBusyAriaLabelFull') : t('mySkills.consolidateAriaLabelFull')}
                 className={`inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-caption-01 font-semibold transition-colors disabled:opacity-50 ${
                   consolidating || consolidateProposals.length > 0
                     ? 'bg-blue-60/10 text-link-primary'
@@ -2128,7 +2244,7 @@ function MySkillsScreen() {
                 }`}
               >
                 <Icon name={consolidating ? 'renew' : 'merge'} size={16} className={consolidating ? 'animate-spin' : ''} />
-                AI 통합
+                {t('mySkills.consolidateBtn')}
               </button>
               {consolidateProposals.length > 0 && (
                 <span className="pointer-events-none absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-60 px-1 text-[10px] font-semibold leading-none text-white tabular-nums">
@@ -2142,12 +2258,12 @@ function MySkillsScreen() {
         {consolidateNote && consolidateProposals.length === 0 && (
           <div
             className={`flex-shrink-0 mx-4 my-2 flex items-start gap-1.5 rounded-lg border border-border-subtle-01 bg-background px-2.5 py-2 text-caption-01 ${
-              consolidateNote.startsWith('통합 분석 실패') ? 'text-support-warning' : 'text-text-helper'
+              consolidateNoteTone === 'error' ? 'text-support-warning' : 'text-text-helper'
             }`}
             role="status"
             title={consolidateNote}
           >
-            <Icon name={consolidateNote.startsWith('통합 분석 실패') ? 'warning' : 'check-circle'} size={12} className="mt-0.5 flex-shrink-0" />
+            <Icon name={consolidateNoteTone === 'error' ? 'warning' : 'check-circle'} size={12} className="mt-0.5 flex-shrink-0" />
             <span className="line-clamp-2 leading-4">{consolidateNote}</span>
           </div>
         )}
@@ -2158,8 +2274,8 @@ function MySkillsScreen() {
           {consolidateProposals.length > 0 && (
             <div className="border-b border-border-subtle-01 bg-background px-3 py-3">
               <div className="flex items-center gap-2 px-1 pb-2">
-                <span className="text-caption-01 font-semibold text-text-primary">통합 제안 검토</span>
-                <span className="text-caption-01 text-text-helper">{consolidateProposals.length}건</span>
+                <span className="text-caption-01 font-semibold text-text-primary">{t('mySkills.consolidateProposalsTitle')}</span>
+                <span className="text-caption-01 text-text-helper">{consolidateProposals.length}</span>
               </div>
               <div className="space-y-2">
                 {consolidateProposals.map((p, i) => (
@@ -2171,7 +2287,7 @@ function MySkillsScreen() {
                       <Icon name={p.kind === 'patch' ? 'merge' : 'trash'} size={12} className="text-icon-secondary flex-shrink-0" />
                       <span className="text-caption-01 font-semibold text-text-primary truncate">{p.skill_id}</span>
                       <Tag type={p.kind === 'patch' ? 'blue' : 'gray'} size="sm">
-                        {p.kind === 'patch' ? (p.from_version === 0 ? '신규 통합' : '병합') : '정리'}
+                        {p.kind === 'patch' ? (p.from_version === 0 ? t('mySkills.consolidateTagNew') : t('mySkills.consolidateTagMerge')) : t('mySkills.consolidateTagArchive')}
                       </Tag>
                     </div>
                     <p className="text-caption-01 text-text-secondary mb-2 line-clamp-2">
@@ -2179,10 +2295,10 @@ function MySkillsScreen() {
                     </p>
                     <div className="flex items-center justify-end gap-1.5">
                       <Button kind="ghost" size="sm" onClick={() => void decideProposal(p, false)}>
-                        거부
+                        {t('mySkills.consolidateReject')}
                       </Button>
                       <Button kind="primary" size="sm" onClick={() => void decideProposal(p, true)}>
-                        승인
+                        {t('mySkills.consolidateApprove')}
                       </Button>
                     </div>
                   </div>
@@ -2223,11 +2339,11 @@ function MySkillsScreen() {
                     <StatusBadge s={s} />
                   </div>
                   <div className="mt-1 flex items-center gap-2 text-label-micro text-text-helper">
-                    <span>{ORIGIN_META[skillOrigin(s)].label}</span>
+                    <span>{t(ORIGIN_LABEL_KEYS[skillOrigin(s)])}</span>
                     <span aria-hidden>·</span>
-                    <span>{s.uses}회 사용</span>
+                    <span>{t('mySkills.listUsesUnit', { count: s.uses })}</span>
                     <span aria-hidden>·</span>
-                    <span>{s.trend}</span>
+                    <span>{renderTrend(s.trend, tChat)}</span>
                   </div>
                 </div>
                 {s.shared && <Icon name="share" size={13} className="text-icon-secondary mt-0.5 opacity-70 flex-shrink-0" />}
@@ -2237,29 +2353,29 @@ function MySkillsScreen() {
           {list.length === 0 && (
             <div className="p-10 text-center text-body-short-01 text-text-helper">
               {hydrating ? (
-                '불러오는 중…'
+                t('mySkills.listLoading')
               ) : skills.length === 0 ? (
                 <div className="flex flex-col items-center gap-3">
-                  <span>아직 학습된 스킬이 없어요. 대화를 나누면 자동으로 스킬이 자라납니다.</span>
+                  <span>{t('mySkills.listEmpty')}</span>
                   <button
                     onClick={() => navigate('/skills')}
                     className="inline-flex items-center gap-1.5 text-link-primary hover:underline text-body-short-01"
                   >
                     <Icon name="skill" size={14} />
-                    Skill Market 둘러보기
+                    {t('mySkills.listMarketLink')}
                     <Icon name="arrow-up-right" size={13} />
                   </button>
                 </div>
               ) : (
                 <div className="flex flex-col items-center gap-2">
                   <Icon name="search" size={20} className="text-icon-secondary" />
-                  <span>조건에 맞는 스킬이 없어요.</span>
-                  {filter !== '전체' && (
+                  <span>{t('mySkills.listFilterEmpty')}</span>
+                  {filter !== 'all' && (
                     <button
-                      onClick={() => setFilter('전체')}
+                      onClick={() => setFilter('all')}
                       className="text-link-primary hover:underline"
                     >
-                      필터 초기화
+                      {t('mySkills.listFilterReset')}
                     </button>
                   )}
                 </div>

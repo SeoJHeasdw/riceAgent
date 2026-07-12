@@ -1,0 +1,75 @@
+{
+  "greeting": {
+    "lateNight": "늦은 밤이네요",
+    "morning": "좋은 아침이에요",
+    "afternoon": "좋은 오후예요",
+    "evening": "좋은 저녁이에요"
+  },
+  "hero": {
+    "headline": "무엇을 해볼까요?",
+    "description": "RICE는 대화할수록 내 작업 방식을 학습하고 반복 작업을 스킬로 저장해요. 이어서 일을 시작해 보세요.",
+    "newChat": "새 대화 시작",
+    "browseSkills": "스킬 마켓 둘러보기"
+  },
+  "learning": {
+    "sectionTitle": "학습 현황",
+    "proposals": "검토할 제안 {{count}}건",
+    "proposals_other": "검토할 제안 {{count}}건",
+    "statSavedSkills": "저장된 스킬",
+    "statTotalUses": "누적 사용",
+    "statAutoImproved": "자동 개선",
+    "statLearnedSignals": "학습된 신호",
+    "emptyTitle": "아직 학습한 내용이 없어요",
+    "emptyDesc": "대화를 시작하면 작업 패턴과 스킬이 여기에 쌓이고, 쓸수록 더 빨라져요."
+  },
+  "topSkills": {
+    "sectionTitle": "자주 쓰는 스킬",
+    "viewAll": "전체 보기",
+    "hot": "인기",
+    "usageCount": "{{count}}회 사용",
+    "patchCount": "{{count}}회 개선",
+    "newSkill": "새 스킬 만들기",
+    "newSkillDesc": "대화에서 반복 작업을 스킬로 저장해요"
+  },
+  "nav": {
+    "groups": {
+      "workspace": "워크스페이스",
+      "market": "마켓플레이스",
+      "system": "연결 · 설정"
+    },
+    "destinations": {
+      "home": {
+        "title": "홈",
+        "description": "모든 기능을 한눈에 보고 이동해요"
+      },
+      "chat": {
+        "title": "채팅",
+        "description": "에이전트와 대화하며 일을 처리해요"
+      },
+      "my-skills": {
+        "title": "나의 스킬",
+        "description": "내가 만들고 저장한 스킬을 관리해요"
+      },
+      "myplugins": {
+        "title": "나의 플러그인",
+        "description": "설치한 플러그인을 관리해요"
+      },
+      "skills": {
+        "title": "스킬 마켓",
+        "description": "커뮤니티 스킬을 찾아 추가해요"
+      },
+      "plugins": {
+        "title": "플러그인 마켓",
+        "description": "기능을 확장하는 플러그인을 둘러봐요"
+      },
+      "connectors": {
+        "title": "커넥터",
+        "description": "외부 계정·데이터 소스를 연결해요"
+      },
+      "settings": {
+        "title": "설정",
+        "description": "모델과 앱 환경을 설정해요"
+      }
+    }
+  }
+}

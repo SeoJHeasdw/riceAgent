@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
+import { apiErrorMessage } from '../lib/i18n/apiError';
 import { Button, Icon, Tag, ResizeHandle } from '../components/ui';
 import type { IconName } from '../components/ui/Icon';
 import {
@@ -14,6 +16,7 @@ import api from '../lib/api';
 import type { LocalMcpTransportPayload } from '../lib/api';
 import { openExternal } from '../lib/openExternal';
 import { useToast } from '../lib/toast/ToastContext';
+import i18n from '../lib/i18n';
 import {
   CONNECTORS,
   connectorKind,
@@ -31,16 +34,16 @@ type Kind = 'remote' | 'local-mcp';
 
 type WirePermission = 'allow' | 'approval' | 'block';
 
-/** 백엔드 도구 정책 ↔ UI 3단 토글 매핑. */
+/** 백엔드 도구 정책 ↔ UI 3단 토글 매핑 (wire === ScopePermission이므로 단순 identity). */
 const WIRE_TO_UI_PERM: Record<WirePermission, ScopePermission> = {
-  allow: '항상 허용',
-  approval: '승인 필요',
-  block: '차단',
+  allow: 'allow',
+  approval: 'approval',
+  block: 'block',
 };
 const UI_TO_WIRE_PERM: Record<ScopePermission, WirePermission> = {
-  '항상 허용': 'allow',
-  '승인 필요': 'approval',
-  '차단': 'block',
+  allow: 'allow',
+  approval: 'approval',
+  block: 'block',
 };
 
 /** 백엔드가 돌려주는 도구 카탈로그 항목(원격 MCP tools/list 로 받아 저장한 것). */
@@ -92,7 +95,7 @@ const toolToScope = (t: ConnectorToolWire): ConnectorScope => {
   const readOnly = READ_PREFIXES.some((p) => t.name.toLowerCase().startsWith(p));
   return {
     name: t.name,
-    mode: readOnly ? '읽기' : '쓰기',
+    mode: readOnly ? 'read' : 'write',
     permission: t.permission ? WIRE_TO_UI_PERM[t.permission] : undefined,
     description: t.description || undefined,
   };
@@ -101,12 +104,9 @@ const toolToScope = (t: ConnectorToolWire): ConnectorScope => {
 /** 백엔드 update diff → UI ConnectorUpdate(적용 시 addsTools 를 도구 목록에 반영). */
 const wireToUpdate = (u: ConnectorUpdateWire | null | undefined): ConnectorUpdate | undefined => {
   if (!u || (u.added.length === 0 && u.removed.length === 0)) return undefined;
-  const parts: string[] = [];
-  if (u.added.length) parts.push(`도구 ${u.added.length}개 추가`);
-  if (u.removed.length) parts.push(`${u.removed.length}개 제거`);
   return {
-    version: `${u.added.length + u.removed.length}건 변경`,
-    note: `원격 서버가 도구를 갱신했어요 — ${parts.join(' · ')}.`,
+    addedCount: u.added.length,
+    removedCount: u.removed.length,
     addsTools: (u.added_tools ?? []).map(toolToScope),
   };
 };
@@ -131,29 +131,29 @@ const CONNECTOR_TYPE_META: Record<
   gmail: {
     displayName: 'Gmail',
     icon: 'send',
-    category: '메일',
+    get category() { return i18n.t('connectors:meta.gmail.category'); },
     provider: 'Google',
-    connectedSummary: '연결하면 원격 MCP 서버가 제공하는 메일 도구를 에이전트가 사용할 수 있어요.',
-    connectableSummary: '연결하면 브라우저에서 구글 로그인이 열리고, 이후 메일 검색·읽기·발송 도구를 쓸 수 있어요.',
-    examples: ['받은 편지함에서 최근 중요한 메일 요약해줘', '이 내용으로 초안 작성해줘'],
+    get connectedSummary() { return i18n.t('connectors:meta.gmail.connectedSummary'); },
+    get connectableSummary() { return i18n.t('connectors:meta.gmail.connectableSummary'); },
+    get examples(): string[] { return i18n.t('connectors:meta.gmail.examples', { returnObjects: true }) as string[]; },
   },
   calendar: {
     displayName: 'Google Calendar',
     icon: 'calendar',
-    category: '일정',
+    get category() { return i18n.t('connectors:meta.calendar.category'); },
     provider: 'Google',
-    connectedSummary: '연결하면 원격 MCP 서버가 제공하는 캘린더 도구를 에이전트가 사용할 수 있어요.',
-    connectableSummary: '연결하면 브라우저에서 구글 로그인이 열리고, 이후 일정 조회·생성·응답 도구를 쓸 수 있어요.',
-    examples: ['오늘 일정 알려줘', '내일 오후 3시에 팀 미팅 잡아줘'],
+    get connectedSummary() { return i18n.t('connectors:meta.calendar.connectedSummary'); },
+    get connectableSummary() { return i18n.t('connectors:meta.calendar.connectableSummary'); },
+    get examples(): string[] { return i18n.t('connectors:meta.calendar.examples', { returnObjects: true }) as string[]; },
   },
   drive: {
     displayName: 'Google Drive',
     icon: 'cloud',
-    category: '스토리지',
+    get category() { return i18n.t('connectors:meta.drive.category'); },
     provider: 'Google',
-    connectedSummary: '연결하면 원격 MCP 서버가 제공하는 드라이브 도구를 에이전트가 사용할 수 있어요.',
-    connectableSummary: '연결하면 브라우저에서 구글 로그인이 열리고, 이후 파일 검색·읽기·생성 도구를 쓸 수 있어요.',
-    examples: ['최근 수정한 문서 찾아줘', '이 내용으로 새 문서 만들어줘'],
+    get connectedSummary() { return i18n.t('connectors:meta.drive.connectedSummary'); },
+    get connectableSummary() { return i18n.t('connectors:meta.drive.connectableSummary'); },
+    get examples(): string[] { return i18n.t('connectors:meta.drive.examples', { returnObjects: true }) as string[]; },
   },
 };
 const DEFAULT_TYPE_META = {
@@ -187,9 +187,9 @@ const infoToConnector = (info: ConnectorInfoWire): Connector => {
     errored,
     // 백엔드 레코드가 실재 — 미연결이어도 "제거" 가능(연결 실패한 커스텀 커넥터 정리 경로).
     persisted: true,
-    account: connected ? info.display_name || '연결됨' : undefined,
+    account: connected ? info.display_name || i18n.t('connectors:detail.tagConnected') : undefined,
     lastSync: info.last_verified_at ?? undefined,
-    summary: meta.connectedSummary || `${info.connector_type} 커넥터`,
+    summary: meta.connectedSummary || i18n.t('connectors:meta.fallbackSummary', { type: info.connector_type }),
     scopes,
     usedBy: [],
     examples: meta.examples,
@@ -224,17 +224,21 @@ const wireToLocalConnector = (s: LocalMcpServerWire): Connector => ({
   id: s.connector_id,
   name: s.name,
   icon: s.transport === 'http' ? 'cloud' : 'server',
-  category: s.transport === 'http' ? 'HTTP MCP' : '로컬 MCP',
-  provider: s.transport === 'http' ? '로컬 MCP · http' : '로컬 MCP · stdio',
+  category: s.transport === 'http'
+    ? i18n.t('connectors:meta.localHttpCategory')
+    : i18n.t('connectors:meta.localStdioCategory'),
+  provider: s.transport === 'http'
+    ? i18n.t('connectors:meta.localHttpProvider')
+    : i18n.t('connectors:meta.localStdioProvider'),
   kind: 'local-mcp',
   // running = 마지막 새로고침(spawn+tools/list)이 도구를 캐시했는지 — 호출마다 spawn 이라
   // 지속 프로세스는 없다. 그래서 "실행 중"은 곧 "캐시된 도구가 있어 바로 쓸 수 있음"이다.
   status: s.running ? 'connected' : 'disconnected',
   account: s.transport === 'http' ? s.url : [s.command, ...s.args].join(' '),
-  lastSync: s.running ? '방금' : undefined,
+  lastSync: s.running ? i18n.t('connectors:meta.justNow') : undefined,
   summary: s.running
-    ? `.mcp.json 에 등록된 로컬 MCP 서버예요. 도구 ${s.tools.length}개를 확인했어요.`
-    : '.mcp.json 에 등록된 로컬 MCP 서버예요. 새로고침하면 노출 도구를 확인할 수 있어요.',
+    ? i18n.t('connectors:meta.localSummaryRunning', { count: s.tools.length })
+    : i18n.t('connectors:meta.localSummaryIdle'),
   transport: s.transport === 'http' ? { type: 'http', endpoint: s.url } : { type: 'stdio', command: s.command, args: s.args },
   scopes: s.tools.map(toolToScope),
   usedBy: [],
@@ -252,7 +256,7 @@ const transportLine = (t: McpTransport): string =>
  * actions. Also the destination for "접근 권한 관리" links elsewhere.
  */
 
-const FILTERS = ['전체', '연결됨', '연결 필요', '업데이트 있음'] as const;
+const FILTERS = ['all', 'connected', 'needsConnection', 'hasUpdate'] as const;
 type Filter = (typeof FILTERS)[number];
 
 const SectionLabel: React.FC<{ children: React.ReactNode; right?: React.ReactNode }> = ({ children, right }) => (
@@ -271,6 +275,7 @@ const StatusDot: React.FC<{ connected: boolean }> = ({ connected }) => (
  * 실제로 잘렸을 때만(scrollHeight > clientHeight) "더보기/접기"를 노출한다.
  */
 const ToolDescription: React.FC<{ text: string; blocked?: boolean }> = ({ text, blocked }) => {
+  const { t } = useTranslation('connectors');
   const ref = useRef<HTMLParagraphElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [clamped, setClamped] = useState(false);
@@ -303,7 +308,7 @@ const ToolDescription: React.FC<{ text: string; blocked?: boolean }> = ({ text, 
           onClick={() => setExpanded((v) => !v)}
           className="mt-0.5 text-caption-01 font-medium text-link-primary hover:underline"
         >
-          {expanded ? '접기' : '더보기'}
+          {expanded ? t('detail.toolCollapse') : t('detail.toolExpand')}
         </button>
       )}
     </>
@@ -311,15 +316,16 @@ const ToolDescription: React.FC<{ text: string; blocked?: boolean }> = ({ text, 
 };
 
 /** 도구를 읽기 전용 / 쓰기·실행 둘로 가른다 (그룹 헤더·기본 권한 결정용) */
-const isReadOnly = (s: ConnectorScope) => s.mode === '읽기';
-/** 도구 권한을 명시하지 않았으면 성격으로 추정: 읽기 → 항상 허용, 쓰기·실행 → 승인 필요 */
-const permOf = (s: ConnectorScope): ScopePermission => s.permission ?? (isReadOnly(s) ? '항상 허용' : '승인 필요');
+const isReadOnly = (s: ConnectorScope) => s.mode === 'read';
+/** 도구 권한을 명시하지 않았으면 성격으로 추정: read → allow, 쓰기·실행 → approval */
+const permOf = (s: ConnectorScope): ScopePermission => s.permission ?? (isReadOnly(s) ? 'allow' : 'approval');
 
-const PERMS: { id: ScopePermission; label: string; icon: IconName; active: string }[] = [
+type PermLabelKey = 'detail.permAllow' | 'detail.permApproval' | 'detail.permBlock';
+const PERMS: { id: ScopePermission; labelKey: PermLabelKey; icon: IconName; active: string }[] = [
   // status-chip(allow/ask/block)과 동일한 색 언어 — support 토큰 기반
-  { id: '항상 허용', label: '항상', icon: 'check', active: 'bg-support-success/[0.13] text-support-success' },
-  { id: '승인 필요', label: '승인', icon: 'user', active: 'bg-support-warning/[0.13] text-support-warning' },
-  { id: '차단', label: '차단', icon: 'view-off', active: 'bg-support-error/15 text-text-error' },
+  { id: 'allow',    labelKey: 'detail.permAllow',    icon: 'check',    active: 'bg-support-success/[0.13] text-support-success' },
+  { id: 'approval', labelKey: 'detail.permApproval', icon: 'user',     active: 'bg-support-warning/[0.13] text-support-warning' },
+  { id: 'block',    labelKey: 'detail.permBlock',    icon: 'view-off', active: 'bg-support-error/15 text-text-error' },
 ];
 
 /**
@@ -330,34 +336,37 @@ const PermissionControl: React.FC<{
   value: ScopePermission;
   disabled?: boolean;
   onChange: (p: ScopePermission) => void;
-}> = ({ value, disabled, onChange }) => (
-  <div
-    className={`inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-field-01 border border-border-subtle-01 flex-shrink-0 ${
-      disabled ? 'opacity-50 pointer-events-none' : ''
-    }`}
-    role="radiogroup"
-  >
-    {PERMS.map((p) => {
-      const on = p.id === value;
-      return (
-        <button
-          key={p.id}
-          type="button"
-          role="radio"
-          aria-checked={on}
-          title={p.id}
-          onClick={() => onChange(p.id)}
-          className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-caption-01 font-medium transition-colors ${
-            on ? p.active : 'text-text-helper hover:text-text-primary hover:bg-layer-hover-01'
-          }`}
-        >
-          <Icon name={p.icon} size={12} />
-          <span>{p.label}</span>
-        </button>
-      );
-    })}
-  </div>
-);
+}> = ({ value, disabled, onChange }) => {
+  const { t } = useTranslation('connectors');
+  return (
+    <div
+      className={`inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-field-01 border border-border-subtle-01 flex-shrink-0 ${
+        disabled ? 'opacity-50 pointer-events-none' : ''
+      }`}
+      role="radiogroup"
+    >
+      {PERMS.map((p) => {
+        const on = p.id === value;
+        return (
+          <button
+            key={p.id}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            title={p.id}
+            onClick={() => onChange(p.id)}
+            className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-caption-01 font-medium transition-colors ${
+              on ? p.active : 'text-text-helper hover:text-text-primary hover:bg-layer-hover-01'
+            }`}
+          >
+            <Icon name={p.icon} size={12} />
+            <span>{t(p.labelKey)}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+};
 
 /**
  * GroupPermissionMenu — 그룹(읽기/쓰기) 전체 도구의 권한을 한 번에 설정하는 드롭다운.
@@ -367,6 +376,7 @@ const GroupPermissionMenu: React.FC<{ disabled?: boolean; onPick: (p: ScopePermi
   disabled,
   onPick,
 }) => {
+  const { t } = useTranslation('connectors');
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -391,7 +401,7 @@ const GroupPermissionMenu: React.FC<{ disabled?: boolean; onPick: (p: ScopePermi
             : 'text-text-helper hover:text-text-primary hover:bg-layer-hover-01'
         }`}
       >
-        모두 설정 <Icon name={open ? 'chevron-up' : 'chevron-down'} size={11} />
+        {t('detail.permSetAll')} <Icon name={open ? 'chevron-up' : 'chevron-down'} size={11} />
       </button>
       {open && (
         <div className="absolute right-0 top-full mt-1 z-10 min-w-[120px] py-1 rounded-lg bg-layer-02 border border-border-subtle-01 shadow-elevation-2">
@@ -406,7 +416,7 @@ const GroupPermissionMenu: React.FC<{ disabled?: boolean; onPick: (p: ScopePermi
               className="flex items-center gap-2 w-full px-3 py-1.5 text-caption-01 text-text-primary hover:bg-layer-hover-01 transition-colors"
             >
               <Icon name={p.icon} size={12} className="flex-shrink-0" />
-              <span>{p.id}</span>
+              <span>{t(p.labelKey)}</span>
             </button>
           ))}
         </div>
@@ -420,6 +430,7 @@ const GroupPermissionMenu: React.FC<{ disabled?: boolean; onPick: (p: ScopePermi
  * 임의의 MCP 서버 URL 로 커스텀 커넥터를 추가한다(OAuth 자동 디스커버리).
  */
 const AddConnectorMenu: React.FC<{ onBrowse: () => void; onCustom: () => void }> = ({ onBrowse, onCustom }) => {
+  const { t } = useTranslation('connectors');
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -439,7 +450,7 @@ const AddConnectorMenu: React.FC<{ onBrowse: () => void; onCustom: () => void }>
         onClick={() => setOpen((v) => !v)}
         className="inline-flex items-center gap-1 text-caption-01 text-link-primary hover:underline"
       >
-        <Icon name="add" size={13} /> 추가
+        <Icon name="add" size={13} /> {t('list.add')}
       </button>
       {open && (
         <div className="absolute right-0 top-full mt-1 z-10 min-w-[170px] py-1 rounded-lg bg-layer-02 border border-border-subtle-01 shadow-elevation-2">
@@ -451,7 +462,7 @@ const AddConnectorMenu: React.FC<{ onBrowse: () => void; onCustom: () => void }>
             }}
             className="flex items-center gap-2 w-full px-3 py-1.5 text-caption-01 text-text-primary hover:bg-layer-hover-01 transition-colors"
           >
-            <Icon name="search" size={12} className="flex-shrink-0" /> 둘러보기
+            <Icon name="search" size={12} className="flex-shrink-0" /> {t('list.browse')}
           </button>
           <button
             type="button"
@@ -461,7 +472,7 @@ const AddConnectorMenu: React.FC<{ onBrowse: () => void; onCustom: () => void }>
             }}
             className="flex items-center gap-2 w-full px-3 py-1.5 text-caption-01 text-text-primary hover:bg-layer-hover-01 transition-colors"
           >
-            <Icon name="tools" size={12} className="flex-shrink-0" /> 커스텀 추가
+            <Icon name="tools" size={12} className="flex-shrink-0" /> {t('list.addCustom')}
           </button>
         </div>
       )}
@@ -496,13 +507,14 @@ const ConnectorDetailView: React.FC<{
   onApplyUpdate,
   onSetToolPermission,
 }) => {
+  const { t } = useTranslation('connectors');
   const c = connectors.find((x) => x.id === connectorId);
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   // 다른 커넥터로 넘어가면 "정말 제거할까요?" 상태가 안 따라오게 초기화(잘못 클릭 방지).
   useEffect(() => setConfirmingRemove(false), [connectorId]);
 
   if (!c || !connectorId) {
-    return <div className="flex-1 flex items-center justify-center text-body-short-02 text-text-helper">커넥터를 선택하세요.</div>;
+    return <div className="flex-1 flex items-center justify-center text-body-short-02 text-text-helper">{t('detail.noSelection')}</div>;
   }
 
   const connected = c.status === 'connected';
@@ -535,7 +547,7 @@ const ConnectorDetailView: React.FC<{
             ...x,
             status: 'connected',
             account: x.transport ? transportLine(x.transport) : `${x.id}@example.com`,
-            lastSync: '방금',
+            lastSync: i18n.t('connectors:meta.justNow'),
           },
     );
   };
@@ -566,23 +578,23 @@ const ConnectorDetailView: React.FC<{
     patch((x) => ({
       ...x,
       scopes: [...x.scopes, ...(x.update?.addsTools ?? [])],
-      lastSync: '방금',
+      lastSync: i18n.t('connectors:meta.justNow'),
       update: undefined,
     }));
   };
 
   const meta: [string, string][] = isMcp
     ? [
-        ['전송 방식', c.transport?.type === 'http' ? 'HTTP (로컬)' : 'stdio (로컬 실행)'],
-        ['분류', c.category],
-        ['실행/엔드포인트', c.transport ? transportLine(c.transport) : '—'],
-        ['마지막 확인', c.lastSync ?? '—'],
+        [t('detail.metaTransport'), c.transport?.type === 'http' ? t('detail.metaTransportHttp') : t('detail.metaTransportStdio')],
+        [t('detail.metaCategory'), c.category],
+        [t('detail.metaEndpoint'), c.transport ? transportLine(c.transport) : '—'],
+        [t('detail.metaLastVerified'), c.lastSync ?? '—'],
       ]
     : [
-        ['제공자', c.provider],
-        ['분류', c.category],
-        ['계정', c.account ?? '—'],
-        ['마지막 동기화', c.lastSync ?? '—'],
+        [t('detail.metaProvider'), c.provider],
+        [t('detail.metaCategory'), c.category],
+        [t('detail.metaAccount'), c.account ?? '—'],
+        [t('detail.metaLastSync'), c.lastSync ?? '—'],
       ];
 
   return (
@@ -602,10 +614,10 @@ const ConnectorDetailView: React.FC<{
               <h2 className="text-heading-03 font-semibold text-text-primary">{c.name}</h2>
               {errored ? (
                 // Tag red는 어두운 적색 배경이 뭉개져서 명도 대비가 있는 chip으로
-                <span className="status-chip status-chip--block">재연결 필요</span>
+                <span className="status-chip status-chip--block">{t('detail.tagReconnectNeeded')}</span>
               ) : (
                 <Tag type={connected ? 'green' : 'gray'} size="sm">
-                  {connected ? '연결됨' : '연결 필요'}
+                  {connected ? t('detail.tagConnected') : t('detail.tagNeedsConnection')}
                 </Tag>
               )}
             </div>
@@ -617,9 +629,9 @@ const ConnectorDetailView: React.FC<{
             {removable && (
               confirmingRemove ? (
                 <div className="flex items-center gap-1.5">
-                  <span className="text-caption-01 text-text-helper">정말 제거할까요?</span>
+                  <span className="text-caption-01 text-text-helper">{t('detail.confirmRemovePrompt')}</span>
                   <Button kind="ghost" size="sm" disabled={busy} onClick={() => setConfirmingRemove(false)}>
-                    취소
+                    {t('detail.btnCancel')}
                   </Button>
                   <Button
                     kind="danger"
@@ -631,7 +643,7 @@ const ConnectorDetailView: React.FC<{
                       else onRealDisconnect(c);
                     }}
                   >
-                    제거
+                    {t('detail.btnConfirmRemove')}
                   </Button>
                 </div>
               ) : (
@@ -643,7 +655,7 @@ const ConnectorDetailView: React.FC<{
                   onClick={() => setConfirmingRemove(true)}
                   className="!text-red-60 hover:!bg-red-60/10"
                 >
-                  제거
+                  {t('detail.btnRemove')}
                 </Button>
               )
             )}
@@ -656,21 +668,21 @@ const ConnectorDetailView: React.FC<{
             >
               {busy
                 ? isMcp && online
-                  ? '새로고침 중…'
+                  ? t('detail.btnRefreshing')
                   : online && !connected
-                  ? '브라우저에서 로그인 대기…'
-                  : '처리 중…'
+                  ? t('detail.btnConnecting')
+                  : t('detail.btnProcessing')
                 : isMcp
                 ? online
-                  ? '새로고침'
+                  ? t('detail.btnRefresh')
                   : connected
-                  ? '중지'
-                  : '실행'
+                  ? t('detail.btnStop')
+                  : t('detail.btnRun')
                 : connected
-                ? '연결 해제'
+                ? t('detail.btnDisconnect')
                 : errored
-                ? '재연결'
-                : '연결'}
+                ? t('detail.btnReconnect')
+                : t('detail.btnConnect')}
             </Button>
           </div>
         </div>
@@ -683,14 +695,23 @@ const ConnectorDetailView: React.FC<{
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1.5 text-body-short-01 leading-5 text-text-primary">
-                <span className="font-semibold">{isMcp ? '새 서버 버전' : '새 버전'}</span>
-                <span className="font-mono font-semibold text-link-primary">{c.update.version}</span>
-                <span className="text-text-secondary">사용 가능</span>
+                <span className="font-semibold">{isMcp ? t('detail.update.newServerVersion') : t('detail.update.newVersion')}</span>
+                <span className="font-mono font-semibold text-link-primary">
+                  {t('detail.update.versionLabel', { count: (c.update.addedCount ?? 0) + (c.update.removedCount ?? 0) })}
+                </span>
+                <span className="text-text-secondary">{t('detail.update.available')}</span>
               </div>
-              <div className="text-caption-01 leading-4 text-text-helper truncate mt-0.5">{c.update.note}</div>
+              <div className="text-caption-01 leading-4 text-text-helper truncate mt-0.5">
+                {(() => {
+                  const parts: string[] = [];
+                  if (c.update.addedCount) parts.push(t('detail.update.added', { count: c.update.addedCount }));
+                  if (c.update.removedCount) parts.push(t('detail.update.removed', { count: c.update.removedCount }));
+                  return t('detail.update.note', { summary: parts.join(' · ') });
+                })()}
+              </div>
             </div>
             <Button kind="primary" size="sm" icon={<Icon name="renew" size={14} />} onClick={applyUpdate} className="flex-shrink-0">
-              업데이트
+              {t('detail.update.btnApply')}
             </Button>
           </div>
         )}
@@ -702,8 +723,7 @@ const ConnectorDetailView: React.FC<{
           <div className="flex items-start gap-2.5 px-3.5 py-3 rounded-lg bg-red-60/10 border border-red-60/30">
             <Icon name="warning" size={16} filled className="text-red-40 flex-shrink-0 mt-0.5" />
             <p className="text-caption-01 text-text-helper leading-relaxed">
-              이 서버는 <span className="text-red-40 font-medium">내 컴퓨터에서 직접 코드를 실행</span>합니다.
-              신뢰할 수 있는 출처의 명령만 실행하세요.
+              {t('detail.localWarning_pre')}<span className="text-red-40 font-medium">{t('detail.localWarning_strong')}</span>{t('detail.localWarning_post')}
             </p>
           </div>
         )}
@@ -716,7 +736,7 @@ const ConnectorDetailView: React.FC<{
                 <button
                   type="button"
                   disabled={busy || !online}
-                  title={isMcp ? '서버를 다시 spawn 해 도구 목록을 새로 확인합니다' : '원격 MCP 서버에서 도구 목록을 다시 불러옵니다'}
+                  title={isMcp ? t('detail.resyncTitleLocal') : t('detail.resyncTitleRemote')}
                   onClick={() => {
                     if (!online) return;
                     if (isMcp) onRefreshLocal(c);
@@ -725,12 +745,12 @@ const ConnectorDetailView: React.FC<{
                   className="inline-flex items-center gap-1 text-caption-01 text-link-primary hover:underline disabled:opacity-50 disabled:no-underline"
                 >
                   <Icon name="renew" size={12} className={busy ? 'animate-spin' : undefined} />
-                  {isMcp ? '재시작' : busy ? '새로고침 중…' : '도구 새로고침'}
+                  {isMcp ? t('detail.resyncLabel') : busy ? t('detail.resyncLabelBusy') : t('detail.resyncLabelRemote')}
                 </button>
               ) : undefined
             }
           >
-            정보
+            {t('detail.sectionInfo')}
           </SectionLabel>
           <div className="grid grid-cols-2 gap-x-6 gap-y-3.5">
             {meta.map(([k, v]) => (
@@ -744,29 +764,29 @@ const ConnectorDetailView: React.FC<{
 
         {/* tool permissions — 도구는 제공자가 정의하고, 사용자는 "언제 호출할지"만 정한다 */}
         <div>
-          <SectionLabel>도구 권한 · {c.scopes.length}</SectionLabel>
+          <SectionLabel>{t('detail.sectionTools', { count: c.scopes.length })}</SectionLabel>
           <p className="text-caption-01 text-text-helper -mt-1 mb-3 leading-relaxed">
-            {isMcp ? '이 서버가 노출하는 도구예요.' : `${c.provider}가 제공하는 도구예요.`} 에이전트가 각 도구를 언제
-            호출할 수 있는지 정하세요 — <span className="status-chip status-chip--allow">항상 허용</span>{' '}
-            <span className="status-chip status-chip--ask">승인 후 호출</span>{' '}
-            <span className="status-chip status-chip--block">차단</span>
+            {isMcp ? t('detail.toolsDesc_local') : t('detail.toolsDesc_remote', { provider: c.provider })}{' '}
+            <span className="status-chip status-chip--allow">{t('detail.permAllowFull')}</span>{' '}
+            <span className="status-chip status-chip--ask">{t('detail.permApprovalFull')}</span>{' '}
+            <span className="status-chip status-chip--block">{t('detail.permBlockFull')}</span>
           </p>
           {c.scopes.length === 0 ? (
             <div className="flex items-center gap-2.5 text-caption-01 text-text-helper border border-dashed border-border-strong-01 rounded-lg px-3.5 py-3">
               <Icon name="tools" size={15} className="text-icon-secondary flex-shrink-0" />
               {connected
                 ? isMcp
-                  ? '이 서버가 노출한 도구가 없어요.'
-                  : '이 커넥터가 제공하는 도구가 없어요.'
+                  ? t('detail.toolsEmpty_connectedLocal')
+                  : t('detail.toolsEmpty_connectedRemote')
                 : isMcp
-                ? '실행하면 노출 도구를 확인할 수 있어요.'
-                : '연결하면 제공되는 도구가 표시돼요.'}
+                ? t('detail.toolsEmpty_disconnectedLocal')
+                : t('detail.toolsEmpty_disconnectedRemote')}
             </div>
           ) : (
             <div className="flex flex-col gap-4">
               {([
-                { key: 'read', label: '읽기 전용 도구', filter: (s: ConnectorScope) => isReadOnly(s) },
-                { key: 'write', label: isMcp ? '실행 도구' : '쓰기·삭제 도구', filter: (s: ConnectorScope) => !isReadOnly(s) },
+                { key: 'read', label: t('detail.toolGroupRead'), filter: (s: ConnectorScope) => isReadOnly(s) },
+                { key: 'write', label: isMcp ? t('detail.toolGroupExec') : t('detail.toolGroupWrite'), filter: (s: ConnectorScope) => !isReadOnly(s) },
               ] as const)
                 .map((g) => ({ ...g, items: c.scopes.map((s, idx) => ({ s, idx })).filter((e) => g.filter(e.s)) }))
                 .filter((g) => g.items.length > 0)
@@ -786,7 +806,7 @@ const ConnectorDetailView: React.FC<{
                     </div>
                     <div className="flex flex-col gap-px bg-border-subtle-01 rounded-lg overflow-hidden">
                       {g.items.map(({ s, idx }) => {
-                        const blocked = permOf(s) === '차단';
+                        const blocked = permOf(s) === 'block';
                         return (
                           <div key={idx} className="flex items-start gap-2.5 bg-background px-3.5 py-2.5">
                             <div className="flex-1 min-w-0">
@@ -817,14 +837,14 @@ const ConnectorDetailView: React.FC<{
 
         {/* where used — 방향을 명확히: 이 커넥터의 도구를 호출하는 쪽 */}
         <div>
-          <SectionLabel>이 커넥터를 사용하는 항목 · {c.usedBy.length}</SectionLabel>
+          <SectionLabel>{t('detail.sectionUsedBy', { count: c.usedBy.length })}</SectionLabel>
           <p className="text-caption-01 text-text-helper -mt-1 mb-2.5 leading-relaxed">
-            이 커넥터의 도구를 호출하는 스킬 · 플러그인 · 자동화예요.
+            {t('detail.usedByDesc')}
           </p>
           {c.usedBy.length === 0 ? (
             <div className="flex items-center gap-2.5 text-caption-01 text-text-helper border border-dashed border-border-strong-01 rounded-lg px-3.5 py-3">
               <Icon name="skill" size={15} className="text-icon-secondary flex-shrink-0" />
-              아직 이 커넥터의 도구를 쓰는 스킬·플러그인이 없어요.
+              {t('detail.usedByEmpty')}
             </div>
           ) : (
             <div className="flex flex-col gap-px bg-border-subtle-01 rounded-lg overflow-hidden">
@@ -846,11 +866,12 @@ const ConnectorDetailView: React.FC<{
 };
 
 function ConnectorsScreen() {
+  const { t } = useTranslation('connectors');
   const { id } = useParams<{ id?: string }>();
   const [connectors, setConnectors] = useState<Connector[]>(CONNECTORS);
   const [online, setOnline] = useState<boolean>(api.isEnabled);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [filter, setFilter] = useState<Filter>('전체');
+  const [filter, setFilter] = useState<Filter>('all');
   const initial = id ? CONNECTORS.find((c) => c.id === id) : undefined;
   const [kind, setKind] = useState<Kind>(initial ? connectorKind(initial) : 'remote');
   const [mcpModalOpen, setMcpModalOpen] = useState(false);
@@ -981,23 +1002,23 @@ function ConnectorsScreen() {
     // (error 상태) 실제 커넥터는 infoToConnector 가 채운 connectorType 을 그대로 쓴다.
     const connectorType = c.connectorType ?? c.id;
     setBusyId(c.id);
-    const job = toast.progress({ label: '연결 시작 중', sublabel: c.name });
+    const job = toast.progress({ label: t('toast.connectStart'), sublabel: c.name });
     try {
       const res = await api.connectConnector(connectorType);
       const url = (res.data as { oauth_url?: string } | undefined)?.oauth_url;
       if (!res.success || !url) {
-        job.done('error', res.error || `${c.name} 연결을 시작하지 못했어요.`);
+        job.done('error', res.error || t('toast.connectFail', { name: c.name }));
         return;
       }
       await openExternal(url); // 시스템 브라우저에서 구글 로그인
-      job.update({ label: '브라우저에서 로그인 대기 중', sublabel: c.name });
+      job.update({ label: t('toast.browserLoginWaiting'), sublabel: c.name });
       const ok = await pollUntilConnected((x) => x.connector_type === connectorType && x.status === 'connected');
       if (!mountedRef.current) {
         job.dismiss(); // 화면을 이미 떠났다 — 결과를 알릴 대상이 없다.
         return;
       }
       if (!ok) {
-        job.done('error', '로그인 대기 시간이 초과됐어요. 다시 시도해주세요.');
+        job.done('error', t('toast.loginTimeout'));
         return;
       }
       const res2 = await api.getConnectors();
@@ -1007,7 +1028,7 @@ function ConnectorsScreen() {
         const found = infos.find((x) => x.connector_type === connectorType && x.status === 'connected');
         if (found) setSel(found.id);
       }
-      job.done('success', `${c.name} 연결됨`);
+      job.done('success', t('toast.connectSuccess', { name: c.name }));
     } finally {
       setBusyId(null);
     }
@@ -1026,12 +1047,12 @@ function ConnectorsScreen() {
     const res = await api.addCustomConnector(payload);
     const data = res.data as { oauth_url?: string; connector_id?: string } | undefined;
     if (!res.success || !data?.oauth_url || !data.connector_id) {
-      return res.error || '연결을 시작하지 못했어요. 입력값을 확인하고 다시 시도하세요.';
+      return res.error || t('toast.customConnectFail');
     }
     setCustomModalOpen(false);
     await openExternal(data.oauth_url); // 시스템 브라우저에서 로그인
     const connectorId = data.connector_id;
-    const job = toast.progress({ label: '브라우저에서 로그인 대기 중', sublabel: payload.display_name });
+    const job = toast.progress({ label: t('toast.browserLoginWaiting'), sublabel: payload.display_name });
     const ok = await pollUntilConnected((x) => x.id === connectorId && x.status === 'connected');
     if (!mountedRef.current) {
       job.dismiss();
@@ -1040,9 +1061,9 @@ function ConnectorsScreen() {
     if (ok) {
       await refresh();
       setSel(connectorId);
-      job.done('success', `${payload.display_name} 연결됨`);
+      job.done('success', t('toast.connectSuccess', { name: payload.display_name }));
     } else {
-      job.done('error', '로그인 대기 시간이 초과됐어요. 다시 시도해주세요.');
+      job.done('error', t('toast.loginTimeout'));
     }
     return null;
   };
@@ -1052,7 +1073,7 @@ function ConnectorsScreen() {
     try {
       const res = await api.deleteConnector(c.id);
       if (!res.success) {
-        toast.notify({ message: res.error || `${c.name} 연결 해제에 실패했어요.`, variant: 'error' });
+        toast.notify({ message: res.error || t('toast.disconnectFail', { name: c.name }), variant: 'error' });
         return;
       }
       await refresh();
@@ -1067,7 +1088,7 @@ function ConnectorsScreen() {
     try {
       const res = await api.resyncConnectorTools(c.id);
       if (!res.success) {
-        toast.notify({ message: res.error || '도구 목록을 새로고침하지 못했어요.', variant: 'error' });
+        toast.notify({ message: res.error || t('toast.resyncFail'), variant: 'error' });
         return;
       }
       await refresh();
@@ -1083,7 +1104,7 @@ function ConnectorsScreen() {
     try {
       const res = await api.refreshLocalConnectors();
       if (!res.success) {
-        toast.notify({ message: res.error || '로컬 MCP 서버를 새로고침하지 못했어요.', variant: 'error' });
+        toast.notify({ message: res.error || t('toast.refreshLocalFail'), variant: 'error' });
         return;
       }
       await loadLocal();
@@ -1098,7 +1119,7 @@ function ConnectorsScreen() {
     try {
       const res = await api.deleteLocalConnector(c.id.replace(/^local:/, ''));
       if (!res.success) {
-        toast.notify({ message: res.error || `${c.name} 제거에 실패했어요.`, variant: 'error' });
+        toast.notify({ message: res.error || t('toast.removeLocalFail', { name: c.name }), variant: 'error' });
         return;
       }
       await loadLocal();
@@ -1114,7 +1135,7 @@ function ConnectorsScreen() {
     try {
       const res = await api.applyConnectorToolsUpdate(c.id);
       if (!res.success) {
-        toast.notify({ message: res.error || '업데이트를 적용하지 못했어요.', variant: 'error' });
+        toast.notify({ message: res.error || t('toast.applyUpdateFail'), variant: 'error' });
         return;
       }
       await refresh();
@@ -1131,18 +1152,24 @@ function ConnectorsScreen() {
       .setConnectorToolPermission(connectorId, toolName, UI_TO_WIRE_PERM[perm])
       .then((res) => {
         if (!res.success) {
-          toast.notify({ message: res.error || '권한 변경을 저장하지 못했어요.', variant: 'error' });
+          toast.notify({ message: res.error ? apiErrorMessage(res) : t('toast.permSaveFail'), variant: 'error' });
         }
       })
-      .catch(() => toast.notify({ message: '권한 변경을 저장하지 못했어요.', variant: 'error' }));
+      .catch(() => toast.notify({ message: t('toast.permSaveFail'), variant: 'error' }));
   };
 
   const isLocal = kind === 'local-mcp';
   const match = (c: Connector) =>
-    filter === '전체' ||
-    (filter === '연결됨' && c.status === 'connected') ||
-    (filter === '연결 필요' && c.status === 'disconnected') ||
-    (filter === '업데이트 있음' && !!c.update);
+    filter === 'all' ||
+    (filter === 'connected' && c.status === 'connected') ||
+    (filter === 'needsConnection' && c.status === 'disconnected') ||
+    (filter === 'hasUpdate' && !!c.update);
+  const filterLabel = (f: Filter): string => ({
+    all: t('filter.all'),
+    connected: t('filter.connected'),
+    needsConnection: t('filter.needsConnection'),
+    hasUpdate: t('filter.hasUpdate'),
+  }[f]);
 
   const kindList = connectors.filter((c) => connectorKind(c) === kind);
   const list = kindList.filter(match);
@@ -1202,8 +1229,8 @@ function ConnectorsScreen() {
         <div className="px-4 pt-4">
           <div className="grid grid-cols-2 gap-1 p-1 bg-field-01 border border-border-subtle-01 rounded-xl">
             {([
-              { id: 'remote' as const, label: '원격' },
-              { id: 'local-mcp' as const, label: '로컬 MCP' },
+              { id: 'remote' as const, label: t('kindTab.remote') },
+              { id: 'local-mcp' as const, label: t('kindTab.localMcp') },
             ]).map((opt) => {
               const active = opt.id === kind;
               return (
@@ -1227,30 +1254,30 @@ function ConnectorsScreen() {
         <div className="p-4">
           <div className="domain-summary domain-summary--connector rounded-xl p-4 text-white">
             <div className="text-caption-01 text-white/70 mb-1">
-              {isLocal ? '실행 중인 MCP 서버' : '연결된 커넥터'}
+              {isLocal ? t('summary.runningMcpServers') : t('summary.connectedConnectors')}
             </div>
             <div className="text-heading-03 font-semibold text-white leading-none tabular-nums">
               {connectedCount}
-              <span className="text-body-short-01 font-normal text-white/70 ml-1">개</span>
+              {t('summary.unit') && <span className="text-body-short-01 font-normal text-white/70 ml-1">{t('summary.unit')}</span>}
             </div>
             {(needsCount > 0 || updateCount > 0) && (
               <div className="text-caption-01 text-white/80 mt-1.5 flex items-center gap-1.5">
-                {needsCount > 0 && <span>{needsCount} {isLocal ? '중지됨' : '연결 필요'}</span>}
+                {needsCount > 0 && <span>{needsCount} {isLocal ? t('summary.stopped') : t('summary.needsConnection')}</span>}
                 {needsCount > 0 && updateCount > 0 && <span className="text-white/40">·</span>}
-                {updateCount > 0 && <span>{updateCount} 업데이트</span>}
+                {updateCount > 0 && <span>{updateCount} {t('summary.updates')}</span>}
               </div>
             )}
           </div>
         </div>
 
-        <div className="text-caption-01 text-text-helper px-4 pt-1 pb-1.5 tracking-wider">필터</div>
+        <div className="text-caption-01 text-text-helper px-4 pt-1 pb-1.5 tracking-wider">{t('filter.label')}</div>
         <div className="flex-1 overflow-y-auto">
           {FILTERS.map((c) => {
             const isActive = c === filter;
             const badge =
-              c === '연결 필요' && needsCount > 0
+              c === 'needsConnection' && needsCount > 0
                 ? needsCount
-                : c === '업데이트 있음' && updateCount > 0
+                : c === 'hasUpdate' && updateCount > 0
                 ? updateCount
                 : null;
             return (
@@ -1263,7 +1290,7 @@ function ConnectorsScreen() {
                     : 'bg-transparent border-l-transparent text-text-secondary hover:bg-layer-hover-01'
                 }`}
               >
-                {c}
+                {filterLabel(c)}
                 {badge && (
                   <span className="ml-auto inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 rounded-full bg-teal-60/20 text-teal-30 text-label-micro">
                     {badge}
@@ -1277,9 +1304,7 @@ function ConnectorsScreen() {
         <div className="border-t border-border-subtle-01 px-4 py-3 flex items-start gap-2">
           <Icon name={isLocal ? 'warning' : 'idea'} size={15} className="text-icon-secondary mt-0.5 flex-shrink-0" />
           <span className="text-caption-01 text-text-helper leading-4">
-            {isLocal
-              ? '로컬 MCP는 내 컴퓨터에서 직접 실행됩니다. 신뢰할 수 있는 서버만 등록하세요.'
-              : '커넥터는 에이전트가 외부 계정·데이터에 접근하는 통로예요. 필요한 범위만 허용하세요.'}
+            {isLocal ? t('rail.tipLocal') : t('rail.tipRemote')}
           </span>
         </div>
       </div>
@@ -1299,10 +1324,10 @@ function ConnectorsScreen() {
         style={{ width: listPanel.width }}
       >
         <div className="px-5 pt-5 pb-3 flex items-center gap-2">
-          <h1 className="text-heading-03 font-semibold text-text-primary">{isLocal ? '로컬 MCP' : '커넥터'}</h1>
+          <h1 className="text-heading-03 font-semibold text-text-primary">{isLocal ? t('localMcp') : t('title')}</h1>
           {isLocal && (
             <Tag type="gray" size="sm">
-              개발자
+              {t('developerTag')}
             </Tag>
           )}
           <div className="flex-1" />
@@ -1311,7 +1336,7 @@ function ConnectorsScreen() {
               onClick={() => setMcpModalOpen(true)}
               className="inline-flex items-center gap-1 text-caption-01 text-link-primary hover:underline"
             >
-              <Icon name="add" size={13} /> 서버 등록
+              <Icon name="add" size={13} /> {t('list.addServer')}
             </button>
           ) : (
             <AddConnectorMenu onBrowse={() => setDirectoryOpen(true)} onCustom={() => setCustomModalOpen(true)} />
@@ -1340,14 +1365,14 @@ function ConnectorsScreen() {
                   <span className="text-body-short-01 font-semibold text-text-primary truncate">{c.name}</span>
                   {c.update && (
                     <Tag type="blue" size="sm">
-                      업데이트
+                      {t('list.updateBadge')}
                     </Tag>
                   )}
                 </div>
                 <div className="flex items-center gap-1.5 mt-0.5">
                   <StatusDot connected={connected} />
                   <span className="text-caption-01 text-text-helper truncate">
-                    {connected ? (isLocal ? '실행 중' : '연결됨') : isLocal ? '중지됨' : '연결 필요'} · {c.category}
+                    {connected ? (isLocal ? t('list.statusRunning') : t('list.statusConnected')) : isLocal ? t('list.statusStopped') : t('list.statusNeedsConnection')} · {c.category}
                   </span>
                 </div>
               </div>
@@ -1358,16 +1383,16 @@ function ConnectorsScreen() {
           <div className="p-10 text-center text-body-short-01 text-text-helper">
             {isLocal ? (
               <>
-                등록된 로컬 MCP 서버가 없어요.
+                {t('list.noLocalEmpty')}
                 <button onClick={() => setMcpModalOpen(true)} className="block mx-auto mt-2 text-link-primary hover:underline">
-                  서버 등록
+                  {t('list.registerServer')}
                 </button>
               </>
             ) : (
               <>
-                해당하는 커넥터가 없어요.
+                {t('list.noRemoteEmpty')}
                 <button onClick={() => setDirectoryOpen(true)} className="block mx-auto mt-2 text-link-primary hover:underline">
-                  커넥터 추가
+                  {t('list.addConnector')}
                 </button>
               </>
             )}

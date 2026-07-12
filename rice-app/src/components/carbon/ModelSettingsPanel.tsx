@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Button, Icon } from '../ui';
 import { ModelPicker, ModelDraft, ModelSettings } from './ModelPicker';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
@@ -32,6 +33,8 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
   settings,
   modelMode,
 }) => {
+  const { t } = useTranslation('chat');
+
   const [draft, setDraft] = useState<ModelDraft>({
     modelId: currentModel,
     settings,
@@ -175,12 +178,12 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
       >
         <div className="flex h-[64px] flex-shrink-0 items-center gap-3 border-b border-border-subtle-01 px-4">
           <div className="min-w-0">
-            <h2 className="text-body-short-02 font-semibold text-text-primary">모델 설정</h2>
-            <p className="mt-0.5 truncate text-caption-01 text-text-helper">{currentModel || '모델 미설정'}</p>
+            <h2 className="text-body-short-02 font-semibold text-text-primary">{t('modelSettings.title')}</h2>
+            <p className="mt-0.5 truncate text-caption-01 text-text-helper">{currentModel || t('modelSettings.noModel')}</p>
           </div>
           <button
             onClick={requestClose}
-            title="닫기 (Esc)"
+            title={t('modelSettings.closeButton')}
             className="ml-auto flex-shrink-0 p-1.5 text-icon-secondary hover:text-icon-primary hover:bg-layer-hover-01 transition-colors rounded-md"
           >
             <Icon name="close" size={18} />
@@ -205,13 +208,13 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
           }`}
         >
           <span className="mr-auto hidden items-center gap-1.5 text-caption-01 text-text-helper sm:flex">
-            <Icon name="lock" size={12} /> 이 기기에 저장
+            <Icon name="lock" size={12} /> {t('modelSettings.saveOnDevice')}
           </span>
           <button
             onClick={requestClose}
             className="h-8 px-3 rounded-lg text-body-short-01 font-medium text-text-secondary hover:text-text-primary hover:bg-layer-hover-01 transition-colors"
           >
-            취소
+            {t('modelSettings.cancel')}
           </button>
           <Button
             kind="primary"
@@ -220,9 +223,9 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
             disabled={!draft.canSave}
             className="px-5"
             icon={<Icon name="check" size={14} />}
-            title={draft.canSave ? undefined : draft.mode === 'local' ? '설치된 모델을 확인하고 선택하세요' : '먼저 모델을 추가하세요'}
+            title={draft.canSave ? undefined : draft.mode === 'local' ? t('modelSettings.saveDisabledLocal') : t('modelSettings.saveDisabledSaas')}
           >
-            저장
+            {t('modelSettings.save')}
           </Button>
         </div>
       </div>
@@ -230,10 +233,10 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
       {/* 미저장 변경사항 확인 다이얼로그 */}
       <ConfirmDialog
         open={confirmOpen}
-        title="저장하지 않고 나가시겠어요?"
-        description="변경한 모델 설정이 저장되지 않습니다. 정말 나가시겠어요?"
-        confirmLabel="나가기"
-        cancelLabel="계속 편집"
+        title={t('modelSettings.confirmTitle')}
+        description={t('modelSettings.confirmDescription')}
+        confirmLabel={t('modelSettings.confirmLeave')}
+        cancelLabel={t('modelSettings.confirmEdit')}
         tone="danger"
         onConfirm={() => {
           setConfirmOpen(false);

@@ -7,6 +7,8 @@ import koChat from '../../locales/ko/chat.json';
 import koSkills from '../../locales/ko/skills.json';
 import koPlugins from '../../locales/ko/plugins.json';
 import koErrors from '../../locales/ko/errors.json';
+import koConnectors from '../../locales/ko/connectors.json';
+import koHome from '../../locales/ko/home.json';
 
 import enCommon from '../../locales/en/common.json';
 import enSettings from '../../locales/en/settings.json';
@@ -14,6 +16,8 @@ import enChat from '../../locales/en/chat.json';
 import enSkills from '../../locales/en/skills.json';
 import enPlugins from '../../locales/en/plugins.json';
 import enErrors from '../../locales/en/errors.json';
+import enConnectors from '../../locales/en/connectors.json';
+import enHome from '../../locales/en/home.json';
 
 /**
  * i18n 초기화 (단일 진입점).
@@ -28,7 +32,7 @@ export const SUPPORTED_LANGUAGES = ['ko', 'en'] as const;
 export type Language = (typeof SUPPORTED_LANGUAGES)[number];
 
 /** 네임스페이스 = 기능 단위 카탈로그. 새 화면은 새 네임스페이스를 권장. */
-export const NAMESPACES = ['common', 'settings', 'chat', 'skills', 'plugins', 'errors'] as const;
+export const NAMESPACES = ['common', 'settings', 'chat', 'skills', 'plugins', 'errors', 'connectors', 'home'] as const;
 export type Namespace = (typeof NAMESPACES)[number];
 
 export const DEFAULT_NS = 'common';
@@ -46,6 +50,8 @@ const resources = {
     skills: koSkills,
     plugins: koPlugins,
     errors: koErrors,
+    connectors: koConnectors,
+    home: koHome,
   },
   en: {
     common: enCommon,
@@ -54,6 +60,8 @@ const resources = {
     skills: enSkills,
     plugins: enPlugins,
     errors: enErrors,
+    connectors: enConnectors,
+    home: enHome,
   },
 } as const;
 

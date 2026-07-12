@@ -111,15 +111,15 @@ function runtimeSkillToLearning(s: {
     const ms = Date.now() - new Date(s.last_used_at).getTime();
     return Math.floor(ms / 86_400_000);
   })();
-  // LearningPanel이 "N회 사용 · {trend}"로 렌더하므로 사용 횟수를 반복하지 않는다
-  const useTrend =
+  // stable TrendCode 사용 — renderTrend()로 렌더 시점에 번역
+  const useTrend: string =
     s.use === 0
-      ? '아직 사용 전'
+      ? 'trend_not_used_yet'
       : idleDays == null
-        ? '사용 중'
+        ? 'trend_in_use'
         : idleDays === 0
-          ? '오늘 사용'
-          : `${idleDays}일 전 사용`;
+          ? 'trend_used_today'
+          : `trend_days_ago:${idleDays}`;
   return {
     id: s.id,
     name: s.name,
@@ -154,15 +154,18 @@ function runtimeSkillToDetail(s: {
   source: string | null;
   last_used_at: string | null;
 }): SkillDetail {
-  const createdFrom =
-    s.source === 'builtin' ? 'RICE 기본 내장' : s.source ? `${s.source}` : '대화에서 자동 생성';
+  // stable CreatedFromCode 사용 — renderCreatedFrom()으로 렌더 시점에 번역
+  const createdFrom: string =
+    s.source === 'builtin' ? 'created_from_builtin' : s.source ? s.source : 'created_from_chat_auto';
+  // stable LastUsedCode 사용 — renderLastUsed()으로 렌더 시점에 번역
+  const lastUsed: string = s.last_used_at ? `last_used_iso:${s.last_used_at}` : 'last_used_never';
   return {
     summary: s.description,
     createdFrom,
-    lastUsed: s.last_used_at ? new Date(s.last_used_at).toLocaleDateString('ko-KR') : '아직 없음',
+    lastUsed,
     shared: false,
     rules: [],
-    versions: [{ ver: `v${s.version}`, when: s.last_used_at ?? '알 수 없음', note: '런타임 동기화', current: true }],
+    versions: [{ ver: `v${s.version}`, when: s.last_used_at ?? '', note: 'noteRuntimeSync', current: true }],
     historyStatus: 'idle',
     usage: [],
     permissions: [],
@@ -230,10 +233,12 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             .filter((m) => !existingIds.has(m.id))
             .map((m): UserSignal => ({
               id: m.id,
-              label: m.kind === 'fact' ? '사실' : '선호',
+              // stable code — 렌더 시 chat:learning.signalLabel* 키로 번역
+              label: m.kind === 'fact' ? 'signal_label_fact' : 'signal_label_preference',
               value: m.content,
               conf: 0.8,
-              source: '런타임 메모리',
+              // stable code — 렌더 시 chat:learning.signalSourceRuntime 키로 번역
+              source: 'signal_source_runtime',
             }));
           return newSignals.length ? [...prev, ...newSignals] : prev;
         });
@@ -271,7 +276,8 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             ...p,
             permissions: p.permissions.map((perm) => ({
               ...perm,
-              mode: connectedTypes.has(connectorKey(perm.name)) ? '연결됨' : perm.mode,
+              // stable code: 'needs_connection' → 연결되면 'connected'로 업그레이드
+              mode: connectedTypes.has(connectorKey(perm.name)) ? 'connected' : perm.mode,
             })),
           });
           const mapped = installed.map((p): MyPlugin => {
@@ -285,8 +291,9 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                 enabled: p.enabled,
                 version: p.version,
                 builtin: p.source === 'builtin',
-                source: p.source === 'builtin' ? 'RICE 기본 내장' : fromMarket.source,
-                updated: p.source === 'builtin' ? '앱과 함께 제공' : fromMarket.updated,
+                // stable code — 렌더 시 plugins:myPlugins.updated* 키로 번역
+                source: p.source === 'builtin' ? 'builtin' : fromMarket.source,
+                updated: p.source === 'builtin' ? 'plugin_updated_builtin' : fromMarket.updated,
               });
             }
             return decoratePermissions(runtimePluginToMyPlugin(p));
@@ -361,7 +368,8 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const myPlugin = {
       ...marketPluginToMyPlugin(market),
       enabled,
-      updated: enabled ? '방금 설치' : '커넥터 연결 필요',
+      // stable code — 렌더 시점에 plugins:myPlugins.updatedJustInstalled / updatedNeedsConnector 로 번역
+      updated: enabled ? 'plugin_updated_just_installed' : 'plugin_updated_needs_connector',
     };
     setMyPlugins((prev) => (prev.some((p) => p.id === id) ? prev : [myPlugin, ...prev]));
     return id;

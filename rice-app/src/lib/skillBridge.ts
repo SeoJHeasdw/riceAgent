@@ -47,7 +47,7 @@ export function marketSkillToOwned(m: MarketSkill): { skill: OwnedSkill; detail:
     name: m.name,
     ver,
     uses: 0,
-    trend: '방금 설치',
+    trend: 'trend_just_now',
     enabled: true,
     shared: false,
     patches: 0,
@@ -60,12 +60,21 @@ export function marketSkillToOwned(m: MarketSkill): { skill: OwnedSkill; detail:
 
   const detail: SkillDetail = {
     summary: m.description,
-    createdFrom: `Skill Market · ${m.author}`,
-    lastUsed: '아직 없음',
+    createdFrom: 'created_from_market',
+    lastUsed: 'last_used_never',
     shared: false,
     rules: [],
     versions: [
-      { ver, when: '방금', note: `${author} ${ver} 설치 — fork 지점`, current: true, author, rules: [] },
+      {
+        ver,
+        when: new Date().toISOString(),
+        // stable code — 렌더 시 renderVersionNote('noteInstalled', t, noteParams)로 번역
+        note: 'noteInstalled',
+        noteParams: { author, ver },
+        current: true,
+        author,
+        rules: [],
+      },
     ],
     usage: [],
     permissions: [],
@@ -90,8 +99,12 @@ export function ownedToMarketSkill(skill: OwnedSkill, detail: SkillDetail): Mark
     name: skill.name,
     description: detail.summary,
     version: skill.ver,
-    author: '나',
-    category: '생산성',
+    // '나'는 렌더 시 t()로 표시해야 하나 ownedToMarketSkill은 순수 변환 함수라 t()에 접근하지 않음.
+    // caller(MySkillsScreen, LearningContext)가 표시 시 own author를 재정의한다.
+    // stable sentinel: 비어 있으면 호출처가 현재 사용자 이름으로 채운다.
+    author: 'me',
+    // stable code — 렌더 시 PluginMarketScreen/SkillMarketScreen이 t()로 번역
+    category: 'productivity',
     tags: [],
     downloads: 0,
     rating: 0,
@@ -197,9 +210,9 @@ export function platformArtifactToPlugin(a: PlatformArtifact): MarketPlugin {
   const connectors = a.connectors?.length
     ? a.connectors.map((c) => ({ name: c.title || c.name, desc: c.description || undefined }))
     : (a.requires?.connectors ?? []).map((c) => ({ name: c }));
-  const useCases = (a.examples && a.examples.length)
-    ? a.examples
-    : pluginSkills.slice(0, 3).map((s) => `${s.command.replace(/[-_]+/g, ' ')} 작업을 이 플러그인으로 도와줘`);
+  // examples가 없으면 빈 배열로 — useCases fallback에 한글 하드코딩을 피한다.
+  // MyPluginsScreen/ArtifactDetailModal은 빈 배열 시 별도 안내(examplesEmpty)를 표시한다.
+  const useCases = (a.examples && a.examples.length) ? a.examples : [];
   return {
     id: `platform-${a.id}`,
     name: a.display_name || a.name,
@@ -242,14 +255,14 @@ export function runtimePluginToMyPlugin(p: {
     icon: 'plug',
     enabled: p.enabled,
     builtin,
-    source: builtin ? 'RICE 기본 내장' : '설치됨 · 마켓',
+    source: builtin ? 'builtin' : 'market',
     version: p.version,
     author: p.author ?? '',
-    updated: builtin ? '앱과 함께 제공' : '설치됨',
+    updated: builtin ? 'plugin_updated_builtin' : 'plugin_updated_installed',
     summary: p.description || '',
     skills: (p.skill_names ?? []).map((name) => ({ name, desc: '' })),
     knowledge: [],
-    permissions: (p.required_connectors ?? []).map((c) => ({ name: c, mode: '연결 필요' })),
+    permissions: (p.required_connectors ?? []).map((c) => ({ name: c, mode: 'needs_connection' as const })),
     examples: [],
   };
 }
@@ -263,13 +276,13 @@ export function marketPluginToMyPlugin(p: MarketPlugin): MyPlugin {
     source: `Plugin Market · ${p.provider}`,
     version: p.version,
     author: p.author,
-    updated: '방금 설치',
+    updated: 'plugin_updated_just_installed',
     summary: p.description,
     // 마켓 PluginSkill { command, desc } → 내 PluginSkill { name, desc }
     skills: (p.skills ?? []).map((s) => ({ name: s.command, desc: s.desc })),
     knowledge: (p.knowledge ?? []).map((k) => ({ name: k.name, desc: k.desc, meta: k.meta ?? '' })),
     // 요구 connector를 권한 항목으로 표시 (연결 필요 상태)
-    permissions: (p.connectors ?? []).map((c) => ({ name: c.name, mode: '연결 필요' })),
+    permissions: (p.connectors ?? []).map((c) => ({ name: c.name, mode: 'needs_connection' as const })),
     examples: p.useCases ?? [],
   };
 }

@@ -1,4 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../lib/i18n';
+import { apiErrorMessage } from '../lib/i18n/apiError';
 import { SessionSidebar, type Session } from '../components/carbon/SessionSidebar';
 import { ModelSettingsPanel } from '../components/carbon/ModelSettingsPanel';
 import { LearningPanel } from '../components/carbon/LearningPanel';
@@ -66,31 +69,38 @@ type LiveTurnProgress = {
 // Human-readable, per-tool copy for the HITL approval card — derived client-side
 // from the tool name + args, so the confirmation line is contextual with ZERO
 // added latency (no extra model call). Extend the map as builtins grow.
+
 const describeTool = (tool: string, args: Record<string, unknown>): { label: string; reason: string; approved: string; denied: string } => {
+  const t = i18n.t.bind(i18n);
   const path = typeof args.path === 'string' ? (args.path as string) : undefined;
   switch (tool) {
     case 'write_file':
       return {
-        label: path ? `${path} 작성` : '파일 작성',
-        reason: '워크스페이스에 파일을 생성·수정합니다.',
-        approved: path ? `${path} 파일을 작성했어요` : '파일을 작성했어요',
-        denied: '파일을 작성하지 않았어요',
+        label: path ? t('chat:tools.writeFile', { path }) : t('chat:tools.writeFileDefault'),
+        reason: t('chat:tools.writeFileReason'),
+        approved: path ? t('chat:tools.writeFileApproved', { path }) : t('chat:tools.writeFileApprovedDefault'),
+        denied: t('chat:tools.writeFileDenied'),
       };
     case 'read_file':
       return {
-        label: path ? `${path} 읽기` : '파일 읽기',
-        reason: '워크스페이스 파일을 읽습니다.',
-        approved: path ? `${path} 파일을 읽었어요` : '파일을 읽었어요',
-        denied: '읽지 않았어요',
+        label: path ? t('chat:tools.readFile', { path }) : t('chat:tools.readFileDefault'),
+        reason: t('chat:tools.readFileReason'),
+        approved: path ? t('chat:tools.readFileApproved', { path }) : t('chat:tools.readFileApprovedDefault'),
+        denied: t('chat:tools.readFileDenied'),
       };
     default:
-      return { label: tool, reason: '실행 전 승인이 필요합니다.', approved: `${tool} 실행했어요`, denied: '실행하지 않았어요' };
+      return {
+        label: tool,
+        reason: t('chat:tools.defaultReason'),
+        approved: t('chat:tools.defaultApproved', { tool }),
+        denied: t('chat:tools.defaultDenied'),
+      };
   }
 };
 
 const toSession = (s: RawSession): Session => ({
   id: s.id,
-  title: s.title || '제목 없는 대화',
+  title: s.title || i18n.t('chat:untitledConversation'),
   // sqlite CURRENT_TIMESTAMP is UTC, "YYYY-MM-DD HH:MM:SS" — normalize to a Date.
   timestamp: s.started_at ? new Date(s.started_at.replace(' ', 'T') + 'Z') : new Date(),
   messageCount: 0, // list endpoint doesn't return a count; not shown for live sessions
@@ -173,20 +183,21 @@ const toThread = (msgs: RawMessage[]): ThreadMessage[] => {
 
 // 트리거 코드 → 사람이 읽는 한 줄 라벨 (LEARNING_LOOP 5.2.2, T4는 Phase A.1,
 // T5는 Self-Improvement v3 — 대화 중 에이전트가 propose_skill로 직접 발의).
-const TRIGGER_LABELS: Record<PatchTrigger, string> = {
-  T1a: '사용자 교정',
-  T1b: '실패 후 개선',
-  T1c: '누락 보완',
-  T3: '정리 통합',
-  T4: '신규 제안',
-  T5: '에이전트 제안',
-};
+const getTriggerLabels = (): Record<PatchTrigger, string> => ({
+  T1a: i18n.t('chat:trigger.T1a'),
+  T1b: i18n.t('chat:trigger.T1b'),
+  T1c: i18n.t('chat:trigger.T1c'),
+  T3: i18n.t('chat:trigger.T3'),
+  T4: i18n.t('chat:trigger.T4'),
+  T5: i18n.t('chat:trigger.T5'),
+});
 
 // Map a parked approval (recovered after an SSE reconnect via
 // GET /sessions/{id}/pending-approvals, CONTRACTS 1.2) into a thread card so the
 // prompt re-renders. Approval state lives on the server, independent of the SSE
 // connection — the client just re-paints what's still pending.
 const pendingToThread = (p: PendingApproval): ThreadMessage | null => {
+  const t = i18n.t.bind(i18n);
   if (p.kind === 'tool_approval') {
     const d = p.payload as ToolApprovalRequiredData;
     return {
@@ -194,8 +205,8 @@ const pendingToThread = (p: PendingApproval): ThreadMessage | null => {
       approvalId: p.approval_id,
       tool: d.tool_name,
       label: d.tool_name,
-      scope: { name: d.tool_name, mode: '실행' },
-      reason: d.reason ?? '실행 전 승인이 필요합니다.',
+      scope: { name: d.tool_name, mode: t('chat:tools.executionMode') },
+      reason: d.reason ?? t('chat:tools.defaultReason'),
     };
   }
   const d = p.payload as SkillPatchProposedData;
@@ -207,11 +218,11 @@ const pendingToThread = (p: PendingApproval): ThreadMessage | null => {
     skillName: d.skill_id,
     // from_version은 0이 유효값(신규 생성)이라 `d.from_version ? ... : ...`(0을
     // falsy로 오판)를 쓰면 안 된다 — undefined만 "값 없음"으로 취급한다.
-    fromVer: isNew ? '(신규)' : d.from_version !== undefined ? `v${d.from_version}` : '현재',
-    toVer: d.to_version !== undefined ? `v${d.to_version}` : '개선',
+    fromVer: isNew ? t('chat:patch.newVersion') : d.from_version !== undefined ? `v${d.from_version}` : t('chat:patch.currentVersion'),
+    toVer: d.to_version !== undefined ? `v${d.to_version}` : t('chat:patch.improvedVersion'),
     changelog: d.changelog,
     trigger: d.trigger,
-    triggerLabel: TRIGGER_LABELS[d.trigger] ?? d.trigger,
+    triggerLabel: getTriggerLabels()[d.trigger] ?? d.trigger,
     diff: d.diff.lines.map((l) => ({ t: l.type === 'context' ? 'ctx' : l.type, text: l.text })),
     // 서버가 준 원문을 그대로 쓴다(버그#0 견고성 개선) — diff.lines 재구성은 폴백만.
     proposedBody:
@@ -245,6 +256,7 @@ const SkillsPopover: React.FC<{
   inlineMode?: boolean;
 }> = ({ onInsert, onClose, onManage, webSearchEnabled, onWebSearchChange, onEscape, initialQuery = '', inlineMode = false }) => {
   const { skills, installed } = useLearning();
+  const { t } = useTranslation('chat');
   const ref = useRef<HTMLDivElement>(null);
   const [q, setQ] = useState(initialQuery);
 
@@ -376,7 +388,7 @@ const SkillsPopover: React.FC<{
             isActive ? 'opacity-100' : 'opacity-0'
           }`}
         >
-          ↵ 삽입
+          {t('skills.insertHint')}
         </span>
       </button>
     );
@@ -404,9 +416,9 @@ const SkillsPopover: React.FC<{
       <div className="px-3 pt-3 pb-2 flex-shrink-0">
         <div className="flex items-center gap-1.5 mb-2">
           <Icon name="skill" size={14} className="text-icon-primary" />
-          <span className="text-body-short-01 font-semibold text-text-primary">이 대화에서 쓸 수 있는 것</span>
+          <span className="text-body-short-01 font-semibold text-text-primary">{t('skills.popoverTitle')}</span>
           <span className="ml-auto text-label-micro font-mono text-text-helper">
-            <span className="text-text-secondary">/</span> 로 호출
+            <span className="text-text-secondary">/</span> {t('skills.popoverCallHint')}
           </span>
         </div>
         <div className="flex items-center gap-1.5 px-2 h-7 bg-layer-01 border border-border-subtle-01 rounded-md focus-within:border-border-strong-02 transition-colors">
@@ -432,7 +444,7 @@ const SkillsPopover: React.FC<{
                 if (cmd) insert(cmd);
               }
             }}
-            placeholder="스킬·도구·전문가 검색"
+            placeholder={t('skills.searchPlaceholder')}
             className="flex-1 min-w-0 bg-transparent border-none outline-none text-caption-01 text-text-primary placeholder:text-text-placeholder"
           />
         </div>
@@ -445,14 +457,14 @@ const SkillsPopover: React.FC<{
             <Icon name="search" size={14} />
           </span>
           <div className="min-w-0 flex-1">
-            <div className="text-caption-01 font-medium text-text-primary">웹 검색 허용</div>
-            <div className="truncate text-label-micro text-text-helper">이 대화의 다음 요청부터 적용</div>
+            <div className="text-caption-01 font-medium text-text-primary">{t('skills.webSearch')}</div>
+            <div className="truncate text-label-micro text-text-helper">{t('skills.webSearchHint')}</div>
           </div>
           <button
             type="button"
             role="switch"
             aria-checked={webSearchEnabled}
-            aria-label="웹 검색 허용"
+            aria-label={t('skills.webSearch')}
             onClick={() => onWebSearchChange(!webSearchEnabled)}
             className={`relative h-[18px] w-8 flex-shrink-0 rounded-full transition-colors ${webSearchEnabled ? 'bg-interactive' : 'bg-layer-03 ring-1 ring-inset ring-border-strong-01'}`}
           >
@@ -462,19 +474,19 @@ const SkillsPopover: React.FC<{
         {empty && (
           <div className="flex flex-col items-center gap-1.5 px-3 py-6 text-center">
             <Icon name="search" size={18} className="text-icon-secondary opacity-50" />
-            <div className="text-caption-01 text-text-helper">검색 결과가 없어요</div>
+            <div className="text-caption-01 text-text-helper">{t('skills.emptyResult')}</div>
           </div>
         )}
 
         {skillItems.length > 0 && (
           <div>
-            <GroupLabel count={skillItems.length} tint={ACCENT.skill}>스킬</GroupLabel>
+            <GroupLabel count={skillItems.length} tint={ACCENT.skill}>{t('skills.groupSkills')}</GroupLabel>
             {skillItems.map((s, i) => (
               <CmdRow
                 key={s.id}
                 icon="skill"
                 command={s.command!}
-                sub={`${s.ver} · ${s.uses}회 사용`}
+                sub={t('skills.usageCount', { ver: s.ver, count: s.uses })}
                 tint={ACCENT.skill}
                 index={i}
               />
@@ -484,13 +496,13 @@ const SkillsPopover: React.FC<{
 
         {toolItems.length > 0 && (
           <div>
-            <GroupLabel count={toolItems.length} tint={ACCENT.tool}>도구</GroupLabel>
-            {toolItems.map((t, i) => (
+            <GroupLabel count={toolItems.length} tint={ACCENT.tool}>{t('skills.groupTools')}</GroupLabel>
+            {toolItems.map((tool, i) => (
               <CmdRow
-                key={t.id}
-                icon={t.icon}
-                command={t.command ?? t.id}
-                sub={t.meta}
+                key={tool.id}
+                icon={tool.icon}
+                command={tool.command ?? tool.id}
+                sub={tool.meta}
                 tint={ACCENT.tool}
                 index={toolOffset + i}
               />
@@ -500,7 +512,7 @@ const SkillsPopover: React.FC<{
 
         {pluginItems.length > 0 && (
           <div>
-            <GroupLabel count={pluginItems.length} tint={ACCENT.plugin}>플러그인 · 전문가</GroupLabel>
+            <GroupLabel count={pluginItems.length} tint={ACCENT.plugin}>{t('skills.groupPlugins')}</GroupLabel>
             {pluginItems.map(({ plugin, provides }, pi) => {
               const open = query ? true : expanded.has(plugin.id);
               return (
@@ -521,7 +533,7 @@ const SkillsPopover: React.FC<{
                     <div className="flex-1 min-w-0">
                       <div className="text-body-short-01 text-text-primary truncate">{plugin.name}</div>
                       <div className="text-caption-01 text-text-helper truncate">
-                        제공 스킬 {provides.length} · {plugin.meta}
+                        {t('skills.pluginProvides', { count: provides.length, meta: plugin.meta })}
                       </div>
                     </div>
                     <Icon
@@ -558,12 +570,12 @@ const SkillsPopover: React.FC<{
           }}
           className="flex items-center gap-1.5 px-3 py-2.5 text-caption-01 text-link-primary hover:bg-layer-hover-02 transition-colors"
         >
-          <Icon name="settings" size={14} /> 학습 패널에서 관리
+          <Icon name="settings" size={14} /> {t('skills.manageLink')}
         </button>
         <div className="ml-auto flex items-center gap-1 pr-3 text-label-micro text-text-helper select-none">
-          <Kbd>↑↓</Kbd> 탐색
-          <Kbd>↵</Kbd> 삽입
-          <Kbd>esc</Kbd> 닫기
+          <Kbd>↑↓</Kbd> {t('skills.navHint').replace('↑↓ ', '')}
+          <Kbd>↵</Kbd> {t('skills.enterHint').replace('↵ ', '')}
+          <Kbd>esc</Kbd> {t('skills.escHint').replace('esc ', '')}
         </div>
       </div>
 
@@ -577,31 +589,11 @@ const SkillsPopover: React.FC<{
   );
 };
 
-const APPROVAL_OPTIONS: Array<{
-  value: ApprovalMode;
-  label: string;
-  description: string;
-  icon: IconName;
-}> = [
-  {
-    value: 'ask',
-    label: 'Ask for approval',
-    description: '파일 변경과 외부 도구 실행 전에 항상 확인합니다.',
-    icon: 'lock',
-  },
-  {
-    value: 'approve_for_me',
-    label: 'Approve for me',
-    description: '일반 작업은 자동 승인하고 위험 가능성이 있는 동작만 묻습니다.',
-    icon: 'check-circle',
-  },
-  {
-    value: 'full_access',
-    label: 'Full access',
-    description: '승인 카드 없이 허용된 도구를 바로 실행합니다.',
-    icon: 'warning',
-  },
-];
+const APPROVAL_ICONS: Record<ApprovalMode, IconName> = {
+  ask: 'lock',
+  approve_for_me: 'check-circle',
+  full_access: 'warning',
+};
 
 /** Codex-style per-turn approval policy selector. Tool cards remain unchanged;
  * this only decides whether an approval gate is automatic or interactive. */
@@ -612,8 +604,14 @@ const ApprovalModePicker: React.FC<{
   onClose: () => void;
   onChange: (value: ApprovalMode) => void;
 }> = ({ value, open, onToggle, onClose, onChange }) => {
+  const { t } = useTranslation('chat');
   const ref = useRef<HTMLDivElement>(null);
-  const selected = APPROVAL_OPTIONS.find((option) => option.value === value) ?? APPROVAL_OPTIONS[0];
+  const approvalOptions: Array<{ value: ApprovalMode; label: string; description: string; icon: IconName }> = [
+    { value: 'ask',            label: t('approval.ask.label'),          description: t('approval.ask.description'),          icon: APPROVAL_ICONS.ask },
+    { value: 'approve_for_me', label: t('approval.approveForMe.label'), description: t('approval.approveForMe.description'), icon: APPROVAL_ICONS.approve_for_me },
+    { value: 'full_access',    label: t('approval.fullAccess.label'),   description: t('approval.fullAccess.description'),   icon: APPROVAL_ICONS.full_access },
+  ];
+  const selected = approvalOptions.find((option) => option.value === value) ?? approvalOptions[0];
 
   useEffect(() => {
     if (!open) return;
@@ -655,15 +653,15 @@ const ApprovalModePicker: React.FC<{
       {open && (
         <div
           role="listbox"
-          aria-label="도구 승인 방식"
+          aria-label={t('approval.listboxLabel')}
           className="absolute bottom-full left-0 z-40 mb-2 w-[340px] max-w-[calc(100vw-40px)] overflow-hidden rounded-lg border border-border-subtle-01 bg-layer-02/95 p-1.5 shadow-elevation-2 backdrop-blur-md"
           style={{ animation: 'popoverIn 140ms cubic-bezier(0.16, 1, 0.3, 1)' }}
         >
           <div className="flex items-center gap-2 px-2 pb-1.5 pt-1">
-            <span className="text-caption-01 font-semibold text-text-primary">실행 권한</span>
-            <span className="ml-auto text-label-micro text-text-helper">다음 요청부터 적용</span>
+            <span className="text-caption-01 font-semibold text-text-primary">{t('approval.permissionTitle')}</span>
+            <span className="ml-auto text-label-micro text-text-helper">{t('approval.permissionHint')}</span>
           </div>
-          {APPROVAL_OPTIONS.map((option) => {
+          {approvalOptions.map((option) => {
             const active = value === option.value;
             const danger = option.value === 'full_access';
             return (
@@ -695,7 +693,7 @@ const ApprovalModePicker: React.FC<{
             );
           })}
           <div className="mx-2 mt-1 border-t border-border-subtle-01 px-0.5 pb-0.5 pt-1.5 text-label-micro leading-4 text-text-helper">
-            차단한 도구와 스킬 변경 승인은 이 설정과 별도로 유지됩니다.
+            {t('approval.blockedNote')}
           </div>
         </div>
       )}
@@ -708,17 +706,19 @@ const ApprovalModePicker: React.FC<{
  * 섞어 보여준다. 클릭 즉시 전송되어 데모/온보딩 첫 인상에서 제품 정체성
  * (스킬로 반복 작업을 학습·자동화)을 바로 보여준다.
  */
-const GENERIC_STARTERS: { icon: IconName; title: string; prompt: string }[] = [
-  { icon: 'flow', title: '오늘 할 일 정리', prompt: '오늘 처리할 작업을 우선순위대로 정리해줘' },
-  { icon: 'idea', title: '아이디어 브레인스토밍', prompt: '새로운 아이디어를 함께 브레인스토밍해줘' },
-  { icon: 'document', title: '글 다듬기', prompt: '내가 붙여넣을 글을 다듬고 피드백을 줘' },
-];
-
 const ChatStarter: React.FC<{
   skills: Skill[];
   signals: UserSignal[];
   onPick: (text: string) => void;
 }> = ({ skills, signals, onPick }) => {
+  const { t } = useTranslation('chat');
+
+  const GENERIC_STARTERS: { icon: IconName; title: string; prompt: string }[] = [
+    { icon: 'flow',     title: t('starter.todoPriority'),  prompt: t('starter.todoPriorityPrompt') },
+    { icon: 'idea',     title: t('starter.brainstorm'),    prompt: t('starter.brainstormPrompt') },
+    { icon: 'document', title: t('starter.editText'),      prompt: t('starter.editTextPrompt') },
+  ];
+
   const usableSkills = [...skills]
     .filter((s) => s.enabled && s.command)
     .sort((a, b) => b.uses - a.uses);
@@ -731,7 +731,7 @@ const ChatStarter: React.FC<{
   const cards = [
     ...GENERIC_STARTERS,
     ...(topSkill
-      ? [{ icon: 'skill' as IconName, title: `${topSkill.name} 실행`, prompt: `/${topSkill.command}` }]
+      ? [{ icon: 'skill' as IconName, title: t('starter.runSkill', { name: topSkill.name }), prompt: `/${topSkill.command}` }]
       : []),
   ];
 
@@ -743,9 +743,9 @@ const ChatStarter: React.FC<{
       >
         <Icon name="model" size={20} className="text-white" />
       </div>
-      <div className="text-heading-04 font-light text-text-primary mb-2">무엇을 도와드릴까요?</div>
+      <div className="text-heading-04 font-light text-text-primary mb-2">{t('starter.greeting')}</div>
       <div className="text-body-short-02 text-text-helper mb-7">
-        쓸수록 당신의 방식에 맞춰 학습하고, 반복 작업은 스킬로 저장합니다.
+        {t('starter.subtitle')}
       </div>
 
       <div className="grid grid-cols-2 gap-2.5 text-left">
@@ -777,7 +777,7 @@ const ChatStarter: React.FC<{
               className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full border border-border-subtle-01 bg-transparent text-caption-01 font-mono text-text-secondary hover:text-text-primary hover:border-border-strong-01 transition-colors"
             >
               /{s.command}
-              <span className="text-text-helper font-sans">{s.uses}회</span>
+              <span className="text-text-helper font-sans">{t('starter.usageCount', { count: s.uses })}</span>
             </button>
           ))}
         </div>
@@ -788,7 +788,7 @@ const ChatStarter: React.FC<{
         <div className="mt-6 text-left border border-dashed border-border-subtle-01 rounded-xl px-4 py-3 bg-interactive/[0.04]">
           <div className="flex items-center gap-2 mb-2">
             <span className="text-caption-01 font-semibold uppercase tracking-wider text-text-secondary">
-              RICE가 기억하는 것
+              {t('starter.rememberedTitle')}
             </span>
             <span className="ai-label">
               <span className="ai-label__text">AI</span>
@@ -830,6 +830,7 @@ const ChatTaskProgress = () => (
 function ChatScreen() {
   const { skills, signals, jumpToSkill, setSkills, setDetails, panelScrollRef, refreshSuggestions } = useLearning();
   const toast = useToast();
+  const { t } = useTranslation('chat');
 
   const [thread, setThreadState] = useState<ThreadMessage[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -972,7 +973,7 @@ function ChatScreen() {
 
   // 모델 카탈로그는 없다(SaaS=직접 등록, Local=ollama에서 라이브 조회).
   // 헤더에 보여줄 이름은 현재 선택된 모델 식별자 그대로 사용한다.
-  const selectedModelName = currentModel || (modelMode === 'local' ? '로컬 모델 미선택' : '모델 미선택');
+  const selectedModelName = currentModel || (modelMode === 'local' ? t('model.noLocalSelection') : t('model.noSelection'));
   const activeSession = sessions.find((s) => s.id === activeSessionId);
 
   // 모델 선택 저장: 로컬 상태 갱신 + 런타임에 영속화(configured=true).
@@ -1037,7 +1038,7 @@ function ChatScreen() {
       window as { electronAPI?: { dialog?: { selectDirectory: (defaultPath?: string) => Promise<string | null> } } }
     ).electronAPI?.dialog?.selectDirectory;
     if (!picker) {
-      toast.notify({ message: '폴더 선택은 RICE 데스크톱 앱에서 사용할 수 있어요.', variant: 'info' });
+      toast.notify({ message: t('folderOnlyDesktop'), variant: 'info' });
       return;
     }
     setWorkspaceSaving(true);
@@ -1046,13 +1047,13 @@ function ChatScreen() {
         if (!path) return;
         const res = await api.updateWorkspaceLocation(path);
         if (!res.success || !res.data?.path) {
-          toast.notify({ message: `저장 위치를 바꾸지 못했어요 · ${res.error ?? 'workspace'}`, variant: 'error' });
+          toast.notify({ message: t('workspaceSaveFailed', { error: res.error ?? 'workspace' }), variant: 'error' });
           return;
         }
         setWorkspacePath(res.data.path);
-        toast.notify({ message: '저장 위치를 변경했어요. 다음 메시지부터 적용됩니다.', variant: 'success', duration: 4500 });
+        toast.notify({ message: t('workspaceSaveSuccess'), variant: 'success', duration: 4500 });
       })
-      .catch(() => toast.notify({ message: '폴더 선택창을 열 수 없어요.', variant: 'error' }))
+      .catch(() => toast.notify({ message: t('workspaceFolderOpenFailed'), variant: 'error' }))
       .finally(() => setWorkspaceSaving(false));
   };
 
@@ -1098,10 +1099,10 @@ function ChatScreen() {
           const hc = await api.checkOllamaModelHealth();
           if (cancelled) return;
           if (!hc.success) {
-            toast.notify({ message: 'Ollama에 연결할 수 없어요. 엔드포인트를 확인하세요.', variant: 'error' });
+            toast.notify({ message: t('error.ollamaUnreachable'), variant: 'error' });
           } else if (hc.data && !hc.data.exists) {
             toast.notify({
-              message: `설정된 모델 "${prov.model}"이 Ollama에 없어요. 모델 설정을 열어 다시 선택하세요.`,
+              message: t('error.ollamaModelMissing', { model: prov.model }),
               variant: 'warning',
               duration: 8000,
             });
@@ -1194,12 +1195,12 @@ function ChatScreen() {
     setSkills((arr) => {
       // already exists → count this as a reuse/confirmation, re-enable it
       if (arr.some((s) => s.id === m.skillId)) {
-        return arr.map((s) => (s.id === m.skillId ? { ...s, enabled: true, uses: s.uses + 1, trend: '+1 방금' } : s));
+        return arr.map((s) => (s.id === m.skillId ? { ...s, enabled: true, uses: s.uses + 1, trend: 'trend_just_now' } : s));
       }
       const sv = m.save;
       return [
         ...arr,
-        { id: m.skillId, name: m.skill, ver: m.ver, uses: 0, trend: '새로 생성', enabled: true, command: sv?.command },
+        { id: m.skillId, name: m.skill, ver: m.ver, uses: 0, trend: 'trend_new', enabled: true, command: sv?.command },
       ];
     });
     // build a detail record for a newly-created skill from the save payload
@@ -1212,20 +1213,20 @@ function ChatScreen() {
               ...d,
               [m.skillId]: {
                 summary: sv.summary,
-                createdFrom: '대화에서 저장',
-                lastUsed: '방금',
+                createdFrom: 'created_from_chat',
+                lastUsed: 'last_used_just_now',
                 shared: false,
-                rules: (sv.rules ?? []).map((t, i) => ({ id: `csr${Date.now()}-${i}`, text: t, source: '대화에서 학습', on: true })),
+                rules: (sv.rules ?? []).map((t2, i) => ({ id: `csr${Date.now()}-${i}`, text: t2, source: t('learning.sourceFromChat'), on: true })),
                 versions: [
                   {
                     ver: m.ver,
-                    when: '방금',
-                    note: '대화에서 저장',
+                    when: 'last_used_just_now',
+                    note: t('learning.noteFromChat'),
                     current: true,
-                    rules: (sv.rules ?? []).map((t) => ({ text: t, added: true })),
+                    rules: (sv.rules ?? []).map((t2) => ({ text: t2, added: true })),
                   },
                 ],
-                usage: [{ kind: '대화', name: activeSession?.title ?? '대화에서 생성', icon: 'chat' }],
+                usage: [{ kind: 'chat', name: activeSession?.title ?? t('conversation'), icon: 'chat' }],
                 permissions: sv.permissions ?? [],
                 steps: sv.steps,
               },
@@ -1243,31 +1244,31 @@ function ChatScreen() {
   const handleApprovePatch = (m: Extract<ThreadMessage, { kind: 'patch' }>, editedBody?: string) => {
     setSkills((arr) =>
       arr.map((s) =>
-        s.id === m.skillId ? { ...s, ver: m.toVer, patches: (s.patches ?? 0) + 1, trend: '개선됨 방금', enabled: true } : s,
+        s.id === m.skillId ? { ...s, ver: m.toVer, patches: (s.patches ?? 0) + 1, trend: 'trend_improved', enabled: true } : s,
       ),
     );
     const addedRules = (m.newRules ?? []).filter((r) => r.added);
     setDetails((d) => {
       const cur = d[m.skillId];
       if (!cur) return d;
-      const note = `${m.changelog}${editedBody ? ' · 편집 반영' : ''}`;
+      const note = `${m.changelog}${editedBody ? ` · ${t('patch.editApplied')}` : ''}`;
       return {
         ...d,
         [m.skillId]: {
           ...cur,
-          lastUsed: '방금',
+          lastUsed: 'last_used_just_now',
           rules: [
             ...cur.rules,
-            ...addedRules.map((r, i) => ({ id: `pr${Date.now()}-${i}`, text: r.text, source: '개선(patch)에서 추가', on: true })),
+            ...addedRules.map((r, i) => ({ id: `pr${Date.now()}-${i}`, text: r.text, source: t('learning.sourcePatch'), on: true })),
           ],
           versions: [
-            { ver: m.toVer, when: '방금', note, current: true, rules: m.newRules ?? [] },
+            { ver: m.toVer, when: 'last_used_just_now', note, current: true, rules: m.newRules ?? [] },
             ...cur.versions.map((v) => ({ ...v, current: false })),
           ],
           // reflect the body change (data source moved) in procedure + permissions
           steps: cur.steps?.map((st) =>
             st.tool === 'db2.query'
-              ? { ...st, tool: 'wxd.query', label: 'watsonx.data 매출 조회', desc: 'watsonx.data.sales 에서 기간별 매출 추출' }
+              ? { ...st, tool: 'wxd.query', label: t('mock.wxdStepLabel'), desc: t('mock.wxdStepDesc') }
               : st,
           ),
           permissions: cur.permissions.map((p) => (p.name === 'db2-prod.sales' ? { ...p, name: 'watsonx.data.sales' } : p)),
@@ -1279,7 +1280,7 @@ function ChatScreen() {
     // — 409가 오면 카드 대신 제안함에서 결정하라고 안내한다.
     void api.respondSkillPatch(m.skillId, { approval_id: m.approvalId, decision: 'approve', edited_body: editedBody }).then((res) => {
       if (!res.success && connected) {
-        toast.notify({ message: '⏳ 카드가 만료되어 제안함으로 이동했어요 · 학습 패널에서 결정할 수 있습니다', duration: 5000 });
+        toast.notify({ message: t('error.patchExpired'), duration: 5000 });
         void refreshSuggestions();
       }
     });
@@ -1348,7 +1349,7 @@ function ChatScreen() {
         if (!last.text) copy.pop();
         else {
           const secs = Math.max(1, Math.round((Date.now() - (last.startedAt ?? Date.now())) / 1000));
-          copy[copy.length - 1] = { ...last, streaming: false, duration: `${secs}초` };
+          copy[copy.length - 1] = { ...last, streaming: false, duration: t('thinking.durationSeconds', { count: secs }) };
         }
       }
       return copy;
@@ -1532,13 +1533,13 @@ function ChatScreen() {
     // 않고 승인 대기다. 토스트로 "기억됨"이라 오인시키지 않고 학습 패널로 안내한다.
     if (d.status === 'quarantined') {
       toast.notify({
-        message: `🔒 외부 콘텐츠 유래 메모리 격리됨 · 학습 패널에서 승인/삭제: ${d.content.slice(0, 48)}`,
+        message: t('error.memoryQuarantined', { content: d.content.slice(0, 48) }),
         duration: 5000,
       });
       return;
     }
-    const label = d.memory_type === 'fact' ? '사실 기억됨' : '선호 기억됨';
-    toast.notify({ message: `💾 ${label}: ${d.content.slice(0, 60)}`, duration: 4000 });
+    const label = d.memory_type === 'fact' ? t('error.memoryFact') : t('error.memoryPreference');
+    toast.notify({ message: t('error.memoryStored', { label, content: d.content.slice(0, 60) }), duration: 4000 });
   };
 
   const handleSkillPatchProposed = (d: SkillPatchProposedData, sessionId = activeSessionIdRef.current) => {
@@ -1556,7 +1557,7 @@ function ChatScreen() {
     setSkills((arr) => {
       if (arr.some((s) => s.id === d.skill_id)) {
         return arr.map((s) =>
-          s.id === d.skill_id ? { ...s, ver: `v${d.version}`, patches: (s.patches ?? 0) + 1, trend: '개선됨' } : s,
+          s.id === d.skill_id ? { ...s, ver: `v${d.version}`, patches: (s.patches ?? 0) + 1, trend: 'trend_improved_short' } : s,
         );
       }
       wasNew = true;
@@ -1567,7 +1568,7 @@ function ChatScreen() {
           name: d.skill_id,
           ver: `v${d.version}`,
           uses: 0,
-          trend: '방금 생성',
+          trend: 'trend_just_created',
           enabled: true,
           patches: 0,
           command: d.skill_id,
@@ -1583,12 +1584,12 @@ function ChatScreen() {
               ...prev,
               [d.skill_id]: {
                 summary: d.skill_id,
-                createdFrom: '대화에서 자동 생성',
-                lastUsed: '방금',
+                createdFrom: 'created_from_chat_auto',
+                lastUsed: 'last_used_just_now',
                 shared: false,
                 rules: [],
-                versions: [{ ver: `v${d.version}`, when: '방금', note: '자동 생성', current: true }],
-                usage: [{ kind: '대화', name: activeSession?.title ?? '대화', icon: 'chat' as const }],
+                versions: [{ ver: `v${d.version}`, when: 'last_used_just_now', note: t('learning.noteAutoCreated'), current: true }],
+                usage: [{ kind: 'chat', name: activeSession?.title ?? t('conversation'), icon: 'chat' as const }],
                 permissions: [],
               },
             },
@@ -1606,7 +1607,7 @@ function ChatScreen() {
     const sid = liveSessionId.current;
     if (!connected || !sid) return;
     setLearnOpen(false);
-    toast.notify({ message: '✨ 대화를 스킬로 정리하는 중…', duration: 3000 });
+    toast.notify({ message: t('learn.processing'), duration: 3000 });
     let proposed = false;
     sseClient.learnFromConversation(sid, instruction, {
       onEvent: (e: SSEEvent) => {
@@ -1618,13 +1619,13 @@ function ChatScreen() {
         } else if (e.type === 'skill_patched') {
           handleSkillPatched(e.data as { skill_id: string; version: number });
         } else if (e.type === 'done' && !proposed) {
-          toast.notify({ message: '이 대화에서 저장할 만한 절차를 찾지 못했어요.', duration: 3000 });
+          toast.notify({ message: t('learn.nothingFound'), duration: 3000 });
         } else if (e.type === 'error') {
           const d = e.data as { message?: string };
-          toast.notify({ message: `⚠️ 학습 실패: ${d.message ?? '알 수 없는 오류'}`, duration: 4000 });
+          toast.notify({ message: t('learn.failed', { message: d.message ?? apiErrorMessage(null) }), duration: 4000 });
         }
       },
-      onError: (msg) => toast.notify({ message: `⚠️ 연결 오류: ${msg}`, duration: 4000 }),
+      onError: (msg) => toast.notify({ message: t('learn.connectionError', { message: msg }), duration: 4000 }),
     });
   };
 
@@ -1696,7 +1697,7 @@ function ChatScreen() {
             approvalId: d.approval_id,
             tool: d.tool_name,
             label: desc.label,
-            scope: { name: d.tool_name, mode: '실행' },
+            scope: { name: d.tool_name, mode: t('tools.executionMode') },
             reason: d.reason ?? desc.reason,
             approvedText: desc.approved,
             deniedText: desc.denied,
@@ -1713,7 +1714,7 @@ function ChatScreen() {
                 ...b,
                 status: d.ok ? 'done' : 'error',
                 result: d.ok ? (typeof d.result === 'string' ? d.result : JSON.stringify(d.result, null, 2)) : undefined,
-                error: d.ok ? undefined : d.error ?? '실패',
+                error: d.ok ? undefined : (d.error ?? 'error'),
               };
               break;
             }
@@ -1769,7 +1770,7 @@ function ChatScreen() {
         sealAnswer(sessionId);
         finalizeThinking(sessionId);
         const d = e.data as { message?: string };
-        pushAgentText(sessionId, `⚠️ 오류: ${d.message ?? '실행 실패'}`);
+        pushAgentText(sessionId, t('error.turnError', { message: d.message ?? 'error' }));
         finishLiveTurn(sessionId, requestId);
       }
     },
@@ -1777,7 +1778,7 @@ function ChatScreen() {
       if (turnRequestRef.current !== requestId) return;
       sealAnswer(sessionId);
       finalizeThinking(sessionId);
-      pushAgentText(sessionId, `⚠️ 연결 오류: ${msg}`);
+      pushAgentText(sessionId, t('error.connectionError', { message: msg }));
       finishLiveTurn(sessionId, requestId);
     },
     onClose: () => {
@@ -1815,11 +1816,11 @@ function ChatScreen() {
         // Show the new chat in the sidebar IMMEDIATELY (ChatGPT-style) with a
         // truncated first-message label instead of waiting for the turn to end.
         // The real LLM title (POST /title) replaces this once the first turn ends.
-        const provisional = q.replace(/\s+/g, ' ').trim().slice(0, 40) || '제목 없는 대화';
+        const provisional = q.replace(/\s+/g, ' ').trim().slice(0, 40) || t('untitledConversation');
         setSessions((prev) => [{ id, title: provisional, timestamp: new Date(), messageCount: 0 }, ...prev]);
       } else {
         finalizeThinking(originSessionId);
-        pushAgentText(originSessionId, `⚠️ 런타임 세션 생성 실패: ${res.error ?? '알 수 없는 오류'}`);
+        pushAgentText(originSessionId, t('error.sessionCreateFailed', { message: res.error ?? 'unknown' }));
         runningSessionIdRef.current = null;
         setBusy(false);
         setWorkProgress(null);
@@ -1974,12 +1975,12 @@ function ChatScreen() {
         ...p,
         {
           kind: 'thinking',
-          duration: '9초',
+          duration: t('mock.thinkingDuration'),
           steps: [
-            { label: '요청 해석', detail: q.length > 40 ? q.slice(0, 40) + '…' : q },
-            { label: '실행 계획 수립', detail: '필요한 단계로 절차 구성', tool: 'plan.build' },
-            { label: '도구·스킬 선택', detail: '설치된 도구·학습한 스킬에서 매칭', tool: 'tool.select' },
-            { label: '실행', detail: '선택한 도구로 작업 수행', tool: 'tool.execute' },
+            { label: t('mock.stepInterpret'), detail: q.length > 40 ? q.slice(0, 40) + '…' : q },
+            { label: t('mock.stepPlan'), detail: t('mock.stepPlanDetail'), tool: 'plan.build' },
+            { label: t('mock.stepSelectTool'), detail: t('mock.stepSelectToolDetail'), tool: 'tool.select' },
+            { label: t('mock.stepExecute'), detail: t('mock.stepExecuteDetail'), tool: 'tool.execute' },
           ],
         },
       ]);
@@ -1992,15 +1993,15 @@ function ChatScreen() {
         {
           kind: 'toolrun',
           id: runId,
-          label: '요청 처리',
+          label: t('mock.toolrunLabel'),
           status: 'running',
           steps: 0,
           time: '',
           open: true,
           calls: [
-            { tool: 'plan.build', label: '단계 계획 수립', status: 'done', time: '0.4s', params: { goal: q.slice(0, 40) }, result: '4단계 계획' },
-            { tool: 'tool.select', label: '필요한 도구 선택', status: 'done', time: '0.3s', params: { from: 'installed' }, result: '2개 선택' },
-            { tool: 'tool.execute', label: '실행 중…', status: 'running', time: '', params: {}, result: '' },
+            { tool: 'plan.build', label: t('mock.callPlanLabel'), status: 'done', time: '0.4s', params: { goal: q.slice(0, 40) }, result: t('mock.callPlanResult') },
+            { tool: 'tool.select', label: t('mock.callSelectLabel'), status: 'done', time: '0.3s', params: { from: 'installed' }, result: t('mock.callSelectResult') },
+            { tool: 'tool.execute', label: t('mock.callExecuteLabel'), status: 'running', time: '', params: {}, result: '' },
           ],
         },
       ]);
@@ -2015,14 +2016,14 @@ function ChatScreen() {
                 ...m,
                 status: 'done',
                 steps: 5,
-                time: '2.0초',
+                time: t('mock.runTime'),
                 open: false,
                 calls: m.calls.map((c) => ({
                   ...c,
                   status: 'done' as const,
                   time: c.time || '0.9s',
-                  label: c.label.replace('…', ' 완료'),
-                  result: c.result || '완료',
+                  label: c.label === t('mock.callExecuteLabel') ? t('mock.callExecuteLabelDone') : c.label,
+                  result: c.result || t('mock.callDone'),
                 })),
               }
             : m,
@@ -2036,8 +2037,8 @@ function ChatScreen() {
         ...p,
         {
           kind: 'agent',
-          text: '처리했어요. 학습한 선호(한국어·간결한 불릿·단위 포함)를 적용했습니다.',
-          usedSkill: { id: 's1', label: '분기 매출 요약', ver: 'v3' },
+          text: t('mock.agentAnswer'),
+          usedSkill: { id: 's1', label: t('mock.usedSkillLabel'), ver: 'v3' },
         },
       ]);
     }, 1700);
@@ -2048,15 +2049,15 @@ function ChatScreen() {
         ...p,
         {
           kind: 'skill',
-          title: '새 스킬을 학습했어요',
-          skill: '요청 처리 루틴',
+          title: t('mock.skillTitle'),
+          skill: t('mock.skillName'),
           skillId: 's1',
           ver: 'v1',
-          desc: '이 작업의 절차를 스킬로 저장했어요. 다음엔 더 적은 단계로 처리합니다.',
-          meta: '경험에서 생성 · 세션을 넘어 유지',
+          desc: t('mock.skillDesc'),
+          meta: t('mock.skillMeta'),
         },
       ]);
-      setSkills((arr) => arr.map((s) => (s.id === 's1' ? { ...s, uses: s.uses + 1, trend: '+1 방금' } : s)));
+      setSkills((arr) => arr.map((s) => (s.id === 's1' ? { ...s, uses: s.uses + 1, trend: 'trend_just_now' } : s)));
     }, 2300);
   };
 
@@ -2234,7 +2235,7 @@ function ChatScreen() {
             }`}
           >
             <span className="text-body-short-01 font-semibold text-text-primary truncate">
-              {isEmpty ? '새 대화' : activeSession?.title || '대화'}
+              {isEmpty ? t('headerEmpty') : activeSession?.title || t('conversation')}
             </span>
 
           </div>
@@ -2272,8 +2273,8 @@ function ChatScreen() {
             {!isEmpty && !atBottom && (
               <button
                 onClick={jumpToBottom}
-                aria-label={hasNewBelow ? '새 메시지로 이동' : '맨 아래로 이동'}
-                title={hasNewBelow ? '새 메시지로 이동' : '맨 아래로 이동'}
+                aria-label={hasNewBelow ? t('scrollToNew') : t('scrollToBottom')}
+                title={hasNewBelow ? t('scrollToNew') : t('scrollToBottom')}
                 className={`absolute bottom-3 left-1/2 flex h-[30px] w-[30px] -translate-x-1/2 items-center justify-center rounded-full border shadow-elevation-2 backdrop-blur-md transition-all ${
                   hasNewBelow
                     ? 'border-blue-50/60 bg-layer-03/95 text-blue-30 hover:border-blue-40 hover:bg-layer-hover-02'
@@ -2343,12 +2344,12 @@ function ChatScreen() {
                       <button
                         onClick={clearCommand}
                         className="ml-0.5 p-0.5 rounded-md text-blue-30/70 hover:text-white hover:bg-interactive/40 transition-colors"
-                        title="명령어 제거 (Backspace)"
+                        title={t('removeCommandTitle')}
                       >
                         <Icon name="close" size={11} />
                       </button>
                     </span>
-                    <span className="text-caption-01 text-text-helper">스킬 명령 · 추가 지시사항은 선택입니다</span>
+                    <span className="text-caption-01 text-text-helper">{t('skillCommandHint')}</span>
                   </div>
                 )}
                 <textarea
@@ -2374,20 +2375,20 @@ function ChatScreen() {
                       setSkillsOpen(false);
                     }
                   }}
-                  placeholder={command ? '추가 지시사항 입력 (선택)' : 'RICE에게 메시지…'}
+                  placeholder={command ? t('placeholderWithCommand') : t('placeholder')}
                   rows={1}
                   className="w-full resize-none border-none outline-none bg-transparent text-text-primary text-body-short-02 leading-5 px-4 pt-3.5 pb-1 min-h-[56px] max-h-[200px]"
                 />
                 <div className="flex items-center gap-1.5 px-2.5 pb-2.5">
                   <div className="relative">
-                    <Tooltip label="스킬·도구 추가">
+                    <Tooltip label={t('addSkillTool')}>
                       <button
                         type="button"
                         onClick={() => {
                           setApprovalMenuOpen(false);
                           setSkillsOpen((o) => !o);
                         }}
-                        aria-label="스킬·도구 추가"
+                        aria-label={t('addSkillTool')}
                         className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
                         skillsOpen
                             ? 'bg-interactive/15 text-blue-30'
@@ -2422,7 +2423,7 @@ function ChatScreen() {
                   />
                   {connected && liveSessionId.current && (
                     <div className="relative">
-                      <Tooltip label="이 대화를 스킬로 저장">
+                        <Tooltip label={t('learn.tooltip')}>
                         {/* 호출(스킬·도구 chip)과 달리 이 버튼은 '학습' — AI 액센트(purple)로
                             성격을 구분한다 (AI 문법의 그라디언트 끝 색) */}
                         <button
@@ -2440,7 +2441,7 @@ function ChatScreen() {
                         <div className="absolute bottom-10 left-0 z-30 w-72 bg-layer-02 border border-border-subtle-01 rounded-lg shadow-elevation-2 p-3">
                           <div className="flex items-center gap-1.5 mb-2">
                             <Icon name="sparkle" size={14} className="text-purple-40" />
-                            <span className="text-body-short-01 font-semibold text-text-primary">이 대화를 스킬로 저장</span>
+                            <span className="text-body-short-01 font-semibold text-text-primary">{t('learn.saveTitle')}</span>
                             <span className="ai-label ml-auto">
                               <span className="ai-label__text">AI</span>
                             </span>
@@ -2457,7 +2458,7 @@ function ChatScreen() {
                                 setLearnOpen(false);
                               }
                             }}
-                            placeholder="무엇을 중심으로 정리할까요? (비워두면 대화 전체를 자동 증류)"
+                            placeholder={t('learn.placeholder')}
                             rows={2}
                             autoFocus
                             className="w-full bg-field-01 border border-border-subtle-01 rounded-md px-2.5 py-2 text-body-short-01 text-text-primary placeholder:text-text-placeholder resize-none focus:outline-none focus:border-interactive"
@@ -2467,7 +2468,7 @@ function ChatScreen() {
                               onClick={() => setLearnOpen(false)}
                               className="h-7 px-2.5 rounded-md text-caption-01 text-text-secondary hover:bg-layer-hover-01 transition-colors"
                             >
-                              취소
+                              {t('learn.cancel')}
                             </button>
                             <button
                               onClick={() => {
@@ -2476,7 +2477,7 @@ function ChatScreen() {
                               }}
                               className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-caption-01 font-semibold bg-interactive text-white hover:bg-interactive-hover transition-colors"
                             >
-                              <Icon name="sparkle" size={12} /> 스킬로 정리
+                              <Icon name="sparkle" size={12} /> {t('learn.submit')}
                             </button>
                           </div>
                         </div>
@@ -2484,7 +2485,7 @@ function ChatScreen() {
                     </div>
                   )}
                   <div className="flex-1" />
-                  <Tooltip label={busy ? '생성 중지' : '전송'}>
+                  <Tooltip label={busy ? t('stopTooltip') : t('sendTooltip')}>
                     <button
                       onClick={() => (busy ? stopTurn() : send())}
                       disabled={!busy && !command && !draft.trim()}
@@ -2504,16 +2505,16 @@ function ChatScreen() {
               </div>
               {workspacePath && (
                 <div className="mt-3 flex items-center px-1">
-                  <Tooltip label={`생성 파일 저장 위치 변경 · ${workspacePath}`}>
+                  <Tooltip label={t('saveLocationTooltip', { path: workspacePath })}>
                     <button
                       type="button"
                       onClick={chooseWorkspaceFolder}
                       disabled={workspaceSaving}
                       className="flex min-w-0 max-w-full items-center gap-2 rounded-md py-1 text-caption-01 text-text-helper transition-colors hover:text-text-primary"
-                      aria-label={`생성 파일 저장 위치 변경: ${workspacePath}`}
+                      aria-label={t('saveLocationAriaLabel', { path: workspacePath })}
                     >
                       <Icon name="folder" size={18} className="flex-shrink-0 text-icon-secondary" />
-                      <span className="flex-shrink-0 text-text-secondary">저장 위치</span>
+                      <span className="flex-shrink-0 text-text-secondary">{t('saveLocation')}</span>
                       <span className="truncate font-mono">{workspacePath}</span>
                     </button>
                   </Tooltip>
@@ -2577,17 +2578,17 @@ function ChatScreen() {
             type="button"
             onClick={() => setSessionSidebarOpen((o) => !o)}
             className="electron-no-drag flex h-6 w-6 items-center justify-center rounded-md text-icon-secondary hover:bg-layer-hover-01 hover:text-icon-primary transition-colors"
-            aria-label={sessionSidebarOpen ? '대화 목록 접기' : '대화 목록 펼치기'}
-            title={sessionSidebarOpen ? '대화 목록 접기' : '대화 목록 펼치기'}
+            aria-label={sessionSidebarOpen ? t('sessionSidebarClose') : t('sessionSidebarOpen')}
+            title={sessionSidebarOpen ? t('sessionSidebarClose') : t('sessionSidebarOpen')}
           >
             <Icon name="sidebar" size={17} />
           </button> 
-          <Tooltip label="빠른 실행 (⌘K)">
+          <Tooltip label={t('quickLaunch')}>
             <button
               type="button"
               onClick={openCommandPalette}
               className="electron-no-drag flex h-6 w-6 items-center justify-center rounded-md text-icon-secondary transition-colors hover:bg-layer-hover-01 hover:text-icon-primary"
-              aria-label="빠른 실행 열기"
+              aria-label={t('quickLaunchAriaLabel')}
             >
               <Icon name="search" size={17} />
             </button>
@@ -2596,13 +2597,13 @@ function ChatScreen() {
 
         {/* 패널의 기능(renew)이 아니라 레이아웃 열기/닫기임을 모양으로 명시한다. */}
         <div className="absolute top-0 right-0 z-30 flex h-11 items-center pr-2 electron-drag">
-          <Tooltip label={learningPanelOpen ? '학습 루프 닫기' : '학습 루프 열기'}>
+          <Tooltip label={learningPanelOpen ? t('learningPanelClose') : t('learningPanelOpen')}>
             <button
               type="button"
               onClick={() => setLearningPanelOpen((open) => !open)}
               data-tour="learning-loop"
               className="electron-no-drag flex h-[28px] w-[28px] items-center justify-center rounded-md text-icon-secondary transition-colors hover:bg-layer-hover-01 hover:text-icon-primary"
-              aria-label={learningPanelOpen ? '학습 루프 닫기' : '학습 루프 열기'}
+              aria-label={learningPanelOpen ? t('learningPanelClose') : t('learningPanelOpen')}
             >
               <Icon name={learningPanelOpen ? 'side-panel-close' : 'side-panel-open'} size={17} />
             </button>
@@ -2626,14 +2627,13 @@ function ChatScreen() {
       {/* Delete-session confirmation (irreversible) */}
       <ConfirmDialog
         open={!!confirmDelete}
-        title="대화를 삭제할까요?"
+        title={t('delete.title')}
         description={
           <>
-            <span className="font-medium text-text-primary">{confirmDelete?.title}</span> 대화와 모든 메시지가 영구
-            삭제됩니다. 되돌릴 수 없어요.
+            <span className="font-medium text-text-primary">{confirmDelete?.title}</span> {t('delete.description')}
           </>
         }
-        confirmLabel="삭제"
+        confirmLabel={t('delete.confirm')}
         tone="danger"
         confirmIcon="trash"
         onConfirm={performDelete}

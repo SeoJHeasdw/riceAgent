@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { TwoColumnLayout } from '../components/TwoColumnLayout';
 import { PluginCard } from '../components/carbon/PluginCard';
@@ -13,14 +14,34 @@ import { useLearning } from '../lib/learning/LearningContext';
 import { connectorIdForScope } from '../lib/learningData';
 import { useResizable } from '../hooks/useResizable';
 import { Icon, ResizeHandle } from '../components/ui';
-import { pluginCategories } from '../lib/mockData';
+import { pluginCategoryCodes, type PluginCategoryCode } from '../lib/mockData';
 import { Plugin } from '../lib/types';
 
 /**
  * PluginMarketScreen - Marketplace for discovering and installing solution expert plugins
  */
 
+// 카테고리 sentinel — 상태에 저장하는 stable code
+const CAT_ALL = '__all__' as const;
+const CAT_INSTALLED = '__installed__' as const;
+type PluginCategorySentinel = typeof CAT_ALL | typeof CAT_INSTALLED;
+type SelectedPluginCategory = PluginCategorySentinel | PluginCategoryCode | string;
+
+// PluginCategoryCode → 번역. t()가 정적 키만 수용하므로 명시적 맵 사용.
+function getPluginCategoryLabel(code: PluginCategoryCode, t: ReturnType<typeof useTranslation<'plugins'>>['t']): string {
+  const map: Record<PluginCategoryCode, string> = {
+    WXO: t('category.WXO'),
+    sales: t('category.sales'),
+    hr: t('category.hr'),
+    finance: t('category.finance'),
+    marketing: t('category.marketing'),
+    itOps: t('category.itOps'),
+  };
+  return map[code] ?? code;
+}
+
 function PluginMarketScreen() {
+  const { t } = useTranslation('plugins');
   const navigate = useNavigate();
   const {
     filteredPlugins,
@@ -35,7 +56,8 @@ function PluginMarketScreen() {
   } = useMarketplace();
   const { installPluginFromMarket } = useLearning();
 
-  const [selectedCategory, setSelectedCategory] = useState('전체');
+  // selectedCategory는 stable code 저장 — 렌더 시 t()로 표시
+  const [selectedCategory, setSelectedCategory] = useState<SelectedPluginCategory>(CAT_ALL);
   const [detailModalPlugin, setDetailModalPlugin] = useState<Plugin | null>(null);
   const [connectorPromptPlugin, setConnectorPromptPlugin] = useState<Plugin | null>(null);
   const toast = useToast();
@@ -48,24 +70,24 @@ function PluginMarketScreen() {
     storageKey: 'rice.panel.pluginmarket',
   });
 
-  // Filter by category
+  // Filter by category — sentinel 처리
   const categoryFilteredPlugins = filteredPlugins.filter((plugin) => {
-    if (selectedCategory === '전체') return true;
-    if (selectedCategory === '설치됨') return plugin.installed;
+    if (selectedCategory === CAT_ALL) return true;
+    if (selectedCategory === CAT_INSTALLED) return plugin.installed;
     return plugin.category === selectedCategory;
   });
 
-  // Sort options
+  // Sort options — stable value 저장, 렌더 시 t()로 표시
   const sortOptions = [
-    { value: 'popular', label: '인기순' },
-    { value: 'recent', label: '최신순' },
-    { value: 'skills', label: '스킬 수' },
+    { value: 'popular', label: t('sortPopular') },
+    { value: 'recent', label: t('sortRecent') },
+    { value: 'skills', label: t('sortSkillCount') },
   ];
 
   // Handle plugin installation
   const handleInstall = async (plugin: Plugin) => {
     setDetailModalPlugin(null);
-    const job = toast.progress({ label: '다운로드 중', sublabel: plugin.name, progress: 0 });
+    const job = toast.progress({ label: t('toastDownloading'), sublabel: plugin.name, progress: 0 });
 
     // Simulate download progress
     for (let i = 0; i <= 50; i += 10) {
@@ -73,7 +95,7 @@ function PluginMarketScreen() {
       job.update({ progress: i });
     }
 
-    job.update({ label: '설치 중', progress: 50 });
+    job.update({ label: t('toastInstalling'), progress: 50 });
 
     // Simulate installation progress
     for (let i = 50; i <= 100; i += 10) {
@@ -85,10 +107,10 @@ function PluginMarketScreen() {
     // 설치를 "나의 플러그인"에도 즉시 반영 (스킬의 installSkillFromMarket 와 대칭).
     installPluginFromMarket(plugin, { enabled: installResult?.enabled ?? true });
     if (installResult?.missingConnectors.length) {
-      job.done('success', '설치됨 · 커넥터 연결 필요');
-      showToast(`${plugin.name}을(를) 활성화하려면 커넥터를 연결하세요`, 'warning');
+      job.done('success', t('toastInstallDone'));
+      showToast(t('toastNeedsConnector', { name: plugin.name }), 'warning');
     } else {
-      job.done('success', '설치 완료');
+      job.done('success', t('toastInstallDone'));
     }
     // The toast lingers, then animates itself out automatically.
   };
@@ -97,7 +119,7 @@ function PluginMarketScreen() {
   const handleUninstall = async (plugin: Plugin) => {
     setDetailModalPlugin(null);
     await uninstallArtifact(plugin.id, 'plugin');
-    showToast(`${plugin.name}이(가) 제거되었습니다`, 'info');
+    showToast(t('toastUninstalled', { name: plugin.name }), 'info');
   };
 
   // Handle plugin toggle
@@ -110,8 +132,8 @@ function PluginMarketScreen() {
     }
     showToast(
       plugin.enabled
-        ? `${plugin.name}이(가) 일시정지되었습니다`
-        : `${plugin.name}이(가) 활성화되었습니다`,
+        ? t('toastPaused', { name: plugin.name })
+        : t('toastEnabled', { name: plugin.name }),
       plugin.enabled ? 'info' : 'success'
     );
   };
@@ -134,8 +156,18 @@ function PluginMarketScreen() {
   const installedCount = filteredPlugins.filter((p) => p.installed).length;
   const activeCount = filteredPlugins.filter((p) => p.enabled).length;
 
-  // Categories with "설치됨" option
-  const categories = ['전체', '설치됨', ...pluginCategories];
+  // 카테고리 버튼 레이블 (sentinel + plugin category codes)
+  const getCategoryButtonLabel = (cat: SelectedPluginCategory): string => {
+    if (cat === CAT_ALL) return t('categoryAll');
+    if (cat === CAT_INSTALLED) return t('categoryInstalled');
+    // pluginCategoryCode인지 확인
+    if (pluginCategoryCodes.includes(cat as PluginCategoryCode)) {
+      return getPluginCategoryLabel(cat as PluginCategoryCode, t);
+    }
+    return cat; // 백엔드 자유 문자열 (번역 없음)
+  };
+
+  const allCategories: SelectedPluginCategory[] = [CAT_ALL, CAT_INSTALLED, ...pluginCategoryCodes];
 
   return (
     <TwoColumnLayout>
@@ -152,25 +184,25 @@ function PluginMarketScreen() {
                 <circle cx="12" cy="12" r="9" />
                 <circle cx="12" cy="12" r="3.5" />
               </svg>
-              내 전문가
+              {t('railExpertLabel')}
             </div>
             <div className="text-heading-03 font-semibold text-white leading-none tracking-tight tabular-nums">
               {installedCount}
-              <span className="text-body-short-01 font-normal text-white/70 ml-1.5">설치됨</span>
+              <span className="text-body-short-01 font-normal text-white/70 ml-1.5">{t('railInstalledUnit')}</span>
             </div>
             <div className="inline-flex items-center gap-1.5 mt-3 px-2 py-0.5 rounded-full bg-white/15 text-caption-01 text-white">
               <span className="w-1.5 h-1.5 rounded-full bg-support-success" />
-              {activeCount} 활성
+              {t('railActiveUnit', { count: activeCount })}
             </div>
           </div>
         </div>
 
         {/* Categories */}
         <div className="text-caption-01 font-semibold uppercase tracking-wider text-text-helper px-4 py-1.5">
-          솔루션
+          {t('railSolutionsTitle')}
         </div>
         <div className="flex-1 overflow-y-auto px-2 space-y-0.5">
-          {categories.map((category) => {
+          {allCategories.map((category) => {
             const isActive = category === selectedCategory;
             return (
               <button
@@ -182,8 +214,8 @@ function PluginMarketScreen() {
                     : 'bg-transparent text-text-secondary hover:bg-layer-hover-01 hover:text-text-primary'
                 }`}
               >
-                <span className="truncate">{category}</span>
-                {category === '설치됨' && (
+                <span className="truncate">{getCategoryButtonLabel(category)}</span>
+                {category === CAT_INSTALLED && (
                   <span className="ml-auto pl-2 flex-shrink-0 text-caption-01 text-text-helper font-mono">
                     {installedCount}
                   </span>
@@ -197,7 +229,7 @@ function PluginMarketScreen() {
         <div className="border-t border-border-subtle-01 px-4 py-3 flex items-start gap-2">
           <Icon name="idea" size={15} className="text-icon-secondary mt-0.5 flex-shrink-0" />
           <span className="text-caption-01 text-text-helper leading-4">
-            각 전문가는 해당 솔루션 개발팀에서 제공하고 관리합니다.
+            {t('railInfoHint')}
           </span>
         </div>
       </div>
@@ -214,8 +246,8 @@ function PluginMarketScreen() {
       {/* Main Content */}
       <div className="flex-1 min-w-0 overflow-y-auto bg-background">
         <MarketplaceHeader
-          title="플러그인 마켓"
-          subtitle="솔루션 전문가를 설치해 에이전트를 해당 도메인 전문가로 만드세요 — 고객 데모, 온프레미스 구축, 오류 처리에 활용할 수 있습니다"
+          title={t('title')}
+          subtitle={t('subtitle')}
           searchValue={searchQuery}
           onSearchChange={setSearchQuery}
           sortValue={sortBy}
@@ -245,15 +277,15 @@ function PluginMarketScreen() {
                 <Icon name="search" size={22} />
               </div>
               <div className="text-body-long-01">
-                  {selectedCategory === '설치됨'
-                    ? '아직 설치된 전문가가 없습니다'
-                    : '해당 솔루션의 전문가를 찾지 못했습니다'}
-                </div>
-                <div className="text-caption-01 mt-1">
-                  {selectedCategory === '설치됨'
-                    ? '마켓에서 솔루션 전문가를 설치해보세요'
-                    : '검색어나 필터를 조정해보세요'}
-                </div>
+                {selectedCategory === CAT_INSTALLED
+                  ? t('emptyInstalledTitle')
+                  : t('emptySearchTitle')}
+              </div>
+              <div className="text-caption-01 mt-1">
+                {selectedCategory === CAT_INSTALLED
+                  ? t('emptyInstalledHint')
+                  : t('emptySearchHint')}
+              </div>
             </div>
           )}
         </div>

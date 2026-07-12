@@ -1,5 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { navDestinations, type NavDestination, type NavGroup } from '../lib/navigation';
 import { NavIcon } from '../lib/navigation/NavIcon';
 import { useLearning } from '../lib/learning/LearningContext';
@@ -13,26 +14,11 @@ import { useLearning } from '../lib/learning/LearningContext';
  * 하단에 모든 destination으로 가는 카드 그리드(공용 navDestinations)를 둔다.
  */
 
-/** 홈 허브 섹션 구성 (group → 라벨/순서) */
-const GROUPS: { id: NavGroup; label: string }[] = [
-  { id: 'workspace', label: '워크스페이스' },
-  { id: 'market', label: '마켓플레이스' },
-  { id: 'system', label: '연결 · 설정' },
-];
-
 /** group별 아이콘 강조 색 (시각적 구분) */
 const GROUP_ACCENT: Record<NavGroup, string> = {
   workspace: 'text-blue-50 bg-blue-60/12',
   market: 'text-purple-50 bg-purple-60/12',
   system: 'text-teal-40 bg-teal-60/12',
-};
-
-const greeting = (): string => {
-  const h = new Date().getHours();
-  if (h < 6) return '늦은 밤이네요';
-  if (h < 12) return '좋은 아침이에요';
-  if (h < 18) return '좋은 오후예요';
-  return '좋은 저녁이에요';
 };
 
 /* ── 24px 스트로크 라인 아이콘 (대시보드 타일용) ── */
@@ -71,8 +57,10 @@ const StatTile: React.FC<{
 );
 
 /* ── 네비게이션 카드 ── */
-const NavCard: React.FC<{ dest: NavDestination; onClick: () => void; className?: string }> = ({
+const NavCard: React.FC<{ dest: NavDestination; title: string; description: string; onClick: () => void; className?: string }> = ({
   dest,
+  title,
+  description,
   onClick,
   className = '',
 }) => (
@@ -89,7 +77,7 @@ const NavCard: React.FC<{ dest: NavDestination; onClick: () => void; className?:
     </span>
     <div className="min-w-0 flex-1">
       <div className="flex items-center gap-1.5">
-        <span className="font-semibold text-text-primary text-body-short-01">{dest.title ?? dest.label}</span>
+        <span className="font-semibold text-text-primary text-body-short-01">{title}</span>
         <NavIcon
           size={15}
           className="text-text-helper opacity-0 transition-opacity duration-150 group-hover:opacity-100"
@@ -97,16 +85,26 @@ const NavCard: React.FC<{ dest: NavDestination; onClick: () => void; className?:
           {ARROW}
         </NavIcon>
       </div>
-      <p className="text-text-secondary leading-relaxed mt-1 text-caption-01">{dest.description}</p>
+      <p className="text-text-secondary leading-relaxed mt-1 text-caption-01">{description}</p>
     </div>
   </button>
 );
 
 const HomeScreen: React.FC = () => {
   const navigate = useNavigate();
+  const { t } = useTranslation('home');
   const { skills, signals, proposals, hydrating } = useLearning();
 
   const visible = navDestinations.filter((d) => !d.hideFromHome);
+
+  // ── 인사말 — 시간대에 따라 다른 키 사용 ──
+  const greeting = (() => {
+    const h = new Date().getHours();
+    if (h < 6) return t('greeting.lateNight');
+    if (h < 12) return t('greeting.morning');
+    if (h < 18) return t('greeting.afternoon');
+    return t('greeting.evening');
+  })();
 
   // ── 학습 현황 집계 ──
   const activeSkills = skills.filter((s) => s.state !== 'archived');
@@ -117,15 +115,39 @@ const HomeScreen: React.FC = () => {
   // 자주 쓰는 스킬 Top 4 (사용 횟수 내림차순)
   const topSkills = [...activeSkills].sort((a, b) => (b.uses || 0) - (a.uses || 0)).slice(0, 4);
 
+  /** nav destination의 번역된 title/description — 렌더 시점에 home 카탈로그에서 조회.
+   *  카탈로그에 없는 destination은 navDestinations의 원본값으로 폴백. */
+  const NAV_DEST_IDS = ['home', 'chat', 'my-skills', 'myplugins', 'skills', 'plugins', 'connectors', 'settings'] as const;
+  type KnownDestId = (typeof NAV_DEST_IDS)[number];
+  const isKnownDestId = (id: string): id is KnownDestId => NAV_DEST_IDS.includes(id as KnownDestId);
+
+  const destTitle = (dest: NavDestination): string => {
+    if (isKnownDestId(dest.id)) return t(`nav.destinations.${dest.id}.title`);
+    return dest.title ?? dest.label;
+  };
+  const destDesc = (dest: NavDestination): string => {
+    if (isKnownDestId(dest.id)) return t(`nav.destinations.${dest.id}.description`);
+    return dest.description;
+  };
+
+  /** nav group label — 렌더 시점에 home 카탈로그에서 조회 */
+  const groupLabel = (id: NavGroup): string => t(`nav.groups.${id}`);
+
+  const GROUPS: { id: NavGroup }[] = [
+    { id: 'workspace' },
+    { id: 'market' },
+    { id: 'system' },
+  ];
+
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-[1040px] mx-auto px-8 py-8">
         {/* ── 히어로 — 인사·한 줄 소개·단일 강한 CTA ── */}
         <header className="mb-6">
-          <p className="text-body-short-01 text-text-helper">{greeting()}</p>
-          <h1 className="text-heading-03 font-light text-text-primary mt-1">무엇을 해볼까요?</h1>
+          <p className="text-body-short-01 text-text-helper">{greeting}</p>
+          <h1 className="text-heading-03 font-light text-text-primary mt-1">{t('hero.headline')}</h1>
           <p className="text-body-short-01 text-text-secondary mt-2 max-w-[560px]">
-            RICE는 대화할수록 내 작업 방식을 학습하고 반복 작업을 스킬로 저장해요. 이어서 일을 시작해 보세요.
+            {t('hero.description')}
           </p>
 
           {/* 주요 행동 — 강한 CTA는 '새 대화' 하나, 나머지는 ghost */}
@@ -137,7 +159,7 @@ const HomeScreen: React.FC = () => {
               <LineIcon size={16}>
                 <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
               </LineIcon>
-              <span className="text-body-short-01 font-semibold">새 대화 시작</span>
+              <span className="text-body-short-01 font-semibold">{t('hero.newChat')}</span>
             </button>
             <button
               onClick={() => navigate('/skills')}
@@ -146,7 +168,7 @@ const HomeScreen: React.FC = () => {
               <LineIcon size={16}>
                 <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
               </LineIcon>
-              <span className="text-body-short-01 font-medium">스킬 마켓 둘러보기</span>
+              <span className="text-body-short-01 font-medium">{t('hero.browseSkills')}</span>
             </button>
           </div>
         </header>
@@ -154,7 +176,7 @@ const HomeScreen: React.FC = () => {
         {/* ── 학습 현황 ── */}
         <section className="mb-6">
           <div className="flex items-center gap-2 mb-3">
-            <h2 className="text-caption-01 font-semibold uppercase tracking-wider text-text-secondary">학습 현황</h2>
+            <h2 className="text-caption-01 font-semibold uppercase tracking-wider text-text-secondary">{t('learning.sectionTitle')}</h2>
             {/* AI 시각 문법 — 학습된 표면임을 표시 */}
             <span className="ai-label">
               <span className="ai-label__text">AI</span>
@@ -165,7 +187,7 @@ const HomeScreen: React.FC = () => {
                 className="ml-auto inline-flex items-center gap-1.5 text-caption-01 font-medium text-blue-50 hover:text-blue-60 transition-colors"
               >
                 <span className="inline-flex h-1.5 w-1.5 rounded-full bg-blue-50" />
-                검토할 제안 {proposals.length}건
+                {t('learning.proposals', { count: proposals.length })}
                 <NavIcon size={13}>{ARROW}</NavIcon>
               </button>
             )}
@@ -190,7 +212,7 @@ const HomeScreen: React.FC = () => {
                   </LineIcon>
                 }
                 value={activeSkills.length}
-                label="저장된 스킬"
+                label={t('learning.statSavedSkills')}
               />
               <StatTile
                 accent="text-teal-40 bg-teal-60/12"
@@ -201,7 +223,7 @@ const HomeScreen: React.FC = () => {
                   </LineIcon>
                 }
                 value={totalUses}
-                label="누적 사용"
+                label={t('learning.statTotalUses')}
               />
               <StatTile
                 accent="text-purple-50 bg-purple-60/12"
@@ -212,7 +234,7 @@ const HomeScreen: React.FC = () => {
                   </LineIcon>
                 }
                 value={totalPatches}
-                label="자동 개선"
+                label={t('learning.statAutoImproved')}
               />
               <StatTile
                 accent="text-support-warning bg-support-warning/12"
@@ -224,7 +246,7 @@ const HomeScreen: React.FC = () => {
                   </LineIcon>
                 }
                 value={signals.length}
-                label="학습된 신호"
+                label={t('learning.statLearnedSignals')}
               />
             </div>
           ) : (
@@ -238,9 +260,9 @@ const HomeScreen: React.FC = () => {
                 </LineIcon>
               </span>
               <div className="min-w-0">
-                <p className="text-body-short-01 font-medium text-text-primary">아직 학습한 내용이 없어요</p>
+                <p className="text-body-short-01 font-medium text-text-primary">{t('learning.emptyTitle')}</p>
                 <p className="text-caption-01 text-text-helper mt-0.5">
-                  대화를 시작하면 작업 패턴과 스킬이 여기에 쌓이고, 쓸수록 더 빨라져요.
+                  {t('learning.emptyDesc')}
                 </p>
               </div>
             </div>
@@ -251,12 +273,12 @@ const HomeScreen: React.FC = () => {
         {topSkills.length > 0 && (
           <section className="mb-6">
             <div className="flex items-center mb-3">
-              <h2 className="text-caption-01 font-semibold uppercase tracking-wider text-text-secondary">자주 쓰는 스킬</h2>
+              <h2 className="text-caption-01 font-semibold uppercase tracking-wider text-text-secondary">{t('topSkills.sectionTitle')}</h2>
               <button
                 onClick={() => navigate('/my-skills')}
                 className="ml-auto inline-flex items-center gap-1 text-caption-01 font-medium text-text-helper hover:text-text-secondary transition-colors"
               >
-                전체 보기
+                {t('topSkills.viewAll')}
                 <NavIcon size={13}>{ARROW}</NavIcon>
               </button>
             </div>
@@ -279,12 +301,12 @@ const HomeScreen: React.FC = () => {
                         {skill.command ? `/${skill.command}` : skill.name}
                       </span>
                       {skill.hot && (
-                        <span className="text-label-micro font-semibold text-orange-40 flex-shrink-0">인기</span>
+                        <span className="text-label-micro font-semibold text-orange-40 flex-shrink-0">{t('topSkills.hot')}</span>
                       )}
                     </div>
                     <div className="text-caption-01 text-text-helper mt-0.5 truncate">
-                      {skill.ver} · {skill.uses}회 사용
-                      {skill.patches ? ` · ${skill.patches}회 개선` : ''}
+                      {skill.ver} · {t('topSkills.usageCount', { count: skill.uses })}
+                      {skill.patches ? ` · ${t('topSkills.patchCount', { count: skill.patches })}` : ''}
                     </div>
                   </div>
                   <NavIcon
@@ -308,9 +330,9 @@ const HomeScreen: React.FC = () => {
                   </span>
                   <div className="min-w-0 flex-1">
                     <span className="text-body-short-01 font-medium text-text-secondary group-hover:text-text-primary transition-colors">
-                      새 스킬 만들기
+                      {t('topSkills.newSkill')}
                     </span>
-                    <div className="text-caption-01 text-text-helper mt-0.5">대화에서 반복 작업을 스킬로 저장해요</div>
+                    <div className="text-caption-01 text-text-helper mt-0.5">{t('topSkills.newSkillDesc')}</div>
                   </div>
                 </button>
               )}
@@ -326,13 +348,15 @@ const HomeScreen: React.FC = () => {
             return (
               <section key={group.id}>
                 <h2 className="text-caption-01 font-semibold uppercase tracking-wider text-text-secondary mb-3">
-                  {group.label}
+                  {groupLabel(group.id)}
                 </h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {items.map((dest, i) => (
                     <NavCard
                       key={dest.id}
                       dest={dest}
+                      title={destTitle(dest)}
+                      description={destDesc(dest)}
                       onClick={() => navigate(dest.path)}
                       // 홀수 개 그룹의 마지막 카드는 2열 전체를 채워 빈 슬롯 제거
                       className={items.length % 2 === 1 && i === items.length - 1 ? 'sm:col-span-2' : ''}

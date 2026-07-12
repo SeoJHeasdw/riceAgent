@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation, Trans } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Button, Icon, Tag, ResizeHandle, Toggle } from '../components/ui';
 import { ConnectorRequiredModal } from '../components/carbon/ConnectorRequiredModal';
@@ -14,8 +15,9 @@ import { connectorIdForScope, type MyPlugin } from '../lib/learningData';
  * prompts to try. Mirrors the "나의 스킬" screen.
  */
 
-const FILTERS = ['전체', '활성', '업데이트 있음', '비활성'] as const;
-type Filter = (typeof FILTERS)[number];
+/** stable filter code — UI 라벨은 렌더 시 plugins:myPlugins.filter* 키로 번역 */
+const FILTER_CODES = ['all', 'active', 'has_update', 'inactive'] as const;
+type Filter = (typeof FILTER_CODES)[number];
 
 const hasUpdate = (p: MyPlugin) => !!p.update;
 
@@ -28,19 +30,34 @@ const SectionLabel: React.FC<{ children: React.ReactNode; right?: React.ReactNod
 
 type PluginTab = 'skills' | 'knowledge' | 'permissions';
 
+/**
+ * plugin.updated stable code → 번역 문자열.
+ * 레거시 자유 문자열(ko/en 자연어)은 그대로 표시하고, 새 stable code만 번역한다.
+ */
+function renderUpdated(updated: string, t: ReturnType<typeof useTranslation<'plugins'>>['t']): string {
+  switch (updated) {
+    case 'plugin_updated_just_installed': return t('myPlugins.updatedJustInstalled');
+    case 'plugin_updated_builtin':        return t('myPlugins.updatedBuiltin');
+    case 'plugin_updated_installed':      return t('myPlugins.updatedInstalled');
+    case 'plugin_updated_needs_connector': return t('myPlugins.updatedNeedsConnector');
+    default: return updated; // 레거시 자유 문자열 폴백
+  }
+}
+
 const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) => {
   const navigate = useNavigate();
+  const { t } = useTranslation('plugins');
   const { myPlugins, setMyPlugins } = useLearning();
   const [tab, setTab] = useState<PluginTab>('skills');
   const [connectorDialogOpen, setConnectorDialogOpen] = useState(false);
   const plugin = myPlugins.find((p) => p.id === pluginId);
 
   if (!plugin || !pluginId) {
-    return <div className="flex-1 flex items-center justify-center text-body-short-02 text-text-helper">플러그인을 선택하세요.</div>;
+    return <div className="flex-1 flex items-center justify-center text-body-short-02 text-text-helper">{t('myPlugins.selectPlaceholder')}</div>;
   }
 
   const patch = (fn: (p: MyPlugin) => MyPlugin) => setMyPlugins((a) => a.map((x) => (x.id === pluginId ? fn(x) : x)));
-  const permissionsNeedingConnection = plugin.permissions.filter((p) => p.mode.includes('연결 필요'));
+  const permissionsNeedingConnection = plugin.permissions.filter((p) => p.mode === 'needs_connection');
   const missingConnectorNames = permissionsNeedingConnection.map((p) => p.name);
   const firstConnectorTarget = (() => {
     const first = permissionsNeedingConnection[0]?.name ?? plugin.permissions[0]?.name;
@@ -71,13 +88,13 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
     if (api.isEnabled) void api.removeArtifact(pluginId);
   };
   const update = () =>
-    plugin.update && patch((x) => ({ ...x, update: undefined, version: plugin.update!.version, updated: '방금' }));
+    plugin.update && patch((x) => ({ ...x, update: undefined, version: plugin.update!.version, updated: 'plugin_updated_just_installed' }));
 
   const meta: [string, string][] = [
-    ['소스', plugin.source],
-    ['버전', plugin.version],
-    ['작성자', plugin.author],
-    ['마지막 업데이트', plugin.updated],
+    [t('myPlugins.metaSource'),   plugin.source],
+    [t('myPlugins.metaVersion'),  plugin.version],
+    [t('myPlugins.metaAuthor'),   plugin.author],
+    [t('myPlugins.metaUpdated'),  renderUpdated(plugin.updated, t)],
   ];
 
   return (
@@ -97,28 +114,28 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
             <div className="flex items-center gap-2 flex-wrap">
               <h2 className="text-heading-03 font-semibold text-text-primary">{plugin.name}</h2>
               <Tag type="purple" size="sm">
-                플러그인
+                {t('myPlugins.tagPlugin')}
               </Tag>
               {plugin.builtin && (
                 <Tag type="teal" size="sm">
-                  기본 내장
+                  {t('myPlugins.tagBuiltin')}
                 </Tag>
               )}
               {!plugin.enabled && (
                 <Tag type="gray" size="sm">
-                  비활성
+                  {t('myPlugins.tagInactive')}
                 </Tag>
               )}
             </div>
             <p className="mt-1.5 text-body-short-01 leading-5 text-text-secondary">{plugin.summary}</p>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
-            <span className="text-caption-01 text-text-helper">{plugin.enabled ? '활성' : '비활성'}</span>
+            <span className="text-caption-01 text-text-helper">{plugin.enabled ? t('myPlugins.statusActive') : t('myPlugins.statusInactive')}</span>
             <Toggle
               checked={plugin.enabled}
               onChange={toggle}
               tone="purple"
-              aria-label={`${plugin.name} ${plugin.enabled ? '비활성화' : '활성화'}`}
+              aria-label={plugin.enabled ? t('myPlugins.ariaDisable', { name: plugin.name }) : t('myPlugins.ariaEnable', { name: plugin.name })}
             />
           </div>
         </div>
@@ -131,14 +148,14 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1.5 text-body-short-01 leading-5 text-text-primary">
-                <span className="font-semibold">새 버전</span>
+                <span className="font-semibold">{t('myPlugins.updateTitle')}</span>
                 <span className="font-mono font-semibold text-link-primary">{plugin.update.version}</span>
-                <span className="text-text-secondary">사용 가능</span>
+                <span className="text-text-secondary">{t('myPlugins.updateAvailable')}</span>
               </div>
               <div className="text-caption-01 leading-4 text-text-helper truncate mt-0.5">{plugin.update.note}</div>
             </div>
             <Button kind="primary" size="sm" icon={<Icon name="renew" size={14} />} onClick={update} className="flex-shrink-0">
-              업데이트
+              {t('myPlugins.updateButton')}
             </Button>
           </div>
         )}
@@ -147,7 +164,7 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
       <div className="px-7 pt-5 pb-10 flex flex-col gap-7">
         {/* metadata */}
         <div>
-          <SectionLabel>정보</SectionLabel>
+          <SectionLabel>{t('myPlugins.metaTitle')}</SectionLabel>
           <div className="grid grid-cols-2 gap-x-6 gap-y-3.5">
             {meta.map(([k, v]) => (
               <div key={k}>
@@ -162,9 +179,9 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
         <div>
           <div className="flex items-center border-b border-border-subtle-01 mb-3.5">
             {([
-              ['skills', `스킬 · ${plugin.skills.length}`],
-              ['knowledge', `지식 · ${plugin.knowledge.length}`],
-              ['permissions', `권한 · ${plugin.permissions.length}`],
+              ['skills',      t('myPlugins.tabSkills',      { count: plugin.skills.length })],
+              ['knowledge',   t('myPlugins.tabKnowledge',   { count: plugin.knowledge.length })],
+              ['permissions', t('myPlugins.tabPermissions', { count: plugin.permissions.length })],
             ] as const).map(([id, label]) => {
               const on = tab === id;
               return (
@@ -186,12 +203,12 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
                 onClick={() => navigate('/my-skills')}
                 className="inline-flex items-center gap-1 text-caption-01 text-link-primary hover:underline"
               >
-                모두 보기 <Icon name="arrow-up-right" size={12} />
+                {t('myPlugins.tabSkillsViewAll')} <Icon name="arrow-up-right" size={12} />
               </button>
             )}
             {tab === 'permissions' && permissionsNeedingConnection.length > 0 && (
               <Button kind="tertiary" size="sm" icon={<Icon name="arrow-up-right" size={14} />} onClick={() => navigate(firstConnectorTarget)}>
-                커넥터 연결
+                {t('myPlugins.tabPermissionsConnect')}
               </Button>
             )}
           </div>
@@ -199,7 +216,11 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
           {tab === 'skills' && (
             <>
               <p className="text-caption-01 text-text-helper mb-2.5">
-                채팅에서 <span className="font-mono text-text-secondary">/</span> 를 입력해 호출하거나, RICE가 관련 작업에 자동으로 사용합니다.
+                <Trans
+                  t={t}
+                  i18nKey="myPlugins.skillsHint"
+                  components={{ slash: <span className="font-mono text-text-secondary" /> }}
+                />
               </p>
               <div className="flex flex-col gap-px bg-border-subtle-01 rounded-lg overflow-hidden">
                 {plugin.skills.map((s, i) => (
@@ -223,7 +244,7 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
           {tab === 'knowledge' && (
             <>
               <p className="text-caption-01 text-text-helper mb-2.5">
-                플러그인이 답변에 활용하는 지식 소스예요. 제공사가 갱신하면 자동으로 최신화됩니다.
+                {t('myPlugins.knowledgeHint')}
               </p>
               <div className="flex flex-col gap-px bg-border-subtle-01 rounded-lg overflow-hidden">
                 {plugin.knowledge.map((k, i) => (
@@ -243,23 +264,23 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
           {tab === 'permissions' && (
             <>
               <p className="text-caption-01 text-text-helper mb-2.5">
-                이 플러그인이 접근할 수 있는 데이터·도구 범위예요. 항목을 누르면 해당 커넥터로 이동합니다.
+                {t('myPlugins.permissionsHint')}
               </p>
               {plugin.permissions.length === 0 ? (
                 <div className="text-caption-01 text-text-helper bg-layer-01 border border-border-subtle-01 rounded-lg px-3.5 py-3.5">
-                  추가 연결 없이 사용할 수 있는 플러그인이에요.
+                  {t('myPlugins.permissionsEmpty')}
                 </div>
               ) : (
                 <div className="flex flex-col gap-px bg-border-subtle-01 rounded-lg overflow-hidden">
                   {plugin.permissions.map((p, i) => {
                     const cid = connectorIdForScope(p.name);
-                    const needsConnection = p.mode.includes('연결 필요');
+                    const needsConnection = p.mode === 'needs_connection';
                     return (
                       <div key={i} className="flex items-center gap-2.5 bg-background px-3.5 py-2.5">
                         <button
                           type="button"
                           onClick={() => navigate(cid ? `/connectors/${cid}` : '/connectors')}
-                          title={cid ? '커넥터에서 보기' : '커넥터 화면으로'}
+                          title={cid ? t('myPlugins.permTitleViewConnector') : t('myPlugins.permTitleGoConnectors')}
                           className="group flex items-center gap-2.5 flex-1 min-w-0 text-left"
                         >
                           <Icon name={needsConnection ? 'connect' : 'lock'} size={15} className="text-purple-40 flex-shrink-0 opacity-80" />
@@ -269,7 +290,7 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
                           {cid && <Icon name="arrow-up-right" size={13} className="text-icon-secondary opacity-50 flex-shrink-0" />}
                         </button>
                         <Tag type={needsConnection ? 'yellow' : 'gray'} size="sm">
-                          {p.mode}
+                          {needsConnection ? t('myPlugins.permModeNeedsConnection') : t('myPlugins.permModeConnected')}
                         </Tag>
                       </div>
                     );
@@ -282,7 +303,7 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
 
         {/* example prompts */}
         <div>
-          <SectionLabel>다음과 같이 질문해 보세요</SectionLabel>
+          <SectionLabel>{t('myPlugins.examplesTitle')}</SectionLabel>
           {plugin.examples.length > 0 ? (
             <div className="flex flex-col gap-1.5">
               {plugin.examples.map((q, i) => (
@@ -302,7 +323,7 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
             </div>
           ) : (
             <div className="text-caption-01 text-text-helper bg-layer-01 border border-border-subtle-01 rounded-lg px-3.5 py-3.5">
-              추천 질문이 아직 제공되지 않았어요.
+              {t('myPlugins.examplesEmpty')}
             </div>
           )}
         </div>
@@ -310,18 +331,18 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
         {/* actions */}
         <div className="flex gap-2 border-t border-border-subtle-01 pt-4 items-center">
           <Button kind="secondary" size="sm" icon={<Icon name="arrow-up-right" size={15} />} onClick={() => navigate('/plugins')}>
-            Plugin Market에서 보기
+            {t('myPlugins.actionViewMarket')}
           </Button>
           <div className="flex-1" />
           {plugin.builtin ? (
-            <span className="text-caption-01 text-text-helper">RICE 기본 내장 · 활성/비활성만 가능</span>
+            <span className="text-caption-01 text-text-helper">{t('myPlugins.actionBuiltinNote')}</span>
           ) : (
             <button
               onClick={remove}
               className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-support-error/40 bg-transparent text-support-error text-body-short-01 font-semibold hover:bg-support-error/10 hover:border-support-error/70 transition-colors"
             >
               <Icon name="trash" size={15} />
-              제거
+              {t('myPlugins.actionRemove')}
             </button>
           )}
         </div>
@@ -343,8 +364,9 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
 
 function MyPluginsScreen() {
   const navigate = useNavigate();
+  const { t } = useTranslation('plugins');
   const { myPlugins, hydrating } = useLearning();
-  const [filter, setFilter] = useState<Filter>('전체');
+  const [filter, setFilter] = useState<Filter>('all');
   const [sel, setSel] = useState<string | null>(myPlugins[0]?.id ?? null);
 
   // Resizable left rail
@@ -364,10 +386,10 @@ function MyPluginsScreen() {
   });
 
   const match = (p: MyPlugin) =>
-    filter === '전체' ||
-    (filter === '활성' && p.enabled) ||
-    (filter === '업데이트 있음' && hasUpdate(p)) ||
-    (filter === '비활성' && !p.enabled);
+    filter === 'all' ||
+    (filter === 'active' && p.enabled) ||
+    (filter === 'has_update' && hasUpdate(p)) ||
+    (filter === 'inactive' && !p.enabled);
 
   const list = myPlugins.filter(match);
   const active = myPlugins.filter((p) => p.enabled).length;
@@ -375,6 +397,16 @@ function MyPluginsScreen() {
 
   const selectedExists = sel && myPlugins.some((p) => p.id === sel);
   const effectiveSel = selectedExists ? sel : list[0]?.id ?? myPlugins[0]?.id ?? null;
+
+  /** filter code → 번역 라벨 */
+  const filterLabel = (code: Filter): string => {
+    switch (code) {
+      case 'all':        return t('myPlugins.filterAll');
+      case 'active':     return t('myPlugins.filterActive');
+      case 'has_update': return t('myPlugins.filterHasUpdate');
+      case 'inactive':   return t('myPlugins.filterInactive');
+    }
+  };
 
   return (
     <div className="flex flex-1 min-w-0 bg-background overflow-hidden">
@@ -385,23 +417,25 @@ function MyPluginsScreen() {
       >
         <div className="p-4">
           <div className="domain-summary domain-summary--plugin rounded-xl p-4 text-white">
-            <div className="text-caption-01 text-white/70 mb-1">나의 플러그인</div>
+            <div className="text-caption-01 text-white/70 mb-1">{t('myPlugins.summaryTitle')}</div>
             <div className="text-heading-03 font-semibold text-white leading-none tabular-nums">
               {myPlugins.length}
-              <span className="text-body-short-01 font-normal text-white/70 ml-1">개</span>
+              {t('myPlugins.summaryCountUnit') && (
+                <span className="text-body-short-01 font-normal text-white/70 ml-1">{t('myPlugins.summaryCountUnit')}</span>
+              )}
             </div>
             <div className="text-caption-01 text-white/80 mt-1.5 flex gap-3">
-              <span>{active} 활성</span>
-              {updateCount > 0 && <span>{updateCount} 업데이트</span>}
+              <span>{t('myPlugins.summaryActive', { count: active })}</span>
+              {updateCount > 0 && <span>{t('myPlugins.summaryUpdate', { count: updateCount })}</span>}
             </div>
           </div>
         </div>
 
-        <div className="text-caption-01 text-text-helper px-4 pt-1 pb-1.5 tracking-wider">필터</div>
+        <div className="text-caption-01 text-text-helper px-4 pt-1 pb-1.5 tracking-wider">{t('myPlugins.filterLabel')}</div>
         <div className="flex-1 overflow-y-auto">
-          {FILTERS.map((c) => {
+          {FILTER_CODES.map((c) => {
             const isActive = c === filter;
-            const badge = c === '업데이트 있음' && updateCount > 0 ? updateCount : null;
+            const badge = c === 'has_update' && updateCount > 0 ? updateCount : null;
             return (
               <button
                 key={c}
@@ -412,7 +446,7 @@ function MyPluginsScreen() {
                     : 'bg-transparent border-l-transparent text-text-secondary hover:bg-layer-hover-01'
                 }`}
               >
-                {c}
+                {filterLabel(c)}
                 {badge && (
                   <span className="ml-auto inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 rounded-full bg-purple-60/20 text-purple-30 text-label-micro">
                     {badge}
@@ -426,7 +460,7 @@ function MyPluginsScreen() {
         <div className="border-t border-border-subtle-01 px-4 py-3 flex items-start gap-2">
           <Icon name="idea" size={15} className="text-icon-secondary mt-0.5 flex-shrink-0" />
           <span className="text-caption-01 text-text-helper leading-4">
-            플러그인은 Plugin Market에서 설치돼요. 여기서 켜고 끄거나 제공 스킬을 확인하세요.
+            {t('myPlugins.tipInstall')}
           </span>
         </div>
       </div>
@@ -446,7 +480,7 @@ function MyPluginsScreen() {
         style={{ width: listPanel.width }}
       >
         <div className="px-5 pt-5 pb-3">
-          <h1 className="text-heading-03 font-semibold text-text-primary">플러그인 목록</h1>
+          <h1 className="text-heading-03 font-semibold text-text-primary">{t('myPlugins.listTitle')}</h1>
         </div>
         {list.map((p) => {
           const on = p.id === effectiveSel;
@@ -474,11 +508,11 @@ function MyPluginsScreen() {
                 </div>
                 <div className="flex items-center gap-1.5 mt-0.5">
                   <span className="text-caption-01 text-text-helper truncate">
-                    {p.skills.length}개 스킬 · {p.updated}
+                    {t('myPlugins.listSkillCount', { count: p.skills.length })} · {renderUpdated(p.updated, t)}
                   </span>
                   {hasUpdate(p) && (
                     <Tag type="purple" size="sm">
-                      업데이트
+                      {t('myPlugins.updateButton')}
                     </Tag>
                   )}
                 </div>
@@ -494,21 +528,21 @@ function MyPluginsScreen() {
         {list.length === 0 && (
           <div className="p-10 text-center text-body-short-01 text-text-helper">
             {hydrating ? (
-              '불러오는 중…'
+              t('myPlugins.listLoading')
             ) : myPlugins.length === 0 ? (
               <div className="flex flex-col items-center gap-3">
-                <span>아직 설치된 플러그인이 없어요. 마켓에서 솔루션 전문가를 설치해보세요.</span>
+                <span>{t('myPlugins.listEmpty')}</span>
                 <button
                   onClick={() => navigate('/plugins')}
                   className="inline-flex items-center gap-1.5 text-link-primary hover:underline text-body-short-01"
                 >
                   <Icon name="plug" size={14} />
-                  Plugin Market 둘러보기
+                  {t('myPlugins.listEmptyBrowse')}
                   <Icon name="arrow-up-right" size={13} />
                 </button>
               </div>
             ) : (
-              '해당하는 플러그인이 없어요.'
+              t('myPlugins.listNoMatch')
             )}
           </div>
         )}
@@ -530,5 +564,3 @@ function MyPluginsScreen() {
 }
 
 export default MyPluginsScreen;
-
-// Made with Bob

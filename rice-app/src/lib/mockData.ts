@@ -17,7 +17,26 @@ export const defaultModelSettings: ModelSettings = {
   showThinking: true,
 };
 
-// Skill categories
+/**
+ * Skill categories — stable codes used in SkillMarketScreen (i18n-ready).
+ * The first entry 'all' is the "show all" sentinel.
+ * Each code maps to skills:market.category<PascalCase> in the i18n catalog.
+ */
+export const skillCategoryCodes = [
+  'all',
+  'dataAnalysis',
+  'automation',
+  'integration',
+  'dev',
+  'communication',
+  'productivity',
+] as const;
+export type SkillCategoryCode = (typeof skillCategoryCodes)[number];
+
+/**
+ * Legacy display strings kept for SkillAuthorModal (not yet migrated to i18n).
+ * TODO(i18n): migrate SkillAuthorModal to use skillCategoryCodes + t()
+ */
 export const skillCategories = [
   'All',
   '데이터 분석',
@@ -28,14 +47,18 @@ export const skillCategories = [
   '생산성',
 ];
 
-// 플러그인 카테고리
-export const pluginCategories = [
+/**
+ * Plugin categories — stable codes used in PluginMarketScreen (i18n-ready).
+ * Rendered via t('plugins:category.<code>').
+ */
+export const pluginCategoryCodes = [
   'WXO',
-  '영업',
-  'HR',
-  '재무',
-  '마케팅',
-  'IT 운영',
-];
+  'sales',
+  'hr',
+  'finance',
+  'marketing',
+  'itOps',
+] as const;
+export type PluginCategoryCode = (typeof pluginCategoryCodes)[number];
 
 // Made with Bob
