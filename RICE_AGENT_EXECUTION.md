@@ -54,8 +54,18 @@ divergence가 tail에서만 일어나 이전 반복까지의 프리픽스가 캐
                   char-bigram fuzzy → ko→en 의도어 확장 → negative tag 감점.
               2c. 자동 전문 주입(2026-07-11 정밀도 v2): 명시적 언급이거나
                   (score >= 3.0 AND name/tag strong-hit >= 2)인 상위 스킬만,
-                  skill_max_auto_inject(기본 1)개·24K token 예산 안에서 SKILL.md
-                  본문을 시스템 프롬프트에 넣는다. 태그 1개 스침(오탐)은 인덱스로.
+                  skill_max_auto_inject(기본 1)개·**창 인식 token 예산** 안에서
+                  SKILL.md 본문을 시스템 프롬프트에 넣는다. 예산 =
+                  min(skill_inject_token_budget 24K, 실효 입력 예산의 1/4) —
+                  orchestrator.effective_skill_token_budget이 프로파일·num_ctx에서
+                  역산해 prefetch에 넘긴다(2026-07-12). 프론티어(96K)는 24K로
+                  기존과 동일, 로컬 32K 창은 ~5.9K로 축소된다: 컨텍스트 매니저는
+                  시스템 프롬프트를 압축하지 않으므로, 과대 주입 스킬이 대화
+                  히스토리를 밀어내는 우선순위 역전을 예산 단계에서 끊는다(§7
+                  "on-prem 비례 축소"의 스킬 구획 구현). 태그 1개 스침(오탐)은
+                  인덱스로. 주입 블록에는 SKILL_PRECEDENCE_NOTE(사용자의 이번
+                  요청이 스킬 절차보다 항상 우선 — 스킬은 default이지 명령이
+                  아니다)와 SKILL_TRUST_NOTE가 함께 실린다.
               2c'. 점착(sticky): 한 번 주입된 스킬은 skill_sticky_turns(기본 2)
                   동안 재매칭 없이 유지된다 — 후속 지시("이어서 해줘")가 라우터에
                   안 걸려도 태스크 중간에 절차가 증발하지 않는다. 유지 턴은

@@ -98,7 +98,10 @@ _SCRATCH_NOTE = (
 _SKILL_NOTE = (
     "\n\nSkills: a saved-skill index may be listed in your task context. If one matches "
     "the task, call skill_view with its name FIRST to load its exact steps; use "
-    "skill_search to find others. Don't guess a procedure a skill would give you."
+    "skill_search to find others. Don't guess a procedure a skill would give you. "
+    # 의도 우선 서열(SKILL_PRECEDENCE_NOTE의 워커판) — 태스크 지시가 스킬 절차를 이긴다.
+    "A skill is a default procedure, not an order: where it conflicts with your task "
+    "instructions, the task instructions win."
 )
 
 _CONFIDENCE_VALUES = ("high", "medium", "low")

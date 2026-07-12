@@ -158,6 +158,21 @@ def effective_context_config(cfg: Config, profile: OrchestrationProfile) -> Cont
     )
 
 
+def effective_skill_token_budget(cfg: Config, profile: OrchestrationProfile) -> int:
+    """이 턴의 스킬 전문 자동 주입 토큰 예산 — 모델 창에서 역산한다.
+
+    config 기본 예산(skill_inject_token_budget=24K)은 프론티어 96K 예산의 1/4로
+    설계된 값인데, 로컬 32K 창(실효 입력 ~23.5K)에서는 "예산 없음"과 같았다.
+    컨텍스트 매니저는 시스템 프롬프트를 압축하지 않으므로, 과대 주입된 스킬
+    본문은 그대로 남고 대화 히스토리(사용자 의도가 사는 곳)가 대신 요약·증류로
+    밀려난다 — 스킬이 사용자 의도를 밀어내는 우선순위 역전. 입력 예산의 1/4을
+    상한으로 걸어 끊는다(프론티어 96K/4 = 24K → 기존과 동일, 무변화).
+    예산 밖 스킬은 인덱스 + skill_view 온디맨드로 강등될 뿐 사라지지 않는다.
+    AGENT_EXECUTION §7 "on-prem은 모델별 한도에 맞춰 비례 축소"의 스킬 구획 구현."""
+    ctx_cfg = effective_context_config(cfg, profile)
+    return min(cfg.learning.skill_inject_token_budget, max(1_024, ctx_cfg.max_tokens // 4))
+
+
 def _dedupe_tool_names(
     builtin: tuple[ToolSpec, ...], foldable: tuple[ToolSpec, ...]
 ) -> tuple[ToolSpec, ...]:
@@ -324,7 +339,12 @@ class Orchestrator:
             # every enabled plugin bypass the relevance filter entirely (P0).
             # Name dedupe (learned wins) happens inside prefetch.
             pf = self._learning.prefetch(
-                session_id, user_message, extra_skills=tuple(self._plugins.injected_skills())
+                session_id,
+                user_message,
+                extra_skills=tuple(self._plugins.injected_skills()),
+                # 창 인식 주입 예산 — 로컬 창에서 스킬 본문이 대화 히스토리를
+                # 밀어내지 않게 입력 예산의 1/4로 클램프(프론티어는 무변화).
+                skill_token_budget=effective_skill_token_budget(cfg, profile),
             )
 
             # 3. ASSEMBLE context (tools from every tool-bearing module).

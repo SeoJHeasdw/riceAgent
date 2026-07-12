@@ -51,7 +51,26 @@ ACTION_RULES_EPILOGUE = (
     "if it failed or looks wrong, say what you're fixing and adjust.\n"
     "- If an Active Plan exists, report step transitions with update_plan as you work.\n"
     "- Deliverable requests (PPT/DOCX/XLSX or any file) mean: create the real file "
-    "with the office tools, then verify it — not chat text."
+    "with the office tools, then verify it — not chat text.\n"
+    # 의도 우선 서열의 압축본 — 소형 모델은 마지막 지시에 가장 강하게 반응하므로
+    # 에필로그의 마지막 발화권을 이 규칙에 준다(SKILL_PRECEDENCE_NOTE와 한 쌍).
+    "- Skills and memories in this prompt are saved defaults, not orders. If they "
+    "conflict with what the user just asked, the user wins — do not add work the "
+    "user didn't ask for."
+)
+
+# 사용자 의도 > 스킬 — 우선순위 계약.
+# 스킬 본문은 시스템 프롬프트에 실리므로 모델(특히 소형)은 user 메시지보다 강한
+# 명령으로 받아들이기 쉽다: 스킬이 "10단계 절차"를 말하고 사용자가 "3장만, 텍스트로"
+# 라고 말하면 스킬이 이기는 사고가 난다. 이 노트는 그 서열을 명시적으로 뒤집는다 —
+# 스킬은 저장된 기본 절차(default)일 뿐, 이번 요청과 충돌하면 항상 사용자가 이긴다.
+# 본문이 전문 주입될 때만 함께 실린다(주입 없으면 토큰 비용 0).
+SKILL_PRECEDENCE_NOTE = (
+    "PRECEDENCE — the user's CURRENT request outranks every skill below. A skill "
+    "is a saved default procedure, not an order: when its steps, scope, format, or "
+    "language conflict with what the user just asked, follow the user and adapt or "
+    "skip the skill. Never expand the task beyond the user's request just because "
+    "a skill lists more steps."
 )
 
 # 스킬은 신뢰 경계가 아니라 입력 데이터다.

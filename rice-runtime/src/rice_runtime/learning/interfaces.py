@@ -186,6 +186,8 @@ class ILearningService(Protocol):
         session_id: str,
         user_message: str,
         extra_skills: Sequence[InjectedSkill] = (),
+        *,
+        skill_token_budget: int | None = None,
     ) -> PrefetchResult:
         """Assemble injectable context: high-relevance active skills injected in
         full (rest listed as a short index for on-demand skill_view), recent facts
@@ -194,7 +196,11 @@ class ILearningService(Protocol):
         `extra_skills` are externally-sourced skills (plugin SKILL.md bundles from
         IPluginLoader.injected_skills) that ride the SAME relevance pipeline —
         scored, budgeted, indexed, and viewable via skill_view — instead of being
-        injected wholesale. A learned skill of the same name wins."""
+        injected wholesale. A learned skill of the same name wins.
+
+        `skill_token_budget` — 이 턴의 모델 창에서 역산한 전문 주입 토큰 상한
+        (orchestrator가 프로파일·num_ctx 기반으로 계산). config 기본 예산을 더
+        좁게만 클램프한다; None이면 config 예산 그대로."""
         ...
 
     def search_skills(self, query: str, limit: int = 8) -> list[dict]:

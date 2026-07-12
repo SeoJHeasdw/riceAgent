@@ -127,6 +127,50 @@ class TestCapAndSticky:
         assert pf_other.skills == ()
 
 
+# ── 2.5 창 인식 주입 예산 (skill_token_budget) ────────────────────────────────
+
+class TestWindowAwareBudget:
+    """orchestrator가 모델 창에서 역산해 넘기는 skill_token_budget이 config 기본
+    예산(24K)을 좁게 클램프한다 — 로컬 창에서 스킬 본문이 대화 히스토리를
+    밀어내지 않게. 예산 밖 스킬은 인덱스로 강등될 뿐 사라지지 않는다."""
+
+    def setup_method(self):
+        self._paths = _fresh_paths()
+        SkillStore(self._paths).write(
+            _skill(
+                "deck-builder",
+                tags=["presentation", "slides", "deck"],
+                description="slide deck builder",
+                body="## Steps\n" + "1. a fairly long procedure line\n" * 40,
+            )
+        )
+
+    def test_tight_budget_demotes_to_index(self):
+        svc = _service(self._paths, skill_max_auto_inject=1, skill_sticky_turns=0)
+        pf = svc.prefetch("s1", "presentation deck 만들어줘", skill_token_budget=10)
+        assert pf.skills == ()  # 본문은 예산 밖 — 주입 금지
+        assert "deck-builder" in pf.system_prompt_additions  # 인덱스에는 남는다
+
+    def test_generous_budget_injects_and_none_keeps_config_budget(self):
+        svc = _service(self._paths, skill_max_auto_inject=1, skill_sticky_turns=0)
+        pf = svc.prefetch("s1", "presentation deck 만들어줘", skill_token_budget=8_000)
+        assert [s.skill_id for s in pf.skills] == ["deck-builder"]
+        # None(하위호환) → config 예산 그대로.
+        pf2 = svc.prefetch("s1", "presentation deck 만들어줘")
+        assert [s.skill_id for s in pf2.skills] == ["deck-builder"]
+
+    def test_injected_block_carries_precedence_note(self):
+        """전문 주입 블록에는 '사용자의 이번 요청 > 스킬' 서열(PRECEDENCE)이 함께
+        실린다 — 스킬은 default이지 명령이 아니다. 주입이 없으면 실리지 않는다."""
+        from rice_runtime.prompts.system import SKILL_PRECEDENCE_NOTE
+
+        svc = _service(self._paths, skill_max_auto_inject=1, skill_sticky_turns=0)
+        pf = svc.prefetch("s1", "presentation deck 만들어줘")
+        assert SKILL_PRECEDENCE_NOTE in pf.system_prompt_additions
+        pf_plain = svc.prefetch("s2", "안녕")
+        assert SKILL_PRECEDENCE_NOTE not in pf_plain.system_prompt_additions
+
+
 # ── 4. 인덱스 상한/오버플로 ───────────────────────────────────────────────────
 
 def test_index_is_capped_with_overflow_hint():

@@ -40,6 +40,7 @@ from rice_runtime.core.config import (
     Config,
     ConfigStore,
     ContextConfig,
+    LearningConfig,
     ProviderConfig,
 )
 from rice_runtime.core.types import Message, ToolCall, ToolSpec, TurnContext, TurnPlan, PlanStep
@@ -401,6 +402,36 @@ def test_effective_max_output_tokens_clamps_local_only():
     assert effective_max_output_tokens(tiny_ctx, LOCAL_PROFILE) == 4_096
     saas = Config(provider=ProviderConfig(kind="claude", model="m", max_output_tokens=16_384))
     assert effective_max_output_tokens(saas, LOCAL_PROFILE) == 16_384
+
+
+def test_effective_skill_token_budget_scales_with_model_window():
+    """스킬 전문 주입 예산은 실효 입력 예산의 1/4로 클램프된다 — 로컬 32K 창에서
+    24K 예산은 '예산 없음'과 같았다(컨텍스트 매니저는 시스템 프롬프트를 압축하지
+    않으므로 과대 주입 스킬이 대화 히스토리를 밀어냈다). 프론티어는 96K/4=24K로
+    기존 기본값과 동일해 동작이 변하지 않는다."""
+    from rice_runtime.agent.orchestrator import effective_skill_token_budget
+
+    local = Config(
+        provider=ProviderConfig(kind="ollama", model="m", num_ctx=32_768, max_output_tokens=16_384),
+        context=ContextConfig(max_tokens=96_000, retained_tokens=64_000),
+    )
+    # 입력 예산 23_552(위 클램프 테스트와 동일) → 스킬 구획은 그 1/4.
+    assert effective_skill_token_budget(local, LOCAL_PROFILE) == 23_552 // 4
+    # 프론티어: 96K // 4 = 24K = config 기본 예산 → 무변화.
+    assert effective_skill_token_budget(local, FRONTIER_PROFILE) == 24_000
+    # 아주 작은 창에서도 최소 1K는 보장한다(명시 언급 스킬 한 개는 실릴 수 있게).
+    tiny = Config(
+        provider=ProviderConfig(kind="ollama", model="m", num_ctx=8_192, max_output_tokens=16_384),
+        context=ContextConfig(max_tokens=96_000, retained_tokens=64_000),
+    )
+    assert effective_skill_token_budget(tiny, LOCAL_PROFILE) == 1_024
+    # 사용자가 config 예산을 더 좁게 잡았으면 그쪽이 이긴다 — 창 역산은 상한만 좁힌다.
+    narrow = Config(
+        provider=ProviderConfig(kind="claude", model="m"),
+        context=ContextConfig(max_tokens=96_000, retained_tokens=64_000),
+        learning=LearningConfig(skill_inject_token_budget=2_000),
+    )
+    assert effective_skill_token_budget(narrow, FRONTIER_PROFILE) == 2_000
 
 
 def test_recent_tool_outputs_get_distillation_relief():

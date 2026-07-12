@@ -44,6 +44,7 @@ from ..prompts.system import (
     SKILL_GUIDANCE,
     SKILL_INDEX_HEADER,
     SKILL_INDEX_NOTE,
+    SKILL_PRECEDENCE_NOTE,
     SKILL_TRUST_NOTE,
 )
 from .curator.consolidate import ConsolidationEngine
@@ -123,8 +124,9 @@ def _render_memories(memories: list[MemoryItem]) -> str:
 def _render_skills(skills: list[InjectedSkill]) -> str:
     """Auto-injected 스킬 본문을 system prompt 블록으로 렌더링한다 (LEARNING_LOOP §7).
     이제 '전부'가 아니라 이번 턴에 관련도가 높아 전문 주입된 것만 실린다.
-    스킬은 신뢰 경계가 아니라 입력 데이터이므로 SKILL_TRUST_NOTE를 함께 싣는다
-    — 위험 행동은 스킬 지시와 무관하게 승인을 거친다."""
+    스킬은 신뢰 경계가 아니라 입력 데이터이므로 SKILL_TRUST_NOTE를, 사용자의
+    이번 요청이 스킬 절차보다 항상 우선하므로 SKILL_PRECEDENCE_NOTE를 함께
+    싣는다 — 위험 행동은 스킬 지시와 무관하게 승인을 거친다."""
     if not skills:
         return ""
     lines = [
@@ -132,6 +134,7 @@ def _render_skills(skills: list[InjectedSkill]) -> str:
         # 이미 주입된 본문을 다시 로딩하는 중복 호출(view 인플레이션)을 막는다.
         "## Available Skills (full procedures below — already loaded, do NOT call "
         "skill_view for these; follow them when relevant)",
+        SKILL_PRECEDENCE_NOTE,
         SKILL_TRUST_NOTE,
     ]
     for sk in skills:
@@ -327,6 +330,8 @@ class LearningService(ILearningService):
         session_id: str,
         user_message: str,
         extra_skills: Sequence[InjectedSkill] = (),
+        *,
+        skill_token_budget: int | None = None,
     ) -> PrefetchResult:
         """Assemble injectable context for the next LLM call (LEARNING_LOOP §6, §7).
 
@@ -335,6 +340,15 @@ class LearningService(ILearningService):
             (AUTO_INJECT_THRESHOLD)와 strong-hit 게이트(name/tag 신호 ≥ 2)를
             모두 넘는 스킬만, `skill_max_auto_inject`(기본 1)·토큰 예산 내에서
             전문 주입한다. 태그 한 개 스치는 오탐은 인덱스에 남는다.
+          - **예산은 창 인식(window-aware)**: `skill_token_budget`(호출자가 이 턴의
+            모델 창에서 역산해 넘김 — orchestrator.effective_skill_token_budget)이
+            config 기본 예산(24K)을 더 좁게 클램프한다. 로컬 32K 창에서 24K 예산은
+            "예산 없음"과 같았다 — 컨텍스트 매니저는 시스템 프롬프트를 압축하지
+            않으므로, 과대 주입된 스킬 본문이 대화 히스토리(사용자 의도!)를
+            밀어내는 역전을 여기서 끊는다. 예산 밖 스킬은 인덱스로 강등될 뿐
+            사라지지 않는다(`skill_view` 온디맨드 — 도구 결과는 히스토리라
+            컨텍스트 매니저가 증류할 수 있는 안전한 자리다). None이면 기존
+            config 예산 그대로(하위호환).
           - **점착(sticky)**: 한 번 전문 주입된 스킬은 `skill_sticky_turns` 동안
             재매칭 없이도 유지된다 — 후속 지시("이어서 해줘")가 라우터에 안
             걸려도 태스크 중간에 절차가 증발하지 않는다. 상한과 별도로 예산만
@@ -375,6 +389,8 @@ class LearningService(ILearningService):
         injected_skills: list[InjectedSkill] = []
         injected_names: set[str] = set()
         remaining_budget = self._config.skill_inject_token_budget
+        if skill_token_budget is not None:
+            remaining_budget = min(remaining_budget, max(0, skill_token_budget))
         max_inject = max(0, self._config.skill_max_auto_inject)
         fresh_count = 0
         for scored in ranked:
