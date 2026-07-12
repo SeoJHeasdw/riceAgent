@@ -862,8 +862,14 @@ function ConnectorsScreen() {
   // 화면을 떠나면(다른 스크린으로 이동 등) 진행 중이던 폴링을 계속하지 않는다 — 안 그러면
   // 백그라운드에서 최대 2분간 낭비되는 요청이 나가고, 이미 의미 없어진 결과로 토스트를 띄우게 된다.
   const mountedRef = useRef(true);
-  useEffect(() => () => {
-    mountedRef.current = false;
+  useEffect(() => {
+    // StrictMode(dev)는 mount→cleanup→mount 로 이펙트를 두 번 돌린다 — 본문에서 true 로
+    // 되돌리지 않으면 첫 cleanup 이 남긴 false 가 영구화되어, OAuth 폴링이 첫 tick 에
+    // "화면을 떠났다"고 오판하고 조용히 중단된다(연결 완료가 화면에 안 보이는 버그).
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
 
   // Resizable left rail
@@ -994,15 +1000,13 @@ function ConnectorsScreen() {
         job.done('error', '로그인 대기 시간이 초과됐어요. 다시 시도해주세요.');
         return;
       }
-      await refresh();
       const res2 = await api.getConnectors();
-      const found =
-        res2.success && Array.isArray(res2.data)
-          ? (res2.data as ConnectorInfoWire[]).find(
-              (x) => x.connector_type === connectorType && x.status === 'connected',
-            )
-          : undefined;
-      if (found) setSel(found.id);
+      if (res2.success && Array.isArray(res2.data)) {
+        const infos = res2.data as ConnectorInfoWire[];
+        mergeRemote(infos.map(infoToConnector));
+        const found = infos.find((x) => x.connector_type === connectorType && x.status === 'connected');
+        if (found) setSel(found.id);
+      }
       job.done('success', `${c.name} 연결됨`);
     } finally {
       setBusyId(null);
