@@ -212,7 +212,26 @@ class ILearningService(Protocol):
         """Load an active skill's full body → {name, version, description, body};
         bumps its view counter and records the on-demand load for this turn's
         use-attribution. Backs the `skill_view` tool. Raises NotFoundError if the
-        skill is missing or not active."""
+        skill is missing or not active. Plugin skills with bundled files also
+        carry a `resources` list (read them via `read_skill_resource`)."""
+        ...
+
+    def read_skill_resource(self, skill_name: str, rel_path: str) -> dict:
+        """Read a bundled resource file (references/, examples/, scripts/) of an
+        enabled plugin skill → {skill, path, content}. Path-contained to the
+        skill's install dir, size-capped, text-only. Backs the `skill_resource`
+        tool — file tools are workspace-sandboxed and cannot reach plugin dirs.
+        Raises NotFoundError (no such skill/resource) or ValidationError
+        (traversal, binary, oversized)."""
+        ...
+
+    def export_skill(self, skill_id: str) -> dict:
+        """Export a skill (learned or builtin) as a distributable market artifact
+        under the workspace `skill-exports/` dir: artifact directory
+        (rice-artifact.yaml + SKILL.md, platform/git-ready) + reproducible tar.gz
+        + sha256 checksum (install-ready). Backs POST /skills/{id}/export — the
+        outbound half of the learning-loop ↔ market bridge. No lineage is kept:
+        a distributed skill becomes the installer's own independent skill."""
         ...
 
     async def observe(self, outcome: TurnOutcome) -> list[LearningEffect]:

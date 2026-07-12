@@ -95,7 +95,9 @@ def test_subagent_toolset_gains_skill_tools_with_learning(tmp_path):
     assert base == {"read_file", "list_dir", "search_files", "fetch_url"}
 
     with_learning = {spec.name for spec, _ in build_subagent_toolset(paths, learning=_FakeLearning())}
-    assert with_learning == base | {"skill_search", "skill_view"}
+    # skill_resource: 플러그인 스킬 번들 파일(references/ 등) 온디맨드 읽기 —
+    # 워커도 메인 루프와 같은 하이브리드 스킬 파이프라인을 쓴다(2026-07-12).
+    assert with_learning == base | {"skill_search", "skill_view", "skill_resource"}
     # propose_skill(사용자 가시 효과 스테이징)은 워커에 실리지 않는다
     assert "propose_skill" not in with_learning
 

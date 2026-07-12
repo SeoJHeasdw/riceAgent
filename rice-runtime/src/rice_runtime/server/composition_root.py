@@ -164,6 +164,10 @@ def build_container(
     plugins: IPluginLoader = PluginLoaderService(
         db, ChildProcessSandbox(), paths, builtin_plugins=BuiltinPluginCatalog(paths)
     )
+    # 부팅 위생: 빌트인으로 승격된 플러그인의 과거 market 설치본 정리 —
+    # 빌트인 카탈로그에 가려 UI에 안 보이는데 remove()는 빌트인 id를 거부해
+    # 영구히 지울 수 없던 유령 행/디렉토리(learning.recover_boot_state와 같은 자리).
+    plugins.reconcile_builtin_shadows()
     approvals: IApprovalGate = ApprovalRegistry()
 
     # ── provider selection (one mapping point) ────────────────────────────────

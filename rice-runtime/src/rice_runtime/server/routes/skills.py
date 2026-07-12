@@ -145,6 +145,16 @@ async def discover(c: Container = Depends(get_container)):
     return {"success": True, "data": {"scanned_sessions": len(digests), "suggestions": added}}
 
 
+@router.post("/{skill_id}/export")
+async def export_skill(skill_id: str, c: Container = Depends(get_container)):
+    """스킬 → 마켓 artifact 내보내기 (학습 루프 ↔ 마켓 다리의 나가는 방향).
+
+    워크스페이스 `skill-exports/` 아래에 platform/git-ready 디렉토리와
+    install-ready tar.gz(+checksum)를 만든다. 유통본과 원본의 관계는 여기서
+    끊긴다 — 계보 없음(제품 결정 2026-07-12)."""
+    return {"success": True, "data": c.learning.export_skill(skill_id)}
+
+
 @router.get("/{skill_id}")
 async def get_skill(skill_id: str, c: Container = Depends(get_container)):
     detail = c.learning.get_skill(skill_id)

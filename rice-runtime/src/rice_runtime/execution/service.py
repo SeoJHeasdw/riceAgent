@@ -92,6 +92,9 @@ class PluginLoaderService(IPluginLoader):
     def set_enabled(self, plugin_id: str, enabled: bool) -> None:
         self._impl.set_enabled(plugin_id, enabled)
 
+    def reconcile_builtin_shadows(self) -> int:
+        return self._impl.reconcile_builtin_shadows()
+
     async def install(self, *, path: str, manifest: dict[str, Any]) -> PluginInfo:
         return await self._impl.install(path=path, manifest=manifest)
 

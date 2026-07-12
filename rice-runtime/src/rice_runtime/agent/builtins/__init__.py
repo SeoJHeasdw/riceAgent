@@ -50,7 +50,7 @@ if TYPE_CHECKING:
 _SUBAGENT_TOOL_NAMES = ("read_file", "list_dir", "search_files", "fetch_url")
 # learning 배선 시 워커에 추가되는 스킬 도구 — propose_skill은 제외한다(사용자
 # 가시 효과를 스테이징하므로 메인 스트림의 카드 흐름 밖에서 돌면 안 된다).
-_SUBAGENT_SKILL_TOOLS = ("skill_search", "skill_view")
+_SUBAGENT_SKILL_TOOLS = ("skill_search", "skill_view", "skill_resource")
 
 
 def build_builtin_tools(

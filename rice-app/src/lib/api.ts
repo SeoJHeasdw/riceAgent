@@ -15,6 +15,18 @@ import type {
 } from './types';
 import type { RuntimeSkillAnalysis } from './learningData';
 
+/** POST /skills/{id}/export 응답 — 학습 스킬을 마켓 artifact로 내보낸 결과.
+ *  artifact_dir는 platform/git-ready 디렉토리, archive_path는 install-ready
+ *  tar.gz(checksum은 그 파일의 sha256). 유통본과 원본의 계보는 없다(제품 결정). */
+export interface SkillExportResult {
+  skill_id: string;
+  version: number;
+  artifact_dir: string;
+  archive_path: string;
+  checksum: string;
+  manifest: Record<string, unknown>;
+}
+
 /** stdio 또는 http 로컬 MCP 서버 정의 — GET /connectors/local/{test,''} 요청 바디 공통 shape. */
 export interface LocalMcpTransportPayload {
   transport: 'stdio' | 'http';
@@ -206,6 +218,12 @@ class ApiClient {
     patch: { body?: string; description?: string; tags?: string[]; state?: 'active' | 'stale' | 'archived' },
   ): Promise<ApiResponse> {
     return this.send('PUT', `/skills/${id}`, patch);
+  }
+  /** 스킬 → 마켓 artifact 내보내기 (POST /skills/{id}/export) — Skill Market
+   *  공개(publish)의 실체. 워크스페이스 skill-exports/ 아래에 platform/git-ready
+   *  디렉토리와 install-ready tar.gz(+sha256 checksum)를 만든다. */
+  exportSkill(id: string): Promise<ApiResponse<SkillExportResult>> {
+    return this.send('POST', `/skills/${id}/export`);
   }
   /** manual "스킬 정리" — curator transition trigger (rule-based only) */
   curateSkills(): Promise<ApiResponse> {

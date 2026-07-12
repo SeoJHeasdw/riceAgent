@@ -29,6 +29,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from dataclasses import replace
+from pathlib import Path
 from typing import Callable
 
 from ..agent.providers.interfaces import ILLMProvider
@@ -72,6 +73,7 @@ from .review.engine import ReviewEngine
 from .review.gate import ReviewGate
 from .signals import has_correction_signal, has_failure_signal
 from .skill import guard as skill_guard
+from .skill.export import export_skill as _run_skill_export
 from .skill.verifier import VerificationReport, tool_call_refs, verify_candidate
 from .skill.analysis import AnalysisStore, SkillAnalysisData, effective_status
 from .skill.analyzer import SkillAnalyzer
@@ -141,7 +143,13 @@ def _render_skills(skills: list[InjectedSkill]) -> str:
         # provenance 를 헤딩에 남긴다 — "왜 이게 프롬프트에 있었나"가 transcript
         # 만으로 감사 가능해야 한다(plugin 스킬도 같은 파이프라인을 타므로).
         origin = f", {sk.source}" if sk.source != "learned" else ""
-        lines.append(f"\n### [{sk.name}] (v{sk.version}{origin})\n{sk.body}")
+        heading = f"\n### [{sk.name}] (v{sk.version}{origin})"
+        if sk.resources:
+            # 본문이 "see references/x.md"라고 지시하는 번들 파일들 — 파일 도구는
+            # 워크스페이스에 갇혀 닿지 못하므로 전용 도구 경로를 광고한다.
+            shown = ", ".join(sk.resources[:8]) + (" …" if len(sk.resources) > 8 else "")
+            heading += f"\n(bundled files — read with skill_resource: {shown})"
+        lines.append(f"{heading}\n{sk.body}")
     return "\n".join(lines)
 
 
@@ -546,6 +554,14 @@ class LearningService(ILearningService):
                 "description": extra.description,
                 "body": extra.body,
             }
+            if extra.resources:
+                # 번들 파일 광고 — 본문의 "see references/x.md" 포인터를 실제로
+                # 열 수 있는 경로(skill_resource)를 함께 알려준다.
+                out["resources"] = list(extra.resources)
+                out["resources_note"] = (
+                    "Bundled files listed above are NOT in this body — read one with "
+                    "the skill_resource tool (name + path)."
+                )
             if repeat:
                 out["note"] = self._REPEAT_VIEW_NOTE
             return out
@@ -563,6 +579,79 @@ class LearningService(ILearningService):
         }
         if repeat:
             out["note"] = self._REPEAT_VIEW_NOTE
+        return out
+
+    # ── skill export (POST /skills/{id}/export — 학습 루프 → 마켓 다리) ───────
+    def export_skill(self, skill_id: str) -> dict:
+        """스킬을 유통 가능한 마켓 artifact로 내보낸다 (skill/export.py).
+
+        빌트인 포함 어떤 스킬이든 가능하다 — export는 읽기 사본이라 빌트인
+        불변성과 충돌하지 않는다. 산출 위치는 워크스페이스 `skill-exports/`:
+        사용자가 파인더에서 바로 찾고 파일 도구로도 닿는 유일한 가시 영역.
+        내보낸 artifact와 원본 스킬의 관계는 여기서 끝난다(계보 없음) — 유통
+        스킬은 설치 순간 받은 쪽의 독립 학습 스킬이 된다(제품 결정 2026-07-12)."""
+        skill = self._read_any_skill(skill_id)
+        if skill is None:
+            raise NotFoundError(f"skill {skill_id!r} not found")
+        result = _run_skill_export(skill, self._paths.workspace / "skill-exports")
+        self._ledger.record(
+            "exported",
+            skill_id=skill_id,
+            detail={"version": skill.version, "checksum": result.checksum},
+        )
+        return {
+            "skill_id": skill_id,
+            "version": skill.version,
+            "artifact_dir": result.artifact_dir,
+            "archive_path": result.archive_path,
+            "checksum": result.checksum,
+            "manifest": result.manifest,
+        }
+
+    # 리소스 응답 상한 — 도구 결과는 히스토리라 컨텍스트 매니저가 증류할 수 있지만,
+    # 애초에 폭주 본문을 싣지 않는 것이 먼저다(대부분의 references 문서는 이하).
+    _RESOURCE_MAX_CHARS = 48_000
+    _RESOURCE_MAX_BYTES = 512 * 1024
+
+    def read_skill_resource(self, skill_name: str, rel_path: str) -> dict:
+        """`skill_resource` 빌트인의 백엔드 — plugin 스킬의 번들 파일을 읽는다.
+
+        본문이 참조하는 references/·examples/·scripts/ 파일은 파일 도구
+        (워크스페이스 격리)로는 닿을 수 없다 — 이 경로가 유일한 창구다. 서빙
+        대상은 이번 턴 prefetch 가 등록한 enabled plugin 스킬(_extra_skills)의
+        `resource_dir` 안으로 한정한다:
+          - 경로 격리: resolve 후 포함 관계 검사 (traversal/symlink 탈출 차단)
+          - 크기 상한: bytes 캡 + 텍스트 캡(초과분은 truncated 표시)
+          - 바이너리 거부: NUL 스니핑 (이미지/아카이브는 텍스트 컨텍스트에 무의미)
+        학습/빌트인 스킬은 번들이 없으므로(NotFoundError) 대상이 아니다."""
+        name = skill_name.strip()
+        extra = self._extra_skills.get(name)
+        if extra is None or not extra.resource_dir:
+            raise NotFoundError(
+                f"skill {name!r} has no bundled resources (only plugin skills with a "
+                "resources list in skill_view support this)"
+            )
+        base = Path(extra.resource_dir).resolve()
+        target = (base / rel_path).resolve()
+        if target != base and base not in target.parents:
+            raise ValidationError(f"resource path escapes the skill directory: {rel_path!r}")
+        if not target.is_file():
+            raise NotFoundError(
+                f"resource {rel_path!r} not found in skill {name!r} — "
+                f"available: {', '.join(extra.resources) or '(none)'}"
+            )
+        if target.stat().st_size > self._RESOURCE_MAX_BYTES:
+            raise ValidationError(f"resource {rel_path!r} is too large to load into context")
+        data = target.read_bytes()
+        if b"\x00" in data[:1024]:
+            raise ValidationError(f"resource {rel_path!r} is binary — only text files can be read")
+        text = data.decode("utf-8", errors="replace")
+        truncated = len(text) > self._RESOURCE_MAX_CHARS
+        if truncated:
+            text = text[: self._RESOURCE_MAX_CHARS]
+        out = {"skill": name, "path": rel_path, "content": text}
+        if truncated:
+            out["truncated"] = True
         return out
 
     def _engagement_evidence(

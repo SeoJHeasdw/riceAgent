@@ -127,9 +127,15 @@ def _score_one(
 
 def score_skills(query: str, skills: list) -> list[ScoredSkill]:
     """Score `skills` (anything with .name/.tags/.description/.body) against
-    `query`, returned sorted by descending score. Skills that share no tokens with
-    the query score 0.0 and are still returned (callers filter by threshold or
-    take the top N)."""
+    `query`, returned sorted by descending score with **explicit mentions first**.
+    Skills that share no tokens with the query score 0.0 and are still returned
+    (callers filter by threshold or take the top N).
+
+    explicit-first 정렬(2026-07-12): 점수만으로 정렬하면 범용 어휘를 가진 스킬
+    (예: 이름/태그에 'skill'이 들어가는 메타 스킬)의 유기 점수가 명시 언급 보너스
+    (9.0)를 넘어 — 사용자가 이름을 콕 집은 스킬이 단일 주입 슬롯
+    (skill_max_auto_inject=1)을 빼앗기는 역전이 났다. "사용자가 THIS를 시켰다"는
+    어떤 유기 매칭보다 강한 신호이므로 정렬 키에서 명시적으로 우선한다."""
     raw_q = lexical.tokens(query)
     q = lexical.expand_query(raw_q)
     scored = []
@@ -142,5 +148,5 @@ def score_skills(query: str, skills: list) -> list[ScoredSkill]:
                 name=s.name, description=s.description, score=score, strong=strong, explicit=explicit
             )
         )
-    scored.sort(key=lambda s: s.score, reverse=True)
+    scored.sort(key=lambda s: (s.explicit, s.score), reverse=True)
     return scored

@@ -66,6 +66,7 @@ Electron main process
 | **POST** | **`/skills/{id}/consolidate-decision`** | **curator 통합의 병합(umbrella patch/create) 제안 응답 (approved, proposed_body?, description?, tags?) — approval_id 파킹 없음, LEARNING_LOOP §5.1** |
 | **GET** | **`/skills/{id}/history`** | **스킬 버전 히스토리 (diff·롤백 UI)** |
 | **POST** | **`/skills/{id}/rollback`** | **이전 버전 복구 (선택)** |
+| **POST** | **`/skills/{id}/export`** | **스킬 → 마켓 artifact 내보내기(2026-07-12, 학습 루프↔마켓 다리) — 워크스페이스 `skill-exports/`에 §2.1 manifest 디렉토리(platform/git-ready) + 재현 가능 tar.gz + sha256 반환. 유통본과 원본의 계보 없음(관계 단절 — 설치 순간 받은 쪽의 독립 학습 스킬). MySkills 공개(publish) 확정의 실체** |
 | **GET** | **`/skills/suggestions`** | **영속 제안함(Self-Improvement v3) — 타임아웃된 HITL 제안 + 발굴 산출물. payload는 `skill_patch_proposed`와 동일 어휘(approval_id 없음) — LEARNING_LOOP §9** |
 | **POST** | **`/skills/suggestions/{sid}/decision`** | **제안함 항목 승인/거부 (approved, edited_body?) — 승인 시 create/patch는 apply_patch, archive는 decide_archive로 수렴. 결정은 ledger에 기록 — LEARNING_LOOP §9** |
 | **POST** | **`/skills/discover`** | **크로스세션 반복 패턴 발굴(수동 트리거, LLM 1회) — 산출 제안은 제안함으로. `{scanned_sessions, suggestions}` 반환 — LEARNING_LOOP §9. 백그라운드 주기는 `discovery_interval_seconds`(기본 0=off)** |

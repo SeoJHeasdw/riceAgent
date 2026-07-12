@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ...core.errors import NotFoundError
+from ...core.errors import NotFoundError, ValidationError
 from ...core.types import ToolSpec
 from ..tool_dispatch import BuiltinTool
 
@@ -87,7 +87,8 @@ def tools(learning: "ILearningService") -> list[tuple[ToolSpec, BuiltinTool]]:
             "Load a skill's full step-by-step procedure (SKILL.md body) by name. "
             "Call this BEFORE doing a task a skill covers — the skill index in your "
             "context lists names + summaries only; the actual steps/commands live "
-            "here. Find names via the index or skill_search."
+            "here. Find names via the index or skill_search. If the result lists "
+            "bundled resources, read them with skill_resource."
         ),
         parameters={
             "type": "object",
@@ -95,6 +96,38 @@ def tools(learning: "ILearningService") -> list[tuple[ToolSpec, BuiltinTool]]:
                 "name": {"type": "string", "description": "Exact skill name (kebab-case)."},
             },
             "required": ["name"],
+        },
+        source="builtin",
+    )
+
+    async def skill_resource(args: dict) -> object:
+        name = str(args.get("name") or "").strip()
+        path = str(args.get("path") or "").strip()
+        if not name or not path:
+            return {"error": "name and path are required"}
+        try:
+            return learning.read_skill_resource(name, path)
+        except (NotFoundError, ValidationError) as e:
+            # 오류를 도구 결과로 되돌려 모델이 같은 턴에 경로를 고쳐 재시도하게
+            # 한다(skill_view 의 did_you_mean 과 같은 원칙).
+            return {"error": str(e)}
+
+    resource_spec = ToolSpec(
+        name="skill_resource",
+        description=(
+            "Read a file bundled with a plugin skill (the skill body or skill_view "
+            "result lists them — e.g. references/x.md, examples/y.md, scripts/z.sh). "
+            "Use when a skill tells you to consult one of its bundled files; regular "
+            "file tools cannot reach them. Args: name = the skill's name, path = the "
+            "relative path exactly as listed."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Skill name that lists the resource."},
+                "path": {"type": "string", "description": "Relative resource path as listed (e.g. references/x.md)."},
+            },
+            "required": ["name", "path"],
         },
         source="builtin",
     )
@@ -157,5 +190,6 @@ def tools(learning: "ILearningService") -> list[tuple[ToolSpec, BuiltinTool]]:
     return [
         (search_spec, skill_search),
         (view_spec, skill_view),
+        (resource_spec, skill_resource),
         (spec, propose_skill),
     ]

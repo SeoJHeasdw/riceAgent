@@ -75,6 +75,18 @@ divergence가 tail에서만 일어나 이전 반복까지의 프리픽스가 캐
                   전문을 온디맨드 로드한다. 같은 턴 반복 skill_view에는 "already
                   loaded" note가 실린다. 라우터가 못 맞춘 수동 로딩은 routing_miss
                   로 계측된다(LEARNING_LOOP §3 — 리뷰의 발견성 patch 힌트).
+              2d'. 플러그인 스킬 번들 리소스(2026-07-12): 표준 레이아웃
+                  (skills/<sub>/SKILL.md)의 형제 파일(references/·examples/·
+                  scripts/)은 InjectedSkill.resource_dir/resources로 실려 주입
+                  블록·skill_view 결과에 목록이 광고되고, 모델은 `skill_resource`
+                  빌트인(경로 격리 + 크기 캡 + 텍스트 전용, 워커 도구셋에도 포함)
+                  으로 온디맨드 읽기한다 — 파일 도구는 워크스페이스에 갇혀 플러그인
+                  설치 디렉토리에 닿지 못하므로 이것이 유일한 창구다(종전엔 본문의
+                  "see references/x.md"가 전부 dangling pointer였다). 로더의
+                  injected_skills()는 SKILL.md stat 시그니처로 캐싱된다(매 턴
+                  재파싱 제거). 정리: 빌트인으로 승격된 플러그인의 과거 설치본은
+                  부팅 시 reconcile_builtin_shadows가 제거한다(카탈로그 새도잉
+                  때문에 UI/remove 어느 쪽으로도 지울 수 없던 유령 설치본).
               2e. 메모리: 최근 facts 기본 8개 + 현재 쿼리 FTS5 매칭 기본 5개.
                   quarantined 메모리는 승인 전까지 주입하지 않는다.
               2f. SKILL_GUIDANCE + 자동 주입 스킬 본문 + 스킬 index + 메모리 +

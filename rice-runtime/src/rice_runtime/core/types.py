@@ -213,7 +213,14 @@ class InjectedSkill:
     exist so non-learning sources (plugin SKILL.md bundles) can ride the same
     relevance pipeline as learned skills — index rendering and lexical scoring
     both need them. `source` is provenance for audit ("why was this in the
-    prompt"): "learned" (skill store / builtin) or "plugin"."""
+    prompt"): "learned" (skill store / builtin) or "plugin".
+
+    `resource_dir`/`resources`: plugin skills shipped in the standard
+    `skills/<name>/SKILL.md` layout may bundle sibling files (references/,
+    examples/, scripts/ — progressive disclosure). The loader lists them here so
+    the `skill_resource` tool can serve them on demand — without this the body's
+    "see references/x.md" pointers are dead: file tools are workspace-sandboxed
+    and can never reach a plugin's install dir. Empty for flat/learned skills."""
 
     skill_id: str
     name: str
@@ -222,6 +229,8 @@ class InjectedSkill:
     description: str = ""
     tags: tuple[str, ...] = ()
     source: str = "learned"
+    resource_dir: str = ""
+    resources: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

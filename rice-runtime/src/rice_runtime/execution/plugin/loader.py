@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 import shutil
 import tarfile
@@ -49,6 +50,8 @@ from ..interfaces import ISandbox, PluginInfo, SandboxResult
 from .manifest import ArtifactManifest, parse_manifest
 from .registry import PluginRegistry
 from .builtin import BUILTIN_PLUGIN_SOURCE, BuiltinPluginCatalog
+
+log = logging.getLogger("rice.execution.plugin_loader")
 
 
 # ─── minimal SKILL.md parser (mirrors learning/skill/store.py) ───────────────
@@ -76,12 +79,24 @@ def _parse_skill_md_minimal(text: str) -> dict[str, Any]:
     body = parts[2].strip()
 
     # Minimal YAML-like key-value parse (no full YAML dep needed here).
-    # Only handles flat keys and simple list values (SKILL.md frontmatter is
-    # deliberately simple — LEARNING_LOOP §2).
+    # Only handles flat keys, simple list values, and block scalars (SKILL.md
+    # frontmatter is deliberately simple — LEARNING_LOOP §2).
     fm: dict[str, Any] = {}
     in_list_key: str | None = None
+    in_block_key: str | None = None
     for line in fm_raw.splitlines():
         line = line.rstrip()
+        if in_block_key is not None:
+            # `description: |` / `>` block scalar — Claude Code 스킬에서 흔한
+            # 형식. 들여쓰인 연속 줄을 한 문자열로 합친다(빈 줄은 블록 유지).
+            # 이전 파서는 이걸 리스트 대기 상태로 오인해 빈 값으로 만들었다.
+            if not line:
+                continue
+            if line.startswith((" ", "\t")):
+                joined = f"{fm[in_block_key]} {line.strip()}".strip()
+                fm[in_block_key] = joined
+                continue
+            in_block_key = None
         if not line:
             in_list_key = None
             continue
@@ -95,6 +110,10 @@ def _parse_skill_md_minimal(text: str) -> dict[str, Any]:
             if v.startswith("[") and v.endswith("]"):
                 # Inline list: [a, b, c]
                 fm[k] = [item.strip().strip('"').strip("'") for item in v[1:-1].split(",") if item.strip()]
+                in_list_key = None
+            elif v in ("|", ">", "|-", ">-", "|+", ">+"):
+                fm[k] = ""
+                in_block_key = k
                 in_list_key = None
             elif v == "":
                 in_list_key = k
@@ -178,6 +197,11 @@ class PluginLoader:
         self._paths = paths
         self._registry = PluginRegistry(db)
         self._builtin_plugins = builtin_plugins
+        # injected_skills() 파싱 캐시: plugin_id → (SKILL.md stat 시그니처, 결과).
+        # prefetch가 매 턴 부르므로 플러그인당 수십 KB 재독·재파싱이 턴 세금이
+        # 됐다. 시그니처는 SKILL.md 파일들의 (경로, mtime, size) — 번들 리소스
+        # 목록은 SKILL.md 변경 시에만 재수집된다(설치본은 사실상 불변이라 충분).
+        self._skills_cache: dict[str, tuple[tuple, list[InjectedSkill]]] = {}
 
     # ── tool / skill surface ─────────────────────────────────────────────────
 
@@ -188,8 +212,11 @@ class PluginLoader:
             tools.extend(self._tools_for_plugin(info))
         return tools
 
-    def _tools_for_plugin(self, info: PluginInfo) -> list[ToolSpec]:
-        """Read the tool declarations from the plugin's stored manifest JSON."""
+    def _read_manifest(self, info: PluginInfo) -> dict[str, Any] | None:
+        """플러그인의 저장 manifest JSON을 읽는다 (빌트인 = .claude-plugin/plugin.json,
+        설치본 = rice-artifact.json). 도구 조회 경로들(_tools_for_plugin,
+        _resolve_tool_entry)이 각자 중복 구현하던 것을 한 곳으로 모은 단일 관문 —
+        읽기 실패는 None(해당 플러그인만 조용히 제외, fail-safe)."""
         plugin_dir = self._plugin_dir(info)
         manifest_path = (
             plugin_dir / ".claude-plugin" / "plugin.json"
@@ -197,10 +224,16 @@ class PluginLoader:
             else plugin_dir / "rice-artifact.json"
         )
         if not manifest_path.exists():
-            return []
+            return None
         try:
-            raw: dict[str, Any] = json.loads(manifest_path.read_text())
+            return json.loads(manifest_path.read_text())
         except (OSError, json.JSONDecodeError):
+            return None
+
+    def _tools_for_plugin(self, info: PluginInfo) -> list[ToolSpec]:
+        """Read the tool declarations from the plugin's stored manifest JSON."""
+        raw = self._read_manifest(info)
+        if raw is None:
             return []
         tools_decl = raw.get("entrypoint", {}).get("tools", []) or []
         specs: list[ToolSpec] = []
@@ -220,6 +253,9 @@ class PluginLoader:
             )
         return specs
 
+    # 번들 리소스 목록 상한 — 프롬프트/도구 결과에 실리는 목록이므로 bounded.
+    _RESOURCE_LIST_MAX = 24
+
     def injected_skills(self) -> list[InjectedSkill]:
         """SKILL.md bundles from enabled plugins → InjectedSkill (CONTRACTS §2.2).
 
@@ -229,6 +265,14 @@ class PluginLoader:
         along so these skills go through the SAME relevance pipeline as learned
         skills (learning.prefetch: index → top-K full body → skill_view) instead
         of being dumped wholesale into the system prompt.
+
+        표준 레이아웃(`skills/<sub>/SKILL.md`)의 형제 파일들(references/,
+        examples/, scripts/)은 `resource_dir`/`resources`로 실어 `skill_resource`
+        도구가 온디맨드로 열 수 있게 한다 — 본문이 "see references/x.md"라고
+        지시해도 파일 도구는 워크스페이스에 갇혀 있어 닿을 수 없던 간극의 해소.
+
+        매 턴 호출되므로(prefetch) SKILL.md stat 시그니처로 캐싱한다 — 내용이
+        안 변한 플러그인은 재독·재파싱 없이 이전 결과를 그대로 쓴다.
         """
         skills: list[InjectedSkill] = []
         for info in self._list_enabled_plugin_infos():
@@ -239,15 +283,27 @@ class PluginLoader:
             # `skills/<sub>/SKILL.md`. v1 버그#10: only flat *.md was scanned, so the
             # standard subdir layout (which platform/registry.py supports) was dropped.
             md_paths = sorted(skills_dir.glob("*.md")) + sorted(skills_dir.glob("*/SKILL.md"))
+            try:
+                signature = tuple(
+                    (str(p), p.stat().st_mtime_ns, p.stat().st_size) for p in md_paths
+                )
+            except OSError:
+                signature = None  # stat 실패 → 캐시 우회, 아래 파싱이 개별 방어
+            cached = self._skills_cache.get(info.id)
+            if signature is not None and cached is not None and cached[0] == signature:
+                skills.extend(cached[1])
+                continue
+            parsed: list[InjectedSkill] = []
             for md_path in md_paths:
                 try:
                     text = md_path.read_text(encoding="utf-8")
                     fm = _parse_skill_md_minimal(text)
                     if not fm["name"]:
-                        fm["name"] = md_path.stem
+                        fm["name"] = md_path.stem if md_path.name != "SKILL.md" else md_path.parent.name
                     if fm["state"] != "active":
                         continue
-                    skills.append(
+                    resource_dir, resources = self._skill_resources(md_path)
+                    parsed.append(
                         InjectedSkill(
                             skill_id=f"plugin:{info.id}:{fm['name']}",
                             name=fm["name"],
@@ -256,11 +312,40 @@ class PluginLoader:
                             description=fm["description"],
                             tags=tuple(fm["tags"]),
                             source="plugin",
+                            resource_dir=resource_dir,
+                            resources=resources,
                         )
                     )
                 except (OSError, ValueError):
                     continue
+            if signature is not None:
+                self._skills_cache[info.id] = (signature, parsed)
+            skills.extend(parsed)
         return skills
+
+    @classmethod
+    def _skill_resources(cls, md_path: Path) -> tuple[str, tuple[str, ...]]:
+        """표준 레이아웃 스킬의 번들 파일 목록 — (스킬 루트, 상대경로들).
+
+        flat `skills/*.md`는 형제가 다른 스킬들이라 번들이 성립하지 않는다 → 빈 값.
+        숨김 파일은 제외하고, 목록은 _RESOURCE_LIST_MAX로 자른다(실제 읽기는
+        skill_resource가 경로 격리로 다시 검증하므로 목록은 광고일 뿐이다)."""
+        if md_path.name != "SKILL.md":
+            return "", ()
+        skill_root = md_path.parent
+        try:
+            rel_paths = sorted(
+                str(p.relative_to(skill_root))
+                for p in skill_root.rglob("*")
+                if p.is_file()
+                and p.name != "SKILL.md"
+                and not any(part.startswith(".") for part in p.relative_to(skill_root).parts)
+            )
+        except OSError:
+            return "", ()
+        if not rel_paths:
+            return "", ()
+        return str(skill_root), tuple(rel_paths[: cls._RESOURCE_LIST_MAX])
 
     async def invoke(self, call: ToolCall, owner_id: str | None = None) -> ToolResult:
         """Run a plugin tool through the sandbox (ISandbox.run is the choke point).
@@ -305,18 +390,10 @@ class PluginLoader:
         if owner_id is not None:
             infos = [i for i in infos if i.id == owner_id]
         for info in infos:
+            raw = self._read_manifest(info)
+            if raw is None:
+                continue
             plugin_dir = self._plugin_dir(info)
-            manifest_path = (
-                plugin_dir / ".claude-plugin" / "plugin.json"
-                if info.source == BUILTIN_PLUGIN_SOURCE
-                else plugin_dir / "rice-artifact.json"
-            )
-            if not manifest_path.exists():
-                continue
-            try:
-                raw: dict[str, Any] = json.loads(manifest_path.read_text())
-            except (OSError, json.JSONDecodeError):
-                continue
             ep = raw.get("entrypoint", {}) or {}
             module = ep.get("module")
             for t in ep.get("tools", []) or []:
@@ -453,6 +530,39 @@ class PluginLoader:
             _resolved_within(self._paths.skills, self._paths.skills / f"{name}.usage.json").unlink(missing_ok=True)
             shutil.rmtree(_resolved_within(self._paths.skills, self._paths.skills / name), ignore_errors=True)  # .history dir
         self._db.execute("DELETE FROM installed_artifacts WHERE id = ?", (artifact_id,))
+
+    # ── boot hygiene ──────────────────────────────────────────────────────────
+
+    def reconcile_builtin_shadows(self) -> int:
+        """빌트인으로 승격된 플러그인의 과거 market 설치본을 부팅 시 정리한다.
+
+        플러그인이 앱 빌트인으로 승격되면(예: plugin-dev) 예전 설치본이 갇힌다:
+        list_plugins는 빌트인 id의 DB 행을 숨기고(카탈로그가 이김), remove()는
+        ensure_mutable로 빌트인 id 삭제를 거부한다 — 사용자가 UI로도 API로도
+        지울 수 없는 유령 행+디렉토리가 영구히 남는다. 빌트인 카탈로그가 어차피
+        모든 조회를 가리므로(shadowing) 설치본 제거는 동작을 바꾸지 않는다.
+        learning.recover_boot_state와 같은 부팅 1회 위생 훅 — 정리 건수를 반환."""
+        if self._builtin_plugins is None:
+            return 0
+        removed = 0
+        for plugin_id in sorted(self._builtin_plugins.ids()):
+            row = self._db.query_one(
+                "SELECT id FROM installed_artifacts WHERE id = ?", (plugin_id,)
+            )
+            stale_dir = self._paths.plugins / plugin_id
+            if row is None and not stale_dir.exists():
+                continue
+            if row is not None:
+                self._db.execute("DELETE FROM installed_artifacts WHERE id = ?", (plugin_id,))
+            if stale_dir.exists():
+                # 삭제 경로 재검증(remove()와 동일 원칙) — id는 카탈로그 유래라
+                # 안전하지만, rmtree 직전 검증은 관례로 유지한다.
+                shutil.rmtree(_resolved_within(self._paths.plugins, stale_dir), ignore_errors=True)
+            self._skills_cache.pop(plugin_id, None)
+            removed += 1
+        if removed:
+            log.info("reconciled %d builtin-shadowed plugin install(s)", removed)
+        return removed
 
     # ── internal helpers ──────────────────────────────────────────────────────
 

@@ -12,6 +12,7 @@ import { IMPACT_REPORT, runtimeAnalysisToSkillAnalysis } from '../lib/learningDa
 import { ownedSkillFiles, ownedToMarketSkill, publishedMarketId } from '../lib/skillBridge';
 import { languageFromPath } from '../lib/skillFiles';
 import { api } from '../lib/api';
+import { useToast } from '../lib/toast/ToastContext';
 import type { RuntimeSkillAnalysis, Skill, SkillAnalysisConfidence, SkillAnalysisToolMention, SkillDetail, SkillOrigin, SkillStep, SkillUpstream, SkillVersion } from '../lib/learningData';
 import type { IconName } from '../components/ui';
 import type { ConsolidateProposal, ImpactReport } from '../lib/types';
@@ -1068,6 +1069,7 @@ const SkillDetailView: React.FC<{
   const navigate = useNavigate();
   const { skills, setSkills, details, setDetails } = useLearning();
   const { publishOwnedSkill, unpublishSkill } = useMarketplace();
+  const toast = useToast();
   const [snapVer, setSnapVer] = useState<string | null>(null);
   // 풀스크린 소스 워크스페이스(IDE) 열림 여부
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
@@ -1537,6 +1539,22 @@ const SkillDetailView: React.FC<{
           // 설치형 재공유 시 원작자 attribution 유지 (ownedToMarketSkill 내부 처리)
           publishOwnedSkill(ownedToMarketSkill(skill, detail));
           setPublishOpen(false);
+          // 공개의 실체 — 런타임이 워크스페이스 skill-exports/ 아래에 유통 가능한
+          // artifact(디렉토리 + tar.gz + checksum)를 만든다. 유통본과 원본의
+          // 계보는 없다(관계 단절). 실패해도 마켓 카드(로컬)는 유지 — 재시도 가능.
+          void api.exportSkill(skillId).then((res) => {
+            if (res.success && res.data) {
+              toast.notify({
+                message: `유통 패키지가 준비됐어요 — 워크스페이스 skill-exports/${skill.name}`,
+                variant: 'success',
+              });
+            } else {
+              toast.notify({
+                message: `유통 패키지 생성에 실패했어요${res.error ? ` — ${res.error}` : ''}`,
+                variant: 'warning',
+              });
+            }
+          });
         }}
       />
 
