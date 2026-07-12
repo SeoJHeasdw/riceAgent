@@ -47,7 +47,14 @@ export interface Skill {
   id: string;
   name: string;
   ver: string;
+  /** 관여 근거가 확인된 턴 수 (자동 주입 횟수와 별개). */
   uses: number;
+  /** 전문이 관련도 라우터에 의해 자동 주입된 노출 횟수. */
+  injected?: number;
+  /** 스킬 관여 턴에서 교정/실패 신호가 함께 감지된 횟수. */
+  friction?: number;
+  /** 자동 라우팅에 실패해 모델이 수동으로 로딩한 횟수. */
+  routingMiss?: number;
   trend: string;
   enabled: boolean;
   hot?: boolean;

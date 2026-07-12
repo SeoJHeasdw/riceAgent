@@ -912,18 +912,62 @@ const ToolSignalGroup: React.FC<{
   </div>
 );
 
+const SkillRoutingMetrics: React.FC<{ skill: Skill }> = ({ skill }) => {
+  const injected = skill.injected ?? 0;
+  const friction = skill.friction ?? 0;
+  const routingMiss = skill.routingMiss ?? 0;
+  // use에는 명시 호출·수동 skill_view도 포함되므로 100%를 넘을 수 있다. 전환율이
+  // 아니라 자동 노출과 전체 관여의 관계를 보는 방향성 지표로 그대로 표시한다.
+  const engagementRate = injected > 0 ? Math.round((skill.uses / injected) * 100) : null;
+  const metrics = [
+    {
+      label: '노출 대비 관여',
+      value: engagementRate == null ? '—' : `${engagementRate}%`,
+      helper: injected > 0 ? `${skill.uses}회 관여 / ${injected}회 노출` : '자동 노출 데이터 없음',
+      title: '관여에는 명시 호출과 수동 로딩도 포함되어 100%를 넘을 수 있는 방향성 지표입니다.',
+    },
+    { label: '자동 노출', value: `${injected}회`, helper: '전문 자동 주입', title: '관련도 라우터가 스킬 전문을 자동 주입한 횟수입니다.' },
+    { label: '마찰 신호', value: `${friction}회`, helper: '교정·실패 동시 감지', title: '스킬이 관여한 턴에서 교정 또는 실패 신호가 함께 감지된 횟수입니다.' },
+    { label: '라우팅 미스', value: `${routingMiss}회`, helper: '수동 로딩으로 발견', title: '자동 라우터가 찾지 못해 모델이 skill_view로 직접 로딩한 횟수입니다.' },
+  ];
+
+  return (
+    <div className="grid grid-cols-2 gap-px border-b border-border-subtle-01 bg-border-subtle-01 md:grid-cols-4">
+      {metrics.map((metric) => (
+        <div key={metric.label} className="min-w-0 bg-background px-4 py-3" title={metric.title}>
+          <div className="text-caption-01 text-text-helper">{metric.label}</div>
+          <div className="mt-1 font-mono text-body-short-01 font-semibold text-text-primary">{metric.value}</div>
+          <div className="mt-0.5 truncate text-caption-01 text-text-helper">{metric.helper}</div>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+type AnalysisRefreshFeedback = {
+  tone: 'success' | 'warning' | 'error';
+  message: string;
+};
+
+const ANALYSIS_FEEDBACK_META: Record<AnalysisRefreshFeedback['tone'], { icon: IconName; cls: string }> = {
+  success: { icon: 'check-circle', cls: 'text-support-success' },
+  warning: { icon: 'warning', cls: 'text-support-warning' },
+  error: { icon: 'warning', cls: 'text-support-error' },
+};
+
 const SkillUnderstandingPanel: React.FC<{
   skill: Skill;
   detail: SkillDetail;
   refreshing: boolean;
-  note: string | null;
+  feedback: AnalysisRefreshFeedback | null;
   onRefresh: () => void;
   onOpenConnectors: () => void;
-}> = ({ skill, detail, refreshing, note, onRefresh, onOpenConnectors }) => {
+}> = ({ skill, detail, refreshing, feedback, onRefresh, onOpenConnectors }) => {
   const understanding = useMemo(() => resolveUnderstanding(skill, detail), [skill, detail]);
   const observed = understanding.tools.filter((t) => t.kind === 'observed');
   const declared = understanding.tools.filter((t) => t.kind === 'declared');
   const mentioned = understanding.tools.filter((t) => t.kind === 'mentioned');
+  const feedbackMeta = feedback ? ANALYSIS_FEEDBACK_META[feedback.tone] : null;
 
   return (
     <div>
@@ -936,7 +980,7 @@ const SkillUnderstandingPanel: React.FC<{
             title="SKILL.md를 다시 분석해 설명용 메타데이터를 갱신합니다"
           >
             <Icon name="renew" size={12} className={refreshing ? 'animate-spin text-icon-primary' : 'text-icon-secondary'} />
-            AI 분석 새로고침
+            {refreshing ? '분석 중…' : 'AI 분석 새로고침'}
           </button>
         }
       >
@@ -957,13 +1001,18 @@ const SkillUnderstandingPanel: React.FC<{
             )}
           </div>
           <p className="mt-2 max-w-[840px] text-body-short-01 leading-5 text-text-secondary">{understanding.summary}</p>
-          {note && (
-            <div className="mt-2 inline-flex items-center gap-1.5 text-caption-01 text-text-helper">
-              <Icon name="idea" size={12} className="text-icon-secondary" />
-              {note}
+          {feedback && feedbackMeta && (
+            <div
+              className={`mt-2 inline-flex items-center gap-1.5 text-caption-01 font-medium ${feedbackMeta.cls}`}
+              role={feedback.tone === 'error' ? 'alert' : 'status'}
+            >
+              <Icon name={feedbackMeta.icon} size={12} />
+              {feedback.message}
             </div>
           )}
         </div>
+
+        <SkillRoutingMetrics skill={skill} />
 
         <div className="grid gap-px bg-border-subtle-01 lg:grid-cols-[minmax(0,1.1fr)_minmax(280px,0.9fr)]">
           <div className="bg-background p-4">
@@ -1037,7 +1086,7 @@ const SkillUnderstandingPanel: React.FC<{
 const SkillTelemetryPanel: React.FC<{ skill: Skill; detail: SkillDetail }> = ({ skill, detail }) => {
   const origin = ORIGIN_META[skillOrigin(skill)];
   const metrics = [
-    { label: '주입/사용', value: `${skill.uses}회`, helper: skill.trend },
+    { label: '관여', value: `${skill.uses}회`, helper: skill.trend },
     { label: '본문 개선', value: `${skill.patches ?? 0}회`, helper: '승인된 변경 기준' },
     { label: '최근 사용', value: detail.lastUsed, helper: statusReason(skill) },
     { label: '출처', value: origin.label, helper: detail.createdFrom },
@@ -1085,13 +1134,13 @@ const SkillDetailView: React.FC<{
   const [publishOpen, setPublishOpen] = useState(false);
   const [confirmUnshare, setConfirmUnshare] = useState(false);
   const [analysisRefreshing, setAnalysisRefreshing] = useState(false);
-  const [analysisNote, setAnalysisNote] = useState<string | null>(null);
+  const [analysisFeedback, setAnalysisFeedback] = useState<AnalysisRefreshFeedback | null>(null);
   // leaving a skill closes any open version snapshot / 확인 모달 / 분석 상태 / 소스·편집
   useEffect(() => {
     setSnapVer(null);
     setConfirmRestore(null);
     setAnalysisRefreshing(false);
-    setAnalysisNote(null);
+    setAnalysisFeedback(null);
     setWorkspaceOpen(false);
     setSummaryOpen(false);
     setEditOpen(false);
@@ -1164,26 +1213,52 @@ const SkillDetailView: React.FC<{
   const refreshAnalysis = async () => {
     if (analysisRefreshing) return;
     setAnalysisRefreshing(true);
-    setAnalysisNote(null);
-    const res = await api.refreshSkillAnalysis(skillId);
-    setAnalysisRefreshing(false);
-    if (res.success && res.data) {
-      const mapped = runtimeAnalysisToSkillAnalysis(res.data);
-      setDetails((prev) => {
-        const cur = prev[skillId];
-        if (!cur) return prev;
-        return { ...prev, [skillId]: { ...cur, analysis: mapped } };
-      });
-      setAnalysisNote(
-        mapped.source === 'llm'
-          ? 'AI 분석을 갱신했어요.'
-          : mapped.status === 'failed'
-            ? 'AI 호출이 실패해 규칙 기반 분석으로 갱신했어요.'
-            : '규칙 기반 분석으로 갱신했어요 — LLM을 연결하면 더 풍부해져요.',
-      );
-      return;
+    setAnalysisFeedback(null);
+    const progress = toast.progress({
+      label: '스킬 분석 중',
+      sublabel: `${skill.name} · 분석 결과를 생성하고 저장하고 있어요`,
+    });
+    try {
+      const res = await api.refreshSkillAnalysis(skillId);
+      if (res.success && res.data) {
+        const mapped = runtimeAnalysisToSkillAnalysis(res.data);
+        setDetails((prev) => {
+          const cur = prev[skillId];
+          if (!cur) return prev;
+          return { ...prev, [skillId]: { ...cur, analysis: mapped } };
+        });
+        const savedAt = mapped.analyzedAt
+          ? new Date(mapped.analyzedAt).toLocaleString('ko-KR')
+          : '방금';
+        if (mapped.source === 'llm') {
+          setAnalysisFeedback({ tone: 'success', message: `AI 분석 저장 완료 · ${savedAt}` });
+          progress.done('success', 'AI 분석 저장 완료');
+        } else if (mapped.status === 'failed') {
+          setAnalysisFeedback({
+            tone: 'warning',
+            message: `AI 호출 실패 · 규칙 기반 분석 저장 완료 · ${savedAt}`,
+          });
+          progress.dismiss();
+          toast.notify({ message: 'AI 호출에 실패해 규칙 기반 분석 결과를 저장했어요.', variant: 'warning' });
+        } else {
+          setAnalysisFeedback({
+            tone: 'warning',
+            message: `규칙 기반 분석 저장 완료 · ${savedAt} · LLM 연결 시 더 풍부해져요`,
+          });
+          progress.done('success', '원문 기반 분석 저장 완료');
+        }
+        return;
+      }
+      const reason = res.error ? ` · ${res.error}` : '';
+      setAnalysisFeedback({ tone: 'error', message: `분석을 갱신하지 못했어요${reason}` });
+      progress.done('error', '스킬 분석 실패');
+    } catch (error) {
+      const reason = error instanceof Error ? ` · ${error.message}` : '';
+      setAnalysisFeedback({ tone: 'error', message: `분석 결과를 반영하지 못했어요${reason}` });
+      progress.done('error', '스킬 분석 실패');
+    } finally {
+      setAnalysisRefreshing(false);
     }
-    setAnalysisNote('런타임에 연결되지 않아 원문 기반 미리보기를 유지합니다.');
   };
 
   // restore a past version: save it as a new current version (history kept).
@@ -1266,7 +1341,7 @@ const SkillDetailView: React.FC<{
         ],
       };
     });
-    setAnalysisNote('본문이 바뀌었어요. 필요하면 AI 분석을 새로고침하세요.');
+    setAnalysisFeedback({ tone: 'warning', message: '본문이 바뀌었어요. AI 분석을 새로고침하세요.' });
   };
 
   // 복원 확인 팝업 — 칩 메뉴의 "전환"과 스냅샷의 "이 버전 복원" 두 경로가 모두 거친다.
@@ -1397,7 +1472,7 @@ const SkillDetailView: React.FC<{
           skill={skill}
           detail={detail}
           refreshing={analysisRefreshing}
-          note={analysisNote}
+          feedback={analysisFeedback}
           onRefresh={() => void refreshAnalysis()}
           onOpenConnectors={() => navigate('/connectors')}
         />

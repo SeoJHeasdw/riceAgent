@@ -98,6 +98,9 @@ function runtimeSkillToLearning(s: {
   state: 'active' | 'stale' | 'archived';
   tags: string[];
   use: number;
+  injected?: number;
+  friction?: number;
+  routing_miss?: number;
   patch: number;
   last_used_at: string | null;
   source?: string | null;
@@ -122,6 +125,9 @@ function runtimeSkillToLearning(s: {
     name: s.name,
     ver: `v${s.version}`,
     uses: s.use,
+    injected: s.injected ?? 0,
+    friction: s.friction ?? 0,
+    routingMiss: s.routing_miss ?? 0,
     trend: useTrend,
     enabled: s.state === 'active' && (s.enabled ?? true),
     hot: s.use > 10,
@@ -186,7 +192,8 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       type RuntimeSkill = {
         id: string; name: string; version: number; description: string;
         state: 'active' | 'stale' | 'archived'; tags: string[];
-        use: number; patch: number; last_used_at: string | null; source?: string | null;
+        use: number; injected?: number; friction?: number; routing_miss?: number;
+        patch: number; last_used_at: string | null; source?: string | null;
         enabled?: boolean;
       };
       const raw = res.data as RuntimeSkill[];
