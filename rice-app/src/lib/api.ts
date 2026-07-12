@@ -27,6 +27,16 @@ export interface SkillExportResult {
   manifest: Record<string, unknown>;
 }
 
+/** POST /skills/{id}/edit-assist 응답 — 자연어 지시로 만든 대상 파일의 새 본문 제안.
+ *  저장 전 상태다: proposed_body 를 그대로 승인하거나 직접 조정해 커밋한다. */
+export interface SkillEditProposal {
+  target_path: string;
+  changelog: string;
+  proposed_body: string;
+  current_body: string;
+  from_version: number;
+}
+
 /** stdio 또는 http 로컬 MCP 서버 정의 — GET /connectors/local/{test,''} 요청 바디 공통 shape. */
 export interface LocalMcpTransportPayload {
   transport: 'stdio' | 'http';
@@ -224,6 +234,20 @@ class ApiClient {
   updateSkillFile(id: string, filePath: string, content: string): Promise<ApiResponse> {
     const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
     return this.send('PUT', `/skills/${encodeURIComponent(id)}/files/${encodedPath}`, { content });
+  }
+  /** 자연어 지시 → 대상 파일의 완성된 새 본문 제안 (POST /skills/{id}/edit-assist).
+   *  "AI로 수정" 드로어의 실제 배선 — LLM 1회 호출이라 느릴 수 있다. 저장은 하지
+   *  않고 제안만 돌려주며(승인 시 updateSkill/_file 로 커밋), provider 미배선이면
+   *  code='provider_unavailable' (503) 로 실패한다. */
+  proposeSkillEdit(
+    id: string,
+    payload: { targetPath: string; instruction: string; history?: { role: 'user' | 'agent'; text: string }[] },
+  ): Promise<ApiResponse<SkillEditProposal>> {
+    return this.send<SkillEditProposal>('POST', `/skills/${encodeURIComponent(id)}/edit-assist`, {
+      target_path: payload.targetPath,
+      instruction: payload.instruction,
+      history: payload.history ?? [],
+    });
   }
   /** 스킬 → 마켓 artifact 내보내기 (POST /skills/{id}/export) — Skill Market
    *  공개(publish)의 실체. 워크스페이스 skill-exports/ 아래에 platform/git-ready

@@ -36,6 +36,7 @@ from ..agent.providers.interfaces import ILLMProvider
 from ..core import lexical
 from ..core.config import LearningConfig
 from ..core.errors import ConflictError, NotFoundError, ValidationError
+from ..core.model_json import extract_json_object
 from ..core.paths import RicePaths
 from ..core.storage.sqlite import Database
 from ..core.tokens import estimate_tokens as _cjk_estimate_tokens
@@ -204,6 +205,10 @@ class LearningService(ILearningService):
         # 호출을 지시하는 도구가 실재하는지 검사한다. None(대부분의 테스트/독립
         # 사용)이면 그 검사만 스킵되고 나머지 검증은 동일하게 돈다.
         self._resolve_tool_names = resolve_tool_names
+        # AI 편집 드로어(propose_skill_edit)의 provider 소스 — analyzer 와 같은 메인
+        # provider 를 쓴다. None(테스트/미배선)이면 편집 제안은 못 만들고 라우트가
+        # 503 을 돌려준다(프론트가 "런타임 오프라인"으로 안내).
+        self._resolve_provider = resolve_provider
         # paths가 None이면 기본 경로를 사용한다.
         # NOTE(agent): paths=None은 T1 이전 테스트와의 역호환을 위해 허용한다.
         # composition_root.py에서 paths를 DI로 주입하므로 실제 실행 경로에서는 항상 제공된다.
@@ -1825,6 +1830,134 @@ class LearningService(ILearningService):
             detail={"source": analysis.source, "status": analysis.status},
         )
         return self._analysis_payload(skill, analysis)
+
+    async def propose_skill_edit(
+        self,
+        skill_id: str,
+        *,
+        target_path: str,
+        instruction: str,
+        history: list[dict] | None = None,
+    ) -> dict:
+        """자연어 지시 → 대상 파일의 완성된 새 본문 1개를 LLM 으로 만든다
+        (POST /skills/{id}/edit-assist — "AI로 수정" 드로어의 실제 배선).
+
+        이 메서드는 **저장하지 않는다** — 제안(changelog + proposed_body)만 돌려주고,
+        버전 증가·히스토리·재분석은 사용자가 승인했을 때 update_skill/_file 이 한다.
+
+        provider 미배선이면 편집 제안을 만들 수 없으므로 ValidationError 를 올린다
+        (라우트가 503 으로 변환 → 프론트가 "런타임 오프라인" 안내). 빌트인은 편집
+        불가라 여기서 걸러진다."""
+        from ..prompts.skill_edit import (  # noqa: PLC0415 — 프롬프트 지연 임포트(analyzer 전례)
+            SKILL_EDIT_INSTRUCTION_MAX_CHARS,
+            SKILL_EDIT_MAX_RESPONSE_CHARS,
+            SKILL_EDIT_TEMPERATURE,
+            build_skill_edit_messages,
+            relevant_authoring_guide,
+            skill_edit_max_tokens,
+            skill_edit_response_schema,
+        )
+
+        self._ensure_not_builtin(skill_id, "AI 편집")
+        instruction = (instruction or "").strip()
+        if not instruction:
+            raise ValidationError("편집 지시가 비어 있습니다")
+        if len(instruction) > SKILL_EDIT_INSTRUCTION_MAX_CHARS:
+            raise ValidationError(
+                f"편집 지시가 너무 깁니다 ({len(instruction)}자) — {SKILL_EDIT_INSTRUCTION_MAX_CHARS}자 이내로 줄여주세요"
+            )
+
+        skill = self._read_any_skill(skill_id)
+        if skill is None:
+            raise NotFoundError(f"skill {skill_id!r} not found")
+
+        # 대상 파일의 현재 전문 — 파일 트리에서 경로로 찾는다(SKILL.md 는 직렬화된
+        # frontmatter 포함본). 경로가 안 맞으면 SKILL.md 로 폴백.
+        files = self.get_skill_files(skill_id)
+        target = next((f for f in files if f["path"] == target_path), None)
+        if target is None:
+            target = next(
+                (f for f in files if f["path"].lower() == "skill.md"), files[0] if files else None
+            )
+        if target is None:
+            raise NotFoundError(f"skill {skill_id!r} has no editable files")
+        resolved_path = target["path"]
+        current_content = target["content"]
+
+        provider = self._resolve_provider() if self._resolve_provider else None
+        if provider is None or getattr(provider, "name", "") == "echo":
+            # echo/미배선은 실제 편집을 만들 수 없다 — 프론트가 "런타임 오프라인"으로
+            # 구분해 안내하도록 전용 code/503 으로 올린다.
+            raise ValidationError(
+                "AI 편집을 사용할 수 없습니다 — 모델 provider가 연결되지 않았습니다",
+                code="provider_unavailable",
+                http=503,
+            )
+
+        # SKILL.md 편집이면 저작 정본(skill-authoring 빌트인)의 품질 규칙을 함께
+        # 싣는다 — 발견성 메타데이터·본문 작성·상시 규칙 섹션만(§4 워크플로 제외).
+        # 빌트인이 없어도(자산 손상 등) 편집 자체는 성립하므로 조용히 생략.
+        authoring_guide: str | None = None
+        if resolved_path.lower().endswith("skill.md"):
+            guide_skill = self._builtin_skills.get("skill-authoring")
+            if guide_skill is not None:
+                authoring_guide = relevant_authoring_guide(guide_skill.body)
+
+        system, messages = build_skill_edit_messages(
+            skill_name=skill.name,
+            description=skill.description,
+            target_path=resolved_path,
+            current_content=current_content,
+            instruction=instruction,
+            history=history,
+            authoring_guide=authoring_guide,
+        )
+        parts: list[str] = []
+        total = 0
+        try:
+            async for chunk in provider.stream(
+                system=system,
+                messages=messages,
+                tools=(),
+                temperature=SKILL_EDIT_TEMPERATURE,
+                response_schema=skill_edit_response_schema(),
+                think=False,
+                max_tokens=skill_edit_max_tokens(len(current_content)),
+            ):
+                if chunk.kind == "text" and chunk.text:
+                    parts.append(chunk.text)
+                    total += len(chunk.text)
+                    if total >= SKILL_EDIT_MAX_RESPONSE_CHARS:
+                        break  # max_tokens 를 무시하는 provider 대비 이중 가드
+        except Exception as exc:  # noqa: BLE001 — 미들스트림 장애도 우리 에러 봉투로
+            log.warning("skill edit LLM call failed for %s", skill_id, exc_info=True)
+            raise ValidationError(
+                "AI 편집 호출이 실패했어요 — 모델 연결을 확인하고 다시 시도해 주세요",
+                code="provider_error",
+                http=502,
+            ) from exc
+        raw = "".join(parts)
+        data = extract_json_object(raw)
+        new_body = str((data or {}).get("new_body") or "").strip()
+        if not data or not new_body:
+            log.warning(
+                "skill edit returned unusable output for %s (%d chars)", skill_id, len(raw)
+            )
+            raise ValidationError("AI 편집 응답을 해석하지 못했어요. 지시를 바꿔 다시 시도해 주세요.")
+
+        changelog = str(data.get("changelog") or "").strip() or instruction
+        self._ledger.record(
+            "skill_edit_proposed",
+            skill_id=skill_id,
+            detail={"target": resolved_path, "changelog": changelog[:200]},
+        )
+        return {
+            "target_path": resolved_path,
+            "changelog": changelog,
+            "proposed_body": new_body,
+            "current_body": current_content,
+            "from_version": skill.version,
+        }
 
     def request_analysis(self, skill_id: str) -> None:
         """재분석 enqueue (best-effort) — 본문을 바꾼 모든 경로(apply_patch/

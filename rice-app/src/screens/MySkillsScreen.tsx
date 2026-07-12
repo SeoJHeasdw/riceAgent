@@ -300,6 +300,28 @@ type RuntimeSkillDetailPayload = {
 const stripFrontmatter = (content: string): string =>
   content.replace(/^---\s*[\s\S]*?\n---\s*/m, '').trim();
 
+/** SKILL.md frontmatter에서 description/tags 추출 — AI 편집이 메타데이터를 고친
+ *  경우 body와 함께 저장해 유실을 막는다(stripFrontmatter만 하면 조용히 버려짐).
+ *  tags는 런타임 직렬화의 YAML 블록 리스트(- a)와 프론트 합성본의 인라인([a, b])
+ *  둘 다 지원하고, description의 YAML 따옴표는 벗긴다. */
+const parseFrontmatterMeta = (content: string): { description?: string; tags?: string[] } => {
+  const fm = /^---\n([\s\S]*?)\n---/.exec(content)?.[1];
+  if (!fm) return {};
+  const description = /^description:\s*(.+?)\s*$/m
+    .exec(fm)?.[1]
+    ?.replace(/^(['"])(.*)\1$/, '$2');
+  const inline = /^tags:\s*\[([^\]]*)\]/m.exec(fm)?.[1];
+  const block = /^tags:\s*\n((?:\s*-\s*.+\n?)+)/m.exec(fm)?.[1];
+  const tags =
+    inline !== undefined
+      ? inline.split(',').map((t) => t.trim()).filter(Boolean)
+      : block
+          ?.split('\n')
+          .map((l) => l.replace(/^\s*-\s*/, '').trim())
+          .filter(Boolean);
+  return { description, tags };
+};
+
 const runtimeSkillSource = (data: RuntimeSkillDetailPayload): string => {
   const frontmatter = [
     `name: ${data.name}`,
@@ -1439,10 +1461,17 @@ const SkillDetailView: React.FC<{
   // 구조화된 절차/도구 표시는 본문에서 다시 분석되는 설명용 sidecar가 담당한다.
   const applyEditPatch = (p: EditPatch, editedBody?: string) => {
     const finalBody = editedBody ?? p.proposedBody;
+    // AI가 frontmatter의 description/tags를 고쳤다면 body와 함께 저장한다 —
+    // stripFrontmatter만 하면 "설명 바꿔줘" 류 지시가 조용히 유실된다.
+    const meta = parseFrontmatterMeta(finalBody);
     // 런타임 영속화 — SKILL.md와 번들 파일이 같은 버전 축을 공유한다. 서버는
     // SKILL.md 및 reference/script 스냅샷을 함께 history에 보관한다.
     const persistence = p.targetPath.toLowerCase().endsWith('skill.md')
-      ? api.updateSkill(skillId, { body: stripFrontmatter(finalBody) })
+      ? api.updateSkill(skillId, {
+          body: stripFrontmatter(finalBody),
+          ...(meta.description ? { description: meta.description } : {}),
+          ...(meta.tags?.length ? { tags: meta.tags } : {}),
+        })
       : api.updateSkillFile(skillId, p.targetPath, finalBody);
     void persistence.then((result) => {
       if (!result.success) {

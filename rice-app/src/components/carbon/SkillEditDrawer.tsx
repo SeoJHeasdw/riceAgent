@@ -1,16 +1,18 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Button, Icon } from '../ui';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Button, ConfirmDialog, Icon } from '../ui';
 import type { Skill, SkillDetail } from '../../lib/learningData';
-import type { SkillFileLanguage } from '../../lib/types';
 import { ownedSkillFiles } from '../../lib/skillBridge';
+import { api } from '../../lib/api';
 
 /**
  * SkillEditDrawer — 채팅 매개 스킬 편집 (Phase 4).
  *
  * 원시 md를 자유 편집하게 두면 학습한 규칙·버전·상태가 뭉개지므로, 모든 소스 변경을
- * "지시 → patch diff 제안 → 승인" 단일 경로로 통과시킨다(채팅 중 에이전트가 거는
- * 기존 patch 흐름과 같은 의미). 승인 시 version++ 되고 이전 버전은 히스토리에 보관된다.
- * 출력은 항상 patch 카드(commit 게이트)이고, 그 위의 대화는 반복 지시를 위한 것.
+ * "지시 → LLM patch 제안 → 승인" 단일 경로로 통과시킨다(채팅 중 에이전트가 거는
+ * 기존 patch 흐름과 같은 의미). 지시는 런타임(POST /skills/{id}/edit-assist)의
+ * LLM 1회 호출로 대상 파일의 새 전문을 만들고, 승인 시 version++ 되고 이전 버전은
+ * 히스토리에 보관된다. 출력은 항상 patch 카드(commit 게이트)이고, 그 위의 대화는
+ * 반복 지시를 위한 것.
  */
 
 export interface EditPatch {
@@ -30,8 +32,6 @@ export interface EditPatch {
 
 type Msg = { role: 'user' | 'agent'; text: string };
 
-const SECTION = '## 내 개선 (편집 어시스턴트)';
-
 const nextVer = (v: string): string => {
   const m = v.match(/\d+/);
   return m ? v.replace(/\d+/, String(Number(m[0]) + 1)) : `${v}.1`;
@@ -39,68 +39,58 @@ const nextVer = (v: string): string => {
 
 const isSkillMdPath = (p: string) => p.toLowerCase().endsWith('skill.md');
 
-/** 파일 언어에 맞는 한 줄 주석 — 코드/문서 파일에 지시를 안전하게 주석으로 남긴다. */
-const commentLine = (lang: SkillFileLanguage, text: string): string => {
-  switch (lang) {
-    case 'html':
-    case 'markdown':
-      return `<!-- ${text} -->`;
-    case 'json':
-      return `// ${text}`;
-    default:
-      return `# ${text}`; // shell · python · text
-  }
-};
-
-/**
- * 지시 → 대상 파일에 대한 patch 제안을 합성한다.
- * SKILL.md면 "내 개선" 섹션에 지침 한 줄을 더하고, 그 외 파일이면 해당 언어 주석으로
- * 지시를 남긴다(실 LLM 편집의 mock — 흐름: 지시→diff→승인→version++).
- */
-function buildPatch(instruction: string, skill: Skill, detail: SkillDetail, targetPath?: string): EditPatch {
-  const text = instruction.trim();
-  const { files } = ownedSkillFiles(skill, detail);
-  const skillMd = files.find((f) => isSkillMdPath(f.path));
-  const target = (targetPath ? files.find((f) => f.path === targetPath) : undefined) ?? skillMd ?? files[0];
-  const current = (target?.content ?? '').replace(/\s*$/, '');
-  const diff: EditPatch['diff'] = [];
-  const base = {
-    fromVer: skill.ver,
-    toVer: nextVer(skill.ver),
-    changelog: text,
-    targetPath: target?.path ?? 'SKILL.md',
-    targetLabel: target?.path.split('/').pop() ?? 'SKILL.md',
-  };
-
-  // ── SKILL.md: 지침 한 줄을 "내 개선" 섹션에 추가 (분석 sidecar는 저장 후 재생성) ──
-  if (target && isSkillMdPath(target.path)) {
-    const bullet = `- ${text}`;
-    const lines = current.split('\n');
-    const headerIdx = lines.findIndex((l) => l.trim() === SECTION);
-    let proposedBody: string;
-    if (headerIdx !== -1) {
-      let at = headerIdx + 1;
-      while (at < lines.length && (lines[at].startsWith('- ') || lines[at].trim() === '')) at++;
-      lines.splice(at, 0, bullet);
-      proposedBody = lines.join('\n') + '\n';
-      diff.push({ t: 'ctx', text: SECTION });
-      diff.push({ t: 'add', text: bullet });
-    } else {
-      proposedBody = `${current}\n\n${SECTION}\n\n${bullet}\n`;
-      lines.slice(-2).forEach((l) => diff.push({ t: 'ctx', text: l }));
-      diff.push({ t: 'add', text: '' });
-      diff.push({ t: 'add', text: SECTION });
-      diff.push({ t: 'add', text: '' });
-      diff.push({ t: 'add', text: bullet });
+/** 현재 본문 → 제안 본문의 라인 단위 diff (LCS). 파일이 20k자 상한이라 O(n·m)로 충분. */
+function lineDiff(before: string, after: string): EditPatch['diff'] {
+  const a = before.replace(/\s*$/, '').split('\n');
+  const b = after.replace(/\s*$/, '').split('\n');
+  const n = a.length;
+  const m = b.length;
+  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
     }
-    return { ...base, diff, proposedBody };
   }
+  const out: EditPatch['diff'] = [];
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) {
+      out.push({ t: 'ctx', text: a[i] });
+      i++;
+      j++;
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      out.push({ t: 'remove', text: a[i++] });
+    } else {
+      out.push({ t: 'add', text: b[j++] });
+    }
+  }
+  while (i < n) out.push({ t: 'remove', text: a[i++] });
+  while (j < m) out.push({ t: 'add', text: b[j++] });
+  return out;
+}
 
-  // ── 그 외 번들 파일: 언어 주석으로 지시를 남긴다 ──
-  const comment = commentLine(target?.language ?? 'text', `(편집 어시스턴트) ${text}`);
-  current.split('\n').slice(-2).forEach((l) => diff.push({ t: 'ctx', text: l }));
-  diff.push({ t: 'add', text: comment });
-  return { ...base, diff, proposedBody: `${current}\n${comment}\n` };
+/** 변경 주변 pad줄만 남기고 긴 무변경 구간은 "⋯ N줄 ⋯"로 접는다(카드 가독성). */
+function collapseContext(diff: EditPatch['diff'], pad = 3): EditPatch['diff'] {
+  const keep = new Array(diff.length).fill(false);
+  diff.forEach((d, i) => {
+    if (d.t === 'ctx') return;
+    for (let k = Math.max(0, i - pad); k <= Math.min(diff.length - 1, i + pad); k++) keep[k] = true;
+  });
+  const out: EditPatch['diff'] = [];
+  let hidden = 0;
+  const flush = () => {
+    if (hidden > 0) out.push({ t: 'ctx', text: `⋯ 변경 없는 ${hidden}줄 ⋯` });
+    hidden = 0;
+  };
+  for (let i = 0; i < diff.length; i++) {
+    if (diff[i].t !== 'ctx' || keep[i]) {
+      flush();
+      out.push(diff[i]);
+    } else hidden++;
+  }
+  flush();
+  return out;
 }
 
 const DiffLine: React.FC<{ line: EditPatch['diff'][number] }> = ({ line }) => {
@@ -136,8 +126,13 @@ export const SkillEditDrawer: React.FC<{
   const [pending, setPending] = useState<EditPatch | null>(null);
   const [editing, setEditing] = useState(false);
   const [body, setBody] = useState('');
+  const [thinking, setThinking] = useState(false);
+  const [confirmLeaveOpen, setConfirmLeaveOpen] = useState(false);
   const [selectedTargetPath, setSelectedTargetPath] = useState(targetPath ?? '');
   const scrollRef = useRef<HTMLDivElement>(null);
+  // in-flight 무효화 토큰 — 대화가 리셋(스킬/파일 변경, 재오픈)되면 올라가고,
+  // 그 전에 떠난 요청의 늦은 응답은 새 대화에 꽂히지 않게 버린다.
+  const reqSeq = useRef(0);
 
   // 드로어 안에서도 저장소의 모든 파일을 오갈 수 있다. 상세 화면에서 바로 열면
   // SKILL.md를, 파일 작업공간에서 열면 현재 보던 파일을 첫 대상으로 삼는다.
@@ -152,41 +147,106 @@ export const SkillEditDrawer: React.FC<{
   // 스킬·대상 파일이 바뀌거나 드로어를 다시 열면 대화 초기화
   useEffect(() => {
     setSelectedTargetPath(defaultTargetPath);
+    reqSeq.current += 1; // 떠 있던 제안 요청 무효화
     setMessages([]);
     setInput('');
     setPending(null);
     setEditing(false);
+    setThinking(false);
+    setConfirmLeaveOpen(false);
   }, [skill.id, open, targetPath, defaultTargetPath]);
+
+  const requestClose = useCallback(() => {
+    if (thinking) {
+      setConfirmLeaveOpen(true);
+      return;
+    }
+    onClose();
+  }, [thinking, onClose]);
 
   useEffect(() => {
     if (!open) return;
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') requestClose();
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [open, onClose]);
+  }, [open, requestClose]);
 
-  // 새 메시지/제안이 생기면 맨 아래로 스크롤
+  // 새로고침·탭/창 닫기는 커스텀 다이얼로그를 띄울 수 없으므로 브라우저의
+  // 기본 이탈 경고를 사용한다. 응답이 끝나는 즉시 경고도 해제한다.
+  useEffect(() => {
+    if (!open || !thinking) return;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [open, thinking]);
+
+  useEffect(() => {
+    if (!thinking) setConfirmLeaveOpen(false);
+  }, [thinking]);
+
+  // 새 메시지/제안/생각중 이 생기면 맨 아래로 스크롤
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-  }, [messages, pending]);
+  }, [messages, pending, thinking]);
 
   if (!open) return null;
 
-  const propose = () => {
+  // 지시 → 런타임 LLM 이 대상 파일의 새 전문을 만들고, 여기서 현재본과 라인 diff 를
+  // 계산해 patch 카드로 보여준다. 저장은 승인 시 onApply(updateSkill/_file) 가 한다.
+  const propose = async () => {
     const text = input.trim();
-    if (!text || pending) return;
-    const patch = buildPatch(text, skill, detail, targetFile?.path);
+    if (!text || pending || thinking) return;
+    const target = targetFile;
+    const history = messages.slice(-8); // 직전 대화 맥락(반복 지시 이해용)
+    const seq = reqSeq.current;
+    setMessages((m) => [...m, { role: 'user', text }]);
+    setInput('');
+    setThinking(true);
+    const res = await api.proposeSkillEdit(skill.id, {
+      targetPath: target?.path ?? 'SKILL.md',
+      instruction: text,
+      history,
+    });
+    if (seq !== reqSeq.current) return; // 그 사이 대화가 리셋됨 — 늦은 응답 폐기
+    setThinking(false);
+    if (!res.success || !res.data) {
+      const offline = res.code === 'provider_unavailable' || !api.isEnabled;
+      const msg = offline
+        ? 'AI 편집은 런타임이 모델에 연결돼 있어야 해요. 런타임을 켠 뒤 다시 시도해 주세요.'
+        : `제안을 만들지 못했어요${res.error ? ` — ${res.error}` : ''}. 지시를 바꿔 다시 시도해 주세요.`;
+      setMessages((m) => [...m, { role: 'agent', text: msg }]);
+      return;
+    }
+    const d = res.data;
+    const diff = collapseContext(lineDiff(d.current_body, d.proposed_body));
+    if (!diff.some((l) => l.t !== 'ctx')) {
+      setMessages((m) => [
+        ...m,
+        { role: 'agent', text: '요청을 반영해도 바뀌는 내용이 없었어요. 조금 더 구체적으로 지시해 주세요.' },
+      ]);
+      return;
+    }
+    const patch: EditPatch = {
+      fromVer: skill.ver,
+      toVer: nextVer(skill.ver),
+      changelog: d.changelog,
+      diff,
+      proposedBody: d.proposed_body,
+      targetPath: d.target_path,
+      targetLabel: d.target_path.split('/').pop() ?? d.target_path,
+    };
     setMessages((m) => [
       ...m,
-      { role: 'user', text },
       { role: 'agent', text: `이렇게 바꾸면 다음 실행부터 반영돼요. 검토하고 적용하세요 — ${patch.fromVer} → ${patch.toVer}.` },
     ]);
     setBody(patch.proposedBody);
     setEditing(false);
     setPending(patch);
-    setInput('');
   };
 
   const apply = () => {
@@ -210,7 +270,7 @@ export const SkillEditDrawer: React.FC<{
   return (
     <div className="fixed inset-0 z-[60] flex">
       {/* 파일 맥락을 잃지 않도록 블러 없이 가볍게만 어둡힌다. */}
-      <div onClick={onClose} className="absolute inset-0 bg-black/25 animate-fade-in" />
+      <div onClick={requestClose} className="absolute inset-0 bg-black/25 animate-fade-in" />
 
       {/* right drawer */}
       <div className="skill-ai-scope relative ml-auto h-full w-[520px] max-w-full bg-layer-01 border-l border-border-subtle-01 shadow-elevation-3 z-[61] flex flex-col animate-slide-in-right">
@@ -227,7 +287,7 @@ export const SkillEditDrawer: React.FC<{
             </div>
           </div>
           <button
-            onClick={onClose}
+            onClick={requestClose}
             aria-label="닫기"
             className="w-7 h-7 flex items-center justify-center rounded-md text-icon-secondary hover:bg-layer-hover-01 hover:text-text-primary transition-colors flex-shrink-0"
           >
@@ -247,8 +307,9 @@ export const SkillEditDrawer: React.FC<{
                   setInput('');
                   setPending(null);
                   setEditing(false);
+                  setThinking(false);
                 }}
-                disabled={!!pending}
+                disabled={!!pending || thinking}
                 className="h-9 w-full appearance-none rounded-lg border border-border-subtle-01 bg-background pl-9 pr-9 font-mono text-body-short-01 text-text-primary outline-none transition-colors hover:bg-layer-hover-01 focus:border-blue-50 disabled:opacity-50"
               >
                 {files.map((file) => (
@@ -290,6 +351,21 @@ export const SkillEditDrawer: React.FC<{
                 <span>{m.text}</span>
               </div>
             ),
+          )}
+
+          {/* AI가 새 본문을 만드는 중 */}
+          {thinking && (
+            <div className="self-start max-w-[90%] text-body-short-01 text-text-helper leading-5 flex items-center gap-2">
+              <Icon name="sparkle" size={15} className="text-blue-30 flex-shrink-0 animate-pulse" />
+              <span className="inline-flex items-center gap-1">
+                변경 내용을 만드는 중이에요
+                <span className="inline-flex gap-0.5">
+                  <span className="w-1 h-1 rounded-full bg-icon-secondary animate-bounce" style={{ animationDelay: '0ms' }} />
+                  <span className="w-1 h-1 rounded-full bg-icon-secondary animate-bounce" style={{ animationDelay: '150ms' }} />
+                  <span className="w-1 h-1 rounded-full bg-icon-secondary animate-bounce" style={{ animationDelay: '300ms' }} />
+                </span>
+              </span>
+            </div>
           )}
 
           {/* pending patch card */}
@@ -378,20 +454,37 @@ export const SkillEditDrawer: React.FC<{
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();
-                  propose();
+                  void propose();
                 }
               }}
-              placeholder={pending ? '먼저 위 제안을 적용하거나 버려주세요' : targetIsSkillMd ? '원하는 동작을 설명해 주세요… (예: 결과는 항상 한국어로 요약해줘)' : `${targetName}에서 무엇을 바꿀까요?`}
-              disabled={!!pending}
+              placeholder={pending ? '먼저 위 제안을 적용하거나 버려주세요' : thinking ? '변경 내용을 만드는 중이에요…' : targetIsSkillMd ? '원하는 동작을 설명해 주세요… (예: 결과는 항상 한국어로 요약해줘)' : `${targetName}에서 무엇을 바꿀까요?`}
+              disabled={!!pending || thinking}
               rows={2}
               className="flex-1 resize-none rounded-lg border border-border-subtle-01 bg-background px-3 py-2 text-body-short-01 text-text-primary placeholder:text-text-helper outline-none focus:ring-1 focus:ring-focus disabled:opacity-50"
             />
-            <Button kind="primary" size="sm" icon={<Icon name="send" size={14} />} onClick={propose} disabled={!input.trim() || !!pending}>
+            <Button kind="primary" size="sm" icon={<Icon name="send" size={14} />} onClick={() => void propose()} disabled={!input.trim() || !!pending || thinking}>
               변경 제안
             </Button>
           </div>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmLeaveOpen}
+        tone="danger"
+        title="AI 답변을 기다리지 않고 나갈까요?"
+        description="지금 나가면 AI가 준비하고 있는 변경 내용이 사라져요."
+        cancelLabel="계속 기다리기"
+        confirmLabel="나가기"
+        confirmIcon="close"
+        stackingClassName="z-[70]"
+        onClose={() => setConfirmLeaveOpen(false)}
+        onConfirm={() => {
+          reqSeq.current += 1;
+          setConfirmLeaveOpen(false);
+          onClose();
+        }}
+      />
     </div>
   );
 };

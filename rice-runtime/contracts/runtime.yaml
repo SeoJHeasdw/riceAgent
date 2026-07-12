@@ -217,6 +217,28 @@ paths:
         slow — clients should show a loading state.
       parameters: [{ $ref: "#/components/parameters/Id" }]
       responses: { "200": { $ref: "#/components/responses/Ok" }, "404": { $ref: "#/components/responses/Error" } }
+  /skills/{id}/edit-assist:
+    post:
+      tags: [skills]
+      summary: >
+        AI edit proposal ("AI로 수정" drawer). Body {target_path, instruction,
+        history[]} → one structured-JSON LLM call rewrites the whole target
+        file (SKILL.md edits additionally carry the skill-authoring builtin's
+        style rules in the prompt). Returns {target_path, changelog,
+        proposed_body, current_body, from_version} — NOTHING is saved; on user
+        approval the client commits via PUT /skills/{id} (SKILL.md) or
+        /skills/{id}/files/{path} (bundle file), which owns version++/history.
+        May be slow — clients must show a loading state. Errors: 503
+        code=provider_unavailable (no model provider wired), 502
+        code=provider_error (mid-stream provider failure), 422 (builtin skill,
+        empty/oversized instruction, unusable model output).
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /skills/curate:
     post:
       tags: [skills]

@@ -30,6 +30,8 @@ export interface ConfirmDialogProps {
   onConfirm: () => void;
   /** 닫기/취소 콜백 */
   onClose: () => void;
+  /** 다른 오버레이 위에 표시할 때 사용할 stacking class */
+  stackingClassName?: string;
 }
 
 export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
@@ -42,6 +44,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   confirmIcon,
   onConfirm,
   onClose,
+  stackingClassName = 'z-[60]',
 }) => {
   const dialogRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
@@ -52,7 +55,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center">
+    <div className={`fixed inset-0 ${stackingClassName} flex items-center justify-center`}>
       {/* backdrop */}
       <div className={dialogBackdropCls} onClick={onClose} aria-hidden="true" />
 

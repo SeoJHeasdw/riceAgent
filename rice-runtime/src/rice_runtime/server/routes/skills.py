@@ -3,6 +3,7 @@
   GET   /skills                 list + usage stats (MySkillsScreen)
   GET   /skills/{id}            detail
   PUT   /skills/{id}/files/{path}  edit bundled reference/script/template
+  POST  /skills/{id}/edit-assist   자연어 지시 → LLM이 대상 파일 새 본문 제안 (저장 없음)
   POST  /skills/curate          manual "스킬 정리" trigger (mode=rules|consolidate, Phase B)
   PATCH /skills/{id}/state      archive / activate
   POST  /skills/{id}/patch      answer a skill_patch_proposed (approve/reject/edit)
@@ -78,6 +79,18 @@ class UpdateSkillIn(BaseModel):
 
 class UpdateSkillFileIn(BaseModel):
     content: str
+
+
+class EditAssistTurn(BaseModel):
+    role: str  # user | agent
+    text: str
+
+
+class EditAssistIn(BaseModel):
+    target_path: str
+    instruction: str
+    # 드로어의 직전 대화(반복 지시 맥락). 비어 있어도 됨 — 마지막 instruction 이 정본.
+    history: list[EditAssistTurn] = []
 
 
 class PatchIn(BaseModel):
@@ -191,6 +204,24 @@ async def update_skill_file(
         "success": True,
         "data": {**detail.__dict__, "files": c.learning.get_skill_files(skill_id)},
     }
+
+
+@router.post("/{skill_id}/edit-assist")
+async def edit_assist(skill_id: str, body: EditAssistIn, c: Container = Depends(get_container)):
+    """자연어 지시 → 대상 파일의 완성된 새 본문 제안 ("AI로 수정" 드로어의 배선).
+
+    저장하지 않는다 — {changelog, proposed_body, current_body, from_version} 만
+    돌려주고, 사용자가 승인하면 프론트가 PUT /skills/{id}[/files/{path}] 로 커밋한다
+    (버전++·히스토리는 그 저장 경로가 담당). LLM 1회 호출이라 느릴 수 있는 일반
+    REST — 프론트는 로딩 상태를 보여줘야 한다. provider 미배선이면 503
+    (code=provider_unavailable) → 프론트가 "런타임 오프라인"으로 안내."""
+    data = await c.learning.propose_skill_edit(
+        skill_id,
+        target_path=body.target_path,
+        instruction=body.instruction,
+        history=[h.model_dump() for h in body.history],
+    )
+    return {"success": True, "data": data}
 
 
 @router.post("/{skill_id}/analysis/refresh")
