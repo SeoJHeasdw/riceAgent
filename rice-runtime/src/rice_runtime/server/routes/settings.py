@@ -14,10 +14,11 @@ import logging
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from ...core.config import AgentConfig, Config, ContextConfig, ProviderConfig, UIConfig, save_config
+from ...core.errors import RiceError
 from ..composition_root import Container
 from .deps import get_container
 
@@ -172,11 +173,25 @@ async def get_ollama_models(c: Container = Depends(get_container)):
             resp.raise_for_status()
             data = resp.json()
     except httpx.ConnectError:
-        raise HTTPException(status_code=503, detail=f"Ollama에 연결할 수 없습니다: {base_url}")
+        raise RiceError(
+            "ollama unreachable",
+            code="ollama.unreachable",
+            http=503,
+            params={"baseUrl": base_url},
+        )
     except httpx.HTTPStatusError as exc:
-        raise HTTPException(status_code=exc.response.status_code, detail="Ollama 응답 오류")
+        raise RiceError(
+            "ollama returned an error",
+            code="ollama.bad_response",
+            http=exc.response.status_code,
+        )
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
+        raise RiceError(
+            "ollama unreachable",
+            code="ollama.unreachable",
+            http=503,
+            params={"baseUrl": base_url},
+        )
     # Normalize to a flat list with only the fields the UI needs.
     models = [
         {
@@ -213,9 +228,19 @@ async def ollama_model_health(c: Container = Depends(get_container)):
             resp = await client.post(f"{base_url}/api/show", json={"name": cfg.model})
             exists = resp.status_code == 200
     except httpx.ConnectError:
-        raise HTTPException(status_code=503, detail=f"Ollama에 연결할 수 없습니다: {base_url}")
+        raise RiceError(
+            "ollama unreachable",
+            code="ollama.unreachable",
+            http=503,
+            params={"baseUrl": base_url},
+        )
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
+        raise RiceError(
+            "ollama unreachable",
+            code="ollama.unreachable",
+            http=503,
+            params={"baseUrl": base_url},
+        )
     return {"success": True, "data": {"exists": exists, "model": cfg.model}}
 
 

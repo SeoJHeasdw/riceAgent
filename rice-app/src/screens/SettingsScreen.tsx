@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Button, Card, Input, Tag, Toggle } from '../components/ui';
 import { useI18n } from '../lib/i18n/I18nContext';
 import { replayOnboarding, replayTour } from '../lib/tutorial';
@@ -7,6 +8,11 @@ import { applyAppearance } from '../lib/appearance';
 /**
  * SettingsScreen - Application preferences
  * Sections: Appearance, API & Runtime, Learning & Privacy, About, Danger zone
+ *
+ * i18n 레퍼런스 화면. 다른 화면 마이그레이션 시 이 파일의 패턴을 따르세요:
+ *   - 문자열: useTranslation('<네임스페이스>') 로 받은 t('키')
+ *   - 언어 읽기/전환: useI18n() 의 { language, setLanguage }
+ *   - 언어명 라벨(English/한국어)처럼 "그 언어로 표기해야 하는" 값은 번역하지 않음
  */
 
 interface AppSettings {
@@ -89,7 +95,8 @@ const SectionIcon: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 );
 
 function SettingsScreen() {
-  const { language, setLanguage, t } = useI18n();
+  const { language, setLanguage } = useI18n();
+  const { t } = useTranslation('settings');
   const [settings, setSettings] = useState<AppSettings>(loadSettings);
   const [saved, setSaved] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
@@ -133,15 +140,15 @@ function SettingsScreen() {
       {/* Header */}
       {/* 채팅·사이드바와 같은 52px 헤더 라인 */}
       <header className="h-[52px] flex-shrink-0 bg-layer-01 border-b border-border-subtle-01 flex items-center gap-3 px-5">
-        <h1 className="text-body-short-02 font-semibold text-text-primary">{t.settings.title}</h1>
+        <h1 className="text-body-short-02 font-semibold text-text-primary">{t('title')}</h1>
         {saved && (
           <Tag type="green" size="sm" className="animate-fade-in" role="status">
-            {t.settings.saved}
+            {t('saved')}
           </Tag>
         )}
         {hasChanges && !saved && (
           <Tag type="yellow" size="sm" role="status">
-            {language === 'ko' ? '저장 안 됨' : 'Unsaved'}
+            {t('unsaved')}
           </Tag>
         )}
         <div className="flex-1" />
@@ -151,7 +158,7 @@ function SettingsScreen() {
           onClick={handleSave}
           disabled={!hasChanges}
         >
-          {t.settings.saveButton}
+          {t('saveButton')}
         </Button>
       </header>
 
@@ -174,14 +181,14 @@ function SettingsScreen() {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="text-heading-03 font-semibold leading-tight">
-                    {t.settings.about.appName}
+                    {t('about.appName')}
                   </span>
                   <span className="px-2 py-0.5 rounded-full bg-white/15 text-caption-01 font-medium">
-                    {t.settings.about.beta}
+                    {t('about.beta')}
                   </span>
                 </div>
                 <div className="text-body-short-01 text-white/75 truncate">
-                  {t.settings.about.appDescription}
+                  {t('about.appDescription')}
                 </div>
               </div>
             </div>
@@ -189,8 +196,8 @@ function SettingsScreen() {
 
           {/* Appearance */}
           <SettingsSection
-            title={t.settings.appearance.title}
-            description={t.settings.appearance.description}
+            title={t('appearance.title')}
+            description={t('appearance.description')}
             iconClass="bg-purple-60/15 text-purple-30"
             icon={
               <SectionIcon>
@@ -200,11 +207,11 @@ function SettingsScreen() {
             }
           >
             <div>
-              <div className="text-label-01 text-text-secondary mb-2">{t.settings.appearance.theme}</div>
+              <div className="text-label-01 text-text-secondary mb-2">{t('appearance.theme')}</div>
               <div className="grid grid-cols-2 gap-1 p-1 bg-field-01 border border-border-subtle-01 rounded-xl max-w-[320px]">
                 {([
-                  { value: 'dark' as const, label: t.settings.appearance.themeDark, enabled: true },
-                  { value: 'light' as const, label: t.settings.appearance.themeLight, enabled: true },
+                  { value: 'dark' as const, label: t('appearance.themeDark'), enabled: true },
+                  { value: 'light' as const, label: t('appearance.themeLight'), enabled: true },
                 ]).map(({ value, label, enabled }) => {
                   const isActive = settings.theme === value;
                   return (
@@ -240,9 +247,10 @@ function SettingsScreen() {
 
             <div>
               <div className="text-label-01 text-text-secondary mb-2">
-                {t.settings.appearance.language}
+                {t('appearance.language')}
               </div>
               <div className="grid grid-cols-2 gap-1 p-1 bg-field-01 border border-border-subtle-01 rounded-xl max-w-[320px]">
+                {/* 언어명은 각 언어 표기 그대로 — 번역 대상 아님 */}
                 {([
                   { value: 'en' as const, label: 'English' },
                   { value: 'ko' as const, label: '한국어' },
@@ -267,13 +275,13 @@ function SettingsScreen() {
             </div>
             <div>
               <div className="text-label-01 text-text-secondary mb-2">
-                {t.settings.appearance.font}
+                {t('appearance.font')}
               </div>
               <div className="grid grid-cols-3 gap-1 p-1 bg-field-01 border border-border-subtle-01 rounded-xl max-w-[320px]">
                 {([
-                  { value: 'system' as const, label: t.settings.appearance.fontSystem },
-                  { value: 'mono'   as const, label: t.settings.appearance.fontMono },
-                  { value: 'sans'   as const, label: t.settings.appearance.fontSans },
+                  { value: 'system' as const, label: t('appearance.fontSystem') },
+                  { value: 'mono'   as const, label: t('appearance.fontMono') },
+                  { value: 'sans'   as const, label: t('appearance.fontSans') },
                 ]).map(({ value, label }) => {
                   const isActive = settings.font === value;
                   return (
@@ -297,8 +305,8 @@ function SettingsScreen() {
 
           {/* API & Runtime */}
           <SettingsSection
-            title={t.settings.apiRuntime.title}
-            description={t.settings.apiRuntime.description}
+            title={t('apiRuntime.title')}
+            description={t('apiRuntime.description')}
             iconClass="bg-interactive/15 text-blue-40"
             icon={
               <SectionIcon>
@@ -309,35 +317,33 @@ function SettingsScreen() {
             }
           >
             <p className="text-caption-01 text-text-helper -mt-1">
-              {language === 'ko'
-                ? 'Claude(SaaS) API 키는 채팅의 모델 설정에서 등록·관리합니다.'
-                : 'The Claude (SaaS) API key is managed in the chat model settings.'}
+              {t('apiRuntime.claudeManagedInChat')}
             </p>
 
             <div>
               <label className="text-label-01 text-text-secondary mb-1.5 block">
-                {t.settings.apiRuntime.ollamaEndpoint}
+                {t('apiRuntime.ollamaEndpoint')}
               </label>
               <Input
                 type="text"
                 value={settings.ollamaEndpoint}
                 onChange={(e) => update('ollamaEndpoint', e.target.value)}
-                placeholder={t.settings.apiRuntime.ollamaPlaceholder}
+                placeholder={t('apiRuntime.ollamaPlaceholder')}
               />
             </div>
 
             <Toggle
               checked={settings.runtimeAutoStart}
               onChange={(checked) => update('runtimeAutoStart', checked)}
-              label={t.settings.apiRuntime.runtimeAutoStart}
-              description={t.settings.apiRuntime.runtimeAutoStartDesc}
+              label={t('apiRuntime.runtimeAutoStart')}
+              description={t('apiRuntime.runtimeAutoStartDesc')}
             />
           </SettingsSection>
 
           {/* Learning & Privacy */}
           <SettingsSection
-            title={t.settings.learningPrivacy.title}
-            description={t.settings.learningPrivacy.description}
+            title={t('learningPrivacy.title')}
+            description={t('learningPrivacy.description')}
             iconClass="bg-support-success/15 text-green-30"
             icon={
               <SectionIcon>
@@ -348,32 +354,28 @@ function SettingsScreen() {
             <Toggle
               checked={settings.userModelingEnabled}
               onChange={(checked) => update('userModelingEnabled', checked)}
-              label={t.settings.learningPrivacy.userModeling}
-              description={t.settings.learningPrivacy.userModelingDesc}
+              label={t('learningPrivacy.userModeling')}
+              description={t('learningPrivacy.userModelingDesc')}
             />
             <Toggle
               checked={settings.localStorageOnly}
               onChange={(checked) => update('localStorageOnly', checked)}
               disabled={!settings.userModelingEnabled}
-              label={t.settings.learningPrivacy.localStorage}
-              description={t.settings.learningPrivacy.localStorageDesc}
+              label={t('learningPrivacy.localStorage')}
+              description={t('learningPrivacy.localStorageDesc')}
             />
             <Toggle
               checked={settings.telemetryEnabled}
               onChange={(checked) => update('telemetryEnabled', checked)}
-              label={t.settings.learningPrivacy.telemetry}
-              description={t.settings.learningPrivacy.telemetryDesc}
+              label={t('learningPrivacy.telemetry')}
+              description={t('learningPrivacy.telemetryDesc')}
             />
           </SettingsSection>
 
           {/* Tutorial — 온보딩/투어 다시 보기 */}
           <SettingsSection
-            title={language === 'ko' ? '튜토리얼' : 'Tutorial'}
-            description={
-              language === 'ko'
-                ? '처음 안내를 놓쳤거나 다시 보고 싶을 때 언제든 재실행할 수 있어요.'
-                : 'Replay the first-run guidance anytime you want to revisit it.'
-            }
+            title={t('tutorial.title')}
+            description={t('tutorial.description')}
             iconClass="bg-orange-40/15 text-orange-30"
             icon={
               <SectionIcon>
@@ -385,39 +387,35 @@ function SettingsScreen() {
             <div className="flex items-center gap-3">
               <div className="flex-1 min-w-0">
                 <div className="text-body-short-02 text-text-primary">
-                  {language === 'ko' ? '소개 다시 보기' : 'Replay onboarding'}
+                  {t('tutorial.replayOnboarding')}
                 </div>
                 <div className="text-caption-01 text-text-helper">
-                  {language === 'ko'
-                    ? 'RICE 개념과 모델 연결을 단계별로 다시 안내해요.'
-                    : 'Walk through the RICE concepts and model setup again.'}
+                  {t('tutorial.replayOnboardingDesc')}
                 </div>
               </div>
               <Button kind="secondary" size="sm" onClick={replayOnboarding}>
-                {language === 'ko' ? '다시 보기' : 'Replay'}
+                {t('tutorial.replay')}
               </Button>
             </div>
             <div className="flex items-center gap-3">
               <div className="flex-1 min-w-0">
                 <div className="text-body-short-02 text-text-primary">
-                  {language === 'ko' ? '둘러보기 다시 시작' : 'Restart tour'}
+                  {t('tutorial.restartTour')}
                 </div>
                 <div className="text-caption-01 text-text-helper">
-                  {language === 'ko'
-                    ? '화면 곳곳의 기능을 말풍선으로 다시 짚어줘요.'
-                    : 'Highlight the key features around the app once more.'}
+                  {t('tutorial.restartTourDesc')}
                 </div>
               </div>
               <Button kind="secondary" size="sm" onClick={replayTour}>
-                {language === 'ko' ? '다시 시작' : 'Start'}
+                {t('tutorial.start')}
               </Button>
             </div>
           </SettingsSection>
 
           {/* Danger zone */}
           <SettingsSection
-            title={t.settings.danger.title}
-            description={t.settings.danger.description}
+            title={t('danger.title')}
+            description={t('danger.description')}
             iconClass="bg-red-60/15 text-red-40"
             icon={
               <SectionIcon>
@@ -429,14 +427,14 @@ function SettingsScreen() {
             <div className="flex items-center gap-3">
               <div className="flex-1">
                 <div className="text-body-short-02 text-text-primary">
-                  {t.settings.danger.reset}
+                  {t('danger.reset')}
                 </div>
                 <div className="text-caption-01 text-text-helper">
-                  {t.settings.danger.resetDesc}
+                  {t('danger.resetDesc')}
                 </div>
               </div>
               <Button kind="danger" size="sm" onClick={handleReset}>
-                {t.settings.danger.resetButton}
+                {t('danger.resetButton')}
               </Button>
             </div>
           </SettingsSection>

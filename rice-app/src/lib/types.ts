@@ -112,8 +112,11 @@ export interface ApiResponse<T = unknown> {
   error?: string;
   message?: string;
   /** stable wire error identifier (RiceError.code) — 호출 측이 분기용으로 쓴다
-   *  (예: 'provider_unavailable' → "런타임 오프라인" 안내). */
+   *  (예: 'provider_unavailable' → "런타임 오프라인" 안내).
+   *  사용자 표시 문구는 lib/i18n/apiError.ts 의 apiErrorMessage(res) 로 지역화한다. */
   code?: string;
+  /** 에러 문구 보간용 파라미터(RiceError.params) — errors 카탈로그가 {{detail}} 등으로 사용. */
+  params?: Record<string, unknown>;
 }
 
 // ── SSE events (RICE_CONTRACTS 1.3) ──────────────────────────────

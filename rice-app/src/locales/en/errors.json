@@ -1,0 +1,28 @@
+{
+  "unknown": "Something went wrong.",
+  "internal_error": "An internal error occurred.",
+  "not_found": "Not found.",
+  "validation_error": "Please check your input.",
+  "conflict": "The request conflicts with the current state.",
+  "permission_denied": "You don't have permission to do that.",
+  "provider_error": "Failed to reach the model provider.",
+  "workspace": {
+    "path_not_absolute": "The save location must be an absolute path.",
+    "mkdir_failed": "Couldn't create the save folder: {{detail}}",
+    "open_failed": "Couldn't open it: {{detail}}"
+  },
+  "ollama": {
+    "unreachable": "Can't connect to Ollama: {{baseUrl}}",
+    "bad_response": "Ollama returned an error."
+  },
+  "session": {
+    "generating": "This session is already generating a response. Try again once it finishes.",
+    "nothing_to_regenerate": "There's no user message to regenerate."
+  },
+  "skill": {
+    "validation_failed": "Skill validation failed: {{detail}}",
+    "already_exists": "A skill with this name already exists: {{name}}",
+    "edit_empty": "The edit instructions are empty.",
+    "edit_unparseable": "Couldn't interpret the AI edit response. Try rephrasing your instructions."
+  }
+}

@@ -20,16 +20,27 @@ class RiceError(Exception):
     code: str = "internal_error"
     http: int = 500
 
-    def __init__(self, message: str = "", *, code: str | None = None, http: int | None = None):
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        code: str | None = None,
+        http: int | None = None,
+        params: dict[str, object] | None = None,
+    ):
         super().__init__(message or self.__class__.__name__)
         self.message = message or self.__class__.__name__
         if code is not None:
             self.code = code
         if http is not None:
             self.http = http
+        # `params` 는 UI 문구 보간용 값(예: {"detail": ..., "baseUrl": ...}).
+        # 런타임은 자연어 문장을 만들지 않는다 — 안정적인 `code` + `params` 만 내려주고
+        # 실제 표시 문구는 프론트의 errors 카탈로그가 담당한다.
+        self.params: dict[str, object] = dict(params) if params else {}
 
-    def to_event_data(self) -> dict[str, str]:
-        return {"error_code": self.code, "message": self.message}
+    def to_event_data(self) -> dict[str, object]:
+        return {"error_code": self.code, "message": self.message, "params": self.params}
 
 
 class NotFoundError(RiceError):

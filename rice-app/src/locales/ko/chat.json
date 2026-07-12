@@ -1,0 +1,9 @@
+{
+  "title": "채팅",
+  "placeholder": "메시지를 입력하세요...",
+  "send": "전송",
+  "stop": "중지",
+  "regenerate": "다시 생성",
+  "newChat": "새 채팅",
+  "thinking": "생각 중..."
+}

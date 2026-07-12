@@ -12,11 +12,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from ...core.config import Config, UIConfig, save_config
-from ...core.errors import NotFoundError
+from ...core.errors import NotFoundError, ValidationError
 from ..composition_root import Container
 from .deps import get_container
 
@@ -52,7 +52,9 @@ def _open_in_default_app(target: Path) -> None:
         else:
             subprocess.Popen(["xdg-open", str(target)])
     except Exception as exc:  # opener missing / no association
-        raise NotFoundError(f"열 수 없어요: {exc}") from exc
+        raise NotFoundError(
+            "failed to open path", code="workspace.open_failed", params={"detail": str(exc)}
+        ) from exc
 
 
 @router.get("/workspace")
@@ -84,12 +86,18 @@ async def update_workspace_location(body: WorkspaceLocationIn, c: Container = De
     if requested:
         target = Path(requested).expanduser()
         if not target.is_absolute():
-            raise HTTPException(status_code=422, detail="저장 위치는 절대 경로여야 합니다.")
+            raise ValidationError(
+                "workspace path must be absolute", code="workspace.path_not_absolute"
+            )
         try:
             target.mkdir(parents=True, exist_ok=True)
             target = target.resolve()
         except OSError as exc:
-            raise HTTPException(status_code=422, detail=f"저장 폴더를 만들 수 없어요: {exc}") from exc
+            raise ValidationError(
+                "failed to create workspace dir",
+                code="workspace.mkdir_failed",
+                params={"detail": str(exc)},
+            ) from exc
         workspace_path: str | None = str(target)
     else:
         workspace_path = None

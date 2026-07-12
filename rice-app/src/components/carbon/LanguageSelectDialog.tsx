@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useI18n } from '../../lib/i18n/I18nContext';
-import type { Language } from '../../lib/i18n/translations';
+import type { Language } from '../../lib/i18n';
 import { BrandMark } from './onboarding/primitives';
 
 export interface LanguageSelectDialogProps {

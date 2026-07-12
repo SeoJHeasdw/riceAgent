@@ -134,7 +134,10 @@ def create_app(container: Container):
     # ── uniform error envelope ────────────────────────────────────────────────
     @app.exception_handler(RiceError)
     async def rice_error_handler(_request: Request, exc: RiceError):
-        return JSONResponse({"success": False, "error": exc.message, "code": exc.code}, status_code=exc.http)
+        return JSONResponse(
+            {"success": False, "error": exc.message, "code": exc.code, "params": exc.params},
+            status_code=exc.http,
+        )
 
     # ── lifecycle ─────────────────────────────────────────────────────────────
     @app.get("/health")

@@ -216,14 +216,14 @@ async def regenerate(
     # 재생성은 하지도 않는 최악의 조합이었다. 아래 검사~delete_after 사이에 await 가
     # 없어 단일 이벤트 루프에서 원자적이다.
     if c.agent.is_active(session_id):
-        raise ConflictError("이 세션에서 이미 응답을 생성하고 있습니다. 완료 후 다시 시도하세요.")
+        raise ConflictError("response already generating", code="session.generating")
     # Drop the stale assistant turn (everything after the last user message) so the
     # re-run replaces it rather than appending a second answer. 절단 기준은 그 사용자
     # 메시지의 고유 id(rowid) — ts 절단은 같은 밀리초의 assistant 응답을 남긴다.
     history = c.sessions.history(session_id)
     last_user = next((m for m in reversed(history) if m.role == "user"), None)
     if last_user is None:
-        raise ConflictError("재생성할 사용자 메시지가 없습니다.")
+        raise ConflictError("nothing to regenerate", code="session.nothing_to_regenerate")
     c.sessions.delete_after_message(session_id, last_user.id)
     request = body or RegenerateIn()
     stream = to_sse_stream(

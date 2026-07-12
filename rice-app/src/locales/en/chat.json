@@ -1,0 +1,9 @@
+{
+  "title": "Chat",
+  "placeholder": "Type a message...",
+  "send": "Send",
+  "stop": "Stop",
+  "regenerate": "Regenerate",
+  "newChat": "New chat",
+  "thinking": "Thinking..."
+}

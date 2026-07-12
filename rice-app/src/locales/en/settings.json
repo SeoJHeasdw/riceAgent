@@ -1,0 +1,60 @@
+{
+  "title": "Settings",
+  "saved": "Saved",
+  "unsaved": "Unsaved",
+  "saveButton": "Save Settings",
+  "appearance": {
+    "title": "Appearance",
+    "description": "Theme, language, and font preferences",
+    "theme": "Theme",
+    "themeDark": "Dark",
+    "themeLight": "Light",
+    "language": "Language",
+    "font": "Font",
+    "fontSystem": "System default",
+    "fontMono": "Monospace",
+    "fontSans": "Sans-serif"
+  },
+  "apiRuntime": {
+    "title": "API & Runtime",
+    "description": "Model provider credentials and local runtime",
+    "claudeManagedInChat": "The Claude (SaaS) API key is managed in the chat model settings.",
+    "ollamaEndpoint": "Ollama endpoint",
+    "ollamaPlaceholder": "http://localhost:11434",
+    "runtimeAutoStart": "Start runtime on launch",
+    "runtimeAutoStartDesc": "Automatically start the RICE runtime when the app opens"
+  },
+  "learningPrivacy": {
+    "title": "Learning · Privacy",
+    "description": "Control what the learning loop can collect and where it lives",
+    "userModeling": "Enable user modeling",
+    "userModelingDesc": "Learn from your interactions to personalize responses",
+    "localStorage": "Store user model locally only",
+    "localStorageDesc": "Keep all learning data on your device",
+    "telemetry": "Share anonymous usage data",
+    "telemetryDesc": "Help improve RICE by sending anonymized telemetry"
+  },
+  "about": {
+    "title": "About",
+    "appName": "RICE",
+    "appDescription": "Runtime Intelligence & Continuous Evolution · v0.1.0",
+    "beta": "Beta"
+  },
+  "tutorial": {
+    "title": "Tutorial",
+    "description": "Replay the first-run guidance anytime you want to revisit it.",
+    "replayOnboarding": "Replay onboarding",
+    "replayOnboardingDesc": "Walk through the RICE concepts and model setup again.",
+    "replay": "Replay",
+    "restartTour": "Restart tour",
+    "restartTourDesc": "Highlight the key features around the app once more.",
+    "start": "Start"
+  },
+  "danger": {
+    "title": "Danger zone",
+    "description": "Irreversible actions — be careful",
+    "reset": "Reset all settings",
+    "resetDesc": "Restore every setting to its default value",
+    "resetButton": "Reset"
+  }
+}

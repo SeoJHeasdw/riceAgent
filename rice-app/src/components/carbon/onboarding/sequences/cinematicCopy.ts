@@ -1,4 +1,4 @@
-import type { Language } from '../../../../lib/i18n/translations';
+import type { Language } from '../../../../lib/i18n';
 import type { CapabilitySpec } from './types';
 
 export interface CinematicCopy {
