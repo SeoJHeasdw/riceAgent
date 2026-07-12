@@ -1668,6 +1668,7 @@ function MySkillsScreen() {
   const curateSkills = () => {
     if (curating) return;
     setCurating(true);
+    setConsolidateNote(null);
     void api.curateSkills();
 
     const moves: string[] = [];
@@ -1698,6 +1699,7 @@ function MySkillsScreen() {
   const runConsolidate = async () => {
     if (consolidating) return;
     setConsolidating(true);
+    setCurateNote(null);
     setConsolidateNote(null);
     const res = await api.consolidateSkills();
     setConsolidating(false);
@@ -1764,7 +1766,7 @@ function MySkillsScreen() {
         style={{ width: railPanel.width }}
       >
         {/* 통계 카드 + "학습 효과" proof CTA — 숫자(현황)에서 정량 증명으로 자연히 이어지는 한 덩어리 */}
-        <div className="p-4">
+        <div className="px-4 pt-4 pb-2">
           <div className="domain-summary domain-summary--skill overflow-hidden rounded-xl text-white">
             <div className="p-4">
               <div className="flex items-center gap-1.5 mb-1">
@@ -1795,72 +1797,26 @@ function MySkillsScreen() {
           </div>
         </div>
 
-        {/* 유지보수 액션 "스킬 정리" — 가끔 쓰는 큐레이터 트리거라 카드가 아닌 경량 행으로 위계를 낮춘다. */}
-        <button
-          onClick={curateSkills}
-          disabled={curating}
-          title="오래 안 쓴 스킬을 stale·보관으로 정리합니다 (POST /skills/curate)"
-          className="group flex items-center gap-2 mx-4 mb-1 px-2 py-1.5 rounded-md text-text-secondary hover:bg-layer-hover-01 hover:text-text-primary transition-colors disabled:opacity-50"
-        >
-          <Icon name="renew" size={14} className={`flex-shrink-0 ${curating ? 'animate-spin text-icon-primary' : 'text-icon-secondary group-hover:text-icon-primary'}`} />
-          <span className="text-body-short-01 font-medium flex-shrink-0">{curating ? '정리 중…' : '스킬 정리'}</span>
-          <span className="text-caption-01 text-text-helper truncate ml-1" title={curateNote ?? undefined}>
-            {curateNote ?? `${STALE_DAYS}일↑ Stale · ${ARCHIVE_DAYS}일↑ 보관`}
-          </span>
-        </button>
-
-        {/* Phase B: curator LLM 통합 — 유사/중복 스킬을 하나의 class-level umbrella로
-            묶는 제안을 분석한다. 규칙 정리와 달리 LLM 판단이 필요해 훨씬 오래 걸릴 수
-            있어(스킬 전체 본문을 프롬프트에 태움) 별도 버튼으로 분리했다. */}
-        <button
-          onClick={() => void runConsolidate()}
-          disabled={consolidating}
-          title="유사/중복 스킬을 하나의 통합 스킬로 합치는 제안을 분석합니다 (POST /skills/curate?mode=consolidate)"
-          className="group flex items-center gap-2 mx-4 mb-1 px-2 py-1.5 rounded-md text-text-secondary hover:bg-layer-hover-01 hover:text-text-primary transition-colors disabled:opacity-50"
-        >
-          <Icon name="flow" size={14} className={`flex-shrink-0 ${consolidating ? 'animate-spin text-icon-primary' : 'text-icon-secondary group-hover:text-icon-primary'}`} />
-          <span className="text-body-short-01 font-medium flex-shrink-0">{consolidating ? '분석 중…' : 'AI 통합 제안'}</span>
-          {consolidateNote && (
-            <span className="text-caption-01 text-text-helper truncate ml-1" title={consolidateNote}>
-              {consolidateNote}
+        {/* 상태 기반 유지보수는 현황 카드와 필터 사이에 둔다. 목록 생성 액션인
+            AI 통합과 같은 위계로 묶지 않고, 기존의 조용한 관리 행 패턴을 유지한다. */}
+        <div className="px-4 pb-1.5">
+          <button
+            onClick={curateSkills}
+            disabled={curating || consolidating}
+            title="오래 안 쓴 스킬을 stale·보관으로 정리합니다"
+            className="group flex h-7 w-full items-center gap-1.5 rounded-md px-1.5 text-text-secondary transition-colors hover:bg-layer-hover-01 hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Icon
+              name="renew"
+              size={13}
+              className={`flex-shrink-0 ${curating ? 'animate-spin text-icon-primary' : 'text-icon-secondary group-hover:text-icon-primary'}`}
+            />
+            <span className="text-caption-01 font-semibold flex-shrink-0">{curating ? '정리 중…' : '스킬 정리'}</span>
+            <span className="ml-auto truncate text-label-micro text-text-helper" title={curateNote ?? undefined}>
+              {curateNote ?? `${STALE_DAYS}일↑ Stale · ${ARCHIVE_DAYS}일↑ 보관`}
             </span>
-          )}
-        </button>
-
-        {/* 통합 제안 검토 목록 — 제안마다 개별 승인/거부(approval_id 없음, 서버가
-            일반 REST 응답으로 그대로 반환한 것을 로컬에서 들고 있다가 반송). */}
-        {consolidateProposals.length > 0 && (
-          <div className="mx-4 mb-2 space-y-1.5">
-            {consolidateProposals.map((p, i) => (
-              <div
-                key={`${p.kind}-${p.skill_id}-${i}`}
-                className="rounded-lg border border-border-subtle-01 bg-layer-01 p-2.5"
-              >
-                <div className="flex items-center gap-1.5 mb-1">
-                  <Icon name={p.kind === 'patch' ? 'flow' : 'trash'} size={12} className="text-icon-secondary flex-shrink-0" />
-                  <span className="text-caption-01 font-semibold text-text-primary truncate">{p.skill_id}</span>
-                  <Tag type={p.kind === 'patch' ? 'blue' : 'gray'} size="sm">
-                    {p.kind === 'patch' ? (p.from_version === 0 ? '신규 통합' : '병합') : '정리'}
-                  </Tag>
-                </div>
-                <p className="text-caption-01 text-text-secondary mb-2 line-clamp-2">
-                  {p.kind === 'patch' ? p.changelog : p.reason}
-                </p>
-                <div className="flex items-center gap-1.5">
-                  <Button kind="ghost" size="sm" onClick={() => void decideProposal(p, false)}>
-                    거부
-                  </Button>
-                  <Button kind="primary" size="sm" onClick={() => void decideProposal(p, true)}>
-                    승인
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* 유지보수 영역과 필터 목록을 시각적으로 분리 */}
-        <div className="mx-4 mt-1.5 mb-1 border-t border-border-subtle-01" />
+          </button>
+        </div>
 
         <div className="flex-1 overflow-y-auto pb-2">
           {FILTER_GROUPS.map((group) => (
@@ -1913,71 +1869,147 @@ function MySkillsScreen() {
         className="flex-shrink-0 bg-background border-r border-border-subtle-01 overflow-y-auto min-w-0"
         style={{ width: listPanel.width }}
       >
-        <div className="px-5 pt-5 pb-3">
-          <h1 className="text-heading-03 font-semibold text-text-primary">스킬 목록</h1>
-        </div>
-        {list.map((s) => {
-          const on = s.id === effectiveSel;
-          return (
+        {/* 다른 관리 화면과 같은 조용한 목록 헤더. AI 통합만 아이콘 액션으로
+            극압축하고, 정확한 의미는 접근성 라벨과 툴팁으로 보완한다. */}
+        <div className="flex items-center gap-2 px-5 pt-5 pb-3">
+          <h1 className="min-w-0 flex-1 text-heading-03 font-semibold text-text-primary">스킬 목록</h1>
+          <div className="relative flex-shrink-0">
             <button
-              key={s.id}
-              onClick={() => {
-                setSel(s.id);
-                setShowImpact(false);
-              }}
-              className={`flex items-start gap-2.5 w-full text-left border-b border-border-subtle-01 border-l-2 px-[18px] py-3 transition-colors ${
-                on && !showImpact ? 'bg-layer-selected-01 border-l-blue-50' : 'bg-transparent border-l-transparent hover:bg-layer-hover-01'
-              } ${skillStatus(s) === 'archived' ? 'opacity-60' : !isInjected(skillStatus(s)) ? 'opacity-70' : ''}`}
+              onClick={() => void runConsolidate()}
+              disabled={consolidating || curating}
+              title="AI가 유사하거나 중복된 스킬을 찾아 통합을 제안합니다"
+              aria-label={consolidating ? 'AI 통합 제안 분석 중' : 'AI 통합 제안'}
+              className={`flex h-7 w-7 items-center justify-center rounded-lg transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                consolidating || consolidateProposals.length > 0
+                  ? 'bg-blue-60/15 text-link-primary'
+                  : 'text-icon-secondary hover:bg-layer-hover-01 hover:text-text-primary'
+              }`}
             >
-              <div
-                className={`mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg border ${
-                  on && !showImpact
-                    ? 'border-blue-50/35 bg-blue-60/16 text-blue-30'
-                    : isInjected(skillStatus(s))
-                      ? 'border-blue-50/25 bg-blue-60/10 text-blue-40'
-                      : 'border-border-subtle-02 bg-layer-03 text-text-helper'
-                }`}
-              >
-                <Icon name="skill" size={15} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-body-short-01 font-semibold text-text-primary truncate">{s.name}</span>
-                  <span className="text-caption-01 font-mono text-text-helper flex-shrink-0">{s.ver}</span>
-                  <OriginGlyph s={s} />
-                  <StatusBadge s={s} />
-                </div>
-                <div className="flex items-center gap-1.5 mt-0.5">
-                  <span className="text-caption-01 text-text-helper truncate">
-                    {s.uses}회 사용 · {s.trend}
-                  </span>
-                </div>
-              </div>
-              {s.shared && <Icon name="share" size={13} className="text-icon-secondary mt-0.5 opacity-70 flex-shrink-0" />}
+              <Icon name={consolidating ? 'renew' : 'merge'} size={16} className={consolidating ? 'animate-spin' : ''} />
             </button>
-          );
-        })}
-        {list.length === 0 && (
-          <div className="p-10 text-center text-body-short-01 text-text-helper">
-            {hydrating ? (
-              '불러오는 중…'
-            ) : skills.length === 0 ? (
-              <div className="flex flex-col items-center gap-3">
-                <span>아직 학습된 스킬이 없어요. 대화를 나누면 자동으로 스킬이 자라납니다.</span>
-                <button
-                  onClick={() => navigate('/skills')}
-                  className="inline-flex items-center gap-1.5 text-link-primary hover:underline text-body-short-01"
-                >
-                  <Icon name="skill" size={14} />
-                  Skill Market 둘러보기
-                  <Icon name="arrow-up-right" size={13} />
-                </button>
-              </div>
-            ) : (
-              '해당하는 스킬이 없어요.'
+            {consolidateProposals.length > 0 && (
+              <span className="pointer-events-none absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-60 px-1 text-[10px] font-semibold leading-none text-white tabular-nums">
+                {consolidateProposals.length}
+              </span>
             )}
           </div>
+        </div>
+
+        {consolidateNote && consolidateProposals.length === 0 && (
+          <div
+            className={`mx-5 mb-2 flex items-start gap-1.5 text-caption-01 ${
+              consolidateNote.startsWith('통합 분석 실패') ? 'text-support-warning' : 'text-text-helper'
+            }`}
+            role="status"
+            title={consolidateNote}
+          >
+            <Icon name={consolidateNote.startsWith('통합 분석 실패') ? 'warning' : 'check-circle'} size={12} className="mt-0.5 flex-shrink-0" />
+            <span className="line-clamp-2 leading-4">{consolidateNote}</span>
+          </div>
         )}
+
+        <div>
+          {/* 통합 제안 검토 목록 — 실행 버튼과 같은 목록 영역에서만 노출해
+              AI 기능의 결과가 필터 탐색을 밀어내지 않도록 한다. */}
+          {consolidateProposals.length > 0 && (
+            <div className="border-b border-border-subtle-01 bg-layer-01 px-3 py-3">
+              <div className="flex items-center gap-2 px-1 pb-2">
+                <span className="text-caption-01 font-semibold text-text-primary">통합 제안 검토</span>
+                <span className="text-caption-01 text-text-helper">{consolidateProposals.length}건</span>
+              </div>
+              <div className="space-y-2">
+                {consolidateProposals.map((p, i) => (
+                  <div
+                    key={`${p.kind}-${p.skill_id}-${i}`}
+                    className="rounded-lg border border-border-subtle-01 bg-background p-2.5"
+                  >
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <Icon name={p.kind === 'patch' ? 'merge' : 'trash'} size={12} className="text-icon-secondary flex-shrink-0" />
+                      <span className="text-caption-01 font-semibold text-text-primary truncate">{p.skill_id}</span>
+                      <Tag type={p.kind === 'patch' ? 'blue' : 'gray'} size="sm">
+                        {p.kind === 'patch' ? (p.from_version === 0 ? '신규 통합' : '병합') : '정리'}
+                      </Tag>
+                    </div>
+                    <p className="text-caption-01 text-text-secondary mb-2 line-clamp-2">
+                      {p.kind === 'patch' ? p.changelog : p.reason}
+                    </p>
+                    <div className="flex items-center justify-end gap-1.5">
+                      <Button kind="ghost" size="sm" onClick={() => void decideProposal(p, false)}>
+                        거부
+                      </Button>
+                      <Button kind="primary" size="sm" onClick={() => void decideProposal(p, true)}>
+                        승인
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {list.map((s) => {
+            const on = s.id === effectiveSel;
+            return (
+              <button
+                key={s.id}
+                onClick={() => {
+                  setSel(s.id);
+                  setShowImpact(false);
+                }}
+                className={`flex items-start gap-2.5 w-full text-left border-b border-border-subtle-01 border-l-2 px-[18px] py-3 transition-colors ${
+                  on && !showImpact ? 'bg-layer-selected-01 border-l-blue-50' : 'bg-transparent border-l-transparent hover:bg-layer-hover-01'
+                } ${skillStatus(s) === 'archived' ? 'opacity-60' : !isInjected(skillStatus(s)) ? 'opacity-70' : ''}`}
+              >
+                <div
+                  className={`mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg border ${
+                    on && !showImpact
+                      ? 'border-blue-50/35 bg-blue-60/16 text-blue-30'
+                      : isInjected(skillStatus(s))
+                        ? 'border-blue-50/25 bg-blue-60/10 text-blue-40'
+                        : 'border-border-subtle-02 bg-layer-03 text-text-helper'
+                  }`}
+                >
+                  <Icon name="skill" size={15} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-body-short-01 font-semibold text-text-primary truncate">{s.name}</span>
+                    <span className="text-caption-01 font-mono text-text-helper flex-shrink-0">{s.ver}</span>
+                    <OriginGlyph s={s} />
+                    <StatusBadge s={s} />
+                  </div>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span className="text-caption-01 text-text-helper truncate">
+                      {s.uses}회 사용 · {s.trend}
+                    </span>
+                  </div>
+                </div>
+                {s.shared && <Icon name="share" size={13} className="text-icon-secondary mt-0.5 opacity-70 flex-shrink-0" />}
+              </button>
+            );
+          })}
+          {list.length === 0 && (
+            <div className="p-10 text-center text-body-short-01 text-text-helper">
+              {hydrating ? (
+                '불러오는 중…'
+              ) : skills.length === 0 ? (
+                <div className="flex flex-col items-center gap-3">
+                  <span>아직 학습된 스킬이 없어요. 대화를 나누면 자동으로 스킬이 자라납니다.</span>
+                  <button
+                    onClick={() => navigate('/skills')}
+                    className="inline-flex items-center gap-1.5 text-link-primary hover:underline text-body-short-01"
+                  >
+                    <Icon name="skill" size={14} />
+                    Skill Market 둘러보기
+                    <Icon name="arrow-up-right" size={13} />
+                  </button>
+                </div>
+              ) : (
+                '해당하는 스킬이 없어요.'
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* List resize handle */}

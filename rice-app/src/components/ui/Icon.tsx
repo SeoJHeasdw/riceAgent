@@ -48,6 +48,7 @@ export type IconName =
   | 'connect'
   | 'chat'
   | 'flow'
+  | 'merge'
   | 'database'
   | 'rule'
   | 'tools'
@@ -104,6 +105,8 @@ const PATHS: Record<IconName, React.ReactNode> = {
   connect: <><path d="M10 13a5 5 0 0 0 7 0l2.5-2.5a5 5 0 0 0-7-7L11 5" /><path d="M14 11a5 5 0 0 0-7 0l-2.5 2.5a5 5 0 0 0 7 7L13 19" /></>,
   chat: <><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.2A8.4 8.4 0 0 1 12 3a8.4 8.4 0 0 1 9 8.5z" /></>,
   flow: <><rect x="3" y="3" width="6" height="6" rx="1" /><rect x="15" y="15" width="6" height="6" rx="1" /><path d="M9 6h6a3 3 0 0 1 3 3v6" /></>,
+  // Consolidation — two independent skill nodes converge into one result.
+  merge: <><circle cx="7" cy="5" r="2" /><circle cx="17" cy="5" r="2" /><circle cx="12" cy="19" r="2" /><path d="M7 7v1.5a3.5 3.5 0 0 0 3.5 3.5H12v5" /><path d="M17 7v1.5a3.5 3.5 0 0 1-3.5 3.5H12" /></>,
   database: <><ellipse cx="12" cy="5" rx="8" ry="3" /><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5" /><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6" /></>,
   rule: <><rect x="4" y="3" width="16" height="18" rx="2" /><path d="M8 8h4M8 12h8M8 16h6" /></>,
   tools: <><path d="M14.7 6.3a4 4 0 0 1 5.3 5.3l-1.4-1.4-2.6 2.6-2.5-2.5 2.6-2.6z" /><path d="M13 11 4.5 19.5a2.1 2.1 0 0 1-3-3L10 8" /></>,
