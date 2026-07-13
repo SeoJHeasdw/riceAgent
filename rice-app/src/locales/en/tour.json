@@ -17,7 +17,7 @@
     },
     "model-settings": {
       "title": "Model settings",
-      "body": "Check and switch the connected AI model. Both SaaS (cloud API) and local (Ollama) are supported."
+      "body": "Check and switch your connected AI model — hosted in the cloud or running locally via Ollama."
     },
     "my-skills": {
       "title": "My Skills",

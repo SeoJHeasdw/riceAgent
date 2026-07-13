@@ -396,7 +396,7 @@
     "confirmEdit": "Keep editing"
   },
   "impact": {
-    "title": "Learning Impact",
+    "title": "Learning Results",
     "tagDemo": "Demo data",
     "tagDemoTitle": "No eval results yet — showing demo fixture. Run the eval harness to see real measurements.",
     "tagLive": "Eval suite live",

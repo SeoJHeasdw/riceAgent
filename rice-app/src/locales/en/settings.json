@@ -42,7 +42,7 @@
   },
   "tutorial": {
     "title": "Tutorial",
-    "description": "Replay the first-run guidance anytime you want to revisit it.",
+    "description": "Come back to the first-run guidance anytime.",
     "replayOnboarding": "Replay onboarding",
     "replayOnboardingDesc": "Walk through the RICE concepts and model setup again.",
     "replay": "Replay",

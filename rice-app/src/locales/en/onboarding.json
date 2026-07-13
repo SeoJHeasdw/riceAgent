@@ -10,7 +10,7 @@
       "assembling": "Assembling cognition core",
       "awake": "Core online",
       "title": "Intelligence that evolves with you",
-      "description": "RICE does more than answer. It learns how you work and turns each task into an ability it can use better next time."
+      "description": "RICE does more than answer questions — it learns how you work and gets better at each task over time."
     },
     "loop": {
       "eyebrow": "SELF-IMPROVEMENT LOOP",
@@ -34,7 +34,7 @@
           "id": "skill",
           "eyebrow": "01 / WORKFLOW MEMORY",
           "title": "Skill",
-          "description": "Remember repeatable workflows and run them in one move next time.",
+          "description": "Remembers your repeated workflows and runs them in one step next time.",
           "metric": "Turn repetition into a reusable ability",
           "accent": "#5b8cff"
         },
@@ -42,7 +42,7 @@
           "id": "connector",
           "eyebrow": "02 / REAL-WORLD ACCESS",
           "title": "Connector",
-          "description": "Securely reach the mail, calendar, and documents you use every day.",
+          "description": "Securely connects to the mail, calendar, and documents you use every day.",
           "metric": "Only the data you allow, only when needed",
           "accent": "#36d8c4"
         },
@@ -50,7 +50,7 @@
           "id": "plugin",
           "eyebrow": "03 / DOMAIN EXPERTISE",
           "title": "Plugin",
-          "description": "Combine proven skills and connectors into domain expertise.",
+          "description": "Bundles proven skills and connectors into ready-made domain expertise.",
           "metric": "Specialized capability in one install",
           "accent": "#aa7dff"
         }
