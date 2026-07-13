@@ -25,6 +25,12 @@ export interface TabsProps {
   onChange?: (tabId: string) => void;
   /** Additional CSS classes */
   className?: string;
+  /** Additional classes for the tab-list row */
+  tabListClassName?: string;
+  /** Additional classes for the active tab panel */
+  panelClassName?: string;
+  /** Accessible label for the tab list */
+  ariaLabel?: string;
 }
 
 export const Tabs: React.FC<TabsProps> = ({
@@ -33,6 +39,9 @@ export const Tabs: React.FC<TabsProps> = ({
   activeTab: controlledActiveTab,
   onChange,
   className = '',
+  tabListClassName = '',
+  panelClassName = '',
+  ariaLabel,
 }) => {
   const [internalActiveTab, setInternalActiveTab] = useState(defaultTab || tabs[0]?.id);
   const baseId = useId();
@@ -65,8 +74,9 @@ export const Tabs: React.FC<TabsProps> = ({
     <div className={`flex flex-col ${className}`}>
       {/* Tab List */}
       <div
-        className="flex border-b border-border-subtle-01"
+        className={`flex border-b border-border-subtle-01 ${tabListClassName}`}
         role="tablist"
+        aria-label={ariaLabel}
       >
         {tabs.map((tab) => {
           const isActive = tab.id === activeTab;
@@ -129,7 +139,7 @@ export const Tabs: React.FC<TabsProps> = ({
           role="tabpanel"
           aria-labelledby={`${baseId}-tab-${activeTab}`}
           tabIndex={0}
-          className="py-4 focus-visible:outline-offset-4"
+          className={`py-4 focus-visible:outline-offset-4 ${panelClassName}`}
         >
           {activeTabContent}
         </div>

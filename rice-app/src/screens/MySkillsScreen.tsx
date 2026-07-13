@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation, Trans } from 'react-i18next';
 import type { TFunction } from 'i18next';
-import { Button, Icon, Tag, ResizeHandle, Toggle, ConfirmDialog, OverflowMenu } from '../components/ui';
+import { Button, Icon, Tag, ResizeHandle, Toggle, ConfirmDialog, OverflowMenu, Tabs } from '../components/ui';
 import { useResizable } from '../hooks/useResizable';
 import { useLearning } from '../lib/learning/LearningContext';
 import { useMarketplace } from '../hooks/useMarketplace';
@@ -32,6 +32,8 @@ import type { ConsolidateProposal, ImpactReport } from '../lib/types';
 // 출처가 새 직교 축이라, 한 줄로 평평히 두지 않고 섹션 라벨로 묶는다.
 type FilterKey =
   | 'all'
+  | 'active'
+  | 'attention'
   | 'builtin'
   | 'authored'
   | 'installed'
@@ -45,6 +47,7 @@ type FilterKey =
   | 'inactive';
 
 type Filter = FilterKey;
+type DetailTab = 'overview' | 'insights' | 'versions';
 
 /** skills 네임스페이스 번역 함수 타입 */
 type TSkills = TFunction<'skills'>;
@@ -275,6 +278,122 @@ const BuiltinStatusToggle: React.FC<{
         aria-label={on ? t('mySkills.builtinToggleAriaDisable', { name: skill.name }) : t('mySkills.builtinToggleAriaEnable', { name: skill.name })}
       />
     </span>
+  );
+};
+
+const LibraryManageMenu: React.FC<{
+  impactActive: boolean;
+  busy: boolean;
+  proposalCount: number;
+  onImpact: () => void;
+  onCurate: () => void;
+  onConsolidate: () => void;
+}> = ({ impactActive, busy, proposalCount, onImpact, onCurate, onConsolidate }) => {
+  const { t } = useTranslation('skills');
+  const [open, setOpen] = useState(false);
+  const ref = React.useRef<HTMLDivElement>(null);
+  const triggerRef = React.useRef<HTMLButtonElement>(null);
+  const itemRefs = React.useRef<Array<HTMLButtonElement | null>>([]);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: MouseEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
+    const frame = requestAnimationFrame(() => itemRefs.current.find((item) => item && !item.disabled)?.focus());
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      cancelAnimationFrame(frame);
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
+
+  const choose = (action: () => void) => {
+    setOpen(false);
+    triggerRef.current?.focus();
+    action();
+  };
+
+  return (
+    <div ref={ref} className="relative flex-shrink-0">
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-label={t('mySkills.manageAriaLabel')}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-pressed={impactActive}
+        className="inline-flex items-center gap-1 text-caption-01 text-link-primary hover:underline"
+      >
+        <Icon name="settings" size={13} />
+        {t('mySkills.manageLabel')}
+        {proposalCount > 0 && (
+          <span className="font-mono text-label-micro no-underline tabular-nums">
+            {proposalCount}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div
+          role="menu"
+          onKeyDown={(event) => {
+            const enabled = itemRefs.current.filter((item): item is HTMLButtonElement => !!item && !item.disabled);
+            const current = enabled.indexOf(document.activeElement as HTMLButtonElement);
+            if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+              event.preventDefault();
+              const delta = event.key === 'ArrowDown' ? 1 : -1;
+              enabled[(current + delta + enabled.length) % enabled.length]?.focus();
+            } else if (event.key === 'Tab') {
+              setOpen(false);
+            }
+          }}
+          className="absolute right-0 top-full z-50 mt-1 min-w-[190px] rounded-lg border border-border-subtle-01 bg-layer-02 py-1 shadow-elevation-2"
+        >
+          <button
+            ref={(node) => { itemRefs.current[0] = node; }}
+            role="menuitem"
+            tabIndex={-1}
+            onClick={() => choose(onImpact)}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-caption-01 text-text-primary transition-colors hover:bg-layer-hover-01"
+          >
+            <Icon name="growth" size={12} className="flex-shrink-0" />
+            {t('mySkills.libraryImpactTitle')}
+          </button>
+          <button
+            ref={(node) => { itemRefs.current[1] = node; }}
+            role="menuitem"
+            tabIndex={-1}
+            disabled={busy}
+            onClick={() => choose(onCurate)}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-caption-01 text-text-primary transition-colors hover:bg-layer-hover-01 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Icon name="renew" size={12} className="flex-shrink-0" />
+            {t('mySkills.curateBtn')}
+          </button>
+          <button
+            ref={(node) => { itemRefs.current[2] = node; }}
+            role="menuitem"
+            tabIndex={-1}
+            disabled={busy}
+            onClick={() => choose(onConsolidate)}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-caption-01 text-text-primary transition-colors hover:bg-layer-hover-01 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Icon name="merge" size={12} className="flex-shrink-0" />
+            {t('mySkills.consolidateBtn')}
+            {proposalCount > 0 && <span className="ml-auto font-mono text-label-micro text-link-primary">{proposalCount}</span>}
+          </button>
+        </div>
+      )}
+    </div>
   );
 };
 
@@ -584,89 +703,6 @@ const bumpVer = (v: string) => {
   return m ? v.replace(/\d+/, String(Number(m[0]) + 1)) : `${v}.1`;
 };
 
-// 헤더의 버전 칩 — 클릭하면 버전 목록이 펼쳐져, 이전 버전 내용을 보거나
-// 그 버전으로 바로 전환(복원)할 수 있다. 전환은 상위에서 확인 모달로 한 번 더 묻는다.
-const VersionChipMenu: React.FC<{
-  versions: SkillVersion[];
-  currentVer: string;
-  onView: (ver: string) => void;
-  onSwitch: (v: SkillVersion) => void;
-}> = ({ versions, currentVer, onView, onSwitch }) => {
-  const { t } = useTranslation('skills');
-  const { t: tChatRaw, i18n } = useTranslation('chat');
-  const tChat = wrapT(tChatRaw);
-  const [open, setOpen] = useState(false);
-  const ref = React.useRef<HTMLDivElement>(null);
-
-  // 외부 클릭 닫기
-  React.useEffect(() => {
-    if (!open) return;
-    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
-    document.addEventListener('mousedown', h);
-    return () => document.removeEventListener('mousedown', h);
-  }, [open]);
-
-  return (
-    <div ref={ref} className="relative">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        title={t('mySkills.versionChipTitle')}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        className="inline-flex items-center gap-1 text-caption-01 font-mono text-text-secondary bg-layer-02 border border-border-subtle-01 rounded px-1.5 py-px hover:bg-layer-hover-01"
-      >
-        {currentVer}
-        <Icon name="chevron-down" size={12} className={`opacity-70 transition-transform ${open ? 'rotate-180' : ''}`} />
-      </button>
-      {open && (
-        <div className="absolute top-full left-0 mt-1 z-50 w-[268px] bg-background border border-border-subtle-01 rounded-lg shadow-elevation-2 overflow-hidden">
-          <div className="px-3 py-2 text-caption-01 text-text-helper border-b border-border-subtle-01 normal-case">
-            {t('mySkills.versionChipHint')}
-          </div>
-          <div className="max-h-[280px] overflow-y-auto">
-            {versions.map((v) => {
-              const isCurrent = v.current ?? v.ver === currentVer;
-              return (
-                <div
-                  key={v.ver}
-                  className={`flex items-center gap-2 px-3 py-2 ${isCurrent ? 'bg-layer-selected-01' : 'hover:bg-layer-hover-01'} transition-colors`}
-                >
-                  <button
-                    onClick={() => { onView(v.ver); setOpen(false); }}
-                    title={t('mySkills.versionViewTitle')}
-                    className="flex-1 min-w-0 text-left"
-                  >
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-body-short-01 font-mono font-semibold text-text-primary">{v.ver}</span>
-                      {isCurrent && <Tag type="blue" size="sm">{t('mySkills.versionCurrentTag')}</Tag>}
-                      <span className="text-caption-01 text-text-helper">{renderVersionWhen(v.when, tChat, i18n.language)}</span>
-                      {v.metrics && (
-                        <span className="ml-auto text-caption-01 font-mono text-text-helper flex-shrink-0">{t('mySkills.metricSuccessRate')} {pctStr(v.metrics.successRate)}</span>
-                      )}
-                    </div>
-                    <div className="text-caption-01 text-text-helper truncate mt-0.5">{renderVersionNote(v.note, tChat, v.noteParams)}</div>
-                  </button>
-                  {isCurrent ? (
-                    <Icon name="check" size={14} className="text-link-primary flex-shrink-0" />
-                  ) : (
-                    <button
-                      onClick={() => { onSwitch(v); setOpen(false); }}
-                      title={t('mySkills.versionRestoreBtnTitle', { ver: v.ver })}
-                      className="group/sw flex-shrink-0 inline-flex h-6 items-center gap-1 rounded border border-border-subtle-02 px-1.5 text-label-micro font-semibold text-text-secondary transition-colors hover:border-border-strong-01 hover:bg-layer-hover-01 hover:text-text-primary"
-                    >
-                      <Icon name="renew" size={10} className="transition-transform group-hover/sw:rotate-180" /> {t('mySkills.versionRestoreBtn')}
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
-
 // 규칙 텍스트 정규화 — 버전 간 diff 비교용
 const normRule = (t: string) => t.trim();
 
@@ -922,9 +958,9 @@ const ProvenanceStrip: React.FC<{
     return (
       <div className="mt-3 rounded-lg border border-teal-70/40 bg-teal-70/10 px-3 py-2.5">
         <div className="flex items-start gap-2 text-caption-01">
-          <Icon name="sparkle" size={14} className="text-teal-40 flex-shrink-0 mt-px" />
-          <span className="text-text-secondary leading-4">
-            <span className="text-text-primary font-semibold">{t('mySkills.provenanceBuiltinTitle')}</span> — {t('mySkills.provenanceBuiltinDesc')}{' '}
+          <Icon name="sparkle" size={14} className="mt-px flex-shrink-0 text-teal-40" />
+          <span className="leading-4 text-text-secondary">
+            <span className="font-semibold text-text-primary">{t('mySkills.provenanceBuiltinTitle')}</span> — {t('mySkills.provenanceBuiltinDesc')}{' '}
             <span className="text-text-primary">{t('mySkills.provenanceBuiltinReadOnly')}</span>{' '}
             {t('mySkills.provenanceBuiltinSourceHint')}
           </span>
@@ -935,7 +971,7 @@ const ProvenanceStrip: React.FC<{
 
   if (origin === 'authored') {
     return (
-      <div className="mt-3 inline-flex items-center gap-2 rounded-lg border border-border-subtle-01 bg-layer-01 px-3 py-2 text-caption-01">
+      <div className="inline-flex items-center gap-2 rounded-lg border border-border-subtle-01 bg-layer-01 px-3 py-2 text-caption-01">
         <Icon name="user" size={14} className="text-purple-60 flex-shrink-0" />
         <span className="text-text-secondary">
           {t('mySkills.provenanceAuthoredBase')}{skill.shared ? t('mySkills.provenanceAuthoredShared') : ''}
@@ -949,7 +985,7 @@ const ProvenanceStrip: React.FC<{
     const diverged = divergenceCount(detail.versions, u.installedVer);
     const update = hasUpstreamUpdate(u);
     return (
-      <div className="mt-3 rounded-lg border border-border-subtle-01 bg-layer-01 px-3 py-2.5">
+      <div className="rounded-lg border border-border-subtle-01 bg-layer-01 px-3 py-2.5">
         <div className="flex items-center gap-2 text-caption-01 flex-wrap">
           <Icon name="download" size={14} className="text-link-primary flex-shrink-0" />
           <span className="text-text-secondary">
@@ -1026,9 +1062,9 @@ const SourceLauncher: React.FC<{ skill: Skill; detail: SkillDetail; onOpen: () =
     <button
       onClick={onOpen}
       title={readOnly ? t('mySkills.sourceLauncherReadOnlyTitle') : t('mySkills.sourceLauncherTitle')}
-      className="group inline-flex h-9 items-center gap-2 rounded-lg border border-border-subtle-01 bg-layer-01 px-3 text-body-short-01 font-semibold text-text-secondary hover:border-blue-50/45 hover:bg-layer-hover-01 hover:text-text-primary transition-colors flex-shrink-0"
+      className="group inline-flex h-8 items-center gap-2 rounded-lg border border-border-strong-01 bg-layer-01 px-3 text-body-short-01 font-semibold text-text-secondary transition-colors duration-150 hover:bg-layer-hover-01 hover:text-text-primary flex-shrink-0"
     >
-      <Icon name="folder" size={15} className="text-icon-secondary group-hover:text-blue-30" />
+      <Icon name="folder" size={15} className="text-icon-secondary group-hover:text-icon-primary" />
       {t('mySkills.sourceLauncherLabel')}
       <span className="text-caption-01 font-normal text-text-helper">{files.length}</span>
       <Icon name="arrow-right" size={13} className="text-icon-secondary opacity-70" />
@@ -1281,6 +1317,201 @@ const SkillTelemetryPanel: React.FC<{ skill: Skill; detail: SkillDetail }> = ({ 
   );
 };
 
+const SkillOverviewPanel: React.FC<{
+  skill: Skill;
+  detail: SkillDetail;
+  onOpenInsights: () => void;
+  onOpenConnectors: () => void;
+  onOpenMarket: () => void;
+}> = ({ skill, detail, onOpenInsights, onOpenConnectors, onOpenMarket }) => {
+  const { t } = useTranslation('skills');
+  const understanding = useMemo(() => resolveUnderstanding(skill, detail, t), [skill, detail, t]);
+  const status = skillStatus(skill);
+  const observed = understanding.tools.filter((tool) => tool.kind === 'observed');
+  const declared = understanding.tools.filter((tool) => tool.kind === 'declared');
+  const usefulTools = (observed.length ? observed : declared.length ? declared : understanding.tools).slice(0, 5);
+  const hasAttention = detail.analysis?.status === 'stale'
+    || detail.analysis?.status === 'failed'
+    || status === 'stale'
+    || (skill.friction ?? 0) > 0
+    || (skill.routingMiss ?? 0) > 0
+    || hasUpstreamUpdate(skill.upstream);
+  const visibleSteps = understanding.steps.slice(0, 4);
+
+  return (
+    <div className="mx-auto w-full max-w-[1120px] space-y-4">
+      {hasAttention && (
+        <div className="flex items-center gap-3 rounded-xl border border-support-warning/35 bg-support-warning/10 px-4 py-3">
+          <Icon name="warning" size={16} className="flex-shrink-0 text-support-warning" />
+          <div className="min-w-0 flex-1">
+            <div className="text-body-short-01 font-semibold text-text-primary">{t('mySkills.overviewAttentionTitle')}</div>
+            <div className="text-caption-01 text-text-secondary">{t('mySkills.overviewAttentionDesc')}</div>
+          </div>
+          <button onClick={onOpenInsights} className="flex-shrink-0 text-caption-01 font-semibold text-link-primary hover:underline">
+            {t('mySkills.overviewInsightsLink')}
+          </button>
+        </div>
+      )}
+
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(280px,0.75fr)]">
+        <section className="rounded-xl border border-border-subtle-01 bg-layer-01 p-4">
+          <div className="flex items-start gap-3">
+            <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-border-subtle-02 bg-layer-02 text-icon-primary">
+              <Icon name="flow" size={16} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <h3 className="text-body-short-02 font-semibold text-text-primary">{t('mySkills.understandingFlowTitle')}</h3>
+              <p className="mt-0.5 text-caption-01 text-text-helper">{t('mySkills.understandingFlowHint')}</p>
+            </div>
+          </div>
+
+          {visibleSteps.length ? (
+            <div className="mt-4 space-y-3">
+              {visibleSteps.map((step, index) => (
+                <div key={`${step.title}-${index}`} className="flex items-start gap-3">
+                  <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full border border-border-subtle-02 bg-background font-mono text-caption-01 text-text-secondary">
+                    {index + 1}
+                  </span>
+                  <div className="min-w-0 pt-0.5">
+                    <div className="text-body-short-01 font-semibold text-text-primary">{step.title}</div>
+                    {step.description && <div className="mt-0.5 line-clamp-1 text-caption-01 text-text-helper">{step.description}</div>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="mt-4 rounded-lg border border-border-subtle-01 bg-background px-3 py-2.5 text-caption-01 text-text-helper">
+              {t('mySkills.understandingFlowEmpty')}
+            </div>
+          )}
+
+          <button onClick={onOpenInsights} className="mt-4 inline-flex items-center gap-1 text-caption-01 font-semibold text-link-primary hover:underline">
+            {t('mySkills.overviewShowAllSteps')} <Icon name="arrow-right" size={12} />
+          </button>
+        </section>
+
+        <div>
+          <section className="rounded-xl border border-border-subtle-01 bg-layer-01 p-4">
+            <div className="flex items-center gap-2">
+              <Icon name="tools" size={15} className="text-icon-secondary" />
+              <h3 className="text-body-short-01 font-semibold text-text-primary">{t('mySkills.overviewToolsTitle')}</h3>
+              <button onClick={onOpenConnectors} className="ml-auto text-caption-01 text-link-primary hover:underline">
+                {t('mySkills.understandingPermissionLink')}
+              </button>
+            </div>
+            {usefulTools.length ? (
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {usefulTools.map((tool) => (
+                  <span key={`${tool.kind}-${tool.name}`} className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-border-subtle-01 bg-background px-2 py-1 text-caption-01 text-text-secondary">
+                    <Icon name={TOOL_KIND_ICON[tool.kind]} size={11} className={`${TOOL_KIND_CLS[tool.kind]} flex-shrink-0`} />
+                    <span className="truncate font-mono">{tool.name}</span>
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-3 text-caption-01 text-text-helper">{t('mySkills.overviewNoTools')}</p>
+            )}
+          </section>
+        </div>
+      </div>
+
+      {!isBuiltinSkill(skill) && <ProvenanceStrip skill={skill} detail={detail} onOpenMarket={onOpenMarket} />}
+    </div>
+  );
+};
+
+const SkillVersionsPanel: React.FC<{
+  detail: SkillDetail;
+  onRetry: () => void;
+  onView: (version: string) => void;
+  onRestore: (version: SkillVersion) => void;
+}> = ({ detail, onRetry, onView, onRestore }) => {
+  const { t } = useTranslation('skills');
+  const tChat = wrapT(useTranslation('chat').t);
+  const { language } = useI18n();
+
+  return (
+    <div className="mx-auto w-full max-w-[880px]">
+      <div className="mb-4 flex items-center gap-3">
+        <div>
+          <h3 className="text-heading-01 font-semibold text-text-primary">
+            {detail.historyStatus === 'loading'
+              ? t('mySkills.versionTitleLoading')
+              : t('mySkills.versionTitle', { count: detail.versions.length })}
+          </h3>
+          <p className="mt-1 text-caption-01 text-text-helper">
+            {detail.versions.length > 1 ? t('mySkills.historyViewNote') : t('mySkills.historyViewSingle')}
+          </p>
+        </div>
+        {detail.historyStatus === 'loading' ? (
+          <span className="ml-auto inline-flex items-center gap-1.5 text-caption-01 text-text-helper">
+            <Icon name="renew" size={11} className="animate-spin" /> {t('mySkills.historyLoading')}
+          </span>
+        ) : detail.historyStatus === 'error' ? (
+          <button onClick={onRetry} className="ml-auto inline-flex items-center gap-1 text-caption-01 font-semibold text-support-warning hover:underline">
+            <Icon name="renew" size={11} /> {t('mySkills.historyRetry')}
+          </button>
+        ) : null}
+      </div>
+
+      {detail.historyStatus === 'error' && (
+        <div className="mb-4 flex items-start gap-2 rounded-xl border border-support-warning/35 bg-support-warning/10 px-3 py-2.5 text-caption-01 text-text-secondary">
+          <Icon name="warning" size={13} className="mt-0.5 flex-shrink-0 text-support-warning" />
+          <span>{t('mySkills.historyError')}{detail.historyError ? ` · ${detail.historyError}` : ''}</span>
+        </div>
+      )}
+
+      <div>
+        {detail.versions.map((version, index) => (
+          <div key={version.ver} className="flex gap-3">
+            <div className="flex flex-col items-center flex-shrink-0">
+              <div className={`mt-4 h-2 w-2 rounded-full ${version.current ? 'bg-interactive ring-2 ring-blue-100' : 'bg-layer-03'}`} />
+              {index < detail.versions.length - 1 && <div className="min-h-[18px] w-px flex-1 bg-border-strong-01" />}
+            </div>
+            <div className="mb-2.5 flex min-w-0 flex-1 items-center rounded-xl border border-border-subtle-01 bg-layer-01 transition-colors duration-150 hover:border-border-strong-01">
+              <button
+                onClick={() => onView(version.ver)}
+                className="flex min-w-0 flex-1 items-center gap-3 rounded-l-xl px-3.5 py-3 text-left transition-colors duration-150 hover:bg-layer-hover-01"
+              >
+                <div className="min-w-0 flex-1">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="font-mono text-body-short-01 font-semibold text-text-primary">{version.ver}</span>
+                  {version.current && <Tag type="blue" size="sm">{t('mySkills.versionCurrentTag')}</Tag>}
+                  <span className="truncate text-caption-01 text-text-helper">{renderVersionWhen(version.when, tChat, language)}</span>
+                  {version.author && (
+                    <span className="inline-flex items-center gap-1 text-caption-01 text-text-helper">
+                      <Icon name="user" size={10} /> {version.author}
+                    </span>
+                  )}
+                </div>
+                <div className="mt-1 truncate text-caption-01 text-text-secondary">{renderVersionNote(version.note, tChat, version.noteParams)}</div>
+                {version.metrics && (
+                  <div className="mt-1.5 flex items-center gap-2 font-mono text-label-micro text-text-helper">
+                    <span>{t('mySkills.metricSuccessRate')} {pctStr(version.metrics.successRate)}</span>
+                    <span>· {t('mySkills.metricUsesUnit', { value: version.metrics.uses })}</span>
+                    {version.metrics.avgTurns != null && <span>· {t('mySkills.metricTurnsUnit', { value: version.metrics.avgTurns })}</span>}
+                  </div>
+                )}
+                </div>
+                <Icon name="arrow-right" size={13} className="flex-shrink-0 text-icon-secondary opacity-60" />
+              </button>
+              {!version.current && (
+                <button
+                  type="button"
+                  onClick={() => onRestore(version)}
+                  className="mr-3 inline-flex h-7 flex-shrink-0 items-center gap-1 rounded-lg border border-border-subtle-02 px-2 text-caption-01 font-semibold text-text-secondary transition-colors duration-150 hover:bg-layer-hover-01 hover:text-text-primary"
+                >
+                  <Icon name="renew" size={11} /> {t('mySkills.versionRestoreBtn')}
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 const SkillDetailView: React.FC<{
   skillId: string | null;
   onSetStatus: (id: string, next: SkillStatus) => void;
@@ -1293,6 +1524,7 @@ const SkillDetailView: React.FC<{
   const { publishOwnedSkill, unpublishSkill } = useMarketplace();
   const toast = useToast();
   const [snapVer, setSnapVer] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<DetailTab>('overview');
   // 풀스크린 소스 워크스페이스(IDE) 열림 여부
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(false);
@@ -1394,6 +1626,7 @@ const SkillDetailView: React.FC<{
   // leaving a skill closes any open version snapshot / 확인 모달 / 분석 상태 / 소스·편집
   useEffect(() => {
     setSnapVer(null);
+    setActiveTab('overview');
     setConfirmRestore(null);
     setAnalysisRefreshing(false);
     setAnalysisFeedback(null);
@@ -1664,22 +1897,27 @@ const SkillDetailView: React.FC<{
             <div className="flex items-center gap-2 flex-wrap">
               <h2 className="text-heading-03 font-semibold text-text-primary">{skill.name}</h2>
               {builtin ? (
-                // 빌트인은 버전 히스토리/복원이 없다(본문 불변) — 정적 버전 표기
                 <span className="text-caption-01 font-mono text-text-secondary bg-layer-02 border border-border-subtle-01 rounded px-1.5 py-px">
                   {skill.ver}
                 </span>
               ) : (
-                <VersionChipMenu
-                  versions={detail.versions}
-                  currentVer={skill.ver}
-                  onView={(ver) => setSnapVer(ver)}
-                  onSwitch={(v) => setConfirmRestore(v)}
-                />
+                <button
+                  onClick={() => setActiveTab('versions')}
+                  title={t('mySkills.versionChipTitle')}
+                  className="rounded border border-border-subtle-01 bg-layer-02 px-1.5 py-px font-mono text-caption-01 text-text-secondary transition-colors duration-150 hover:bg-layer-hover-01 hover:text-text-primary"
+                >
+                  {skill.ver}
+                </button>
               )}
               {builtin && (
                 <Tag type="teal" size="sm">
                   {t('mySkills.headerBuiltinTag')}
                 </Tag>
+              )}
+              {!builtin && (
+                <span className="inline-flex items-center gap-1.5 text-caption-01 text-text-helper">
+                  <OriginGlyph s={skill} /> {t(ORIGIN_LABEL_KEYS[skillOrigin(skill)])}
+                </span>
               )}
               {skill.shared && (
                 <Tag type="purple" size="sm">
@@ -1694,7 +1932,7 @@ const SkillDetailView: React.FC<{
               )}
             </div>
             <div className="mt-1.5 max-w-[780px]">
-              <p className={`text-body-short-01 leading-5 text-text-secondary ${summaryExpandable && !summaryOpen ? 'line-clamp-3' : ''}`}>
+              <p className={`text-body-short-01 leading-5 text-text-secondary ${summaryExpandable && !summaryOpen ? 'line-clamp-2' : ''}`}>
                 {detail.summary}
               </p>
               {summaryExpandable && (
@@ -1711,8 +1949,6 @@ const SkillDetailView: React.FC<{
             <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-3 text-caption-01">
               {([
                 [t('mySkills.headerUsesLabel'), t('mySkills.headerUsesUnit', { count: skill.uses })],
-                [t('mySkills.headerPatchLabel'), t('mySkills.headerPatchUnit', { count: skill.patches ?? 0 })],
-                [t('mySkills.headerCreatedLabel'), renderCreatedFrom(detail.createdFrom, tChat)],
                 [t('mySkills.headerLastUsedLabel'), renderLastUsed(detail.lastUsed, tChat, language)],
               ]).map(([k, v]) => (
                 <span key={k} className="inline-flex items-baseline gap-1.5 text-text-helper">
@@ -1721,165 +1957,93 @@ const SkillDetailView: React.FC<{
                 </span>
               ))}
             </div>
-            {/* 출처 스트립 — 설치형/제작형일 때 원본·발산·업데이트를 표시 (학습형은 생략) */}
-            <ProvenanceStrip skill={skill} detail={detail} onOpenMarket={() => navigate('/skills')} />
+            {builtin && <ProvenanceStrip skill={skill} detail={detail} onOpenMarket={() => navigate('/skills')} />}
           </div>
           <div className="flex flex-shrink-0 items-center gap-2">
             {!builtin && (
-              <button
+              <Button
+                kind="primary"
+                size="sm"
                 onClick={() => { setEditTarget(undefined); setEditOpen(true); }}
                 title={t('mySkills.headerAiEditTitle')}
-                className="skill-ai-action inline-flex h-9 items-center gap-2 rounded-lg px-3.5 text-body-short-01 font-semibold text-white transition-all"
+                icon={<Icon name="sparkle" size={14} />}
               >
-                <Icon name="sparkle" size={15} />
                 {t('mySkills.headerAiEditBtn')}
-              </button>
+              </Button>
             )}
             <SourceLauncher skill={skill} detail={detail} onOpen={() => setWorkspaceOpen(true)} />
-          </div>
-        </div>
-      </div>
-
-      {/* scrollable body — source of truth is SKILL.md; this surface explains it for humans */}
-      <div className="flex-1 min-w-0 overflow-y-auto px-7 pt-5 pb-10 flex flex-col gap-7">
-        <SkillUnderstandingPanel
-          skill={skill}
-          detail={detail}
-          refreshing={analysisRefreshing}
-          feedback={analysisFeedback}
-          onRefresh={() => void refreshAnalysis()}
-          onOpenConnectors={() => navigate('/connectors')}
-        />
-
-        <SkillTelemetryPanel skill={skill} detail={detail} />
-
-        {/* version history — 빌트인은 본문 불변이라 히스토리·복원이 없다 */}
-        {!builtin && (
-        <div>
-          <div className="mb-2.5 flex max-w-[780px] items-center gap-3">
-            <span className="text-caption-01 font-semibold uppercase tracking-wider text-text-secondary">
-              {detail.historyStatus === 'loading'
-                ? t('mySkills.versionTitleLoading')
-                : t('mySkills.versionTitle', { count: detail.versions.length })}
-            </span>
-            {detail.historyStatus === 'loading' ? (
-              <span className="inline-flex items-center gap-1.5 text-caption-01 text-text-helper">
-                <Icon name="renew" size={11} className="animate-spin" /> {t('mySkills.historyLoading')}
-              </span>
-            ) : detail.historyStatus === 'error' ? (
-              <button
-                onClick={() => void loadRuntimeSkillDetail(skillId)}
-                className="inline-flex items-center gap-1 text-caption-01 font-semibold text-support-warning hover:underline"
-              >
-                <Icon name="renew" size={11} /> {t('mySkills.historyRetry')}
-              </button>
-            ) : (
-              <span className="text-caption-01 text-text-helper">
-                {detail.versions.length > 1 ? t('mySkills.historyViewNote') : t('mySkills.historyViewSingle')}
-              </span>
-            )}
-          </div>
-          {detail.historyStatus === 'error' && (
-            <div className="mb-3 flex items-start gap-2 rounded-lg border border-support-warning/35 bg-support-warning/10 px-3 py-2.5 text-caption-01 text-text-secondary">
-              <Icon name="warning" size={13} className="mt-0.5 flex-shrink-0 text-support-warning" />
-              <span>{t('mySkills.historyError')}{detail.historyError ? ` · ${detail.historyError}` : ''}</span>
-            </div>
-          )}
-          <div className="max-w-[780px]">
-            {detail.versions.map((v, i) => (
-              <div key={v.ver} className="flex gap-2">
-                <div className="flex flex-col items-center flex-shrink-0">
-                  <div
-                    className={`mt-2.5 h-2 w-2 rounded-full ${v.current ? 'bg-blue-50 ring-2 ring-blue-100' : 'bg-layer-03'}`}
-                  />
-                  {i < detail.versions.length - 1 && <div className="min-h-[14px] w-px flex-1 bg-border-strong-01" />}
-                </div>
-                <button
-                  onClick={() => setSnapVer(v.ver)}
-                  className="mb-1.5 flex min-w-0 flex-1 items-center gap-2 rounded-md border border-border-subtle-01 bg-layer-01 px-2.5 py-1.5 text-left transition-colors hover:border-border-subtle-02 hover:bg-layer-hover-01"
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="flex min-w-0 items-center gap-1.5">
-                      <span className="font-mono text-caption-01 font-semibold text-text-primary">{v.ver}</span>
-                      {v.current && (
-                        <span className="rounded bg-blue-60/20 px-1.5 py-px text-label-micro font-semibold text-blue-30">
-                          {t('mySkills.versionCurrentTag')}
-                        </span>
-                      )}
-                      <span className="truncate text-label-micro text-text-helper">{renderVersionWhen(v.when, tChat, language)}</span>
-                      {v.author && (
-                        <span className="inline-flex items-center gap-1 text-label-micro text-text-helper">
-                          <Icon name="user" size={10} /> {v.author}
-                        </span>
-                      )}
-                    </div>
-                    <div className="mt-px truncate text-caption-01 text-text-secondary">{renderVersionNote(v.note, tChat, v.noteParams)}</div>
-                    {v.metrics && (
-                      <div className="mt-1 flex items-center gap-2 text-label-micro font-mono text-text-helper">
-                        <span>{t('mySkills.metricSuccessRate')} {pctStr(v.metrics.successRate)}</span>
-                        <span>· {t('mySkills.metricUsesUnit', { value: v.metrics.uses })}</span>
-                        {v.metrics.avgTurns != null && <span>· {t('mySkills.metricTurnsUnit', { value: v.metrics.avgTurns })}</span>}
-                      </div>
-                    )}
-                  </div>
-                  <Icon name="arrow-right" size={13} className="flex-shrink-0 text-icon-secondary opacity-45" />
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-        )}
-
-      </div>
-
-      {/* actions — 주 액션(편집)만 또렷이 노출하고, 보조·위험 액션은 ••• 메뉴로 접는다.
-          빌트인은 편집·공유·삭제가 원천 차단(백엔드 422)이라 액션 자체를 노출하지 않고,
-          허용되는 내보내기(사본 다운로드)만 남긴다 — 스킬 작성 교보재로 쓰라는 의도. */}
-      <div className="flex-shrink-0 flex gap-2 border-t border-border-subtle-01 bg-background px-7 py-2 items-center">
-        {builtin ? (
-          <>
-            <span className="inline-flex items-center gap-1.5 text-caption-01 text-text-helper">
-              <Icon name="sparkle" size={13} className="text-teal-40" />
-              {t('mySkills.headerBuiltinHint')}
-            </span>
-            <div className="flex-1" />
-            <Button
-              kind="ghost"
-              size="sm"
-              icon={<Icon name="export" size={14} />}
-              onClick={() => downloadSkillBundle(skill, detail)}
-            >
-              {t('mySkills.exportBtnLabel')}
-            </Button>
-          </>
-        ) : (
-          <>
-            <span className="inline-flex items-center gap-1.5 text-caption-01 text-text-helper">
-              <Icon name="lock" size={12} />
-              {t('mySkills.headerAiEditLockHint')}
-            </span>
-            {/* 공유됨이면 마켓 게시 상태를 인라인으로 알려준다 (메뉴 안에 숨지 않게) */}
-            {skill.shared && (
-              <span className="inline-flex items-center gap-1 text-caption-01 text-purple-60" title={t('mySkills.headerSharedMarketTitle')}>
-                <Icon name="share" size={13} /> {t('mySkills.headerSharedMarketLabel')}
-              </span>
-            )}
-            <div className="flex-1" />
-            {/* 공유·내보내기·삭제 — 의도적 단계로 접어둔다. 삭제는 danger 항목(명확한 hover). */}
             <OverflowMenu
               align="right"
-              direction="up"
-              items={[
-                skill.shared
-                  ? { label: t('mySkills.menuUnshareLabel'), icon: 'share', onClick: () => setConfirmUnshare(true) }
-                  : { label: t('mySkills.menuShareLabel'), icon: 'share', onClick: () => setPublishOpen(true) },
-                { label: t('mySkills.menuExportLabel'), icon: 'export', onClick: () => downloadSkillBundle(skill, detail) },
-                { label: t('mySkills.menuDeleteLabel'), icon: 'trash', tone: 'danger', onClick: () => setConfirmDelete(true) },
-              ]}
+              direction="down"
+              variant="compact"
+              items={builtin
+                ? [
+                    { label: t('mySkills.menuExportLabel'), icon: 'export', onClick: () => downloadSkillBundle(skill, detail) },
+                  ]
+                : [
+                    skill.shared
+                      ? { label: t('mySkills.menuUnshareLabel'), icon: 'share', onClick: () => setConfirmUnshare(true) }
+                      : { label: t('mySkills.menuShareLabel'), icon: 'share', onClick: () => setPublishOpen(true) },
+                    { label: t('mySkills.menuExportLabel'), icon: 'export', onClick: () => downloadSkillBundle(skill, detail) },
+                    { label: t('mySkills.menuDeleteLabel'), icon: 'trash', tone: 'danger' as const, onClick: () => setConfirmDelete(true) },
+                  ]}
             />
-          </>
-        )}
+          </div>
+        </div>
       </div>
+
+      <Tabs
+        className="min-h-0 flex-1"
+        tabListClassName="flex-shrink-0 px-7"
+        panelClassName="min-h-0 flex-1 overflow-y-auto px-7 pt-5 pb-10"
+        ariaLabel={t('mySkills.detailTabsAriaLabel')}
+        activeTab={builtin && activeTab === 'versions' ? 'overview' : activeTab}
+        onChange={(tab) => setActiveTab(tab as DetailTab)}
+        tabs={[
+          {
+            id: 'overview',
+            label: t('mySkills.tabOverview'),
+            content: (
+              <SkillOverviewPanel
+                skill={skill}
+                detail={detail}
+                onOpenInsights={() => setActiveTab('insights')}
+                onOpenConnectors={() => navigate('/connectors')}
+                onOpenMarket={() => navigate('/skills')}
+              />
+            ),
+          },
+          {
+            id: 'insights',
+            label: t('mySkills.tabInsights'),
+            content: (
+              <div className="mx-auto flex w-full max-w-[1120px] flex-col gap-7">
+                <SkillTelemetryPanel skill={skill} detail={detail} />
+                <SkillUnderstandingPanel
+                  skill={skill}
+                  detail={detail}
+                  refreshing={analysisRefreshing}
+                  feedback={analysisFeedback}
+                  onRefresh={() => void refreshAnalysis()}
+                  onOpenConnectors={() => navigate('/connectors')}
+                />
+              </div>
+            ),
+          },
+          ...(!builtin ? [{
+            id: 'versions',
+            label: `${t('mySkills.tabVersions')} · ${detail.versions.length}`,
+            content: (
+              <SkillVersionsPanel
+                detail={detail}
+                onRetry={() => void loadRuntimeSkillDetail(skillId)}
+                onView={setSnapVer}
+                onRestore={setConfirmRestore}
+              />
+            ),
+          }] : []),
+        ]}
+      />
 
       <ConfirmDialog
         open={confirmDelete}
@@ -1965,7 +2129,7 @@ function MySkillsScreen() {
   const { t } = useTranslation('skills');
   const tChat = wrapT(useTranslation('chat').t);
   const navigate = useNavigate();
-  const { skills, setSkills, hydrating } = useLearning();
+  const { skills, setSkills, details, hydrating } = useLearning();
   const [filter, setFilter] = useState<Filter>('all');
   const [sel, setSel] = useState<string | null>('s1');
   // "학습 효과" (Learning Impact) panel swaps into the detail pane (LE-1: keep 7 screens)
@@ -1995,21 +2159,23 @@ function MySkillsScreen() {
   // 하나로 합친 스킬 라이브러리 패널. 필터와 목록을 분리된 두 열로 두면
   // 작은 화면에서 상세 작업공간을 지나치게 압박하므로 한 패널 안에서 탐색한다.
   const listPanel = useResizable({
-    initial: 376,
-    min: 312,
-    max: 520,
-    storageKey: 'rice.panel.myskills-list',
+    initial: 282,
+    min: 184,
+    max: 360,
+    storageKey: 'rice.panel.myskills',
   });
 
-  const FILTER_GROUPS: { labelKey: 'mySkills.filterGroupOrigin' | 'mySkills.filterGroupStatus' | 'mySkills.filterGroupUsability' | null; items: Filter[] }[] = [
-    { labelKey: null, items: ['all'] },
+  const FILTER_GROUPS: { labelKey: 'mySkills.filterGroupDefault' | 'mySkills.filterGroupOrigin' | 'mySkills.filterGroupStatus' | 'mySkills.filterGroupUsability'; items: Filter[] }[] = [
+    { labelKey: 'mySkills.filterGroupDefault', items: ['all'] },
+    { labelKey: 'mySkills.filterGroupStatus', items: ['active', 'attention', 'stale', 'archived', 'inactive'] },
     { labelKey: 'mySkills.filterGroupOrigin', items: ['builtin', 'authored', 'installed', 'learned'] },
-    { labelKey: 'mySkills.filterGroupStatus', items: ['stale', 'archived'] },
-    { labelKey: 'mySkills.filterGroupUsability', items: ['frequent', 'recent', 'draft', 'shared', 'inactive'] },
+    { labelKey: 'mySkills.filterGroupUsability', items: ['frequent', 'recent', 'draft', 'shared'] },
   ];
 
   const FILTER_LABEL: Record<Filter, string> = {
     all: t('mySkills.filterAll'),
+    active: t('mySkills.filterActive'),
+    attention: t('mySkills.filterNeedsAttention'),
     builtin: t('mySkills.filterBuiltin'),
     authored: t('mySkills.filterAuthored'),
     installed: t('mySkills.filterInstalled'),
@@ -2024,10 +2190,17 @@ function MySkillsScreen() {
   };
 
   const list = useMemo(
-    () =>
-      skills.filter(
-        (s) =>
-          filter === 'all' ||
+    () => skills.filter((s) => {
+        const detail = details[s.id];
+        const analysisNeedsAttention = detail?.analysis?.status === 'stale' || detail?.analysis?.status === 'failed';
+        const needsAttention = skillStatus(s) === 'stale'
+          || (s.friction ?? 0) > 0
+          || (s.routingMiss ?? 0) > 0
+          || hasUpstreamUpdate(s.upstream)
+          || analysisNeedsAttention;
+        const matchesFilter = filter === 'all' ||
+          (filter === 'active' && skillStatus(s) === 'active') ||
+          (filter === 'attention' && needsAttention) ||
           (filter === 'builtin' && skillOrigin(s) === 'builtin') ||
           (filter === 'authored' && skillOrigin(s) === 'authored') ||
           (filter === 'installed' && skillOrigin(s) === 'installed') ||
@@ -2038,9 +2211,10 @@ function MySkillsScreen() {
           (filter === 'shared' && !!s.shared) ||
           (filter === 'inactive' && skillStatus(s) === 'inactive') ||
           (filter === 'stale' && skillStatus(s) === 'stale') ||
-          (filter === 'archived' && skillStatus(s) === 'archived'),
-      ),
-    [skills, filter],
+          (filter === 'archived' && skillStatus(s) === 'archived');
+        return matchesFilter;
+      }),
+    [details, filter, skills],
   );
   const active = skills.filter((s) => skillStatus(s) === 'active').length;
   const shared = skills.filter((s) => s.shared).length;
@@ -2165,45 +2339,33 @@ function MySkillsScreen() {
 
   // keep selection valid as skills change
   const selectedExists = sel && list.some((s) => s.id === sel);
-  const effectiveSel = selectedExists ? sel : list[0]?.id ?? (filter !== 'all' ? null : skills[0]?.id) ?? null;
+  const hasListConstraint = filter !== 'all';
+  const effectiveSel = selectedExists ? sel : list[0]?.id ?? (hasListConstraint ? null : skills[0]?.id) ?? null;
 
   return (
     <div className="flex flex-1 min-w-0 bg-background overflow-hidden">
-      {/* 스킬 라이브러리 — 현황·검색·필터·목록을 하나의 탐색 맥락으로 합친다. */}
+      {/* 스킬 라이브러리 — 현황·필터·목록을 하나의 탐색 맥락으로 합친다. */}
       <div
         className="flex-shrink-0 bg-layer-01 border-r border-border-subtle-01 flex flex-col min-w-0 overflow-hidden"
         style={{ width: listPanel.width }}
       >
         <div className="flex-shrink-0 border-b border-border-subtle-01 px-4 pt-5 pb-4">
-          <div className="domain-summary domain-summary--skill overflow-hidden rounded-xl text-white">
-            <div className="p-4">
-              <div className="text-caption-01 text-white/70">{t('mySkills.libraryTitle')}</div>
-              <div className="mt-1 text-heading-03 font-semibold leading-none text-white tabular-nums">
-                {skills.length}
-                {t('mySkills.libraryUnit') && <span className="ml-1 text-body-short-01 font-normal text-white/70">{t('mySkills.libraryUnit')}</span>}
-              </div>
-              <div className="mt-2 flex gap-3 text-caption-01 text-white/80">
-                <span>{t('mySkills.libraryActiveLabel', { count: active })}</span>
-                <span>{t('mySkills.librarySharedLabel', { count: shared })}</span>
-              </div>
+          <div className="domain-summary domain-summary--skill rounded-xl p-4 text-white">
+            <div className="mb-1 text-caption-01 text-white/70">{t('mySkills.libraryTitle')}</div>
+            <div className="text-heading-03 font-semibold leading-none text-white tabular-nums">
+              {skills.length}
+              {t('mySkills.libraryUnit') && (
+                <span className="ml-1 text-body-short-01 font-normal text-white/70">{t('mySkills.libraryUnit')}</span>
+              )}
             </div>
-            <button
-              onClick={() => setShowImpact(true)}
-              aria-pressed={showImpact}
-              title={t('mySkills.libraryImpactBtnTitle')}
-              className="domain-summary__action flex w-full items-center gap-2 border-t px-4 py-2.5 text-left transition-colors"
-            >
-              <Icon name="growth" size={15} className="flex-shrink-0 text-white" />
-              <div className="min-w-0 flex-1">
-                <div className="text-body-short-01 font-semibold text-white">{t('mySkills.libraryImpactTitle')}</div>
-                <div className="text-caption-01 text-white/70">{t('mySkills.libraryImpactDesc')}</div>
-              </div>
-              <Icon name="arrow-right" size={14} className="flex-shrink-0 text-white/70" />
-            </button>
+            <div className="mt-1.5 flex gap-3 text-caption-01 text-white/80">
+              <span>{t('mySkills.libraryActiveLabel', { count: active })}</span>
+              <span>{t('mySkills.librarySharedLabel', { count: shared })}</span>
+            </div>
           </div>
 
-          <div className="mt-3 flex items-center gap-1 text-caption-01">
-            <label className="relative w-[116px] flex-shrink-0 rounded-md transition-colors hover:bg-layer-hover-01">
+          <div className="mt-3 flex items-center gap-2">
+            <label className="relative min-w-0 flex-1 rounded-lg transition-colors duration-150 hover:bg-layer-hover-01">
               <span className="sr-only">{t('mySkills.listFilterLabel')}</span>
               <select
                 value={filter}
@@ -2211,60 +2373,38 @@ function MySkillsScreen() {
                   setFilter(event.target.value as Filter);
                   setShowImpact(false);
                 }}
-                className="h-8 w-full appearance-none border-0 bg-transparent pl-2 pr-7 text-caption-01 font-semibold text-text-secondary outline-none"
+                className="h-8 w-full appearance-none border-0 bg-transparent pl-2 pr-7 text-caption-01 font-semibold text-text-secondary"
               >
                 {FILTER_GROUPS.map((group) => (
-                  <optgroup key={group.labelKey ?? '_all'} label={group.labelKey ? t(group.labelKey) : t('mySkills.filterGroupDefault')}>
+                  <optgroup key={group.labelKey} label={t(group.labelKey)}>
                     {group.items.map((item) => <option key={item} value={item}>{FILTER_LABEL[item]}</option>)}
                   </optgroup>
                 ))}
               </select>
-              <Icon name="chevron-down" size={13} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-icon-secondary" />
+              <Icon name="chevron-down" size={12} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-icon-secondary" />
             </label>
-            <span className="mx-1 h-4 w-px bg-border-subtle-01" aria-hidden />
-            <button
-              onClick={curateSkills}
-              disabled={curating || consolidating}
-              title={curateNote ?? t('mySkills.curateBtnTitle')}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-caption-01 font-semibold text-text-secondary transition-colors hover:bg-layer-hover-01 hover:text-text-primary disabled:opacity-50"
-            >
-              <Icon name="renew" size={13} className={curating ? 'animate-spin' : ''} />
-              {t('mySkills.curateBtn')}
-            </button>
-            <div className="relative flex-shrink-0">
-              <button
-                onClick={() => void runConsolidate()}
-                disabled={consolidating || curating}
-                title={t('mySkills.consolidateBtnTitleFull')}
-                aria-label={consolidating ? t('mySkills.consolidateBusyAriaLabelFull') : t('mySkills.consolidateAriaLabelFull')}
-                className={`inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-caption-01 font-semibold transition-colors disabled:opacity-50 ${
-                  consolidating || consolidateProposals.length > 0
-                    ? 'bg-blue-60/10 text-link-primary'
-                    : 'text-text-secondary hover:bg-layer-hover-01 hover:text-text-primary'
-                }`}
-              >
-                <Icon name={consolidating ? 'renew' : 'merge'} size={16} className={consolidating ? 'animate-spin' : ''} />
-                {t('mySkills.consolidateBtn')}
-              </button>
-              {consolidateProposals.length > 0 && (
-                <span className="pointer-events-none absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-60 px-1 text-[10px] font-semibold leading-none text-white tabular-nums">
-                  {consolidateProposals.length}
-                </span>
-              )}
-            </div>
+
+            <LibraryManageMenu
+              impactActive={showImpact}
+              busy={curating || consolidating}
+              proposalCount={consolidateProposals.length}
+              onImpact={() => setShowImpact(true)}
+              onCurate={curateSkills}
+              onConsolidate={() => void runConsolidate()}
+            />
           </div>
         </div>
 
-        {consolidateNote && consolidateProposals.length === 0 && (
+        {(curateNote || consolidateNote) && consolidateProposals.length === 0 && (
           <div
             className={`flex-shrink-0 mx-4 my-2 flex items-start gap-1.5 rounded-lg border border-border-subtle-01 bg-background px-2.5 py-2 text-caption-01 ${
-              consolidateNoteTone === 'error' ? 'text-support-warning' : 'text-text-helper'
+              !curateNote && consolidateNoteTone === 'error' ? 'text-support-warning' : 'text-text-helper'
             }`}
             role="status"
-            title={consolidateNote}
+            title={curateNote ?? consolidateNote ?? undefined}
           >
-            <Icon name={consolidateNoteTone === 'error' ? 'warning' : 'check-circle'} size={12} className="mt-0.5 flex-shrink-0" />
-            <span className="line-clamp-2 leading-4">{consolidateNote}</span>
+            <Icon name={!curateNote && consolidateNoteTone === 'error' ? 'warning' : 'check-circle'} size={12} className="mt-0.5 flex-shrink-0" />
+            <span className="line-clamp-2 leading-4">{curateNote ?? consolidateNote}</span>
           </div>
         )}
 
@@ -2316,14 +2456,14 @@ function MySkillsScreen() {
                   setSel(s.id);
                   setShowImpact(false);
                 }}
-                className={`group flex items-start gap-3 w-full text-left border-b border-border-subtle-01 border-l-2 px-4 py-3 transition-colors ${
-                  on && !showImpact ? 'bg-layer-selected-01 border-l-blue-50' : 'bg-transparent border-l-transparent hover:bg-layer-hover-01'
-                } ${skillStatus(s) === 'archived' ? 'opacity-60' : !isInjected(skillStatus(s)) ? 'opacity-70' : ''}`}
+                className={`group flex w-full items-start gap-2.5 border-b border-l-2 border-border-subtle-01 px-4 py-2.5 text-left transition-colors duration-150 ${
+                  on && !showImpact ? 'border-l-interactive bg-layer-selected-01' : 'border-l-transparent bg-transparent hover:bg-layer-hover-01'
+                }`}
               >
                 <div
-                  className={`mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg border ${
+                  className={`mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border ${
                     on && !showImpact
-                      ? 'border-blue-50/35 bg-blue-60/16 text-blue-30'
+                      ? 'border-blue-50 bg-blue-60/14 text-blue-30'
                       : isInjected(skillStatus(s))
                         ? 'border-blue-50/25 bg-blue-60/10 text-blue-40'
                         : 'border-border-subtle-02 bg-layer-03 text-text-helper'
@@ -2335,13 +2475,10 @@ function MySkillsScreen() {
                   <div className="flex items-center gap-1.5">
                     <span className="text-body-short-01 font-semibold text-text-primary truncate">{s.name}</span>
                     <span className="text-caption-01 font-mono text-text-helper flex-shrink-0">{s.ver}</span>
-                    <OriginGlyph s={s} />
                     <StatusBadge s={s} />
                   </div>
                   <div className="mt-1 flex items-center gap-2 text-label-micro text-text-helper">
                     <span>{t(ORIGIN_LABEL_KEYS[skillOrigin(s)])}</span>
-                    <span aria-hidden>·</span>
-                    <span>{t('mySkills.listUsesUnit', { count: s.uses })}</span>
                     <span aria-hidden>·</span>
                     <span>{renderTrend(s.trend, tChat)}</span>
                   </div>
@@ -2391,7 +2528,7 @@ function MySkillsScreen() {
         onDoubleClick={listPanel.resetWidth}
         isResizing={listPanel.isResizing}
         value={listPanel.width} min={listPanel.min} max={listPanel.max} onResizeBy={listPanel.resizeBy}
-        aria-label="Resize skills list panel"
+        aria-label={t('mySkills.listResizeAriaLabel')}
       />
 
       {/* detail — skill detail, or the Learning Impact panel (LE-1) */}

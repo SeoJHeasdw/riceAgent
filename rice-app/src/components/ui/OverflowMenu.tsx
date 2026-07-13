@@ -26,14 +26,17 @@ export interface OverflowMenuProps {
   direction?: 'up' | 'down';
   /** 트리거 접근성 라벨 */
   label?: string;
+  /** 팝업 표면과 행 밀도 — compact는 Connector Add 메뉴와 같은 문법 */
+  variant?: 'default' | 'compact';
 }
 
-export const OverflowMenu: React.FC<OverflowMenuProps> = ({ items, align = 'right', direction = 'down', label }) => {
+export const OverflowMenu: React.FC<OverflowMenuProps> = ({ items, align = 'right', direction = 'down', label, variant = 'default' }) => {
   const { t } = useTranslation('common');
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const compact = variant === 'compact';
 
   const focusItem = (index: number) => {
     const enabled = itemRefs.current.filter((item): item is HTMLButtonElement => !!item && !item.disabled);
@@ -105,8 +108,10 @@ export const OverflowMenu: React.FC<OverflowMenuProps> = ({ items, align = 'righ
               setOpen(false);
             }
           }}
-          className={`absolute z-50 min-w-[200px] bg-background border border-border-subtle-01 rounded-lg shadow-elevation-2 overflow-hidden py-1 ${
-            direction === 'up' ? 'bottom-full mb-1.5' : 'top-full mt-1.5'
+          className={`absolute z-50 border border-border-subtle-01 rounded-lg shadow-elevation-2 overflow-hidden py-1 ${
+            compact ? 'min-w-[190px] bg-layer-02' : 'min-w-[200px] bg-background'
+          } ${
+            direction === 'up' ? `bottom-full ${compact ? 'mb-1' : 'mb-1.5'}` : `top-full ${compact ? 'mt-1' : 'mt-1.5'}`
           } ${align === 'right' ? 'right-0' : 'left-0'}`}
         >
           {items.map((item, i) => {
@@ -126,7 +131,9 @@ export const OverflowMenu: React.FC<OverflowMenuProps> = ({ items, align = 'righ
                     setOpen(false);
                     item.onClick();
                   }}
-                  className={`flex items-center gap-2.5 w-full text-left px-3 py-2 text-body-short-01 transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                  className={`flex items-center w-full text-left px-3 transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                    compact ? 'gap-2 py-1.5 text-caption-01' : 'gap-2.5 py-2 text-body-short-01'
+                  } ${
                     danger
                       ? 'text-support-error hover:bg-support-error/10'
                       : 'text-text-primary hover:bg-layer-hover-01'
