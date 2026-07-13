@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Button, Icon, Modal } from '../ui';
 
 /**
@@ -53,6 +54,7 @@ const inputCls =
   'w-full h-9 px-3 bg-field-01 text-text-primary font-mono text-body-short-01 border border-border-strong-01 rounded-lg outline-none transition-colors focus:border-focus focus:ring-1 focus:ring-focus placeholder:text-text-placeholder placeholder:font-sans';
 
 export const CustomConnectorModal: React.FC<CustomConnectorModalProps> = ({ open, onClose, onDiscover, onAdd }) => {
+  const { t } = useTranslation('connectors');
   const [mcpEndpoint, setMcpEndpoint] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [discoverState, setDiscoverState] = useState<DiscoverState>('idle');
@@ -127,10 +129,17 @@ export const CustomConnectorModal: React.FC<CustomConnectorModalProps> = ({ open
     }
   };
 
+  const discoverBtnLabel =
+    discoverState === 'checking'
+      ? t('custom.discoverBtn_checking')
+      : discoverState === 'done'
+      ? t('custom.discoverBtn_done')
+      : t('custom.discoverBtn_idle');
+
   const footer = (
     <div className="flex items-center justify-between w-full">
       <Button kind="ghost" size="xs" onClick={onClose} disabled={adding}>
-        취소
+        {t('custom.cancel')}
       </Button>
       <div className="flex items-center gap-2">
         <Button
@@ -141,17 +150,16 @@ export const CustomConnectorModal: React.FC<CustomConnectorModalProps> = ({ open
           disabled={!canDiscover}
           icon={discoverState !== 'checking' ? <Icon name="search" size={12} /> : undefined}
         >
-          {discoverState === 'checking' ? '검사 중…' : discoverState === 'done' ? '다시 검사' : 'OAuth 설정 검사'}
+          {discoverBtnLabel}
         </Button>
         <div className="relative group">
           <Button kind="primary" size="xs" onClick={handleAdd} loading={adding} disabled={!canAdd}>
             <Icon name="connect" size={12} className="mr-1" />
-            추가하고 연결
+            {t('custom.addBtn')}
           </Button>
           {!canAdd && !adding && (
             <div className="pointer-events-none absolute bottom-full right-0 mb-2 w-max max-w-[240px] px-2.5 py-1.5 rounded-md bg-text-primary text-text-inverse text-caption-01 shadow-elevation-2 opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-150">
-              이름과 authorize/token 엔드포인트가 필요해요 — 검사로 자동 채우거나 직접
-              입력하세요
+              {t('custom.addBtnTooltip')}
               <span className="absolute top-full right-4 -mt-px border-4 border-transparent border-t-text-primary" />
             </div>
           )}
@@ -166,31 +174,29 @@ export const CustomConnectorModal: React.FC<CustomConnectorModalProps> = ({ open
       onClose={() => {
         if (!adding) onClose();
       }}
-      title="커스텀 커넥터 추가"
+      title={t('custom.title')}
       size="md"
       footer={footer}
       compactFooter
     >
       <div className="space-y-4">
         <p className="text-caption-01 text-text-helper leading-relaxed">
-          OAuth 로 인증하는 원격 MCP 서버 URL 을 입력하면, authorize/token 엔드포인트와 client
-          등록 가능 여부를 자동으로 찾아봐요. 표준을 따르지 않는 서버는 아래에서 직접 입력하면
-          돼요.
+          {t('custom.description')}
         </p>
 
         <div>
-          <label className="text-label-01 text-text-secondary mb-1.5 block">표시 이름</label>
+          <label className="text-label-01 text-text-secondary mb-1.5 block">{t('custom.labelDisplayName')}</label>
           <input
             type="text"
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
-            placeholder="예: Notion, Linear, Sentry"
+            placeholder={t('custom.placeholderDisplayName')}
             className={inputCls.replace('font-mono ', '')}
           />
         </div>
 
         <div>
-          <label className="text-label-01 text-text-secondary mb-1.5 block">MCP 서버 URL</label>
+          <label className="text-label-01 text-text-secondary mb-1.5 block">{t('custom.labelMcpUrl')}</label>
           <input
             type="text"
             value={mcpEndpoint}
@@ -220,11 +226,9 @@ export const CustomConnectorModal: React.FC<CustomConnectorModalProps> = ({ open
               className={`flex-shrink-0 mt-0.5 ${discovered?.ok ? 'text-support-success' : 'text-yellow-40'}`}
             />
             <p className="text-caption-01 text-text-helper leading-relaxed">
-              {discovered?.ok
-                ? '이 서버의 OAuth 설정을 자동으로 찾았어요. 그대로 추가하거나 아래에서 고칠 수 있어요.'
-                : '자동으로 찾지 못했어요 — authorize/token 엔드포인트를 직접 입력해주세요.'}
+              {discovered?.ok ? t('custom.discoverOk') : t('custom.discoverFail')}
               {discovered?.registration_endpoint && (
-                <span className="block mt-0.5">동적 client 등록을 지원해요 — client ID/secret 을 직접 입력하지 않아도 돼요.</span>
+                <span className="block mt-0.5">{t('custom.discoverDynamicReg')}</span>
               )}
             </p>
           </div>
@@ -234,7 +238,7 @@ export const CustomConnectorModal: React.FC<CustomConnectorModalProps> = ({ open
           <>
             <div className="grid grid-cols-1 gap-4">
               <div>
-                <label className="text-label-01 text-text-secondary mb-1.5 block">Authorize 엔드포인트</label>
+                <label className="text-label-01 text-text-secondary mb-1.5 block">{t('custom.labelAuthorize')}</label>
                 <input
                   type="text"
                   value={authUrl}
@@ -246,7 +250,7 @@ export const CustomConnectorModal: React.FC<CustomConnectorModalProps> = ({ open
                 />
               </div>
               <div>
-                <label className="text-label-01 text-text-secondary mb-1.5 block">Token 엔드포인트</label>
+                <label className="text-label-01 text-text-secondary mb-1.5 block">{t('custom.labelToken')}</label>
                 <input
                   type="text"
                   value={tokenUrl}
@@ -265,14 +269,14 @@ export const CustomConnectorModal: React.FC<CustomConnectorModalProps> = ({ open
               className="flex items-center gap-1 text-caption-01 text-link-primary hover:underline"
             >
               <Icon name={advancedOpen ? 'chevron-up' : 'chevron-down'} size={12} />
-              고급 설정 · scope · client ID/secret 직접 입력
+              {t('custom.advancedToggle')}
             </button>
 
             {advancedOpen && (
               <div className="space-y-4 pl-3 border-l-2 border-border-subtle-01">
                 <div>
                   <label className="text-label-01 text-text-secondary mb-1.5 block">
-                    Scope <span className="text-text-placeholder font-normal">· 공백으로 구분 · 선택</span>
+                    {t('custom.labelScope')} <span className="text-text-placeholder font-normal">{t('custom.scopeHint')}</span>
                   </label>
                   <input
                     type="text"
@@ -286,7 +290,7 @@ export const CustomConnectorModal: React.FC<CustomConnectorModalProps> = ({ open
                 </div>
                 <div>
                   <label className="text-label-01 text-text-secondary mb-1.5 block">
-                    Dynamic registration 엔드포인트 <span className="text-text-placeholder font-normal">· 선택</span>
+                    {t('custom.labelDynReg')} <span className="text-text-placeholder font-normal">{t('custom.dynRegHint')}</span>
                   </label>
                   <input
                     type="text"
@@ -300,7 +304,7 @@ export const CustomConnectorModal: React.FC<CustomConnectorModalProps> = ({ open
                 </div>
                 <div>
                   <label className="text-label-01 text-text-secondary mb-1.5 block">
-                    Client ID <span className="text-text-placeholder font-normal">· 직접 등록한 client 가 있을 때만</span>
+                    {t('custom.labelClientId')} <span className="text-text-placeholder font-normal">{t('custom.clientIdHint')}</span>
                   </label>
                   <input
                     type="text"
@@ -312,7 +316,7 @@ export const CustomConnectorModal: React.FC<CustomConnectorModalProps> = ({ open
                   />
                 </div>
                 <div>
-                  <label className="text-label-01 text-text-secondary mb-1.5 block">Client secret</label>
+                  <label className="text-label-01 text-text-secondary mb-1.5 block">{t('custom.labelClientSecret')}</label>
                   <input
                     type="password"
                     value={clientSecret}
@@ -337,8 +341,7 @@ export const CustomConnectorModal: React.FC<CustomConnectorModalProps> = ({ open
         <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg bg-layer-02 border border-border-subtle-01">
           <Icon name="lock" size={15} className="text-icon-secondary flex-shrink-0 mt-0.5" />
           <p className="text-caption-01 text-text-helper leading-relaxed">
-            Client secret 은 <span className="text-text-secondary font-medium">OS 키체인에만</span> 저장돼요. "추가하고
-            연결"을 누르면 시스템 브라우저에서 로그인 화면이 열려요.
+            {t('custom.securityNote_pre')} <span className="text-text-secondary font-medium">{t('custom.securityNote_strong')}</span> {t('custom.securityNote_post')}
           </p>
         </div>
       </div>

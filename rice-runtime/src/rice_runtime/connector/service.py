@@ -493,9 +493,10 @@ class ConnectorService(IConnectorService):
             client_id, client_secret = await register_dynamic_client(registration_endpoint, redirect_uri)
         if not client_id:
             raise ValidationError(
-                "이 서버에서 OAuth client ID를 얻지 못했어요 — 동적 client 등록(RFC 7591)이 "
-                "실패했거나 지원되지 않아요. 고급 설정에서 client ID(발급받았다면 secret 포함)를 "
-                "직접 입력해주세요."
+                f"failed to obtain OAuth client ID for {display_name!r} — dynamic "
+                "registration (RFC 7591) failed or is unsupported",
+                code="connectors.dynamic_registration_failed",
+                params={"displayName": display_name},
             )
 
         connector_type = self._custom.unique_type(display_name)

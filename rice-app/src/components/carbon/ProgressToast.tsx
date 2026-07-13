@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { floatingSurfaceCls } from '../ui/surfaces';
 
 /**
@@ -86,6 +87,7 @@ export const ProgressToast: React.FC<ProgressToastProps> = ({
   dismissSignal = 0,
   onDismiss,
 }) => {
+  const { t } = useTranslation('common');
   const [leaving, setLeaving] = useState(false);
   const inProgress = tone === 'progress';
   const config = toneConfig[tone];
@@ -162,7 +164,7 @@ export const ProgressToast: React.FC<ProgressToastProps> = ({
         <button
           onClick={() => setLeaving(true)}
           className="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-lg text-icon-secondary hover:bg-layer-hover-01 hover:text-text-primary transition-colors"
-          aria-label={inProgress ? '취소' : '닫기'}
+          aria-label={inProgress ? t('cancel') : t('close')}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
             <path d="M18 6 6 18M6 6l12 12" />

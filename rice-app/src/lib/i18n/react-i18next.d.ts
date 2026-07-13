@@ -9,8 +9,17 @@ import type chat from '../../locales/ko/chat.json';
 import type skills from '../../locales/ko/skills.json';
 import type plugins from '../../locales/ko/plugins.json';
 import type errors from '../../locales/ko/errors.json';
-import type connectors from '../../locales/ko/connectors.json';
+// connectors.json은 fixture/loopStages 등 대규모 섹션을 포함해 타입 크기가 크다.
+// TS2589 "Type instantiation is excessively deep" 오류를 방지하기 위해
+// 정적 string 키만 필요한 섹션만 남기고, fixture/loopStages는 Record<string, unknown>으로 축소한다.
+import type _connectors from '../../locales/ko/connectors.json';
+type connectors = Omit<typeof _connectors, 'fixture' | 'loopStages'> & {
+  fixture: Record<string, unknown>;
+  loopStages: Record<string, unknown>;
+};
 import type home from '../../locales/ko/home.json';
+import type onboarding from '../../locales/ko/onboarding.json';
+import type tour from '../../locales/ko/tour.json';
 
 declare module 'i18next' {
   interface CustomTypeOptions {
@@ -24,6 +33,8 @@ declare module 'i18next' {
       errors: typeof errors;
       connectors: typeof connectors;
       home: typeof home;
+      onboarding: typeof onboarding;
+      tour: typeof tour;
     };
   }
 }

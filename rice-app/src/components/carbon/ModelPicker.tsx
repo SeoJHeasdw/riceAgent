@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useTranslation, Trans } from 'react-i18next';
 import { Button, Icon, Input, Tag, Toggle } from '../ui';
 import { ModelRegisterModal, RegisterPayload } from './ModelRegisterModal';
 import { useToast } from '../../lib/toast/ToastContext';
@@ -98,6 +99,7 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
   onboarding = false,
   onChange,
 }) => {
+  const { t } = useTranslation('settings');
   const [localSettings, setLocalSettings] = useState(settings);
   const [draftModel, setDraftModel] = useState(currentModel);
   const [draftMode, setDraftMode] = useState(modelMode);
@@ -132,23 +134,26 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
   // Ollama 로컬 모델 목록 fetch
   const fetchOllamaModels = async () => {
     setOllamaFetching(true);
-    const job = toast.progress({ label: '로컬 모델 확인 중', sublabel: localSettings.endpoint || 'http://localhost:11434' });
+    const job = toast.progress({
+      label: t('modelPicker.toast.fetchingModels'),
+      sublabel: localSettings.endpoint || 'http://localhost:11434',
+    });
     try {
       const res = await api.getOllamaModels();
       if (res.success && Array.isArray(res.data)) {
         const list = res.data as OllamaModel[];
         setOllamaModels(list);
-        job.done('success', `모델 ${list.length}개 발견`);
+        job.done('success', t('modelPicker.toast.modelsFound', { count: list.length }));
         if (list.length > 0 && !list.some((m) => m.name === draftModel)) {
           setDraftModel(list[0].name);
         }
       } else {
         setOllamaModels([]);
-        job.done('error', res.error ?? 'Ollama에 연결할 수 없어요');
+        job.done('error', t('modelPicker.toast.ollamaConnectFail'));
       }
     } catch {
       setOllamaModels([]);
-      job.done('error', '연결 실패');
+      job.done('error', t('modelPicker.toast.connFail'));
     } finally {
       setOllamaFetching(false);
     }
@@ -157,11 +162,17 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
   const testConnection = async () => {
     setConnTest('testing');
     const endpoint = (localSettings.endpoint || '').trim();
-    const job = toast.progress({ label: '연결 확인 중', sublabel: endpoint || '엔드포인트' });
+    const job = toast.progress({
+      label: t('modelPicker.toast.connTestLabel'),
+      sublabel: endpoint || t('modelPicker.toast.connTestEndpoint'),
+    });
     await new Promise<void>((resolve) => window.setTimeout(resolve, 200));
     const reachable = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\/?$/.test(endpoint);
     setConnTest(reachable ? 'ok' : 'fail');
-    job.done(reachable ? 'success' : 'error', reachable ? '연결 성공' : '연결 실패');
+    job.done(
+      reachable ? 'success' : 'error',
+      reachable ? t('modelPicker.toast.connOk') : t('modelPicker.toast.connFail'),
+    );
   };
 
   // 모델 등록: 테스트를 통과한 (provider, modelId, apiKey)를 목록에 반영하고 선택
@@ -204,7 +215,7 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
     <div className="rice-model-picker space-y-4">
       {/* ── 실행 위치 ── */}
       <div>
-        <div className="text-label-01 text-text-secondary mb-2">실행 위치</div>
+        <div className="text-label-01 text-text-secondary mb-2">{t('modelPicker.runLocation')}</div>
         <div className="relative grid grid-cols-2 p-0.5 bg-field-01 border border-border-subtle-01 rounded-lg">
           {/* sliding indicator — 채운 파랑 대신 neutral 선택 표면 + 1px blue 테두리 */}
           <span
@@ -214,8 +225,8 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
             }`}
           />
           {([
-            { mode: 'saas' as const, title: 'SaaS', caption: '클라우드 API' },
-            { mode: 'local' as const, title: 'Local', caption: 'Ollama · 온디바이스' },
+            { mode: 'saas' as const, title: 'SaaS', caption: t('modelPicker.saasCaption') },
+            { mode: 'local' as const, title: 'Local', caption: t('modelPicker.localCaption') },
           ]).map(({ mode, title, caption }) => {
             const isActive = draftMode === mode;
             return (
@@ -244,21 +255,21 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
         <>
           <div>
             <div className="flex items-center justify-between mb-2">
-              <div className="text-label-01 text-text-secondary">모델</div>
+              <div className="text-label-01 text-text-secondary">{t('modelPicker.sectionModel')}</div>
               <button
                 onClick={() => setRegisterModalOpen(true)}
                 className="flex items-center gap-1 text-caption-01 text-interactive hover:underline"
               >
                 <Icon name="add" size={12} />
-                모델 추가
+                {t('modelPicker.addModel')}
               </button>
             </div>
 
             {saasModels.length === 0 ? (
               <EmptyState
                 icon={<Icon name="lock" size={22} className="text-icon-secondary" />}
-                title="등록된 모델 없음"
-                desc="모델 추가로 API 모델과 키를 등록하세요"
+                title={t('modelPicker.emptyTitle')}
+                desc={t('modelPicker.emptyDesc')}
                 action={
                   <Button
                     kind="primary"
@@ -266,7 +277,7 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
                     icon={<Icon name="add" size={14} />}
                     onClick={() => setRegisterModalOpen(true)}
                   >
-                    모델 추가
+                    {t('modelPicker.addModel')}
                   </Button>
                 }
               />
@@ -299,7 +310,7 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
                         onClick={(e) => { e.stopPropagation(); removeRegisteredModel(r.modelId); }}
                         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); removeRegisteredModel(r.modelId); } }}
                         className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-1 rounded-md text-icon-secondary hover:text-support-error hover:bg-support-error/10 transition-colors duration-150 cursor-pointer flex-shrink-0"
-                        title="등록 해제"
+                        title={t('modelPicker.unregister')}
                       >
                         <Icon name="trash" size={14} />
                       </span>
@@ -318,7 +329,7 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
       {draftMode === 'local' && (
         <>
           <div>
-            <label className="text-label-01 text-text-secondary mb-1.5 block">Ollama 엔드포인트</label>
+            <label className="text-label-01 text-text-secondary mb-1.5 block">{t('modelPicker.ollamaEndpointLabel')}</label>
             <div className="flex gap-2">
               <Input
                 type="text"
@@ -339,7 +350,7 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
                 loading={connTest === 'testing'}
                 className="flex-shrink-0 !bg-layer-02 hover:!bg-layer-hover-02"
               >
-                연결 테스트
+                {t('modelPicker.btnTestConn')}
               </Button>
             </div>
             {connTest !== 'idle' && connTest !== 'testing' && (
@@ -347,7 +358,7 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
                 {connTest === 'ok' ? (
                   <>
                     <Icon name="check" size={13} className="flex-shrink-0" />
-                    연결됨 · Ollama 응답 정상
+                    {t('modelPicker.connOk')}
                   </>
                 ) : (
                   <>
@@ -355,7 +366,7 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
                       <circle cx="12" cy="12" r="9" />
                       <path d="M12 8v5M12 16.5h.01" />
                     </svg>
-                    연결 실패 · 엔드포인트를 확인하세요
+                    {t('modelPicker.connFail')}
                   </>
                 )}
               </div>
@@ -365,8 +376,8 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
           {ollamaModels === null ? (
             <EmptyState
               icon={<Icon name="server" size={22} className="text-icon-secondary" />}
-              title="설치된 모델 확인 전"
-              desc="로컬 Ollama에서 모델 목록을 불러옵니다"
+              title={t('modelPicker.localPreTitle')}
+              desc={t('modelPicker.localPreDesc')}
               action={
                 <Button
                   kind="primary"
@@ -375,22 +386,24 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
                   onClick={fetchOllamaModels}
                   loading={ollamaFetching}
                 >
-                  로컬 모델 확인
+                  {t('modelPicker.btnFetchModels')}
                 </Button>
               }
             />
           ) : ollamaModels.length === 0 ? (
             <EmptyState
               icon={<Icon name="download" size={22} className="text-icon-secondary" />}
-              title="설치된 모델 없음"
+              title={t('modelPicker.localEmptyTitle')}
               desc={
-                <>
-                  <code className="font-mono text-text-secondary">ollama pull &lt;모델명&gt;</code> 으로 설치 후 다시 확인하세요
-                </>
+                <Trans
+                  i18nKey="modelPicker.localEmptyDesc_pre"
+                  ns="settings"
+                  components={{ code: <code className="font-mono text-text-secondary" /> }}
+                />
               }
               action={
                 <Button kind="secondary" size="sm" onClick={fetchOllamaModels} loading={ollamaFetching}>
-                  다시 확인
+                  {t('modelPicker.btnRefetch')}
                 </Button>
               }
             />
@@ -398,15 +411,15 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
             <>
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <div className="text-label-01 text-text-secondary">설치된 모델 ({ollamaModels.length})</div>
+                  <div className="text-label-01 text-text-secondary">{t('modelPicker.installedModels', { count: ollamaModels.length })}</div>
                   <button
                     onClick={fetchOllamaModels}
                     disabled={ollamaFetching}
                     className="flex items-center gap-1 text-caption-01 text-interactive hover:underline disabled:opacity-40"
-                    title="새로고침"
+                    title={t('modelPicker.titleRefresh')}
                   >
                     <Icon name="renew" size={12} className={ollamaFetching ? 'animate-spin' : ''} />
-                    새로고침
+                    {t('modelPicker.btnRefresh')}
                   </button>
                 </div>
                 <div className="flex flex-col gap-1.5">
@@ -550,49 +563,50 @@ const Params: React.FC<{
   setLocalSettings: React.Dispatch<React.SetStateAction<ModelSettings>>;
   /** Local 모드에서만 Show Thinking 토글을 노출한다(reasoning trace는 로컬 전용). */
   local?: boolean;
-}> = ({ localSettings, setLocalSettings, local = false }) => (
-  <div>
-    <div className="text-label-01 text-text-secondary mb-2">응답 설정</div>
-    <div className="space-y-4">
-      {/* 창의성 */}
-      <div>
-        <div className="flex items-center justify-between mb-1.5">
-          <label className="text-label-01 text-text-secondary">창의성 (Temperature)</label>
-          <span className="text-caption-01 font-mono text-text-primary bg-field-01 border border-border-subtle-01 rounded-md px-1.5 py-0.5">
-            {localSettings.temperature.toFixed(1)}
-          </span>
-        </div>
-        <input
-          type="range"
-          min="0"
-          max="2"
-          step="0.1"
-          value={localSettings.temperature}
-          onChange={(e) => setLocalSettings({ ...localSettings, temperature: parseFloat(e.target.value) })}
-          className="rice-slider w-full h-1.5 rounded-full appearance-none cursor-pointer"
-          style={{
-            background: `linear-gradient(to right, var(--cds-interactive) ${(localSettings.temperature / 2) * 100}%, var(--cds-layer-03) ${(localSettings.temperature / 2) * 100}%)`,
-          }}
-        />
-        <div className="flex justify-between text-caption-01 text-text-helper mt-1">
-          <span>정확하게</span>
-          <span>창의적으로</span>
-        </div>
-      </div>
-
-      {/* Local 모델의 reasoning trace는 비용과 무관하지만 사용자가 화면 노출을 선택한다. */}
-      {local && (
-        <div className="border-t border-border-subtle-01 pt-3">
-          <Toggle
-            checked={localSettings.showThinking}
-            onChange={(showThinking) => setLocalSettings({ ...localSettings, showThinking })}
-            label="Show Thinking"
-            description="로컬 모델의 추론 과정을 대화에서 확인합니다"
+}> = ({ localSettings, setLocalSettings, local = false }) => {
+  const { t } = useTranslation('settings');
+  return (
+    <div>
+      <div className="text-label-01 text-text-secondary mb-2">{t('modelPicker.params.title')}</div>
+      <div className="space-y-4">
+        {/* 창의성 */}
+        <div>
+          <div className="flex items-center justify-between mb-1.5">
+            <label className="text-label-01 text-text-secondary">{t('modelPicker.params.temperatureLabel')}</label>
+            <span className="text-caption-01 font-mono text-text-primary bg-field-01 border border-border-subtle-01 rounded-md px-1.5 py-0.5">
+              {localSettings.temperature.toFixed(1)}
+            </span>
+          </div>
+          <input
+            type="range"
+            min="0"
+            max="2"
+            step="0.1"
+            value={localSettings.temperature}
+            onChange={(e) => setLocalSettings({ ...localSettings, temperature: parseFloat(e.target.value) })}
+            className="rice-slider w-full h-1.5 rounded-full appearance-none cursor-pointer"
+            style={{
+              background: `linear-gradient(to right, var(--cds-interactive) ${(localSettings.temperature / 2) * 100}%, var(--cds-layer-03) ${(localSettings.temperature / 2) * 100}%)`,
+            }}
           />
+          <div className="flex justify-between text-caption-01 text-text-helper mt-1">
+            <span>{t('modelPicker.params.temperatureLow')}</span>
+            <span>{t('modelPicker.params.temperatureHigh')}</span>
+          </div>
         </div>
-      )}
-    </div>
-  </div>
-);
 
-// Made with Bob
+        {/* Local 모델의 reasoning trace는 비용과 무관하지만 사용자가 화면 노출을 선택한다. */}
+        {local && (
+          <div className="border-t border-border-subtle-01 pt-3">
+            <Toggle
+              checked={localSettings.showThinking}
+              onChange={(showThinking) => setLocalSettings({ ...localSettings, showThinking })}
+              label={t('modelPicker.params.showThinkingLabel')}
+              description={t('modelPicker.params.showThinkingDesc')}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};

@@ -1,4 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useI18n } from '../../../lib/i18n/I18nContext';
 import type { ModelDraft, ModelSettings } from '../ModelPicker';
 import { CinematicCanvas } from './cinematic/CinematicCanvas';
@@ -36,6 +37,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
   onComplete,
 }) => {
   const { language } = useI18n();
+  const { t } = useTranslation('onboarding');
   const copy = useMemo(() => getCinematicCopy(language), [language]);
   const [draft, setDraft] = useState<ModelDraft>({
     modelId: currentModel,
@@ -55,7 +57,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
       className={`cinematic-onboarding cinematic-onboarding--${sequence.phase}`}
       role="dialog"
       aria-modal="true"
-      aria-label={language === 'ko' ? 'RICE 시작하기' : 'Get started with RICE'}
+      aria-label={t('ui.dialogAriaLabel')}
     >
       <div className="cinematic-nebula" aria-hidden="true" />
       <div className="cinematic-grid" aria-hidden="true" />

@@ -146,6 +146,20 @@
     "usedByEmpty": "No skills or plugins use this connector yet."
   },
 
+  "catalog": {
+    "category": {
+      "dev": "Development",
+      "docs": "Documentation",
+      "issueTracker": "Issue tracker",
+      "crm": "CRM",
+      "marketingCrm": "Marketing & CRM",
+      "project": "Project management",
+      "storage": "Storage",
+      "database": "Database",
+      "customerSupport": "Customer support"
+    }
+  },
+
   "toast": {
     "connectStart": "Starting connection",
     "browserLoginWaiting": "Waiting for browser login",
@@ -159,5 +173,264 @@
     "applyUpdateFail": "Could not apply the update.",
     "permSaveFail": "Could not save permission change.",
     "customConnectFail": "Could not start connection. Check your input and try again."
+  },
+
+  "badge": {
+    "popular": "Popular",
+    "new": "New",
+    "recommended": "Recommended"
+  },
+
+  "directory": {
+    "title": "Browse connectors",
+    "searchPlaceholder": "Search connectors…",
+    "sourceChip": "IBM & Partners",
+    "catalogCount": "Catalog · {{count}}",
+    "comingSoonHint": "\"Coming soon\" items cannot be connected directly yet. If you have an MCP server URL, try",
+    "comingSoonCta": "\"Add custom\"",
+    "comingSoonSuffix": "to connect right away.",
+    "noResults": "No connectors found for \"{{query}}\".",
+    "tagComingSoon": "Coming soon",
+    "alreadyAdded": "Already added",
+    "comingSoonDisabled": "Not yet available in MVP — if you have an MCP server URL, use \"Add custom\"",
+    "addAriaLabel": "Add {{name}}"
+  },
+
+  "required": {
+    "title": "Connection required before activating",
+    "later": "Later",
+    "goToConnectors": "Go to Connectors",
+    "tagWaiting": "Awaiting connection",
+    "descriptionLine1": "You need to approve the connectors this plugin will access before turning it on.",
+    "descriptionLine2": "After connecting, re-enable the plugin and its skills and tools will be attached to the agent.",
+    "sectionLabel": "Required connectors",
+    "tagNeedsConnection": "Needs connection",
+    "fallbackConnectorName": "Required connector",
+    "hint": "Connection is completed from the Connectors screen after reviewing the permission scope. You can close this and the plugin will remain installed."
+  },
+
+  "custom": {
+    "title": "Add custom connector",
+    "cancel": "Cancel",
+    "discoverBtn_idle": "Check OAuth settings",
+    "discoverBtn_checking": "Checking…",
+    "discoverBtn_done": "Check again",
+    "addBtn": "Add and connect",
+    "addBtnTooltip": "Name and authorize/token endpoints are required — fill them automatically with Check, or enter manually",
+    "description": "Enter a remote MCP server URL that uses OAuth authentication and we'll automatically discover the authorize/token endpoints and whether dynamic client registration is supported. For servers that don't follow the standard, fill in the fields below manually.",
+    "labelDisplayName": "Display name",
+    "placeholderDisplayName": "e.g. Notion, Linear, Sentry",
+    "labelMcpUrl": "MCP server URL",
+    "discoverOk": "OAuth settings for this server were found automatically. Add as-is or edit below.",
+    "discoverFail": "Could not find settings automatically — please enter the authorize/token endpoints manually.",
+    "discoverDynamicReg": "Dynamic client registration is supported — you don't need to enter a client ID/secret manually.",
+    "labelAuthorize": "Authorize endpoint",
+    "labelToken": "Token endpoint",
+    "advancedToggle": "Advanced · scope · enter client ID/secret manually",
+    "labelScope": "Scope",
+    "scopeHint": "· space-separated · optional",
+    "labelDynReg": "Dynamic registration endpoint",
+    "dynRegHint": "· optional",
+    "labelClientId": "Client ID",
+    "clientIdHint": "· only if you have a pre-registered client",
+    "labelClientSecret": "Client secret",
+    "securityNote_pre": "Client secret is stored",
+    "securityNote_strong": "only in the OS keychain",
+    "securityNote_post": ". Clicking \"Add and connect\" opens the login screen in your system browser."
+  },
+
+  "marketplaceHeader": {
+    "searchAriaLabel": "Search {{title}}",
+    "searchPlaceholder": "Search",
+    "clearSearch": "Clear search",
+    "sortAriaLabel": "Sort by",
+    "tagFilterAriaLabel": "Tag filter"
+  },
+
+  "mcpRegister": {
+    "modalTitle": "Register local MCP server",
+    "cancel": "Cancel",
+    "btnTesting": "Testing…",
+    "btnTest": "Test connection",
+    "btnRegister": "Register",
+    "tooltipPaste": "Paste MCP server config or import a file",
+    "tooltipNeedTest": "Pass 'Test connection' first",
+    "warningExec": "Local MCP servers {{strong}} on your computer. Only register configs from trusted sources.",
+    "warningExecStrong": "run code directly",
+    "sectionInputLabel": "MCP server config (JSON)",
+    "importFromFile": "Import from file",
+    "dragDropLabel": "Drop here to load",
+    "inputHint": "Paste the install snippet from the MCP server docs, or drag a JSON file onto the input above. Click outside after pasting to auto-parse. Multiple servers (e.g. an existing .mcp.json) are all recognised and listed.",
+    "serverListTitle": "Servers found · {{count}}",
+    "namePlaceholder": "Enter a name",
+    "testOk": "Connected · {{count}} tools found",
+    "registered": "✓ Registered",
+    "storageHint": "Server config is saved to <path>~/.rice/.mcp.json</path>. It starts immediately after registration and persists across app restarts.",
+    "parseErrorInvalidJson": "Not valid JSON.",
+    "parseErrorNotObject": "Not a valid JSON object.",
+    "parseErrorNoServer": "No MCP server config with a command or url found.",
+    "testFail": "Could not verify connection.",
+    "registerFail": "Registration failed — check whether this name is already registered",
+    "registerSummaryAllFail": "Registration failed. Check the per-item errors below.",
+    "registerSummaryPartial": "Only {{success}}/{{total}} registered — check the remaining items."
+  },
+
+  "loopStages": {
+    "exp": { "label": "Experience", "desc": "Observe patterns from chats and tasks" },
+    "gen": { "label": "Skill creation", "desc": "Turn repetition into reusable skills" },
+    "use": { "label": "Use & improve", "desc": "Rules strengthen with every use" },
+    "model": { "label": "User model", "desc": "Remembered across sessions" }
+  },
+
+  "fixture": {
+    "lastSync": {
+      "justNow": "just now",
+      "min2Ago": "2 min ago",
+      "min5Ago": "5 min ago",
+      "min10Ago": "10 min ago",
+      "hour1Ago": "1 hour ago",
+      "yesterday": "yesterday"
+    },
+    "usedByKind": {
+      "skill": "Skill",
+      "plugin": "Plugin",
+      "automation": "Automation",
+      "conversation": "Conversation"
+    },
+    "db2": {
+      "category": "Database",
+      "summary": "Production database connection used for quarterly sales queries and schema checks.",
+      "scopes": [
+        "List schemas and tables in the connected database.",
+        "Describe columns, types, and indexes for a specific table.",
+        "Run read-only SQL (SELECT) queries.",
+        "Retrieve query execution plans (EXPLAIN).",
+        "Run INSERT, UPDATE, and DELETE statements."
+      ],
+      "usedBy": [
+        { "kind": "skill", "name": "Quarterly sales summary" },
+        { "kind": "skill", "name": "Db2 schema check" },
+        { "kind": "plugin", "name": "Db2 expert" }
+      ],
+      "examples": ["Review the sales table schema", "Create a 2026 Q1 sales summary"]
+    },
+    "slack": {
+      "category": "Messaging",
+      "summary": "Send summaries and reports to channels, and read mentions.",
+      "scopes": [
+        "List channels in the workspace.",
+        "Read recent messages from a channel.",
+        "Search messages across the workspace.",
+        "Retrieve messages that mention the user.",
+        "Post a message to a channel.",
+        "Reply to a thread.",
+        "Upload a file to a channel."
+      ],
+      "usedBy": [
+        { "kind": "automation", "name": "Weekly sales report → Slack" }
+      ],
+      "examples": ["Send this week's summary to the #sales-report channel"]
+    },
+    "outlook": {
+      "category": "Mail & Calendar",
+      "summary": "Draft and send emails, and check your calendar.",
+      "scopes": [
+        "List emails in the inbox.",
+        "Fetch the body and attachments of a specific email.",
+        "Read calendar events for a given period.",
+        "Create an email draft.",
+        "Send an email.",
+        "Create a calendar event."
+      ],
+      "usedBy": [
+        { "kind": "conversation", "name": "Executive report email draft" }
+      ],
+      "examples": ["Draft an executive report email from this summary"]
+    },
+    "jira": {
+      "category": "Issue tracker",
+      "summary": "Read sprints and issues to organise retrospectives.",
+      "scopes": [
+        "Search issues with JQL.",
+        "Get details of a specific issue.",
+        "List sprints on a board.",
+        "Create a new issue.",
+        "Add a comment to an issue.",
+        "Transition an issue's status."
+      ],
+      "usedBy": [
+        { "kind": "skill", "name": "Meeting action item extraction" }
+      ],
+      "examples": ["Summarise this sprint's retrospective"]
+    },
+    "gdrive": {
+      "category": "Storage",
+      "summary": "Read and summarise documents, or save output files.",
+      "scopes": [
+        "List files and folders.",
+        "Search files by name or content.",
+        "Read or export document content.",
+        "Create a new file.",
+        "Edit an existing file."
+      ],
+      "usedBy": [],
+      "examples": ["Summarise the documents in this folder"]
+    },
+    "orchestrate": {
+      "category": "Automation",
+      "summary": "Run workflows automatically on a schedule or trigger.",
+      "scopes": [
+        "List available workflows.",
+        "Check workflow run status and history.",
+        "Run a workflow.",
+        "Register or modify a workflow schedule."
+      ],
+      "usedBy": [
+        { "kind": "automation", "name": "Quarterly sales summary · Every Mon 08:00" }
+      ],
+      "examples": ["Set up a Monday morning report automation"]
+    },
+    "gmail": {
+      "category": "Mail",
+      "summary": "Read and summarise emails, or draft and send executive reports. Default prototype connector.",
+      "usedBy": [
+        { "kind": "conversation", "name": "Executive report email send" }
+      ],
+      "examples": ["Summarise important emails from this week in my inbox", "Draft an executive report email from this summary"]
+    },
+    "mcp-filesystem": {
+      "category": "File system",
+      "summary": "Read and write to a specified folder on your computer so the agent can work with local files.",
+      "usedBy": [
+        { "kind": "skill", "name": "Local document summary" }
+      ],
+      "examples": ["Organise the markdown files on my desktop"]
+    },
+    "mcp-git": {
+      "category": "Version control",
+      "summary": "Read commits, diffs, and logs from a local repository to explain or summarise code changes.",
+      "usedBy": [
+        { "kind": "conversation", "name": "Change review" }
+      ],
+      "examples": ["Summarise changes from recent commits"]
+    },
+    "mcp-sqlite": {
+      "category": "Database",
+      "summary": "Query a local SQLite file for analysis. Connect to discover the exposed tools.",
+      "usedBy": [],
+      "examples": ["Show me the tables in data.db"]
+    },
+    "catalog": {
+      "github": { "summary": "Read issues, PRs, and code to summarise changes or assist with reviews.", "examples": ["Summarise open PRs in this repository"] },
+      "notion": { "summary": "Search and summarise workspace documents, and write pages.", "examples": ["Compile this week's meeting notes into one page"] },
+      "linear": { "summary": "Read issues and cycles to track progress and create tickets.", "examples": ["Organise remaining issues in this cycle"] },
+      "confluence": { "summary": "Search space documents to find answers or write reports.", "examples": ["Summarise the onboarding documentation"] },
+      "salesforce": { "summary": "Query deals and customer data to analyse the pipeline.", "examples": ["Show top deals in this quarter's pipeline"] },
+      "hubspot": { "summary": "Read contacts, deals, and campaign data to build reports.", "examples": ["Summarise new lead trends this month"] },
+      "asana": { "summary": "Read tasks and projects to track status and create work items.", "examples": ["Tell me which tasks are due soon"] },
+      "dropbox": { "summary": "Read and summarise documents in a folder, or save output files.", "examples": ["Summarise each PDF in this folder in one line"] },
+      "postgres": { "summary": "Inspect schemas and analyse data with read-only queries.", "examples": ["Analyse recent trends in the orders table"] },
+      "zendesk": { "summary": "Read tickets to classify issues and draft responses.", "examples": ["Organise today's urgent tickets"] }
+    }
   }
 }

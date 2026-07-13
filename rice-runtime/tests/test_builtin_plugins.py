@@ -91,10 +91,12 @@ async def test_builtin_plugin_cannot_be_reinstalled_or_removed(tmp_path: Path):
         "version": "9.9.9",
     }
 
-    with pytest.raises(ValidationError, match="빌트인 플러그인"):
+    with pytest.raises(ValidationError) as exc_info:
         await loader.install(path=str(tmp_path), manifest=manifest)
-    with pytest.raises(ValidationError, match="빌트인 플러그인"):
+    assert exc_info.value.code == "plugins.builtin_immutable"
+    with pytest.raises(ValidationError) as exc_info:
         await loader.remove(BUILTIN_ID)
+    assert exc_info.value.code == "plugins.builtin_immutable"
 
 
 def test_stale_installed_copy_is_shadowed_by_builtin():

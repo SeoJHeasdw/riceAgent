@@ -1,6 +1,7 @@
 import type { Skill as MarketSkill, SkillFile, Plugin as MarketPlugin, PlatformArtifact } from './types';
 import type { Skill as OwnedSkill, SkillDetail, MyPlugin } from './learningData';
 import { getSkillFiles } from './skillFiles';
+import i18n from './i18n';
 
 /**
  * skillBridge — the seam between the two "skill" worlds.
@@ -122,17 +123,21 @@ export function ownedToMarketSkill(skill: OwnedSkill, detail: SkillDetail): Mark
 function synthesizeSkillMd(skill: OwnedSkill, detail: SkillDetail): SkillFile {
   const steps = detail.steps ?? [];
   const rules = detail.rules.filter((r) => r.on);
+  // 헤더는 우리 코드가 정적으로 박아 넣는 구조 텍스트라 현재 UI 언어를 따른다
+  // (SkillAuthorModal.generatedDef 와 동일 원칙 — docs/i18n.md 참고).
+  const stepsHeading = i18n.t('skills:bridge.stepsHeading');
+  const rulesHeading = i18n.t('skills:bridge.rulesHeading');
   const stepsBlock = steps.length
-    ? `\n## 절차\n\n${steps.map((s, i) => `${i + 1}. **${s.label}** — ${s.desc} \`(${s.tool})\``).join('\n')}\n`
+    ? `\n${stepsHeading}\n\n${steps.map((s, i) => `${i + 1}. **${s.label}** — ${s.desc} \`(${s.tool})\``).join('\n')}\n`
     : '';
   const rulesBlock = rules.length
-    ? `\n## 학습한 규칙\n\n${rules.map((r) => `- ${r.text}`).join('\n')}\n`
+    ? `\n${rulesHeading}\n\n${rules.map((r) => `- ${r.text}`).join('\n')}\n`
     : '';
   const content = `---
 name: ${skill.command ?? skill.id}
 description: ${detail.summary}
 version: ${skill.ver}
-source: 대화 학습에서 자동 구성
+source: ${i18n.t('skills:bridge.autoComposedSource')}
 ---
 
 # ${skill.name}
@@ -255,7 +260,8 @@ export function runtimePluginToMyPlugin(p: {
     icon: 'plug',
     enabled: p.enabled,
     builtin,
-    source: builtin ? 'builtin' : 'market',
+    // stable code — 렌더 시 renderPluginSource()로 번역
+    source: builtin ? 'plugin_source_builtin' : 'plugin_source_runtime',
     version: p.version,
     author: p.author ?? '',
     updated: builtin ? 'plugin_updated_builtin' : 'plugin_updated_installed',
@@ -273,7 +279,8 @@ export function marketPluginToMyPlugin(p: MarketPlugin): MyPlugin {
     name: p.name,
     icon: 'plug',
     enabled: true,
-    source: `Plugin Market · ${p.provider}`,
+    // stable code — 렌더 시 renderPluginSource()로 번역 (provider는 보간 파라미터)
+    source: `plugin_source_market:${p.provider}`,
     version: p.version,
     author: p.author,
     updated: 'plugin_updated_just_installed',

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useI18n } from '../../lib/i18n/I18nContext';
 import type { Language } from '../../lib/i18n';
 import { BrandMark } from './onboarding/primitives';
@@ -21,6 +22,7 @@ const ArrowIcon = () => (
 
 export const LanguageSelectDialog: React.FC<LanguageSelectDialogProps> = ({ open, onConfirm }) => {
   const { language, setLanguage } = useI18n();
+  const { t } = useTranslation('common');
   const [selected, setSelected] = useState<Language>(language);
 
   useEffect(() => {
@@ -45,9 +47,9 @@ export const LanguageSelectDialog: React.FC<LanguageSelectDialogProps> = ({ open
           <small>FIRST CONTACT</small>
         </div>
         <div className="language-dock__intro">
-          <span>WELCOME / 환영합니다</span>
-          <h1 id="language-title">Choose your language</h1>
-          <p>RICE와 대화할 언어를 선택하세요.<br />Select the language you want to use with RICE.</p>
+          <span>{t('languageSelect.welcome')}</span>
+          <h1 id="language-title">{t('languageSelect.heading')}</h1>
+          <p>{t('languageSelect.description')}</p>
         </div>
         <div className="language-dock__options">
           {LANGUAGES.map((item) => {
@@ -68,10 +70,10 @@ export const LanguageSelectDialog: React.FC<LanguageSelectDialogProps> = ({ open
           })}
         </div>
         <button type="button" className="language-dock__continue" onClick={handleConfirm}>
-          <span>{selected === 'ko' ? '한국어로 시작하기' : 'Continue in English'}</span>
+          <span>{t('languageSelect.continueButton', { lng: selected })}</span>
           <ArrowIcon />
         </button>
-        <p className="language-dock__foot">언어는 설정에서 언제든 변경할 수 있습니다 · You can change this anytime</p>
+        <p className="language-dock__foot">{t('languageSelect.footer')}</p>
       </section>
     </div>
   );

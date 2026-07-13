@@ -1,5 +1,8 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { Card, Icon } from '../ui';
+import { useI18n } from '../../lib/i18n/I18nContext';
+import { formatNumber } from '../../lib/i18n/formatters';
 
 /**
  * SkillCard - Skill marketplace card.
@@ -24,8 +27,6 @@ export interface SkillCardProps {
   onInstall: () => void;
   onSponsor: () => void;
 }
-
-const nf = (n: number) => n.toLocaleString();
 
 /** 카드 푸터 스탯용 12px 스트로크 아이콘 (공용 Icon 세트에 없는 글리프) */
 const StatIcon: React.FC<{ children: React.ReactNode }> = ({ children }) => (
@@ -61,6 +62,10 @@ export const SkillCard: React.FC<SkillCardProps> = ({
   onInstall,
   onSponsor,
 }) => {
+  const { t: tRaw } = useTranslation('skills');
+  const t = tRaw as (key: string, opts?: Record<string, unknown>) => string;
+  const { language } = useI18n();
+
   return (
     <Card
       padding="md"
@@ -115,7 +120,7 @@ export const SkillCard: React.FC<SkillCardProps> = ({
           }`}
         >
           {installed && <Icon name="check" size={12} />}
-          {installed ? '설치됨' : '받기'}
+          {installed ? t('market.installed') : t('market.getBtn')}
         </button>
       </div>
 
@@ -130,7 +135,7 @@ export const SkillCard: React.FC<SkillCardProps> = ({
       <div className="relative flex items-center gap-2 mt-3 text-caption-01 text-text-helper">
         <span className="flex items-center gap-1 flex-shrink-0">
           <Icon name="download" size={12} />
-          {nf(downloads)}
+          {formatNumber(downloads, language)}
         </span>
         {rating > 0 && (
           <span className="flex items-center gap-1 flex-shrink-0">
@@ -141,19 +146,19 @@ export const SkillCard: React.FC<SkillCardProps> = ({
         {points !== undefined && points > 0 && (
           <span className="flex items-center gap-1 flex-shrink-0 text-blue-30 font-mono">
             <StatIcon>{ZAP}</StatIcon>
-            {nf(points)} BP
+            {formatNumber(points, language)} BP
           </span>
         )}
       </div>
 
       <div className="relative flex items-center gap-1.5 mt-2 min-w-0">
         <div className="flex items-center gap-1.5 min-w-0 flex-1 overflow-hidden">
-          {tags.slice(0, 2).map((t) => (
+          {tags.slice(0, 2).map((tag) => (
             <span
-              key={t}
+              key={tag}
               className="min-w-0 truncate rounded-full border border-border-subtle-01 bg-layer-02/65 px-2 py-0.5 text-caption-01 text-text-secondary"
             >
-              #{t}
+              #{tag}
             </span>
           ))}
           {tags.length > 2 && (
@@ -165,11 +170,11 @@ export const SkillCard: React.FC<SkillCardProps> = ({
             e.stopPropagation();
             onSponsor();
           }}
-          title="블루 포인트로 후원하기"
+          title={t('market.sponsorBtnTitle')}
           className="flex-shrink-0 inline-flex items-center gap-1 h-6 px-2 -mr-1 rounded-full text-caption-01 font-medium text-text-helper hover:text-blue-30 hover:bg-blue-60/10 transition-colors"
         >
           <StatIcon>{ZAP}</StatIcon>
-          후원
+          {t('market.sponsorBtnLabel')}
         </button>
       </div>
     </Card>

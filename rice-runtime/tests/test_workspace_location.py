@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from fastapi import HTTPException
 
 from rice_runtime.core.config import RuntimeArgs
+from rice_runtime.core.errors import ValidationError
 from rice_runtime.core.paths import RicePaths
 from rice_runtime.server.composition_root import build_container
 from rice_runtime.server.routes.workspace import WorkspaceLocationIn, update_workspace_location
@@ -52,7 +52,8 @@ def test_workspace_location_is_queued_and_promoted_at_turn_boundary(tmp_path):
 def test_workspace_location_rejects_relative_paths(tmp_path):
     container = build_container(RuntimeArgs(), paths=RicePaths.from_env(tmp_path / "rice").ensure())
     try:
-        with pytest.raises(HTTPException, match="절대 경로"):
+        with pytest.raises(ValidationError) as exc_info:
             asyncio.run(update_workspace_location(WorkspaceLocationIn(path="relative/output"), container))
+        assert exc_info.value.code == "workspace.path_not_absolute"
     finally:
         container.shutdown()

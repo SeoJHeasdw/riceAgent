@@ -104,7 +104,9 @@ class BuiltinPluginCatalog:
         if self.is_builtin(plugin_id_or_name):
             name = plugin_id_or_name.removeprefix("plugin:")
             raise ValidationError(
-                f"빌트인 플러그인 '{name}'은(는) {action}할 수 없습니다. 활성/비활성만 전환할 수 있습니다."
+                f"builtin plugin {name!r} cannot {action} — only enable/disable is allowed",
+                code="plugins.builtin_immutable",
+                params={"name": name, "action": action},
             )
 
     def _materialize(self, plugin_id: str) -> PluginInfo:

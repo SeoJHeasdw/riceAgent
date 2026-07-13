@@ -207,9 +207,10 @@ class OAuthFlow:
             # 커스텀 커넥터는 env/JSON 설치 경로를 안 쓴다 — 동적 등록(RFC 7591)이
             # 실패했거나 미지원인 경우이므로 모달의 수동 입력을 안내한다.
             raise OAuthConfigError(
-                f"{self._d.display_name}에 OAuth client ID가 없어요. 이 서버가 동적 client 등록을 "
-                "지원하지 않거나 등록이 실패한 상태예요 — 커넥터를 제거한 뒤 '커스텀 추가'의 "
-                "고급 설정에서 client ID(발급받았다면 secret 포함)를 직접 입력해 다시 추가해주세요."
+                f"{self._d.display_name} has no OAuth client ID and dynamic registration "
+                "failed or is unsupported",
+                code="connectors.custom_client_id_missing",
+                params={"displayName": self._d.display_name},
             )
         raise OAuthConfigError(
             f"{self._d.display_name} OAuth requires a client_id. Set "

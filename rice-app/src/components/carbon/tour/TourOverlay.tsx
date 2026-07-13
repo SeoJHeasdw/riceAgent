@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { TourStep } from './tourSteps';
 
 /**
@@ -227,6 +228,9 @@ const BubbleArrow: React.FC<{ side: BubblePos['arrowSide']; center: number }> = 
 
 /* ── 메인 컴포넌트 ──────────────────────────────────────────────────────── */
 export const TourOverlay: React.FC<TourOverlayProps> = ({ steps, currentPath, onNavigate, onDone }) => {
+  const { t } = useTranslation('tour');
+  // 스텝 텍스트는 id 기반 동적 키(steps.<id>.title|body)라 넓힌 t 로 조회한다.
+  const tt = t as unknown as (key: string, options?: Record<string, unknown>) => string;
   const [index, setIndex] = useState(0);
   const [targetRect, setTargetRect] = useState<Rect | null>(null);
   const [bubblePos, setBubblePos] = useState<BubblePos | null>(null);
@@ -291,6 +295,9 @@ export const TourOverlay: React.FC<TourOverlayProps> = ({ steps, currentPath, on
 
   if (!step) return null;
 
+  const stepTitle = tt(`steps.${step.id}.title`);
+  const stepBody = tt(`steps.${step.id}.body`);
+
   const triggerDone = () => {
     setLeaving(true);
     setTimeout(onDone, 200);
@@ -316,7 +323,7 @@ export const TourOverlay: React.FC<TourOverlayProps> = ({ steps, currentPath, on
         <div
           role="dialog"
           aria-modal="false"
-          aria-label={`투어 ${index + 1}단계: ${step.title}`}
+          aria-label={t('ui.stepAria', { step: index + 1, title: stepTitle })}
           className="fixed top-0 left-0"
           style={{
             zIndex: 9002,
@@ -343,7 +350,7 @@ export const TourOverlay: React.FC<TourOverlayProps> = ({ steps, currentPath, on
               <button
                 onClick={triggerDone}
                 className="absolute top-3.5 right-3.5 flex items-center justify-center w-6 h-6 rounded-lg text-text-helper hover:text-text-secondary hover:bg-layer-hover-01 transition-colors"
-                aria-label="투어 닫기"
+                aria-label={t('ui.close')}
               >
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden>
                   <path d="M18 6 6 18M6 6l12 12" />
@@ -357,11 +364,11 @@ export const TourOverlay: React.FC<TourOverlayProps> = ({ steps, currentPath, on
                     {index + 1}
                   </span>
                   <span className="text-body-short-01 font-semibold leading-tight text-text-primary">
-                    {step.title}
+                    {stepTitle}
                   </span>
                 </div>
                 <p className="text-body-short-01 leading-[1.65] text-text-secondary">
-                  {step.body}
+                  {stepBody}
                 </p>
               </div>
             </div>
@@ -391,13 +398,13 @@ export const TourOverlay: React.FC<TourOverlayProps> = ({ steps, currentPath, on
                   onClick={triggerDone}
                   className="text-caption-01 font-medium px-2.5 py-1.5 rounded-lg text-text-helper hover:text-text-secondary hover:bg-layer-hover-01 transition-colors"
                 >
-                  건너뛰기
+                  {t('ui.skip')}
                 </button>
                 <button
                   onClick={goNext}
                   className="flex items-center gap-1.5 text-caption-01 font-semibold px-4 py-1.5 rounded-lg bg-interactive text-white hover:bg-interactive-hover transition-colors"
                 >
-                  {isLast ? '시작하기' : '다음'}
+                  {isLast ? t('ui.start') : t('ui.next')}
                   {!isLast && (
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                       <path d="M5 12h14M13 6l6 6-6 6" />

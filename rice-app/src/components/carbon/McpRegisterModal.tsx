@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useTranslation, Trans } from 'react-i18next';
 import { Button, Icon, Modal } from '../ui';
 import type { LocalMcpTransportPayload } from '../../lib/api';
 
@@ -39,14 +40,24 @@ interface ParsedEntry {
 
 type RowTestStatus = 'idle' | 'testing' | 'ok' | 'fail';
 
+/** 파싱 에러 코드 — 렌더 시점에 t()로 변환한다. */
+type ParseErrorCode = 'parseErrorInvalidJson' | 'parseErrorNotObject' | 'parseErrorNoServer';
+
+const PARSE_ERROR_KEYS = {
+  parseErrorInvalidJson: 'mcpRegister.parseErrorInvalidJson',
+  parseErrorNotObject: 'mcpRegister.parseErrorNotObject',
+  parseErrorNoServer: 'mcpRegister.parseErrorNoServer',
+} as const satisfies Record<ParseErrorCode, `mcpRegister.${string}`>;
+
 interface RowState {
   entry: ParsedEntry;
   selected: boolean;
   test: RowTestStatus;
-  testError: string | null;
+  testErrorCode: 'testFail' | null;
+  testErrorRaw: string | null;
   tools: string[];
   registered: boolean;
-  registerError: string | null;
+  registerErrorCode: 'registerFail' | null;
 }
 
 const EXAMPLE_JSON = `{
@@ -83,14 +94,14 @@ function toPayload(cfg: Record<string, unknown>): LocalMcpTransportPayload | nul
 
 /** README 스니펫 그대로(`{"mcpServers": {...}}`), 래퍼 없는 다중({"name": {...}, ...}),
  * 래퍼도 이름도 없는 단일({"command": ...}) 셋 다 받는다. */
-function parseLocalMcpJson(text: string): { entries: ParsedEntry[] } | { error: string } {
+function parseLocalMcpJson(text: string): { entries: ParsedEntry[] } | { errorCode: ParseErrorCode } {
   let data: unknown;
   try {
     data = JSON.parse(text);
   } catch {
-    return { error: '올바른 JSON이 아니에요.' };
+    return { errorCode: 'parseErrorInvalidJson' };
   }
-  if (!isPlainObject(data)) return { error: '올바른 JSON 객체가 아니에요.' };
+  if (!isPlainObject(data)) return { errorCode: 'parseErrorNotObject' };
 
   const container = isPlainObject(data.mcpServers) ? (data.mcpServers as Record<string, unknown>) : data;
   const entries: ParsedEntry[] = [];
@@ -104,7 +115,7 @@ function parseLocalMcpJson(text: string): { entries: ParsedEntry[] } | { error: 
   const bare = toPayload(data);
   if (bare) return { entries: [{ name: '', payload: bare }] };
 
-  return { error: 'command 또는 url이 있는 MCP 서버 설정을 찾지 못했어요.' };
+  return { errorCode: 'parseErrorNoServer' };
 }
 
 const textareaCls =
@@ -126,12 +137,17 @@ const SectionStep: React.FC<{ n: number; children: React.ReactNode; noMargin?: b
 );
 
 export const McpRegisterModal: React.FC<McpRegisterModalProps> = ({ open, onClose, onTest, onRegister }) => {
+  const { t } = useTranslation('connectors');
   const [jsonText, setJsonText] = useState('');
-  const [parseError, setParseError] = useState<string | null>(null);
+  const [parseErrorCode, setParseErrorCode] = useState<ParseErrorCode | null>(null);
   const [rows, setRows] = useState<RowState[]>([]);
   const [testingAll, setTestingAll] = useState(false);
   const [registering, setRegistering] = useState(false);
-  const [registerSummaryError, setRegisterSummaryError] = useState<string | null>(null);
+  const [registerSummaryKey, setRegisterSummaryKey] = useState<
+    | null
+    | { key: 'mcpRegister.registerSummaryAllFail' }
+    | { key: 'mcpRegister.registerSummaryPartial'; success: number; total: number }
+  >(null);
   const [dragActive, setDragActive] = useState(false);
   const [lastParsedText, setLastParsedText] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -140,11 +156,11 @@ export const McpRegisterModal: React.FC<McpRegisterModalProps> = ({ open, onClos
   useEffect(() => {
     if (open) {
       setJsonText('');
-      setParseError(null);
+      setParseErrorCode(null);
       setRows([]);
       setTestingAll(false);
       setRegistering(false);
-      setRegisterSummaryError(null);
+      setRegisterSummaryKey(null);
       setDragActive(false);
       setLastParsedText('');
     }
@@ -153,22 +169,23 @@ export const McpRegisterModal: React.FC<McpRegisterModalProps> = ({ open, onClos
   const applyParse = (text: string) => {
     setLastParsedText(text);
     const result = parseLocalMcpJson(text);
-    if ('error' in result) {
-      setParseError(result.error);
+    if ('errorCode' in result) {
+      setParseErrorCode(result.errorCode);
       setRows([]);
       return;
     }
-    setParseError(null);
-    setRegisterSummaryError(null);
+    setParseErrorCode(null);
+    setRegisterSummaryKey(null);
     setRows(
       result.entries.map((entry) => ({
         entry,
         selected: entry.name.trim().length > 0,
         test: 'idle',
-        testError: null,
+        testErrorCode: null,
+        testErrorRaw: null,
         tools: [],
         registered: false,
-        registerError: null,
+        registerErrorCode: null,
       })),
     );
   };
@@ -210,7 +227,7 @@ export const McpRegisterModal: React.FC<McpRegisterModalProps> = ({ open, onClos
 
   const setRowName = (idx: number, name: string) => {
     setRows((rs) =>
-      rs.map((r, i) => (i === idx ? { ...r, entry: { ...r.entry, name }, test: 'idle', testError: null } : r)),
+      rs.map((r, i) => (i === idx ? { ...r, entry: { ...r.entry, name }, test: 'idle', testErrorCode: null, testErrorRaw: null } : r)),
     );
   };
   const toggleRowSelected = (idx: number) => {
@@ -226,13 +243,14 @@ export const McpRegisterModal: React.FC<McpRegisterModalProps> = ({ open, onClos
     setTestingAll(true);
     for (let i = 0; i < rows.length; i++) {
       if (!rows[i].selected || !rows[i].entry.name.trim()) continue;
-      setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, test: 'testing', testError: null } : r)));
+      setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, test: 'testing', testErrorCode: null, testErrorRaw: null } : r)));
       const result = await onTest(rows[i].entry.payload);
       setRows((rs) =>
         rs.map((r, idx) => {
           if (idx !== i) return r;
-          if (result?.ok) return { ...r, test: 'ok', tools: result.tools, testError: null };
-          return { ...r, test: 'fail', testError: result?.error || '연결을 확인하지 못했어요.' };
+          if (result?.ok) return { ...r, test: 'ok', tools: result.tools, testErrorCode: null, testErrorRaw: null };
+          // 백엔드가 아직 code를 내려주지 않는 경우 raw error를 별도 보관하되 UI 기본 문구는 카탈로그 키를 쓴다
+          return { ...r, test: 'fail', testErrorCode: 'testFail', testErrorRaw: result?.error ?? null };
         }),
       );
     }
@@ -242,7 +260,7 @@ export const McpRegisterModal: React.FC<McpRegisterModalProps> = ({ open, onClos
   const runRegisterSelected = async () => {
     if (!canRegister) return;
     setRegistering(true);
-    setRegisterSummaryError(null);
+    setRegisterSummaryKey(null);
     const targets = rows
       .map((r, i) => ({ r, i }))
       .filter(({ r }) => r.selected && r.test === 'ok' && !r.registered);
@@ -251,11 +269,11 @@ export const McpRegisterModal: React.FC<McpRegisterModalProps> = ({ open, onClos
       const ok = await onRegister(r.entry.name.trim(), r.entry.payload);
       if (ok) {
         successCount += 1;
-        setRows((rs) => rs.map((row, idx) => (idx === i ? { ...row, registered: true, registerError: null } : row)));
+        setRows((rs) => rs.map((row, idx) => (idx === i ? { ...row, registered: true, registerErrorCode: null } : row)));
       } else {
         setRows((rs) =>
           rs.map((row, idx) =>
-            idx === i ? { ...row, registerError: '등록 실패 — 이 이름이 이미 등록되어 있는지 확인하세요' } : row,
+            idx === i ? { ...row, registerErrorCode: 'registerFail' } : row,
           ),
         );
       }
@@ -264,16 +282,16 @@ export const McpRegisterModal: React.FC<McpRegisterModalProps> = ({ open, onClos
     if (successCount === targets.length) {
       onClose();
     } else if (successCount === 0) {
-      setRegisterSummaryError('등록하지 못했어요. 아래 항목별 오류를 확인하세요.');
+      setRegisterSummaryKey({ key: 'mcpRegister.registerSummaryAllFail' });
     } else {
-      setRegisterSummaryError(`${successCount}/${targets.length}개만 등록됐어요 — 나머지 항목을 확인하세요.`);
+      setRegisterSummaryKey({ key: 'mcpRegister.registerSummaryPartial', success: successCount, total: targets.length });
     }
   };
 
   const footer = (
     <div className="flex items-center justify-between w-full">
       <Button kind="ghost" size="xs" onClick={() => { if (!busy) onClose(); }} disabled={busy}>
-        취소
+        {t('mcpRegister.cancel')}
       </Button>
       <div className="flex items-center gap-2">
         <Button
@@ -284,16 +302,16 @@ export const McpRegisterModal: React.FC<McpRegisterModalProps> = ({ open, onClos
           disabled={!canTest}
           icon={!testingAll ? <Icon name="connect" size={12} /> : undefined}
         >
-          {testingAll ? '테스트 중…' : '연결 테스트'}
+          {testingAll ? t('mcpRegister.btnTesting') : t('mcpRegister.btnTest')}
         </Button>
         <div className="relative group">
           <Button kind="primary" size="xs" onClick={runRegisterSelected} loading={registering} disabled={!canRegister}>
             <Icon name="check" size={12} className="mr-1" />
-            등록
+            {t('mcpRegister.btnRegister')}
           </Button>
           {!canRegister && !registering && (
             <div className="pointer-events-none absolute bottom-full right-0 mb-2 w-max max-w-[240px] px-2.5 py-1.5 rounded-md bg-text-primary text-text-inverse text-caption-01 shadow-elevation-2 opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-150">
-              {rows.length === 0 ? 'MCP 서버 설정을 붙여넣거나 파일을 가져오세요' : "먼저 '연결 테스트'를 통과하세요"}
+              {rows.length === 0 ? t('mcpRegister.tooltipPaste') : t('mcpRegister.tooltipNeedTest')}
               <span className="absolute top-full right-4 -mt-px border-4 border-transparent border-t-text-primary" />
             </div>
           )}
@@ -303,21 +321,22 @@ export const McpRegisterModal: React.FC<McpRegisterModalProps> = ({ open, onClos
   );
 
   return (
-    <Modal open={open} onClose={() => { if (!busy) onClose(); }} title="로컬 MCP 서버 등록" size="md" footer={footer} compactFooter>
+    <Modal open={open} onClose={() => { if (!busy) onClose(); }} title={t('mcpRegister.modalTitle')} size="md" footer={footer} compactFooter>
       <div className="space-y-4">
         {/* 실행 경고 — 로컬 MCP의 핵심 신뢰 모델 */}
         <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg bg-red-60/10 border border-red-60/30">
           <Icon name="warning" size={15} filled className="text-red-40 flex-shrink-0 mt-0.5" />
           <p className="text-caption-01 text-text-helper leading-relaxed">
-            로컬 MCP 서버는 <span className="text-red-40 font-medium">내 컴퓨터에서 직접 코드를 실행</span>합니다.
-            신뢰할 수 있는 출처의 설정만 등록하세요.
+            {t('detail.localWarning_pre')}
+            <span className="text-red-40 font-medium">{t('detail.localWarning_strong')}</span>
+            {t('detail.localWarning_post')}
           </p>
         </div>
 
         {/* JSON 입력 */}
         <div>
           <div className="flex items-center justify-between mb-1.5">
-            <SectionStep n={1} noMargin>MCP 서버 설정 (JSON)</SectionStep>
+            <SectionStep n={1} noMargin>{t('mcpRegister.sectionInputLabel')}</SectionStep>
             <Button
               kind="secondary"
               size="sm"
@@ -325,7 +344,7 @@ export const McpRegisterModal: React.FC<McpRegisterModalProps> = ({ open, onClos
               onClick={() => fileInputRef.current?.click()}
               icon={<Icon name="attachment" size={14} />}
             >
-              파일에서 가져오기
+              {t('mcpRegister.importFromFile')}
             </Button>
             <input
               ref={fileInputRef}
@@ -346,7 +365,7 @@ export const McpRegisterModal: React.FC<McpRegisterModalProps> = ({ open, onClos
               disabled={busy}
               onChange={(e) => {
                 setJsonText(e.target.value);
-                setParseError(null);
+                setParseErrorCode(null);
               }}
               onBlur={() => {
                 // 붙여넣고 다른 곳을 클릭하면 자동으로 파싱 — 파일 업로드 경로와 동작을 맞춰서
@@ -362,20 +381,18 @@ export const McpRegisterModal: React.FC<McpRegisterModalProps> = ({ open, onClos
             {dragActive && (
               <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-lg bg-layer-01/90 border-2 border-dashed border-focus">
                 <span className="inline-flex items-center gap-1.5 text-body-short-01 font-medium text-link-primary">
-                  <Icon name="document" size={16} /> 여기에 놓아서 불러오기
+                  <Icon name="document" size={16} /> {t('mcpRegister.dragDropLabel')}
                 </span>
               </div>
             )}
           </div>
           <p className="mt-1.5 text-caption-01 text-text-helper leading-relaxed">
-            MCP 서버 문서의 설치 스니펫을 그대로 붙여넣거나, JSON 파일을 위 입력창에 끌어다 놓으세요.
-            붙여넣고 다른 곳을 클릭하면 자동으로 서버 목록을 만들어요. 서버가 여러 개면(예: 기존
-            .mcp.json 파일) 전부 인식해서 목록으로 보여줘요.
+            {t('mcpRegister.inputHint')}
           </p>
-          {parseError && (
+          {parseErrorCode && (
             <div className="mt-2 flex items-center gap-1.5 text-caption-01 text-support-error">
               <Icon name="warning" size={14} filled />
-              {parseError}
+              {t(PARSE_ERROR_KEYS[parseErrorCode])}
             </div>
           )}
         </div>
@@ -383,7 +400,7 @@ export const McpRegisterModal: React.FC<McpRegisterModalProps> = ({ open, onClos
         {/* 파싱된 서버 목록 */}
         {rows.length > 0 && (
           <div>
-            <SectionStep n={2}>찾은 서버 · {rows.length}개</SectionStep>
+            <SectionStep n={2}>{t('mcpRegister.serverListTitle', { count: rows.length })}</SectionStep>
             <div className="flex flex-col gap-px bg-border-subtle-01 rounded-lg overflow-hidden">
               {rows.map((row, idx) => (
                 <div key={idx} className="bg-background px-3 py-2.5">
@@ -400,7 +417,7 @@ export const McpRegisterModal: React.FC<McpRegisterModalProps> = ({ open, onClos
                       value={row.entry.name}
                       disabled={busy}
                       onChange={(e) => setRowName(idx, e.target.value)}
-                      placeholder="이름을 입력하세요"
+                      placeholder={t('mcpRegister.namePlaceholder')}
                       className="flex-1 min-w-0 h-8 px-2.5 bg-field-01 text-text-primary text-body-short-01 border border-border-strong-01 rounded-md outline-none focus:border-focus focus:ring-1 focus:ring-focus disabled:opacity-60"
                     />
                     <span className="flex-shrink-0 text-caption-01 font-mono text-text-helper px-1.5 py-0.5 rounded bg-layer-02">
@@ -419,17 +436,19 @@ export const McpRegisterModal: React.FC<McpRegisterModalProps> = ({ open, onClos
                   </div>
                   {row.test === 'ok' && (
                     <div className="mt-1 pl-[26px] text-caption-01 text-support-success">
-                      연결됨 · 도구 {row.tools.length}개 발견
+                      {t('mcpRegister.testOk', { count: row.tools.length })}
                     </div>
                   )}
-                  {row.test === 'fail' && row.testError && (
-                    <div className="mt-1 pl-[26px] text-caption-01 text-support-error truncate">{row.testError}</div>
+                  {row.test === 'fail' && row.testErrorCode && (
+                    <div className="mt-1 pl-[26px] text-caption-01 text-support-error truncate">
+                      {t('mcpRegister.testFail')}
+                    </div>
                   )}
                   {row.registered && (
-                    <div className="mt-1 pl-[26px] text-caption-01 text-support-success">✓ 등록됨</div>
+                    <div className="mt-1 pl-[26px] text-caption-01 text-support-success">{t('mcpRegister.registered')}</div>
                   )}
-                  {row.registerError && (
-                    <div className="mt-1 pl-[26px] text-caption-01 text-support-error">{row.registerError}</div>
+                  {row.registerErrorCode && (
+                    <div className="mt-1 pl-[26px] text-caption-01 text-support-error">{t('mcpRegister.registerFail')}</div>
                   )}
                 </div>
               ))}
@@ -437,10 +456,15 @@ export const McpRegisterModal: React.FC<McpRegisterModalProps> = ({ open, onClos
           </div>
         )}
 
-        {registerSummaryError && (
+        {registerSummaryKey && (
           <div className="flex items-center gap-1.5 text-caption-01 text-support-error">
             <Icon name="warning" size={14} filled />
-            {registerSummaryError}
+            {registerSummaryKey.key === 'mcpRegister.registerSummaryAllFail'
+              ? t('mcpRegister.registerSummaryAllFail')
+              : t('mcpRegister.registerSummaryPartial', {
+                  success: registerSummaryKey.success,
+                  total: registerSummaryKey.total,
+                })}
           </div>
         )}
 
@@ -448,8 +472,11 @@ export const McpRegisterModal: React.FC<McpRegisterModalProps> = ({ open, onClos
         <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg bg-layer-02 border border-border-subtle-01">
           <Icon name="lock" size={15} className="text-icon-secondary flex-shrink-0 mt-0.5" />
           <p className="text-caption-01 text-text-helper leading-relaxed">
-            서버 설정은 <span className="text-text-secondary font-medium">~/.rice/.mcp.json</span> 에 저장돼요.
-            등록하면 바로 실행되고, 다음에 앱을 열어도 그대로 남아 있어요.
+            <Trans
+              i18nKey="mcpRegister.storageHint"
+              ns="connectors"
+              components={{ path: <span className="text-text-secondary font-medium" /> }}
+            />
           </p>
         </div>
       </div>

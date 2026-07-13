@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Button, Icon, Tag } from '../ui';
 import { connectorIdForScope, type ThreadMessage, type ToolCall, type SkillRef, type EditDiffRow } from '../../lib/learningData';
@@ -11,10 +12,17 @@ import { Markdown } from './Markdown';
 // extensions so command/identifier chips (`db2.query`) stay plain.
 const FILE_CHIP_RE = /^\.?\/?[\w.-]+\.(txt|md|markdown|json|jsonl|csv|tsv|log|ya?ml|py|js|ts|tsx|jsx|sh|bash|html?|css|scss|sql|toml|ini|env|xml|svg|pptx?|docx?|xlsx?|pdf)$/i;
 
-// epoch ms → 시간 라벨 — undefined/0은 빈 문자열로 조용히 처리.
-// 오늘: "HH:MM" / 올해 다른 날: "M월 D일 HH:MM" / 작년 이전: "YYYY년 M월 D일 HH:MM"
-const formatTime = (ms?: number): string => {
+/** 앱 언어 코드 → Intl 로케일 태그 */
+const LOCALE_MAP: Record<string, string> = { ko: 'ko-KR', en: 'en-US' };
+
+/**
+ * epoch ms → 시간 라벨 (언어 기반 포맷).
+ * 앱 언어를 locale 파라미터로 받아 언어 변경 즉시 다시 렌더된다.
+ * undefined/0은 빈 문자열로 조용히 처리.
+ */
+const formatTime = (ms: number | undefined, locale: string): string => {
   if (!ms) return '';
+  const intlLocale = LOCALE_MAP[locale] ?? locale;
   const d = new Date(ms);
   const now = new Date();
   const sameDay =
@@ -22,10 +30,11 @@ const formatTime = (ms?: number): string => {
     d.getMonth() === now.getMonth() &&
     d.getDate() === now.getDate();
   const sameYear = d.getFullYear() === now.getFullYear();
-  const time = d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
+  const time = d.toLocaleTimeString(intlLocale, { hour: '2-digit', minute: '2-digit', hour12: false });
   if (sameDay) return time;
-  if (sameYear) return `${d.getMonth() + 1}월 ${d.getDate()}일 ${time}`;
-  return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일 ${time}`;
+  if (sameYear)
+    return d.toLocaleDateString(intlLocale, { month: 'numeric', day: 'numeric' }) + ' ' + time;
+  return d.toLocaleDateString(intlLocale, { year: 'numeric', month: 'numeric', day: 'numeric' }) + ' ' + time;
 };
 
 /**
@@ -46,6 +55,7 @@ const AILabel: React.FC = () => (
 // 본격 마크다운이 아니라 인라인 코드만 (chat1/chat3 의 `localhost:8080` 류 하이라이트).
 const Rich: React.FC<{ text: string }> = ({ text }) => {
   const { openFile } = useFileViewer();
+  const { t } = useTranslation('chat');
   const chipCls =
     'font-mono text-code-02 bg-layer-02 text-blue-40 border border-border-subtle-01 rounded px-1 py-px';
   return (
@@ -58,7 +68,7 @@ const Rich: React.FC<{ text: string }> = ({ text }) => {
               <button
                 key={i}
                 onClick={() => openFile(inner)}
-                title="파일 열기"
+                title={t('message.openFile')}
                 className={`${chipCls} hover:bg-layer-hover-02 hover:underline cursor-pointer`}
               >
                 {inner}
@@ -91,14 +101,17 @@ const AnimatedEllipsis: React.FC<{ className?: string }> = ({ className = '' }) 
 // ── streaming typing indicator ───────────────────────────────
 // Shown in an assistant bubble that has no text yet (live SSE turn in flight),
 // so the user can tell RICE is generating a response and isn't stuck.
-const TypingDots: React.FC = () => (
-  <span className="inline-flex min-w-[160px] py-1" aria-label="응답 생성 중">
-    <span className="text-caption-01 text-text-helper">
-      응답 생성 중
-      <AnimatedEllipsis />
+const TypingDots: React.FC = () => {
+  const { t } = useTranslation('chat');
+  return (
+    <span className="inline-flex min-w-[160px] py-1" aria-label={t('message.generating')}>
+      <span className="text-caption-01 text-text-helper">
+        {t('message.generating')}
+        <AnimatedEllipsis />
+      </span>
     </span>
-  </span>
-);
+  );
+};
 
 // ── avatar ───────────────────────────────────────────────────
 const Avatar: React.FC<{ kind: 'user' | 'agent' }> = ({ kind }) => {
@@ -118,19 +131,21 @@ const Avatar: React.FC<{ kind: 'user' | 'agent' }> = ({ kind }) => {
 
 // ── status glyph for a tool step ─────────────────────────────
 const StepStatus: React.FC<{ status: ToolCall['status'] }> = ({ status }) => {
+  const { t } = useTranslation('chat');
   if (status === 'running') {
-    return <span className="ia-spinner w-3.5 h-3.5 flex-shrink-0" aria-label="실행 중" />;
+    return <span className="ia-spinner w-3.5 h-3.5 flex-shrink-0" aria-label={t('message.running')} />;
   }
   if (status === 'error') {
-    return <Icon name="warning" size={14} filled className="text-support-error flex-shrink-0" title="오류" />;
+    return <Icon name="warning" size={14} filled className="text-support-error flex-shrink-0" title={t('message.error')} />;
   }
-  return <Icon name="check-circle" size={14} className="text-support-success flex-shrink-0" title="완료" />;
+  return <Icon name="check-circle" size={14} className="text-support-success flex-shrink-0" title={t('message.done')} />;
 };
 
 // ── one tool step (expandable: params + result) ──────────────
 const ToolStep: React.FC<{ c: ToolCall }> = ({ c }) => {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
+  const { t } = useTranslation('chat');
   return (
     <div className="border-t border-border-subtle-01 first:border-t-0">
       <div
@@ -149,7 +164,7 @@ const ToolStep: React.FC<{ c: ToolCall }> = ({ c }) => {
               const cid = connectorIdForScope(c.scope!.name);
               navigate(cid ? `/connectors/${cid}` : '/connectors');
             }}
-            title={`커넥터에서 보기: ${c.scope.name} · ${c.scope.mode}`}
+            title={t('message.viewConnector', { name: c.scope.name, mode: c.scope.mode })}
             className="inline-flex items-center gap-1 flex-shrink-0 border border-border-subtle-01 px-1.5 py-0.5 rounded text-label-micro font-mono text-text-helper hover:bg-layer-hover-02 hover:text-text-secondary transition-colors"
           >
             <Icon name="lock" size={10} className="opacity-70" />
@@ -193,6 +208,7 @@ const ToolCallCard: React.FC<{ m: Extract<ThreadMessage, { kind: 'toolrun' }>; o
   const [open, setOpen] = useState(!!m.open);
   const running = m.status === 'running';
   const pct = m.reuse ? Math.round((1 - m.reuse.toSteps / m.reuse.fromSteps) * 100) : null;
+  const { t } = useTranslation('chat');
 
   return (
     <div className="my-1.5 max-w-[640px]">
@@ -201,14 +217,14 @@ const ToolCallCard: React.FC<{ m: Extract<ThreadMessage, { kind: 'toolrun' }>; o
         <div className="flex items-center gap-2 px-3 py-1.5 bg-layer-02 border border-border-subtle-01 border-b-0 border-l-2 border-l-blue-50 rounded-t-lg">
           <Icon name="renew" size={14} className="text-icon-secondary flex-shrink-0" />
           <span className="text-caption-01 text-text-secondary">
-            저장된 스킬 재사용 —{' '}
+            {t('message.usedSkillReuse')}{' '}
             <span className="text-text-primary font-semibold">
               {m.reuse.fromSteps} steps → {m.reuse.toSteps} steps
             </span>
           </span>
           <span className="ml-auto flex-shrink-0">
             <Tag type="green" size="sm">
-              {pct}% 빠름
+              {t('message.fasterByPct', { pct })}
             </Tag>
           </span>
         </div>
@@ -230,7 +246,7 @@ const ToolCallCard: React.FC<{ m: Extract<ThreadMessage, { kind: 'toolrun' }>; o
               e.stopPropagation();
               onJumpSkill?.(m.usedSkill!.id);
             }}
-            title="이 스킬로 이동"
+            title={t('message.jumpToSkill')}
             className="inline-flex items-center gap-1 flex-shrink-0 border border-border-subtle-01 rounded px-1.5 py-0.5 text-caption-01 text-text-secondary hover:bg-layer-hover-02 transition-colors"
           >
             <Icon name="skill" size={12} />
@@ -238,7 +254,7 @@ const ToolCallCard: React.FC<{ m: Extract<ThreadMessage, { kind: 'toolrun' }>; o
           </button>
         )}
         <span className="ml-auto text-caption-01 text-text-helper font-mono flex-shrink-0">
-          {running ? '실행 중…' : `${m.steps} steps · ${m.time}`}
+          {running ? t('message.toolRunning') : `${m.steps} steps · ${m.time}`}
         </span>
         <Icon name={open ? 'chevron-up' : 'chevron-down'} size={16} className="text-icon-secondary flex-shrink-0" />
       </div>
@@ -259,6 +275,7 @@ const ToolCallCard: React.FC<{ m: Extract<ThreadMessage, { kind: 'toolrun' }>; o
 const BashCard: React.FC<{ m: Extract<ThreadMessage, { kind: 'tool_bash' }> }> = ({ m }) => {
   const [open, setOpen] = useState(!m.collapsed);
   const running = m.status === 'running';
+  const { t } = useTranslation('chat');
   return (
     <div className="my-1.5 max-w-[640px] border border-border-subtle-01 rounded-lg overflow-hidden bg-layer-01">
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border-subtle-01">
@@ -266,11 +283,11 @@ const BashCard: React.FC<{ m: Extract<ThreadMessage, { kind: 'tool_bash' }> }> =
         <span className="text-caption-01 font-semibold text-text-secondary flex-shrink-0">Bash</span>
         <span className="text-caption-01 text-text-helper truncate">{m.desc}</span>
         {running ? (
-          <span className="ia-spinner w-3.5 h-3.5 ml-auto flex-shrink-0" aria-label="실행 중" />
+          <span className="ia-spinner w-3.5 h-3.5 ml-auto flex-shrink-0" aria-label={t('message.running')} />
         ) : m.status === 'error' ? (
-          <Icon name="warning" size={13} filled className="text-support-error ml-auto flex-shrink-0" title="오류" />
+          <Icon name="warning" size={13} filled className="text-support-error ml-auto flex-shrink-0" title={t('message.error')} />
         ) : (
-          <Icon name="check-circle" size={13} className="text-support-success ml-auto flex-shrink-0" title="완료" />
+          <Icon name="check-circle" size={13} className="text-support-success ml-auto flex-shrink-0" title={t('message.done')} />
         )}
       </div>
       <div className="font-mono text-label-micro leading-[18px]">
@@ -289,7 +306,7 @@ const BashCard: React.FC<{ m: Extract<ThreadMessage, { kind: 'tool_bash' }> }> =
               onClick={() => setOpen(true)}
               className="flex items-center gap-1.5 w-full px-3 py-1.5 border-t border-border-subtle-01 text-caption-01 text-link-primary hover:bg-layer-hover-01 transition-colors"
             >
-              <Icon name="chevron-down" size={13} /> 출력 보기
+              <Icon name="chevron-down" size={13} /> {t('message.viewOutput')}
             </button>
           ))}
       </div>
@@ -398,22 +415,25 @@ const TableBlock: React.FC<{ m: Extract<ThreadMessage, { kind: 'table' }> }> = (
 );
 
 // ── used-skill badge (clickable → jumps to panel) ────────────
-const UsedSkillBadge: React.FC<{ skill: SkillRef; onJump?: (id: string) => void }> = ({ skill, onJump }) => (
-  <button
-    onClick={() => onJump?.(skill.id)}
-    title="이 스킬을 학습 패널에서 보기"
-    className="inline-flex items-center gap-1.5 bg-layer-01 border border-border-subtle-01 rounded-md pl-1.5 pr-2 py-0.5 text-caption-01 text-text-secondary hover:bg-layer-hover-01 transition-colors"
-  >
-    <Icon name="skill" size={13} />
-    <span className="whitespace-nowrap">
-      배운 스킬 사용 ·{' '}
-      <span className="text-text-primary font-semibold">
-        {skill.label} {skill.ver}
+const UsedSkillBadge: React.FC<{ skill: SkillRef; onJump?: (id: string) => void }> = ({ skill, onJump }) => {
+  const { t } = useTranslation('chat');
+  return (
+    <button
+      onClick={() => onJump?.(skill.id)}
+      title={t('message.usedSkillTitle')}
+      className="inline-flex items-center gap-1.5 bg-layer-01 border border-border-subtle-01 rounded-md pl-1.5 pr-2 py-0.5 text-caption-01 text-text-secondary hover:bg-layer-hover-01 transition-colors"
+    >
+      <Icon name="skill" size={13} />
+      <span className="whitespace-nowrap">
+        {t('message.usedSkillBadge')}{' '}
+        <span className="text-text-primary font-semibold">
+          {skill.label} {skill.ver}
+        </span>
       </span>
-    </span>
-    <Icon name="arrow-up-right" size={12} className="opacity-70" />
-  </button>
-);
+      <Icon name="arrow-up-right" size={12} className="opacity-70" />
+    </button>
+  );
+};
 
 // ── message action bar (copy / feedback / regenerate / teach) ─
 const MessageActions: React.FC<{
@@ -426,7 +446,8 @@ const MessageActions: React.FC<{
   const [vote, setVote] = useState<'up' | 'down' | null>(null);
   const [copied, setCopied] = useState(false);
   const [correcting, setCorrecting] = useState(false);
-  const [text, setText] = useState('');
+  const [inputText, setInputText] = useState('');
+  const { t, i18n } = useTranslation('chat');
 
   const Btn: React.FC<{
     icon: Parameters<typeof Icon>[0]['name'];
@@ -458,35 +479,35 @@ const MessageActions: React.FC<{
   };
 
   const submit = () => {
-    const t = text.trim();
-    if (!t) return;
+    const trimmed = inputText.trim();
+    if (!trimmed) return;
     setCorrecting(false);
-    setText('');
-    onCorrect?.(t);
+    setInputText('');
+    onCorrect?.(trimmed);
   };
 
-  const timeLabel = formatTime(sentAt);
+  const timeLabel = formatTime(sentAt, i18n.language);
 
   return (
     <div className="mt-1.5">
       <div className="flex items-center gap-px -ml-2">
         <Btn
           icon={copied ? 'check' : 'copy'}
-          label="답변 복사하기"
+          label={t('message.copyAnswer')}
           tint="#78a9ff"
           onClick={copy}
-          overlay={copied ? <span className="copy-toast">클립보드에 복사되었습니다</span> : null}
+          overlay={copied ? <span className="copy-toast">{t('message.copied')}</span> : null}
         />
         <Btn
           icon="thumbs-up"
-          label="좋아요"
+          label={t('message.thumbsUp')}
           tint="#42be65"
           active={vote === 'up'}
           onClick={() => setVote((v) => (v === 'up' ? null : 'up'))}
         />
         <Btn
           icon="thumbs-down"
-          label="고칠 점 알려주기"
+          label={t('message.thumbsDown')}
           tint="#ff8389"
           active={vote === 'down'}
           onClick={() => {
@@ -495,11 +516,11 @@ const MessageActions: React.FC<{
             setCorrecting(!isDown);
           }}
         />
-        <Btn icon="renew" label="답변 재생성" tint="#be95ff" onClick={() => onRegenerate?.()} />
+        <Btn icon="renew" label={t('message.regenerate')} tint="#be95ff" onClick={() => onRegenerate?.()} />
         <div className="w-px h-4 bg-border-subtle-01 mx-1" />
         <Btn
           icon="edit"
-          label="교정해서 가르치기"
+          label={t('message.correctTitle')}
           tint="#3ddbd9"
           active={correcting}
           onClick={() => {
@@ -519,14 +540,14 @@ const MessageActions: React.FC<{
         <div className="mt-2 border border-border-strong-01 bg-layer-01 rounded-lg overflow-hidden">
           <div className="flex items-center gap-1.5 px-2.5 pt-2">
             <Icon name="idea" size={14} className="text-icon-secondary" />
-            <span className="text-caption-01 font-semibold text-text-primary">교정해서 가르치기</span>
+            <span className="text-caption-01 font-semibold text-text-primary">{t('message.correctTitle')}</span>
             <span className="ml-auto">
               <AILabel />
             </span>
           </div>
           <textarea
-            value={text}
-            onChange={(e) => setText(e.target.value)}
+            value={inputText}
+            onChange={(e) => setInputText(e.target.value)}
             autoFocus
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
@@ -534,11 +555,11 @@ const MessageActions: React.FC<{
                 submit();
               }
             }}
-            placeholder="어떻게 고치면 좋을까요? (예: APAC을 항상 맨 위에)"
+            placeholder={t('message.correctPlaceholder')}
             className="w-full resize-none border-none outline-none bg-transparent text-text-primary text-body-short-01 leading-5 px-2.5 py-2 h-[52px]"
           />
           <div className="flex items-center gap-2 px-2 pb-2">
-            <span className="text-caption-01 text-text-helper">저장하면 에이전트가 기억하고 다음부터 반영합니다.</span>
+            <span className="text-caption-01 text-text-helper">{t('message.correctHint')}</span>
             <div className="flex-1" />
             <Button
               kind="ghost"
@@ -546,13 +567,13 @@ const MessageActions: React.FC<{
               className="!h-9"
               onClick={() => {
                 setCorrecting(false);
-                setText('');
+                setInputText('');
               }}
             >
-              취소
+              {t('message.cancel')}
             </Button>
             <Button kind="primary" size="sm" className="!h-9" icon={<Icon name="send" size={14} />} onClick={submit}>
-              가르치기
+              {t('message.teach')}
             </Button>
           </div>
         </div>
@@ -565,34 +586,38 @@ const MessageActions: React.FC<{
 const MemoryIndicator: React.FC<{
   m: Extract<ThreadMessage, { kind: 'memory' }>;
   onJumpSkill?: (id: string) => void;
-}> = ({ m, onJumpSkill }) => (
-  <div className="my-1 max-w-[640px]">
-    <div className="ai-tile flex gap-2.5 items-start px-3.5 py-3">
-      <Icon name="bookmark" size={16} filled className="text-blue-40 mt-0.5 flex-shrink-0" />
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="text-body-short-01 font-semibold text-text-primary">{m.text}</span>
-          <span className="text-caption-01 text-text-helper">AI 메모리에 기록됨</span>
+}> = ({ m, onJumpSkill }) => {
+  const { t } = useTranslation('chat');
+  return (
+    <div className="my-1 max-w-[640px]">
+      <div className="ai-tile flex gap-2.5 items-start px-3.5 py-3">
+        <Icon name="bookmark" size={16} filled className="text-blue-40 mt-0.5 flex-shrink-0" />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-body-short-01 font-semibold text-text-primary">{m.text}</span>
+            <span className="text-caption-01 text-text-helper">{t('message.memoryRecorded')}</span>
+          </div>
+          <ul className="mt-1.5 pl-4 flex flex-col gap-1 list-disc">
+            {m.facts.map((f, i) => (
+              <li key={i} className="text-caption-02 leading-[18px] text-text-secondary">
+                {f}
+              </li>
+            ))}
+          </ul>
+          {m.target && (
+            <button
+              onClick={() => onJumpSkill?.(m.target!.id)}
+              className="mt-2 inline-flex items-center gap-1 text-caption-01 text-link-primary hover:underline whitespace-nowrap"
+            >
+              {t('message.memoryAppliedTo', { label: m.target.label })}{' '}
+              <Icon name="arrow-up-right" size={12} className="opacity-80" />
+            </button>
+          )}
         </div>
-        <ul className="mt-1.5 pl-4 flex flex-col gap-1 list-disc">
-          {m.facts.map((f, i) => (
-            <li key={i} className="text-caption-02 leading-[18px] text-text-secondary">
-              {f}
-            </li>
-          ))}
-        </ul>
-        {m.target && (
-          <button
-            onClick={() => onJumpSkill?.(m.target!.id)}
-            className="mt-2 inline-flex items-center gap-1 text-caption-01 text-link-primary hover:underline whitespace-nowrap"
-          >
-            {m.target.label}에 반영됨 <Icon name="arrow-up-right" size={12} className="opacity-80" />
-          </button>
-        )}
       </div>
     </div>
-  </div>
-);
+  );
+};
 
 // Live-ticking elapsed seconds since `startedAt`, re-rendering once per second
 // while `active`. WHY: commercial models run with extended thinking OFF, so they
@@ -621,18 +646,19 @@ const ThinkingBlock: React.FC<{ m: Extract<ThreadMessage, { kind: 'thinking' }> 
   const open = userOpen ?? !!m.streaming;
   const steps = m.steps ?? [];
   const elapsed = useElapsedSeconds(m.startedAt, !!m.streaming && !hasTrace);
+  const { t } = useTranslation('chat');
   // With reasoning text (Ollama message.thinking) → show the live trace under a
-  // plain "생각 중…" header. Empty waiting blocks (SaaS) keep the elapsed counter.
+  // plain "thinking…" header. Empty waiting blocks (SaaS) keep the elapsed counter.
   const liveLabel = hasTrace ? (
     <>
-      생각 중
+      {t('message.thinkingLive')}
       <AnimatedEllipsis />
     </>
   ) : (
     <>
-      응답 생성 중
+      {t('message.thinkingLiveWaiting')}
       <AnimatedEllipsis />
-      <span className="ml-1 tabular-nums">{elapsed}초</span>
+      <span className="ml-1 tabular-nums">{t('message.thinkingElapsed', { count: elapsed })}</span>
     </>
   );
   if (!m.streaming && !hasTrace && steps.length === 0) return null;
@@ -644,7 +670,7 @@ const ThinkingBlock: React.FC<{ m: Extract<ThreadMessage, { kind: 'thinking' }> 
       >
         <Icon name="idea" size={14} className={`opacity-70 ${m.streaming ? 'animate-pulse' : ''}`} />
         <span className={m.streaming ? 'tabular-nums' : undefined}>
-          {m.streaming ? liveLabel : m.duration ? `${m.duration} 동안 생각함` : '추론 과정'}
+          {m.streaming ? liveLabel : m.duration ? t('message.thinkingDone', { duration: m.duration }) : t('message.thinkingTrace')}
         </span>
         <Icon name={open ? 'chevron-up' : 'chevron-down'} size={14} />
       </button>
@@ -726,6 +752,7 @@ const PlanCard: React.FC<{ m: Extract<ThreadMessage, { kind: 'plan' }> }> = ({ m
   const doneCount = m.steps.filter((s) => s.status === 'done' || s.status === 'skipped').length;
   const failed = m.steps.some((s) => s.status === 'failed');
   const completed = m.status === 'completed';
+  const { t } = useTranslation('chat');
   return (
     <div className="my-2 max-w-[680px]">
       <div className="border-l border-border-subtle-01 pl-4 py-0.5">
@@ -735,14 +762,14 @@ const PlanCard: React.FC<{ m: Extract<ThreadMessage, { kind: 'plan' }> }> = ({ m
               completed ? 'bg-support-success' : failed ? 'bg-support-error' : 'bg-blue-40'
             }`}
           />
-          <span className="text-body-short-01 font-semibold text-text-primary">실행 계획</span>
-          {m.revision > 1 && <span className="text-caption-01 text-text-helper">수정 {m.revision - 1}회</span>}
+          <span className="text-body-short-01 font-semibold text-text-primary">{t('message.planTitle')}</span>
+          {m.revision > 1 && <span className="text-caption-01 text-text-helper">{t('message.planRevision', { count: m.revision - 1 })}</span>}
           <span
             className={`ml-auto text-caption-01 tabular-nums flex-shrink-0 ${
               completed ? 'text-support-success' : failed ? 'text-support-error' : 'text-text-helper'
             }`}
           >
-            {completed ? '완료' : `${doneCount}/${m.steps.length}`}
+            {completed ? t('message.planCompleted') : `${doneCount}/${m.steps.length}`}
           </span>
         </div>
         <div className="mt-1 text-caption-01 text-text-helper truncate">{m.goal}</div>
@@ -783,14 +810,6 @@ const PlanCard: React.FC<{ m: Extract<ThreadMessage, { kind: 'plan' }> }> = ({ m
 // ── generic builtin/connector tool call trace ───────────────
 // One card per live tool call: shows the tool + args while running, then the
 // result/error once the runtime sends tool_result.
-const TOOL_LABELS: Record<string, string> = {
-  create_presentation: '프레젠테이션 생성',
-  create_document: '문서 생성',
-  create_workbook: '워크북 생성',
-  read_file: '파일 읽기',
-  write_file: '파일 작성',
-  terminal: '터미널 실행',
-};
 
 const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 
@@ -811,8 +830,10 @@ const formatBytes = (v: unknown): string | null => {
   return `${(v / (1024 * 1024)).toFixed(1)} MB`;
 };
 
-const summarizeValue = (key: string, value: unknown): string => {
-  if (value == null) return '없음';
+type TFn = (key: string, options?: Record<string, unknown>) => string;
+
+const summarizeValue = (key: string, value: unknown, t: TFn): string => {
+  if (value == null) return t('message.toolValueNone');
   if (key === 'bytes_written') return formatBytes(value) ?? String(value);
   if (typeof value === 'string') return value.length > 140 ? `${value.slice(0, 140)}…` : value;
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
@@ -821,14 +842,20 @@ const summarizeValue = (key: string, value: unknown): string => {
       const titles = value
         .map((item) => (isRecord(item) && typeof item.title === 'string' ? item.title : null))
         .filter(Boolean)
-        .slice(0, 3);
-      return `${value.length}장${titles.length ? ` · ${titles.join(', ')}${value.length > titles.length ? '…' : ''}` : ''}`;
+        .slice(0, 3) as string[];
+      if (titles.length > 0) {
+        const joined = titles.join(', ');
+        return value.length > titles.length
+          ? t('message.toolValueSlidesWithTitlesMore', { count: value.length, titles: joined })
+          : t('message.toolValueSlidesWithTitles', { count: value.length, titles: joined });
+      }
+      return t('message.toolValueSlides', { count: value.length });
     }
-    if (key === 'blocks') return `${value.length}개 블록`;
-    if (key === 'warnings') return value.length ? value.map(String).join(' · ') : '없음';
-    return `${value.length}개 항목`;
+    if (key === 'blocks') return t('message.toolValueBlocks', { count: value.length });
+    if (key === 'warnings') return value.length ? value.map(String).join(' · ') : t('message.toolValueNone');
+    return t('message.toolValueItems', { count: value.length });
   }
-  if (isRecord(value)) return `${Object.keys(value).length}개 필드`;
+  if (isRecord(value)) return t('message.toolValueFields', { count: Object.keys(value).length });
   return String(value);
 };
 
@@ -836,6 +863,7 @@ const BuiltinToolCard: React.FC<{ m: Extract<ThreadMessage, { kind: 'toolcall' }
   const [open, setOpen] = useState(false);
   const [rawOpen, setRawOpen] = useState(false);
   const { openFile } = useFileViewer();
+  const { t } = useTranslation('chat');
   const dot =
     m.status === 'running' ? 'bg-support-warning animate-pulse' : m.status === 'error' ? 'bg-support-error' : 'bg-support-success';
 
@@ -846,7 +874,11 @@ const BuiltinToolCard: React.FC<{ m: Extract<ThreadMessage, { kind: 'toolcall' }
   const title =
     (typeof m.args.title === 'string' ? (m.args.title as string) : null) ??
     (typeof resultObj?.title === 'string' ? resultObj.title : null);
-  const toolLabel = TOOL_LABELS[m.tool] ?? m.tool.replace(/_/g, ' ');
+
+  // 번역된 도구 이름. 카탈로그에 없으면 도구 이름을 사람이 읽기 좋게 변환.
+  // toolNames 키는 런타임에 결정되므로 TFn (넓은 타입)으로 호출한다.
+  const toolLabel = (t as TFn)(`message.toolNames.${m.tool}`, { defaultValue: m.tool.replace(/_/g, ' ') });
+
   const slideCount =
     typeof resultObj?.slide_count === 'number'
       ? resultObj.slide_count
@@ -863,11 +895,11 @@ const BuiltinToolCard: React.FC<{ m: Extract<ThreadMessage, { kind: 'toolcall' }
   const rows: { label: string; value: React.ReactNode; mono?: boolean }[] = [];
   const push = (label: string, value: unknown, mono = false) => {
     if (value == null || value === '') return;
-    rows.push({ label, value: summarizeValue(label, value), mono });
+    rows.push({ label, value: summarizeValue(label, value, t as TFn), mono });
   };
   if (path) {
     rows.push({
-      label: '파일',
+      label: t('message.toolLabelFile'),
       mono: true,
       value: (
         <button onClick={() => openFile(path)} className="text-blue-40 font-mono break-all text-left hover:underline">
@@ -876,13 +908,13 @@ const BuiltinToolCard: React.FC<{ m: Extract<ThreadMessage, { kind: 'toolcall' }
       ),
     });
   }
-  push('제목', title);
-  push('테마', resultObj?.theme ?? m.args.theme, true);
-  push('슬라이드', slideCount != null ? `${slideCount}장` : null);
-  push('시트', sheetCount != null ? `${sheetCount}개` : null);
-  push('용량', formatBytes(resultObj?.bytes_written) ?? null);
-  push('구성', m.args.slides ?? m.args.blocks ?? m.args.sheets);
-  push('경고', resultObj?.warnings);
+  push(t('message.toolLabelTitle'), title);
+  push(t('message.toolLabelTheme'), resultObj?.theme ?? m.args.theme, true);
+  push(t('message.toolLabelSlides'), slideCount != null ? t('message.toolValueSlides', { count: slideCount }) : null);
+  push(t('message.toolLabelSheets'), sheetCount != null ? t('message.toolValueSheets', { count: sheetCount }) : null);
+  push(t('message.toolLabelSize'), formatBytes(resultObj?.bytes_written) ?? null);
+  push(t('message.toolLabelLayout'), m.args.slides ?? m.args.blocks ?? m.args.sheets);
+  push(t('message.toolLabelWarnings'), resultObj?.warnings);
 
   if (rows.length === 0) {
     Object.entries(resultObj ?? m.args)
@@ -918,7 +950,7 @@ const BuiltinToolCard: React.FC<{ m: Extract<ThreadMessage, { kind: 'toolcall' }
         <span className="font-semibold text-text-secondary">{toolLabel}</span>
         {path && <span className="font-mono text-text-helper truncate">{path}</span>}
         <span className="text-text-helper">
-          {m.status === 'running' ? '실행 중…' : m.status === 'error' ? '실패' : '완료'}
+          {m.status === 'running' ? t('message.toolRunning') : m.status === 'error' ? t('message.toolError') : t('message.toolDone')}
         </span>
         <Icon name={open ? 'chevron-up' : 'chevron-down'} size={14} className="ml-auto flex-shrink-0" />
       </button>
@@ -947,7 +979,7 @@ const BuiltinToolCard: React.FC<{ m: Extract<ThreadMessage, { kind: 'toolcall' }
               className="self-start inline-flex items-center gap-1.5 text-caption-01 text-link-primary hover:underline"
             >
               <Icon name="document" size={13} />
-              {path} 열어보기
+              {t('message.toolOpenFile', { path })}
             </button>
           )}
           <button
@@ -956,7 +988,7 @@ const BuiltinToolCard: React.FC<{ m: Extract<ThreadMessage, { kind: 'toolcall' }
             className="self-start inline-flex items-center gap-1 text-caption-01 text-text-helper hover:text-text-secondary transition-colors"
           >
             <Icon name={rawOpen ? 'chevron-up' : 'chevron-down'} size={12} />
-            원본 세부정보 {rawOpen ? '접기' : '보기'}
+            {t('message.toolRawDetails')} {rawOpen ? t('message.toolRawCollapse') : t('message.toolRawExpand')}
           </button>
           {rawOpen && (
             <pre className="max-h-[260px] overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-border-subtle-01 bg-background px-3 py-2 text-label-micro leading-[18px] text-text-helper font-mono m-0">
@@ -979,6 +1011,7 @@ const ApprovalCard: React.FC<{
   const [state, setState] = useState<'pending' | 'approved' | 'denied'>('pending');
   const [previewOpen, setPreviewOpen] = useState(false);
   const hasPreview = !!m.fields?.length || !!m.body;
+  const { t } = useTranslation('chat');
   return (
     <div className="my-1.5 max-w-[680px]">
       {/* 도구 실행 승인은 AI 문법이 아니라 warning 문법 — ai-tile 금지 */}
@@ -989,7 +1022,7 @@ const ApprovalCard: React.FC<{
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 min-w-0 flex-wrap">
-              <span className="text-body-short-01 font-semibold text-text-primary">승인 필요</span>
+              <span className="text-body-short-01 font-semibold text-text-primary">{t('message.approvalRequired')}</span>
               <span className="text-caption-01 font-mono text-blue-40 truncate max-w-[180px]">{m.tool}</span>
               <span className="text-body-short-01 text-text-secondary truncate">{m.label}</span>
               <span className="inline-flex items-center gap-1 flex-shrink-0 border border-border-subtle-01 px-1.5 py-0.5 rounded text-label-micro font-mono text-text-helper">
@@ -1005,7 +1038,7 @@ const ApprovalCard: React.FC<{
                 className="mt-1.5 inline-flex items-center gap-1 text-caption-01 text-link-primary hover:underline"
               >
                 <Icon name={previewOpen ? 'chevron-up' : 'chevron-down'} size={12} />
-                실행 내용 {previewOpen ? '접기' : '보기'}
+                {t('message.approvalExecutionPreview')} {previewOpen ? t('message.approvalCollapse') : t('message.approvalExpand')}
               </button>
             )}
           </div>
@@ -1019,7 +1052,7 @@ const ApprovalCard: React.FC<{
                   onRespond?.('reject');
                 }}
               >
-                거부
+                {t('message.reject')}
               </Button>
               <Button
                 kind="primary"
@@ -1030,16 +1063,16 @@ const ApprovalCard: React.FC<{
                   onRespond?.('approve');
                 }}
               >
-                승인
+                {t('message.approve')}
               </Button>
             </div>
           ) : state === 'approved' ? (
             <span className="inline-flex items-center gap-1.5 text-caption-01 text-support-success flex-shrink-0 pt-1">
-              <Icon name="check-circle" size={13} /> 승인됨
+              <Icon name="check-circle" size={13} /> {t('message.approvedStatus')}
             </span>
           ) : (
             <span className="inline-flex items-center gap-1.5 text-caption-01 text-text-helper flex-shrink-0 pt-1">
-              <Icon name="close" size={13} /> 거부됨
+              <Icon name="close" size={13} /> {t('message.deniedStatus')}
             </span>
           )}
         </div>
@@ -1065,9 +1098,9 @@ const ApprovalCard: React.FC<{
         {state === 'pending' ? (
           null
         ) : state === 'approved' ? (
-          <div className="mt-2 ml-8 text-caption-01 text-support-success">{m.approvedText ?? '실행했어요'}</div>
+          <div className="mt-2 ml-8 text-caption-01 text-support-success">{m.approvedText ?? t('message.approvedDefault')}</div>
         ) : (
-          <div className="mt-2 ml-8 text-caption-01 text-text-helper">{m.deniedText ?? '실행하지 않았어요'}</div>
+          <div className="mt-2 ml-8 text-caption-01 text-text-helper">{m.deniedText ?? t('message.deniedDefault')}</div>
         )}
       </div>
     </div>
@@ -1106,6 +1139,7 @@ const PatchProposalCard: React.FC<{
   const [editing, setEditing] = useState(false);
   const [body, setBody] = useState(m.proposedBody);
   const edited = editing && body !== m.proposedBody;
+  const { t } = useTranslation('chat');
 
   return (
     <div className="my-2 max-w-[680px]">
@@ -1118,7 +1152,7 @@ const PatchProposalCard: React.FC<{
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <span className="text-body-short-01 font-semibold text-text-primary">스킬 개선 제안</span>
+              <span className="text-body-short-01 font-semibold text-text-primary">{t('message.patchTitle')}</span>
               <Tag type="purple" size="sm">{m.triggerLabel}</Tag>
             </div>
             <div className="mt-1 flex min-w-0 items-center gap-1.5">
@@ -1131,7 +1165,7 @@ const PatchProposalCard: React.FC<{
             </div>
           </div>
           <span className="flex-shrink-0 rounded-full border border-border-subtle-02 bg-background/40 px-2 py-1 text-label-micro text-text-helper">
-            검토 필요
+            {t('message.patchReviewNeeded')}
           </span>
         </div>
 
@@ -1156,7 +1190,7 @@ const PatchProposalCard: React.FC<{
           <div className="px-3 py-2 border-b border-border-subtle-01 flex items-center gap-1.5">
             <Icon name="renew" size={12} className="text-icon-secondary opacity-70" />
             <span className="text-caption-01 font-semibold text-text-secondary">
-              {editing ? '본문 편집' : '본문 변경 (diff)'}
+              {editing ? t('message.patchBodyEdit') : t('message.patchBodyDiff')}
             </span>
             {state === 'pending' && (
               <button
@@ -1164,7 +1198,7 @@ const PatchProposalCard: React.FC<{
                 className="ml-auto text-caption-01 text-link-primary hover:underline inline-flex items-center gap-1"
               >
                 <Icon name={editing ? 'view' : 'edit'} size={12} />
-                {editing ? 'diff 보기' : '편집'}
+                {editing ? t('message.patchViewDiff') : t('message.patchEdit')}
               </button>
             )}
           </div>
@@ -1189,7 +1223,7 @@ const PatchProposalCard: React.FC<{
         {state === 'pending' ? (
           <div className="flex items-center gap-2 flex-wrap border-t border-border-subtle-01 bg-layer-02/25 px-4 py-3">
             <span className="text-caption-01 text-text-helper">
-              승인하면 이전 버전은 히스토리에 보관돼요 (롤백 가능).
+              {t('message.patchApproveHint')}
             </span>
             <div className="flex-1" />
             <Button
@@ -1200,7 +1234,7 @@ const PatchProposalCard: React.FC<{
                 onReject?.();
               }}
             >
-              거부
+              {t('message.reject')}
             </Button>
             <Button
               kind="primary"
@@ -1211,22 +1245,22 @@ const PatchProposalCard: React.FC<{
                 onApprove?.(edited ? body : undefined);
               }}
             >
-              {edited ? '편집 후 적용' : '승인하고 적용'}
+              {edited ? t('message.patchApplyEdited') : t('message.patchApply')}
             </Button>
           </div>
         ) : state === 'approved' ? (
           <div className="flex items-center gap-2.5 flex-wrap border-t border-border-subtle-01 px-4 py-3">
             <span className="inline-flex items-center gap-1.5 text-caption-01 text-support-success">
-              <Icon name="check-circle" size={13} /> {m.toVer}로 개선됨{edited ? ' (편집 반영)' : ''} · 이전 버전 보관
+              <Icon name="check-circle" size={13} /> {edited ? t('message.patchApprovedStatusEdited', { toVer: m.toVer }) : t('message.patchApprovedStatus', { toVer: m.toVer })}
             </span>
             <div className="flex-1" />
             <Button kind="ghost" size="sm" icon={<Icon name="arrow-up-right" size={14} />} onClick={() => onJumpSkill?.(m.skillId)}>
-              나의 스킬에서 보기
+              {t('message.patchViewInSkills')}
             </Button>
           </div>
         ) : (
           <span className="inline-flex items-center gap-1.5 border-t border-border-subtle-01 px-4 py-3 text-caption-01 text-text-helper">
-            <Icon name="close" size={13} /> 거부됨 · 본문은 그대로예요 ({m.fromVer})
+            <Icon name="close" size={13} /> {t('message.patchDeniedStatus', { fromVer: m.fromVer })}
           </span>
         )}
       </div>
@@ -1243,6 +1277,7 @@ const SkillProposalCard: React.FC<{
   onSave?: () => void;
 }> = ({ m, onJumpSkill, onSave }) => {
   const [saved, setSaved] = useState<boolean | null>(null);
+  const { t } = useTranslation('chat');
   return (
     <div className="ai-tile p-4">
       <div className="flex items-center gap-2 mb-1.5">
@@ -1252,12 +1287,12 @@ const SkillProposalCard: React.FC<{
         </span>
         {saved !== false && (
           <Tag type={saved === true ? 'green' : 'purple'} size="sm">
-            {saved === true ? '저장됨' : '제안됨'}
+            {saved === true ? t('message.skillSaved') : t('message.skillProposed')}
           </Tag>
         )}
       </div>
       <div className="text-body-short-01 font-semibold text-text-primary mb-1.5">
-        {saved === null ? '이 작업을 스킬로 저장할까요?' : m.title}
+        {saved === null ? t('message.skillSavePrompt') : m.title}
       </div>
       <p className="text-body-short-01 text-text-secondary mb-2.5">{m.desc}</p>
       {saved === null ? (
@@ -1265,7 +1300,7 @@ const SkillProposalCard: React.FC<{
           <span className="text-caption-01 text-text-helper">{m.meta}</span>
           <div className="flex-1" />
           <Button kind="ghost" size="sm" onClick={() => setSaved(false)}>
-            이번만 쓰기
+            {t('message.skillUseOnce')}
           </Button>
           <Button
             kind="primary"
@@ -1276,21 +1311,21 @@ const SkillProposalCard: React.FC<{
               onSave?.();
             }}
           >
-            스킬로 저장
+            {t('message.skillSave')}
           </Button>
         </div>
       ) : saved === true ? (
         <div className="flex items-center gap-2.5">
           <span className="inline-flex items-center gap-1.5 text-caption-01 text-support-success">
-            <Icon name="check-circle" size={13} /> 스킬로 저장됨 · 다음 세션에서도 사용 가능
+            <Icon name="check-circle" size={13} /> {t('message.skillSavedStatus')}
           </span>
           <div className="flex-1" />
           <Button kind="ghost" size="sm" icon={<Icon name="arrow-up-right" size={14} />} onClick={() => onJumpSkill?.(m.skillId)}>
-            패널에서 보기
+            {t('message.skillViewInPanel')}
           </Button>
         </div>
       ) : (
-        <span className="text-caption-01 text-text-helper">저장하지 않았어요 · 비슷한 작업이 반복되면 다시 제안할게요.</span>
+        <span className="text-caption-01 text-text-helper">{t('message.skillNotSaved')}</span>
       )}
     </div>
   );
@@ -1299,6 +1334,7 @@ const SkillProposalCard: React.FC<{
 // ── user-bubble affordance (copy on hover, beside timestamp) ─
 const UserCopyButton: React.FC<{ text: string }> = ({ text }) => {
   const [copied, setCopied] = useState(false);
+  const { t } = useTranslation('chat');
 
   const copy = () => {
     navigator.clipboard?.writeText(text).catch(() => {});
@@ -1311,12 +1347,12 @@ const UserCopyButton: React.FC<{ text: string }> = ({ text }) => {
       <button
         type="button"
         onClick={copy}
-        aria-label="내 메시지 복사하기"
+        aria-label={t('message.copyUserMessage')}
         className="w-6 h-6 inline-flex items-center justify-center rounded-md text-icon-secondary opacity-0 transition-all duration-150 hover:bg-layer-hover-01 hover:text-icon-primary group-hover/user:opacity-100 focus-visible:opacity-100"
       >
         <Icon name={copied ? 'check' : 'copy'} size={13} className={copied ? 'text-support-success' : undefined} />
       </button>
-      <span className="action-tip">{copied ? '복사됨' : '복사하기'}</span>
+      <span className="action-tip">{copied ? t('message.copiedShort') : t('message.copyShort')}</span>
     </div>
   );
 };
@@ -1467,6 +1503,7 @@ export const ChatTurn: React.FC<ChatTurnProps> = ({
   actionsTimeAt = {},
   showThinking = true,
 }) => {
+  const { i18n } = useTranslation('chat');
   const visibleItems = showThinking ? items : items.filter(({ m }) => m.kind !== 'thinking');
   const first = visibleItems[0]?.m;
 
@@ -1475,7 +1512,7 @@ export const ChatTurn: React.FC<ChatTurnProps> = ({
 
   // user turn — a right-aligned bubble, no avatar/label (normal chat convention)
   if (first.kind === 'user') {
-    const timeLabel = formatTime(first.sentAt);
+    const timeLabel = formatTime(first.sentAt, i18n.language);
     return (
       <div className="group/user flex flex-col items-end py-2.5" data-msg-index={visibleItems[0].index}>
         <div className="max-w-[76%]">

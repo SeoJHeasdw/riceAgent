@@ -58,8 +58,9 @@ async def set_enabled(plugin_id: str, body: EnabledIn, c: Container = Depends(ge
         missing = [ct for ct in info.required_connectors if ct not in connected]
         if missing:
             raise ValidationError(
-                f"플러그인 '{info.name}' 활성화에 필요한 커넥터가 연결되지 않았습니다: {', '.join(missing)}. "
-                f"커넥터를 먼저 연결하세요 (CONTRACTS §4.4).",
+                f"plugin {info.name!r} requires connectors that are not connected: {', '.join(missing)}",
+                code="plugins.missing_connectors",
+                params={"name": info.name, "missing": ", ".join(missing)},
             )
     c.plugins.set_enabled(plugin_id, body.enabled)
     return {"success": True}

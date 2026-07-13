@@ -1,4 +1,5 @@
 import React, { useId } from 'react';
+import { useTranslation } from 'react-i18next';
 
 /**
  * IconRail - left navigation rail
@@ -82,11 +83,12 @@ const RailButton: React.FC<{
 };
 
 export const IconRail: React.FC<IconRailProps> = ({ items, activeId, onNavigate, topInset = false }) => {
+  const { t } = useTranslation('common');
   const topItems = items.filter((item) => !item.pinBottom);
   const bottomItems = items.filter((item) => item.pinBottom);
 
   return (
-    <nav aria-label="주요 메뉴" className="w-[52px] h-full bg-shell border-r border-shell-border flex flex-col items-center py-2 electron-drag">
+    <nav aria-label={t('mainMenu')} className="w-[52px] h-full bg-shell border-r border-shell-border flex flex-col items-center py-2 electron-drag">
       {/* Traffic-light clearance — mirrors the h-11 titlebar the other screens reserve,
           so the first rail icon sits below the macOS window buttons instead of under them. */}
       {topInset && <div className="h-11 flex-shrink-0" aria-hidden="true" />}

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 import { Button, Icon, Modal } from '../ui';
 import { useToast } from '../../lib/toast/ToastContext';
 
@@ -28,20 +29,16 @@ export interface RegisterPayload {
 
 interface ProviderSpec {
   id: string;
+  /** 브랜드명 라벨 (custom 제외 번역 대상 아님) */
   label: string;
   /** 라이트한 형식 검증용 접두사 (없으면 검증 생략) */
   keyPrefix: string;
-  keyPlaceholder: string;
   /** 빠른 선택용 모델명 제안 */
   suggestions: string[];
   /** Base URL 필드 노출 여부 */
   baseUrl?: 'none' | 'optional' | 'required';
-  baseUrlLabel?: string;
-  baseUrlPlaceholder?: string;
   /** watsonx project id 필요 여부 */
   needsProjectId?: boolean;
-  /** API 키 입력 라벨 (기본 'API 키') */
-  keyLabel?: string;
 }
 
 const PROVIDERS: ProviderSpec[] = [
@@ -49,7 +46,6 @@ const PROVIDERS: ProviderSpec[] = [
     id: 'anthropic',
     label: 'Anthropic',
     keyPrefix: 'sk-ant-',
-    keyPlaceholder: 'sk-ant-...',
     suggestions: ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
     baseUrl: 'none',
   },
@@ -57,33 +53,23 @@ const PROVIDERS: ProviderSpec[] = [
     id: 'openai',
     label: 'OpenAI',
     keyPrefix: 'sk-',
-    keyPlaceholder: 'sk-...',
     suggestions: ['gpt-4o', 'gpt-4o-mini', 'o3-mini'],
     baseUrl: 'optional',
-    baseUrlLabel: 'Base URL (선택)',
-    baseUrlPlaceholder: 'https://api.openai.com/v1',
   },
   {
     id: 'watsonx',
     label: 'IBM watsonx',
     keyPrefix: '',
-    keyLabel: 'IBM Cloud API 키',
-    keyPlaceholder: 'IBM Cloud API 키',
     suggestions: ['ibm/granite-3-8b-instruct', 'meta-llama/llama-3-3-70b-instruct'],
     baseUrl: 'required',
-    baseUrlLabel: '지역 엔드포인트',
-    baseUrlPlaceholder: 'https://us-south.ml.cloud.ibm.com',
     needsProjectId: true,
   },
   {
     id: 'custom',
-    label: 'OpenAI 호환 (커스텀)',
+    label: 'OpenAI-compatible (Custom)',
     keyPrefix: '',
-    keyPlaceholder: 'API 키를 입력하세요',
     suggestions: [],
     baseUrl: 'required',
-    baseUrlLabel: 'Base URL',
-    baseUrlPlaceholder: 'https://my-gateway/v1',
   },
 ];
 
@@ -99,6 +85,7 @@ export interface ModelRegisterModalProps {
 }
 
 export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, onClose, onRegister, defaults }) => {
+  const { t } = useTranslation('settings');
   const [providerId, setProviderId] = useState<string>('anthropic');
   const [modelId, setModelId] = useState('');
   const [apiKey, setApiKey] = useState('');
@@ -143,7 +130,7 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
   const canRegister = test === 'ok';
 
   // provider / 입력값이 바뀌면 이전 테스트 결과는 무효
-  const invalidateTest = () => setTest((t) => (t === 'idle' ? t : 'idle'));
+  const invalidateTest = () => setTest((prev) => (prev === 'idle' ? prev : 'idle'));
 
   const handleProvider = (id: string) => {
     setProviderId(id);
@@ -156,12 +143,18 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
     if (!canTest) return;
     setTest('testing');
     // 진척률 없는 작업 → indeterminate 진행률 토스트(progress 생략).
-    const job = toast.progress({ label: '연결 확인 중', sublabel: `${provider.label} · ${trimmedId}` });
+    const job = toast.progress({
+      label: t('modelRegister.toastConnecting'),
+      sublabel: `${provider.label} · ${trimmedId}`,
+    });
     // 프로토타입: 실제 네트워크 호출 없이 키 형식만 검증
     window.setTimeout(() => {
       const prefixOk = !provider.keyPrefix || trimmedKey.startsWith(provider.keyPrefix);
       setTest(prefixOk ? 'ok' : 'fail');
-      job.done(prefixOk ? 'success' : 'error', prefixOk ? '연결 성공' : '연결 실패');
+      job.done(
+        prefixOk ? 'success' : 'error',
+        prefixOk ? t('modelRegister.toastConnOk') : t('modelRegister.toastConnFail'),
+      );
     }, 1000);
   };
 
@@ -177,10 +170,22 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
     });
   };
 
+  // 런타임에 provider id 기반으로 카탈로그에서 조회
+  // 동적 키라 타입 지정 t로는 직접 접근 어려움 — 좁은 범위에서만 widened t 사용
+  const pt = t as unknown as (key: string) => string;
+  const providerKeyLabel = pt(`modelRegister.providers.${provider.id}.keyLabel`);
+  const providerKeyPlaceholder = pt(`modelRegister.providers.${provider.id}.keyPlaceholder`);
+  const providerBaseUrlLabel = provider.baseUrl !== 'none'
+    ? pt(`modelRegister.providers.${provider.id}.baseUrlLabel`)
+    : '';
+  const providerBaseUrlPlaceholder = provider.baseUrl !== 'none'
+    ? pt(`modelRegister.providers.${provider.id}.baseUrlPlaceholder`)
+    : '';
+
   const footer = (
     <div className="flex items-center justify-between w-full">
       <Button kind="ghost" size="sm" onClick={onClose} disabled={test === 'testing'} className="!h-7">
-        취소
+        {t('modelRegister.cancel')}
       </Button>
       <div className="flex items-center gap-2">
         <Button
@@ -192,19 +197,23 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
           icon={test !== 'testing' ? <Icon name="connect" size={14} /> : undefined}
           className="!h-7"
         >
-          {test === 'testing' ? '테스트 중…' : test === 'ok' ? '다시 테스트' : '연결 테스트'}
+          {test === 'testing'
+            ? t('modelRegister.testingBtn')
+            : test === 'ok'
+              ? t('modelRegister.retestBtn')
+              : t('modelRegister.testBtn')}
         </Button>
         {/* 등록은 테스트 통과(게이트) 후에만 활성화 — 비활성 시 hover 안내 */}
         <div className="relative group">
           <Button kind="primary" size="sm" onClick={handleRegister} disabled={!canRegister} className="!h-7">
             <Icon name="check" size={14} className="mr-1.5" />
-            등록
+            {t('modelRegister.register')}
           </Button>
           {!canRegister && (
             <div className="pointer-events-none absolute bottom-full right-0 mb-2 w-max max-w-[220px] px-2.5 py-1.5 rounded-md bg-text-primary text-text-inverse text-caption-01 shadow-elevation-2 opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-150">
               {fieldsReady
-                ? "먼저 '연결 테스트'를 통과하세요"
-                : '모델명과 API 키를 입력한 뒤 연결 테스트를 실행하세요'}
+                ? t('modelRegister.gatePrimary')
+                : t('modelRegister.gateSecondary')}
               <span className="absolute top-full right-4 -mt-px border-4 border-transparent border-t-text-primary" />
             </div>
           )}
@@ -219,14 +228,16 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
       onClose={() => {
         if (test !== 'testing') onClose();
       }}
-      title="모델 등록"
+      title={t('modelRegister.title')}
       size="sm"
       footer={footer}
     >
       <div className="space-y-4">
         {/* Provider 선택 */}
         <div>
-          <label className="text-label-01 text-text-secondary mb-2 block">제공자</label>
+          <label className="text-label-01 text-text-secondary mb-2 block">
+            {t('modelRegister.providerLabel')}
+          </label>
           <div className="grid grid-cols-2 gap-1.5">
             {PROVIDERS.map((p) => {
               const active = p.id === providerId;
@@ -251,7 +262,9 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
 
         {/* 모델명 */}
         <div>
-          <label className="text-label-01 text-text-secondary mb-1.5 block">모델명</label>
+          <label className="text-label-01 text-text-secondary mb-1.5 block">
+            {t('modelRegister.modelIdLabel')}
+          </label>
           <input
             type="text"
             value={modelId}
@@ -259,7 +272,7 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
               setModelId(e.target.value);
               invalidateTest();
             }}
-            placeholder={provider.suggestions[0] ?? '모델 식별자를 입력하세요'}
+            placeholder={provider.suggestions[0] ?? t('modelRegister.modelIdPlaceholder')}
             className="w-full h-9 px-3 bg-field-01 text-text-primary font-mono text-body-short-01 border border-border-strong-01 rounded-lg outline-none transition-colors focus:border-focus focus:ring-1 focus:ring-focus placeholder:text-text-placeholder placeholder:font-sans"
           />
           {provider.suggestions.length > 0 && (
@@ -288,12 +301,14 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
         {/* watsonx project id */}
         {needsProjectId && (
           <div>
-            <label className="text-label-01 text-text-secondary mb-1.5 block">project_id</label>
+            <label className="text-label-01 text-text-secondary mb-1.5 block">
+              {t('modelRegister.projectIdLabel')}
+            </label>
             <input
               type="text"
               value={projectId}
               onChange={(e) => { setProjectId(e.target.value); invalidateTest(); }}
-              placeholder="watsonx 프로젝트 ID"
+              placeholder={t('modelRegister.projectIdPlaceholder')}
               autoComplete="off"
               spellCheck={false}
               className="w-full h-9 px-3 bg-field-01 text-text-primary font-mono text-body-short-01 border border-border-strong-01 rounded-lg outline-none transition-colors focus:border-focus focus:ring-1 focus:ring-focus placeholder:text-text-placeholder placeholder:font-sans"
@@ -305,13 +320,13 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
         {provider.baseUrl !== 'none' && (
           <div>
             <label className="text-label-01 text-text-secondary mb-1.5 block">
-              {provider.baseUrlLabel ?? 'Base URL'}
+              {providerBaseUrlLabel}
             </label>
             <input
               type="text"
               value={baseUrl}
               onChange={(e) => { setBaseUrl(e.target.value); invalidateTest(); }}
-              placeholder={provider.baseUrlPlaceholder}
+              placeholder={providerBaseUrlPlaceholder}
               autoComplete="off"
               spellCheck={false}
               className="w-full h-9 px-3 bg-field-01 text-text-primary font-mono text-body-short-01 border border-border-strong-01 rounded-lg outline-none transition-colors focus:border-focus focus:ring-1 focus:ring-focus placeholder:text-text-placeholder placeholder:font-sans"
@@ -321,7 +336,9 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
 
         {/* API 키 — 모노스페이스 + show/hide 토글 */}
         <div>
-          <label className="text-label-01 text-text-secondary mb-1.5 block">{provider.keyLabel ?? 'API 키'}</label>
+          <label className="text-label-01 text-text-secondary mb-1.5 block">
+            {providerKeyLabel}
+          </label>
           <div className="relative">
             <input
               type={showKey ? 'text' : 'password'}
@@ -330,7 +347,7 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
                 setApiKey(e.target.value);
                 invalidateTest();
               }}
-              placeholder={provider.keyPlaceholder}
+              placeholder={providerKeyPlaceholder}
               autoComplete="off"
               spellCheck={false}
               className="w-full h-9 pl-3 pr-10 bg-field-01 text-text-primary font-mono text-body-short-01 border border-border-strong-01 rounded-lg outline-none transition-colors focus:border-focus focus:ring-1 focus:ring-focus placeholder:text-text-placeholder placeholder:font-sans"
@@ -339,8 +356,8 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
               type="button"
               onClick={() => setShowKey((v) => !v)}
               className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-icon-secondary hover:text-icon-primary hover:bg-layer-hover-01 transition-colors"
-              title={showKey ? '키 숨기기' : '키 보기'}
-              aria-label={showKey ? '키 숨기기' : '키 보기'}
+              title={showKey ? t('modelRegister.hideKey') : t('modelRegister.showKey')}
+              aria-label={showKey ? t('modelRegister.hideKey') : t('modelRegister.showKey')}
             >
               <Icon name={showKey ? 'view-off' : 'view'} size={16} />
             </button>
@@ -349,20 +366,20 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
           {/* 테스트 결과 인라인 표시 */}
           {test === 'testing' && (
             <div className="flex items-center gap-2 mt-2 text-caption-01 text-text-secondary">
-              <span className="ia-spinner w-3.5 h-3.5" /> 연결을 확인하는 중입니다…
+              <span className="ia-spinner w-3.5 h-3.5" /> {t('modelRegister.testingInline')}
             </div>
           )}
           {test === 'ok' && (
             <div className="flex items-center gap-1.5 mt-2 text-caption-01 text-support-success">
-              <Icon name="check-circle" size={14} /> 연결됨 · 이제 등록할 수 있습니다
+              <Icon name="check-circle" size={14} /> {t('modelRegister.testOk')}
             </div>
           )}
           {test === 'fail' && (
             <div className="flex items-center gap-1.5 mt-2 text-caption-01 text-support-error">
               <Icon name="warning" size={14} filled />
               {provider.keyPrefix
-                ? `키 형식을 확인하세요 (${provider.keyPrefix}로 시작)`
-                : '연결에 실패했습니다 · 키를 확인하세요'}
+                ? t('modelRegister.testFailPrefix', { prefix: provider.keyPrefix })
+                : t('modelRegister.testFailGeneric')}
             </div>
           )}
         </div>
@@ -371,11 +388,16 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
         <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg bg-layer-02 border border-border-subtle-01">
           <Icon name="lock" size={15} className="text-icon-secondary flex-shrink-0 mt-0.5" />
           <p className="text-caption-01 text-text-helper leading-relaxed">
-            API 키는 <span className="text-text-secondary font-medium">이 기기에만 저장</span>되며 외부 서버로
-            전송되지 않습니다.
+            <Trans
+              i18nKey="modelRegister.storageNote"
+              ns="settings"
+              components={{
+                device: <span className="text-text-secondary font-medium" />,
+              }}
+            />
             <br />
             <span className="text-text-placeholder">
-              로컬 데이터베이스(state.db)에 평문으로 보관됩니다.
+              {t('modelRegister.storageNoteDb')}
             </span>
           </p>
         </div>

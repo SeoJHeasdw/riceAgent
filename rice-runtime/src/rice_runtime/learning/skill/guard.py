@@ -64,7 +64,9 @@ def validate_content_size(body: str, max_chars: int = DEFAULT_MAX_BODY_CHARS) ->
     — 정상적인 스킬 본문이 이 상한에 걸릴 일은 거의 없다(넉넉하게 잡음)."""
     if len(body) > max_chars:
         raise ValidationError(
-            f"본문이 너무 깁니다 ({len(body)}자 > 최대 {max_chars}자) — 더 짧은 절차로 나눠주세요."
+            f"body too long ({len(body)} chars > max {max_chars})",
+            code="skill.body_too_long",
+            params={"length": len(body), "max": max_chars},
         )
 
 

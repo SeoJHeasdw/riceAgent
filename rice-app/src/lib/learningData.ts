@@ -1,5 +1,14 @@
 import type { IconName } from '../components/ui/Icon';
 import type { ImpactReport, PatchTrigger, PlanStepData, SkillFile } from './types';
+import i18n from './i18n/index';
+
+// 동적 키/returnObjects 호출용 넓은 타입 래퍼.
+// i18next TFunction은 정적 키 기반 오버로드라 동적 템플릿 리터럴 키에 맞지 않는다.
+// apiError.ts와 동일 패턴으로 unknown 경유 캐스트.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type TFnAny = (key: string, options?: Record<string, unknown>) => any;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const tAny: TFnAny = (i18n.t as unknown as TFnAny);
 
 /**
  * learningData — mock content for the learning-loop surfaces (chat thread,
@@ -632,10 +641,26 @@ export interface LoopStage {
 }
 
 export const LOOP_STAGES: LoopStage[] = [
-  { key: 'exp', label: '경험', icon: 'idea', desc: '대화·작업에서 패턴 관찰' },
-  { key: 'gen', label: '스킬 생성', icon: 'tools', desc: '반복을 재사용 스킬로' },
-  { key: 'use', label: '사용·개선', icon: 'renew', desc: '쓸수록 규칙 보강' },
-  { key: 'model', label: '유저 모델', icon: 'user', desc: '세션을 넘어 기억' },
+  {
+    key: 'exp', icon: 'idea',
+    get label() { return tAny('connectors:loopStages.exp.label') as string; },
+    get desc() { return tAny('connectors:loopStages.exp.desc') as string; },
+  },
+  {
+    key: 'gen', icon: 'tools',
+    get label() { return tAny('connectors:loopStages.gen.label') as string; },
+    get desc() { return tAny('connectors:loopStages.gen.desc') as string; },
+  },
+  {
+    key: 'use', icon: 'renew',
+    get label() { return tAny('connectors:loopStages.use.label') as string; },
+    get desc() { return tAny('connectors:loopStages.use.desc') as string; },
+  },
+  {
+    key: 'model', icon: 'user',
+    get label() { return tAny('connectors:loopStages.model.label') as string; },
+    get desc() { return tAny('connectors:loopStages.model.desc') as string; },
+  },
 ];
 
 // ── Learning Impact (eval results — RICE_LEARNING_EVAL 6.3) ──────
@@ -644,36 +669,55 @@ export const LOOP_STAGES: LoopStage[] = [
 // latest.json, EVAL 6.4)으로 동일 스키마를 drop-in 교체한다.
 // warm.skills_used의 @vN은 patch로 개선된 버전을 가리킨다 — 라이브 데모의
 // 「분기 매출 요약」 v3→v4 개선(ACT 2.5)과 정량/정성이 같은 스킬을 향한다.
-export const IMPACT_REPORT: ImpactReport = {
-  task_suite: 'demo-v1',
-  model: 'claude-sonnet-4-5',
-  runs_per_task: 5,
-  generated_at: '2026-06-22T10:00:00Z',
-  tasks: [
-    {
-      id: 'T-A',
-      title: '분기 매출 요약',
-      cold: { turns: 5, tool_calls: 12, success_rate: 0.8, skill_hit: false },
-      warm: { turns: 2, tool_calls: 5, success_rate: 1.0, skill_hit: true, skills_used: ['분기 매출 요약@v4'] },
-      delta: { turns_pct: -0.6, tool_calls_pct: -0.58, success_pp: 0.2 },
-    },
-    {
-      id: 'T-B',
-      title: 'Db2 스키마 점검',
-      cold: { turns: 4, tool_calls: 9, success_rate: 0.8, skill_hit: false },
-      warm: { turns: 2, tool_calls: 4, success_rate: 1.0, skill_hit: true, skills_used: ['Db2 스키마 점검@v2'] },
-      delta: { turns_pct: -0.5, tool_calls_pct: -0.56, success_pp: 0.2 },
-    },
-    {
-      id: 'T-C',
-      title: '고객 이탈 분석',
-      cold: { turns: 6, tool_calls: 11, success_rate: 0.6, skill_hit: false },
-      warm: { turns: 3, tool_calls: 6, success_rate: 0.8, skill_hit: true, skills_used: ['고객 이탈 분석@v1'] },
-      delta: { turns_pct: -0.5, tool_calls_pct: -0.45, success_pp: 0.2 },
-    },
-  ],
-  aggregate: { turns_pct: -0.54, tool_calls_pct: -0.53, success_pp: 0.2, skill_hit_rate: 1.0 },
-};
+/**
+ * IMPACT_REPORT — demo fixture. title과 skills_used를 렌더 시점에 번역한다.
+ * ImpactReport를 그대로 구현하되, title/skills_used는 Proxy-like getter를 피하고
+ * buildImpactReport() 팩토리로 현재 언어 기준 객체를 생성한다.
+ * MySkillsScreen은 언어 변경 시 재렌더되므로 re-render마다 최신 문자열을 읽게 된다.
+ */
+function buildImpactReport(): ImpactReport {
+  const ta = (key: string) => tAny(key) as string;
+  return {
+    task_suite: 'demo-v1',
+    model: 'claude-sonnet-4-5',
+    runs_per_task: 5,
+    generated_at: '2026-06-22T10:00:00Z',
+    tasks: [
+      {
+        id: 'T-A',
+        title: ta('chat:impact.taskTitle.T-A'),
+        cold: { turns: 5, tool_calls: 12, success_rate: 0.8, skill_hit: false },
+        warm: { turns: 2, tool_calls: 5, success_rate: 1.0, skill_hit: true,
+          skills_used: [ta('chat:impact.taskTitle.T-A') + '@v4'] },
+        delta: { turns_pct: -0.6, tool_calls_pct: -0.58, success_pp: 0.2 },
+      },
+      {
+        id: 'T-B',
+        title: ta('chat:impact.taskTitle.T-B'),
+        cold: { turns: 4, tool_calls: 9, success_rate: 0.8, skill_hit: false },
+        warm: { turns: 2, tool_calls: 4, success_rate: 1.0, skill_hit: true,
+          skills_used: [ta('chat:impact.taskTitle.T-B') + '@v2'] },
+        delta: { turns_pct: -0.5, tool_calls_pct: -0.56, success_pp: 0.2 },
+      },
+      {
+        id: 'T-C',
+        title: ta('chat:impact.taskTitle.T-C'),
+        cold: { turns: 6, tool_calls: 11, success_rate: 0.6, skill_hit: false },
+        warm: { turns: 3, tool_calls: 6, success_rate: 0.8, skill_hit: true,
+          skills_used: [ta('chat:impact.taskTitle.T-C') + '@v1'] },
+        delta: { turns_pct: -0.5, tool_calls_pct: -0.45, success_pp: 0.2 },
+      },
+    ],
+    aggregate: { turns_pct: -0.54, tool_calls_pct: -0.53, success_pp: 0.2, skill_hit_rate: 1.0 },
+  };
+}
+
+/** demo fixture — 렌더마다 현재 언어로 title/skills_used를 갱신한다. */
+export const IMPACT_REPORT: ImpactReport = new Proxy({} as ImpactReport, {
+  get(_target, prop) {
+    return buildImpactReport()[prop as keyof ImpactReport];
+  },
+});
 
 // ── My Plugins (installed plugin management screen) ──────────────
 export interface PluginSkill {
@@ -815,141 +859,156 @@ export interface ConnectorUpdate {
 /** 커넥터 구분을 정규화 (kind 미지정 = 원격 커넥터) */
 export const connectorKind = (c: Connector): 'remote' | 'local-mcp' => c.kind ?? 'remote';
 
+// ── fixture 헬퍼 (렌더 시점에 카탈로그를 읽는 usedBy 생성) ──────────────────
+// ConnectorUser.kind와 name은 fixture.usedByKind / fixture.<id>.usedBy에서 온다.
+// tAny를 사용해 동적 키 + returnObjects 타입 오류를 피한다 (apiError.ts 동일 패턴).
+function fixtureUsedBy(id: string): ConnectorUser[] {
+  const items = tAny(`connectors:fixture.${id}.usedBy`, { returnObjects: true }) as Array<{ kind: string; name: string }>;
+  if (!Array.isArray(items)) return [];
+  const kindIconMap: Record<string, IconName> = {
+    skill: 'skill', plugin: 'database', automation: 'flow', conversation: 'chat',
+  };
+  return items.map((u) => ({
+    kind: tAny(`connectors:fixture.usedByKind.${u.kind}`) as string || u.kind,
+    name: u.name,
+    icon: kindIconMap[u.kind] ?? 'skill',
+  }));
+}
+
+function fixtureScopes(id: string, modes: Array<'read' | 'write' | 'exec'>, permissions?: Array<ScopePermission | undefined>): ConnectorScope[] {
+  const names = tAny(`connectors:fixture.${id}.scopes`, { returnObjects: true }) as string[];
+  if (!Array.isArray(names)) return [];
+  return names.map((name, idx) => ({
+    name,
+    mode: modes[idx] ?? 'read',
+    ...(permissions?.[idx] ? { permission: permissions[idx] } : {}),
+  }));
+}
+
+function fixtureExamples(id: string): string[] {
+  const items = tAny(`connectors:fixture.${id}.examples`, { returnObjects: true }) as string[];
+  return Array.isArray(items) ? items : [];
+}
+
 export const CONNECTORS: Connector[] = [
   {
     id: 'db2',
     name: 'Db2 (prod)',
     icon: 'database',
-    category: '데이터베이스',
+    get category() { return tAny('connectors:fixture.db2.category'); },
     provider: 'IBM Db2',
     status: 'connected',
     account: 'db2-prod.ibm.internal',
-    lastSync: '방금',
-    summary: '분기 매출 조회·스키마 점검에 쓰는 운영 데이터베이스 연결이에요.',
-    scopes: [
-      { name: '연결된 데이터베이스의 스키마·테이블 목록을 조회합니다.', mode: 'read' },
-      { name: '특정 테이블의 컬럼·타입·인덱스를 설명합니다.', mode: 'read' },
-      { name: '읽기 전용 SQL(SELECT) 쿼리를 실행합니다.', mode: 'read' },
-      { name: '쿼리 실행 계획(EXPLAIN)을 조회합니다.', mode: 'read' },
-      { name: 'INSERT·UPDATE·DELETE 문을 실행합니다.', mode: 'write', permission: 'approval' },
-    ],
-    usedBy: [
-      { kind: '스킬', name: '분기 매출 요약', icon: 'skill' },
-      { kind: '스킬', name: 'Db2 스키마 점검', icon: 'skill' },
-      { kind: '플러그인', name: 'Db2 전문가', icon: 'database' },
-    ],
-    examples: ['sales 테이블 스키마를 리뷰해줘', '2026 Q1 매출 요약 만들어줘'],
+    get lastSync() { return tAny('connectors:fixture.lastSync.justNow'); },
+    get summary() { return tAny('connectors:fixture.db2.summary'); },
+    get scopes() {
+      return fixtureScopes('db2',
+        ['read', 'read', 'read', 'read', 'write'],
+        [undefined, undefined, undefined, undefined, 'approval'],
+      );
+    },
+    get usedBy() { return fixtureUsedBy('db2'); },
+    get examples() { return fixtureExamples('db2'); },
   },
   {
     id: 'slack',
     name: 'Slack',
     icon: 'chat',
-    category: '메시징',
+    get category() { return tAny('connectors:fixture.slack.category'); },
     provider: 'Slack',
     status: 'connected',
     account: 'ibm-data-platform.slack.com',
-    lastSync: '10분 전',
-    summary: '요약·리포트를 채널로 보내고 멘션을 읽어옵니다.',
-    scopes: [
-      { name: '워크스페이스의 채널 목록을 조회합니다.', mode: 'read' },
-      { name: '채널의 최근 메시지를 읽어옵니다.', mode: 'read' },
-      { name: '워크스페이스 전체에서 메시지를 검색합니다.', mode: 'read' },
-      { name: '사용자를 멘션한 메시지를 조회합니다.', mode: 'read' },
-      { name: '채널에 메시지를 게시합니다.', mode: 'write' },
-      { name: '스레드에 답글을 작성합니다.', mode: 'write' },
-      { name: '채널에 파일을 업로드합니다.', mode: 'write' },
-    ],
-    usedBy: [{ kind: '자동화', name: '주간 매출 리포트 → Slack', icon: 'flow' }],
-    examples: ['이번 주 요약을 #sales-report 채널로 보내줘'],
+    get lastSync() { return tAny('connectors:fixture.lastSync.min10Ago'); },
+    get summary() { return tAny('connectors:fixture.slack.summary'); },
+    get scopes() {
+      return fixtureScopes('slack',
+        ['read', 'read', 'read', 'read', 'write', 'write', 'write'],
+      );
+    },
+    get usedBy() { return fixtureUsedBy('slack'); },
+    get examples() { return fixtureExamples('slack'); },
   },
   {
     id: 'outlook',
     name: 'Outlook',
     icon: 'send',
-    category: '메일·일정',
+    get category() { return tAny('connectors:fixture.outlook.category'); },
     provider: 'Microsoft 365',
     status: 'connected',
     account: 'jaeho.seo@ibm.com',
-    lastSync: '1시간 전',
-    summary: '메일 초안 작성·발송과 일정 확인에 사용합니다.',
-    scopes: [
-      { name: '받은 편지함의 메일 목록을 조회합니다.', mode: 'read' },
-      { name: '특정 메일의 본문·첨부를 가져옵니다.', mode: 'read' },
-      { name: '지정한 기간의 캘린더 일정을 읽어옵니다.', mode: 'read' },
-      { name: '메일 초안을 생성합니다.', mode: 'write' },
-      { name: '메일을 발송합니다.', mode: 'write', permission: 'approval' },
-      { name: '캘린더 일정을 생성합니다.', mode: 'write' },
-    ],
-    usedBy: [{ kind: '대화', name: '임원 보고 메일 초안', icon: 'chat' }],
-    examples: ['이 요약으로 임원 보고 메일 초안 만들어줘'],
+    get lastSync() { return tAny('connectors:fixture.lastSync.hour1Ago'); },
+    get summary() { return tAny('connectors:fixture.outlook.summary'); },
+    get scopes() {
+      return fixtureScopes('outlook',
+        ['read', 'read', 'read', 'write', 'write', 'write'],
+        [undefined, undefined, undefined, undefined, 'approval', undefined],
+      );
+    },
+    get usedBy() { return fixtureUsedBy('outlook'); },
+    get examples() { return fixtureExamples('outlook'); },
   },
   {
     id: 'jira',
     name: 'Jira',
     icon: 'rule',
-    category: '이슈 트래커',
+    get category() { return tAny('connectors:fixture.jira.category'); },
     provider: 'Atlassian',
     status: 'disconnected',
-    summary: '스프린트·이슈를 읽어 회고 정리에 활용합니다.',
-    scopes: [
-      { name: 'JQL로 이슈를 검색합니다.', mode: 'read' },
-      { name: '특정 이슈의 상세 정보를 조회합니다.', mode: 'read' },
-      { name: '보드의 스프린트 목록을 가져옵니다.', mode: 'read' },
-      { name: '새 이슈를 생성합니다.', mode: 'write' },
-      { name: '이슈에 댓글을 추가합니다.', mode: 'write' },
-      { name: '이슈의 상태를 전환합니다.', mode: 'write' },
-    ],
-    usedBy: [{ kind: '스킬', name: '회의록 액션아이템 추출', icon: 'skill' }],
-    examples: ['이번 스프린트 회고를 정리해줘'],
+    get summary() { return tAny('connectors:fixture.jira.summary'); },
+    get scopes() {
+      return fixtureScopes('jira',
+        ['read', 'read', 'read', 'write', 'write', 'write'],
+      );
+    },
+    get usedBy() { return fixtureUsedBy('jira'); },
+    get examples() { return fixtureExamples('jira'); },
   },
   {
     id: 'gdrive',
     name: 'Google Drive',
     icon: 'cloud',
-    category: '스토리지',
+    get category() { return tAny('connectors:fixture.gdrive.category'); },
     provider: 'Google',
     status: 'disconnected',
-    summary: '문서를 읽어 요약하거나 결과 파일을 저장합니다.',
-    scopes: [
-      { name: '파일·폴더 목록을 조회합니다.', mode: 'read' },
-      { name: '이름이나 내용으로 파일을 검색합니다.', mode: 'read' },
-      { name: '문서 내용을 읽거나 내보냅니다.', mode: 'read' },
-      { name: '새 파일을 생성합니다.', mode: 'write' },
-      { name: '기존 파일을 수정합니다.', mode: 'write' },
-    ],
+    get summary() { return tAny('connectors:fixture.gdrive.summary'); },
+    get scopes() {
+      return fixtureScopes('gdrive',
+        ['read', 'read', 'read', 'write', 'write'],
+      );
+    },
     usedBy: [],
-    examples: ['이 폴더의 문서들을 요약해줘'],
+    get examples() { return fixtureExamples('gdrive'); },
   },
   {
     id: 'orchestrate',
     name: 'watsonx Orchestrate',
     icon: 'flow',
-    category: '자동화',
+    get category() { return tAny('connectors:fixture.orchestrate.category'); },
     provider: 'IBM watsonx',
     status: 'connected',
     account: 'orchestrate.ibm.com',
-    lastSync: '어제',
-    summary: '워크플로를 스케줄·트리거로 자동 실행합니다.',
-    scopes: [
-      { name: '사용 가능한 워크플로 목록을 조회합니다.', mode: 'read' },
-      { name: '워크플로 실행 상태·기록을 확인합니다.', mode: 'read' },
-      { name: '워크플로를 실행합니다.', mode: 'exec', permission: 'approval' },
-      { name: '워크플로 스케줄을 등록·변경합니다.', mode: 'exec', permission: 'approval' },
-    ],
-    usedBy: [{ kind: '자동화', name: '분기 매출 요약 · 매주 월 08:00', icon: 'flow' }],
-    examples: ['매주 월요일 아침 리포트 자동화를 만들어줘'],
+    get lastSync() { return tAny('connectors:fixture.lastSync.yesterday'); },
+    get summary() { return tAny('connectors:fixture.orchestrate.summary'); },
+    get scopes() {
+      return fixtureScopes('orchestrate',
+        ['read', 'read', 'exec', 'exec'],
+        [undefined, undefined, 'approval', 'approval'],
+      );
+    },
+    get usedBy() { return fixtureUsedBy('orchestrate'); },
+    get examples() { return fixtureExamples('orchestrate'); },
   },
   {
     id: 'gmail',
     name: 'Gmail',
     icon: 'send',
-    category: '메일',
+    get category() { return tAny('connectors:fixture.gmail.category'); },
     provider: 'Google',
     status: 'connected',
     account: 'jaeho.seo@gmail.com',
-    lastSync: '5분 전',
-    summary: '메일을 읽어 요약하거나 임원 보고 메일을 작성·발송합니다. 프로토타입 기본 커넥터예요.',
-    // 실제 Google Gmail 커넥터가 노출하는 도구 (읽기 3 · 쓰기/삭제 9)
+    get lastSync() { return tAny('connectors:fixture.lastSync.min5Ago'); },
+    get summary() { return tAny('connectors:fixture.gmail.summary'); },
+    // 실제 Google Gmail 커넥터가 노출하는 도구 (읽기 3 · 쓰기/삭제 9) — scope name은 런타임 API 문자열이므로 번역 대상 아님
     scopes: [
       { name: "Retrieves a specific email thread from the authenticated user's Gmail account.", mode: 'read' },
       { name: 'Lists user labels.', mode: 'read' },
@@ -964,8 +1023,8 @@ export const CONNECTORS: Connector[] = [
       { name: 'Removes labels from a thread.', mode: 'write' },
       { name: 'Modifies an existing label.', mode: 'write' },
     ],
-    usedBy: [{ kind: '대화', name: '임원 보고 메일 발송', icon: 'chat' }],
-    examples: ['받은 편지함에서 이번 주 중요 메일만 요약해줘', '이 요약으로 임원 보고 메일 초안 만들어줘'],
+    get usedBy() { return fixtureUsedBy('gmail'); },
+    get examples() { return fixtureExamples('gmail'); },
     update: {
       addedCount: 2,
       removedCount: 0,
@@ -981,25 +1040,26 @@ export const CONNECTORS: Connector[] = [
     id: 'mcp-filesystem',
     name: 'Filesystem',
     icon: 'server',
-    category: '파일 시스템',
-    provider: '로컬 MCP · stdio',
+    get category() { return tAny('connectors:fixture.mcp-filesystem.category'); },
+    get provider() { return tAny('connectors:meta.localStdioProvider'); },
     kind: 'local-mcp',
     status: 'connected',
     account: 'npx @modelcontextprotocol/server-filesystem',
-    lastSync: '방금',
-    summary: '내 컴퓨터의 지정한 폴더를 읽고 써서 에이전트가 로컬 파일을 다룰 수 있게 합니다.',
+    get lastSync() { return tAny('connectors:fixture.lastSync.justNow'); },
+    get summary() { return tAny('connectors:fixture.mcp-filesystem.summary'); },
     transport: {
       type: 'stdio',
       command: 'npx',
       args: ['-y', '@modelcontextprotocol/server-filesystem', '/Users/jaehoseo/Desktop'],
     },
+    // MCP tool names은 코드 식별자이므로 번역 대상 아님
     scopes: [
       { name: 'read_file', mode: 'read' },
       { name: 'write_file', mode: 'write' },
       { name: 'list_directory', mode: 'read' },
     ],
-    usedBy: [{ kind: '스킬', name: '로컬 문서 요약', icon: 'skill' }],
-    examples: ['바탕화면의 마크다운 파일들을 정리해줘'],
+    get usedBy() { return fixtureUsedBy('mcp-filesystem'); },
+    get examples() { return fixtureExamples('mcp-filesystem'); },
     update: {
       addedCount: 2,
       removedCount: 0,
@@ -1013,35 +1073,36 @@ export const CONNECTORS: Connector[] = [
     id: 'mcp-git',
     name: 'Git',
     icon: 'tools',
-    category: '버전 관리',
-    provider: '로컬 MCP · stdio',
+    get category() { return tAny('connectors:fixture.mcp-git.category'); },
+    get provider() { return tAny('connectors:meta.localStdioProvider'); },
     kind: 'local-mcp',
     status: 'connected',
     account: 'uvx mcp-server-git',
-    lastSync: '2분 전',
-    summary: '로컬 저장소의 커밋·diff·로그를 읽어 코드 변경을 설명하거나 요약합니다.',
+    get lastSync() { return tAny('connectors:fixture.lastSync.min2Ago'); },
+    get summary() { return tAny('connectors:fixture.mcp-git.summary'); },
     transport: {
       type: 'stdio',
       command: 'uvx',
       args: ['mcp-server-git', '--repository', '/Users/jaehoseo/Desktop/vswrk/bob/rice'],
     },
+    // MCP tool names은 코드 식별자이므로 번역 대상 아님
     scopes: [
       { name: 'git_log', mode: 'read' },
       { name: 'git_diff', mode: 'read' },
       { name: 'git_status', mode: 'read' },
     ],
-    usedBy: [{ kind: '대화', name: '변경사항 리뷰', icon: 'chat' }],
-    examples: ['최근 커밋들의 변경 요약해줘'],
+    get usedBy() { return fixtureUsedBy('mcp-git'); },
+    get examples() { return fixtureExamples('mcp-git'); },
   },
   {
     id: 'mcp-sqlite',
     name: 'SQLite',
     icon: 'database',
-    category: '데이터베이스',
-    provider: '로컬 MCP · stdio',
+    get category() { return tAny('connectors:fixture.mcp-sqlite.category'); },
+    get provider() { return tAny('connectors:meta.localStdioProvider'); },
     kind: 'local-mcp',
     status: 'disconnected',
-    summary: '로컬 SQLite 파일을 쿼리해 분석합니다. 연결하면 노출 도구를 확인할 수 있어요.',
+    get summary() { return tAny('connectors:fixture.mcp-sqlite.summary'); },
     transport: {
       type: 'stdio',
       command: 'uvx',
@@ -1049,25 +1110,28 @@ export const CONNECTORS: Connector[] = [
     },
     scopes: [],
     usedBy: [],
-    examples: ['data.db의 테이블 목록을 보여줘'],
+    get examples() { return fixtureExamples('mcp-sqlite'); },
   },
 ];
 
 /** maps a tool scope / permission name to the connector that owns it (or null) */
 export function connectorIdForScope(scope: string): string | null {
   const s = scope.toLowerCase();
-  if (s.includes('gmail') || s.includes('메일 보내기') || s.includes('받은 편지함')) return 'gmail';
-  if (s.includes('calendar') || s.includes('캘린더')) return 'calendar';
+  if (s.includes('gmail') || s.includes('send email') || s.includes('inbox') || s.includes('draft email')) return 'gmail';
+  if (s.includes('calendar') || s.includes('event') || s.includes('schedule')) return 'calendar';
   if (s.startsWith('db2')) return 'db2';
-  if (s.includes('orchestrate') || s.includes('워크플로')) return 'orchestrate';
-  if (s.startsWith('#') || s.includes('slack') || s.includes('멘션')) return 'slack';
-  if (s.includes('메일') || s.includes('일정') || s.includes('outlook')) return 'outlook';
+  if (s.includes('orchestrate') || s.includes('workflow')) return 'orchestrate';
+  if (s.startsWith('#') || s.includes('slack') || s.includes('mention') || s.includes('channel')) return 'slack';
+  if (s.includes('outlook') || s.includes('mail') || s.includes('appointment')) return 'outlook';
   if (s.includes('drive')) return 'gdrive';
   if (s.includes('jira')) return 'jira';
   return null;
 }
 
 // ── Connector directory (추가 가능한 원격 커넥터 카탈로그) ──────────
+/** 커넥터 카탈로그 카드에 표시하는 뱃지 — stable code, 번역은 렌더 시 connectors:badge.<code> 로 */
+export type BadgeCode = 'popular' | 'new' | 'recommended';
+
 export interface CatalogConnector {
   id: string;
   name: string;
@@ -1075,8 +1139,8 @@ export interface CatalogConnector {
   category: string;
   provider: string;
   summary: string;
-  /** '인기' · '새로 생성' · '추천' 등 카드에 표시할 뱃지 */
-  badges?: string[];
+  /** stable badge codes — 렌더 시 t('connectors:badge.<code>') 로 번역 */
+  badges?: BadgeCode[];
   examples?: string[];
   /**
    * true = 아직 백엔드 registry(connector/registry.py)에 실제로 연결되지 않은 항목 —
@@ -1091,106 +1155,106 @@ export const CONNECTOR_CATALOG: CatalogConnector[] = [
     id: 'github',
     name: 'GitHub',
     icon: 'tools',
-    category: '개발',
+    get category() { return tAny('connectors:catalog.category.dev'); },
     provider: 'GitHub',
-    summary: '이슈·PR·코드를 읽어 변경을 요약하거나 리뷰를 돕습니다.',
-    badges: ['인기'],
-    examples: ['이 저장소의 열린 PR을 요약해줘'],
+    get summary() { return tAny('connectors:fixture.catalog.github.summary'); },
+    badges: ['popular'],
+    get examples() { return fixtureExamples('catalog.github' as string); },
     comingSoon: true,
   },
   {
     id: 'notion',
     name: 'Notion',
     icon: 'bookmark',
-    category: '문서',
+    get category() { return tAny('connectors:catalog.category.docs'); },
     provider: 'Notion',
-    summary: '워크스페이스 문서를 검색·요약하고 페이지를 작성합니다.',
-    badges: ['인기'],
-    examples: ['이번 주 회의 노트를 한 페이지로 정리해줘'],
+    get summary() { return tAny('connectors:fixture.catalog.notion.summary'); },
+    badges: ['popular'],
+    get examples() { return fixtureExamples('catalog.notion' as string); },
     comingSoon: true,
   },
   {
     id: 'linear',
     name: 'Linear',
     icon: 'flow',
-    category: '이슈 트래커',
+    get category() { return tAny('connectors:catalog.category.issueTracker'); },
     provider: 'Linear',
-    summary: '이슈·사이클을 읽어 진행 상황을 정리하고 티켓을 생성합니다.',
-    badges: ['새로 생성'],
-    examples: ['이번 사이클 남은 이슈를 정리해줘'],
+    get summary() { return tAny('connectors:fixture.catalog.linear.summary'); },
+    badges: ['new'],
+    get examples() { return fixtureExamples('catalog.linear' as string); },
     comingSoon: true,
   },
   {
     id: 'confluence',
     name: 'Confluence',
     icon: 'rule',
-    category: '문서',
+    get category() { return tAny('connectors:catalog.category.docs'); },
     provider: 'Atlassian',
-    summary: '스페이스 문서를 검색해 답을 찾거나 보고서를 작성합니다.',
-    examples: ['온보딩 문서를 요약해줘'],
+    get summary() { return tAny('connectors:fixture.catalog.confluence.summary'); },
+    get examples() { return fixtureExamples('catalog.confluence' as string); },
     comingSoon: true,
   },
   {
     id: 'salesforce',
     name: 'Salesforce',
     icon: 'growth',
-    category: 'CRM',
+    get category() { return tAny('connectors:catalog.category.crm'); },
     provider: 'Salesforce',
-    summary: '거래·고객 데이터를 조회해 파이프라인을 분석합니다.',
-    badges: ['추천'],
-    examples: ['이번 분기 파이프라인 상위 거래를 보여줘'],
+    get summary() { return tAny('connectors:fixture.catalog.salesforce.summary'); },
+    badges: ['recommended'],
+    get examples() { return fixtureExamples('catalog.salesforce' as string); },
     comingSoon: true,
   },
   {
     id: 'hubspot',
     name: 'HubSpot',
     icon: 'growth',
-    category: '마케팅·CRM',
+    get category() { return tAny('connectors:catalog.category.marketingCrm'); },
     provider: 'HubSpot',
-    summary: '컨택·딜·캠페인 데이터를 읽어 리포트를 만듭니다.',
-    examples: ['이번 달 신규 리드 추이를 요약해줘'],
+    get summary() { return tAny('connectors:fixture.catalog.hubspot.summary'); },
+    get examples() { return fixtureExamples('catalog.hubspot' as string); },
     comingSoon: true,
   },
   {
     id: 'asana',
     name: 'Asana',
     icon: 'flow',
-    category: '프로젝트',
+    get category() { return tAny('connectors:catalog.category.project'); },
     provider: 'Asana',
-    summary: '태스크·프로젝트를 읽어 상태를 정리하고 업무를 만듭니다.',
-    badges: ['새로 생성'],
-    examples: ['마감 임박한 태스크를 알려줘'],
+    get summary() { return tAny('connectors:fixture.catalog.asana.summary'); },
+    badges: ['new'],
+    get examples() { return fixtureExamples('catalog.asana' as string); },
     comingSoon: true,
   },
   {
     id: 'dropbox',
     name: 'Dropbox',
     icon: 'cloud',
-    category: '스토리지',
+    get category() { return tAny('connectors:catalog.category.storage'); },
     provider: 'Dropbox',
-    summary: '폴더의 문서를 읽어 요약하거나 결과 파일을 저장합니다.',
-    examples: ['이 폴더의 PDF들을 한 줄씩 요약해줘'],
+    get summary() { return tAny('connectors:fixture.catalog.dropbox.summary'); },
+    get examples() { return fixtureExamples('catalog.dropbox' as string); },
     comingSoon: true,
   },
   {
     id: 'postgres',
     name: 'PostgreSQL',
     icon: 'database',
-    category: '데이터베이스',
+    get category() { return tAny('connectors:catalog.category.database'); },
     provider: 'PostgreSQL',
-    summary: '스키마를 점검하고 읽기 전용 쿼리로 데이터를 분석합니다.',
-    badges: ['추천'],
-    examples: ['orders 테이블의 최근 추세를 분석해줘'],
+    get summary() { return tAny('connectors:fixture.catalog.postgres.summary'); },
+    badges: ['recommended'],
+    get examples() { return fixtureExamples('catalog.postgres' as string); },
     comingSoon: true,
   },
   {
     id: 'zendesk',
     name: 'Zendesk',
     icon: 'chat',
-    category: '고객지원',
+    get category() { return tAny('connectors:catalog.category.customerSupport'); },
     provider: 'Zendesk',
-    summary: '티켓을 읽어 이슈를 분류하고 응답 초안을 작성합니다.',
-    examples: ['오늘 들어온 긴급 티켓을 정리해줘'],
+    get summary() { return tAny('connectors:fixture.catalog.zendesk.summary'); },
+    get examples() { return fixtureExamples('catalog.zendesk' as string); },
     comingSoon: true,
   },
 ];

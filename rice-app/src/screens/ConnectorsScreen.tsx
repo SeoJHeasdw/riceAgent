@@ -1007,7 +1007,7 @@ function ConnectorsScreen() {
       const res = await api.connectConnector(connectorType);
       const url = (res.data as { oauth_url?: string } | undefined)?.oauth_url;
       if (!res.success || !url) {
-        job.done('error', res.error || t('toast.connectFail', { name: c.name }));
+        job.done('error', res.code ? apiErrorMessage(res) : t('toast.connectFail', { name: c.name }));
         return;
       }
       await openExternal(url); // 시스템 브라우저에서 구글 로그인
@@ -1047,7 +1047,7 @@ function ConnectorsScreen() {
     const res = await api.addCustomConnector(payload);
     const data = res.data as { oauth_url?: string; connector_id?: string } | undefined;
     if (!res.success || !data?.oauth_url || !data.connector_id) {
-      return res.error || t('toast.customConnectFail');
+      return res.code ? apiErrorMessage(res) : t('toast.customConnectFail');
     }
     setCustomModalOpen(false);
     await openExternal(data.oauth_url); // 시스템 브라우저에서 로그인
@@ -1073,7 +1073,7 @@ function ConnectorsScreen() {
     try {
       const res = await api.deleteConnector(c.id);
       if (!res.success) {
-        toast.notify({ message: res.error || t('toast.disconnectFail', { name: c.name }), variant: 'error' });
+        toast.notify({ message: res.code ? apiErrorMessage(res) : t('toast.disconnectFail', { name: c.name }), variant: 'error' });
         return;
       }
       await refresh();
@@ -1088,7 +1088,7 @@ function ConnectorsScreen() {
     try {
       const res = await api.resyncConnectorTools(c.id);
       if (!res.success) {
-        toast.notify({ message: res.error || t('toast.resyncFail'), variant: 'error' });
+        toast.notify({ message: res.code ? apiErrorMessage(res) : t('toast.resyncFail'), variant: 'error' });
         return;
       }
       await refresh();
@@ -1104,7 +1104,7 @@ function ConnectorsScreen() {
     try {
       const res = await api.refreshLocalConnectors();
       if (!res.success) {
-        toast.notify({ message: res.error || t('toast.refreshLocalFail'), variant: 'error' });
+        toast.notify({ message: res.code ? apiErrorMessage(res) : t('toast.refreshLocalFail'), variant: 'error' });
         return;
       }
       await loadLocal();
@@ -1119,7 +1119,7 @@ function ConnectorsScreen() {
     try {
       const res = await api.deleteLocalConnector(c.id.replace(/^local:/, ''));
       if (!res.success) {
-        toast.notify({ message: res.error || t('toast.removeLocalFail', { name: c.name }), variant: 'error' });
+        toast.notify({ message: res.code ? apiErrorMessage(res) : t('toast.removeLocalFail', { name: c.name }), variant: 'error' });
         return;
       }
       await loadLocal();
@@ -1135,7 +1135,7 @@ function ConnectorsScreen() {
     try {
       const res = await api.applyConnectorToolsUpdate(c.id);
       if (!res.success) {
-        toast.notify({ message: res.error || t('toast.applyUpdateFail'), variant: 'error' });
+        toast.notify({ message: res.code ? apiErrorMessage(res) : t('toast.applyUpdateFail'), variant: 'error' });
         return;
       }
       await refresh();

@@ -56,5 +56,99 @@
     "reset": "모든 설정 초기화",
     "resetDesc": "모든 설정을 기본값으로 되돌립니다",
     "resetButton": "초기화"
+  },
+
+  "modelPicker": {
+    "runLocation": "실행 위치",
+    "saasCaption": "클라우드 API",
+    "localCaption": "Ollama · 온디바이스",
+    "sectionModel": "모델",
+    "addModel": "모델 추가",
+    "emptyTitle": "등록된 모델 없음",
+    "emptyDesc": "모델 추가로 API 모델과 키를 등록하세요",
+    "unregister": "등록 해제",
+    "ollamaEndpointLabel": "Ollama 엔드포인트",
+    "btnTestConn": "연결 테스트",
+    "connOk": "연결됨 · Ollama 응답 정상",
+    "connFail": "연결 실패 · 엔드포인트를 확인하세요",
+    "localPreTitle": "설치된 모델 확인 전",
+    "localPreDesc": "로컬 Ollama에서 모델 목록을 불러옵니다",
+    "btnFetchModels": "로컬 모델 확인",
+    "localEmptyTitle": "설치된 모델 없음",
+    "localEmptyDesc_pre": "<code>ollama pull &lt;모델명&gt;</code>으로 설치 후 다시 확인하세요",
+    "btnRefetch": "다시 확인",
+    "installedModels": "설치된 모델 ({{count}})",
+    "btnRefresh": "새로고침",
+    "titleRefresh": "새로고침",
+    "params": {
+      "title": "응답 설정",
+      "temperatureLabel": "창의성 (Temperature)",
+      "temperatureLow": "정확하게",
+      "temperatureHigh": "창의적으로",
+      "showThinkingLabel": "Show Thinking",
+      "showThinkingDesc": "로컬 모델의 추론 과정을 대화에서 확인합니다"
+    },
+    "toast": {
+      "fetchingModels": "로컬 모델 확인 중",
+      "modelsFound": "모델 {{count}}개 발견",
+      "ollamaConnectFail": "Ollama에 연결할 수 없어요",
+      "connTestLabel": "연결 확인 중",
+      "connTestEndpoint": "엔드포인트",
+      "connOk": "연결 성공",
+      "connFail": "연결 실패"
+    }
+  },
+
+  "modelRegister": {
+    "title": "모델 등록",
+    "cancel": "취소",
+    "register": "등록",
+    "testBtn": "연결 테스트",
+    "testingBtn": "테스트 중…",
+    "retestBtn": "다시 테스트",
+    "providerLabel": "제공자",
+    "modelIdLabel": "모델명",
+    "modelIdPlaceholder": "모델 식별자를 입력하세요",
+    "projectIdLabel": "project_id",
+    "projectIdPlaceholder": "watsonx 프로젝트 ID",
+    "apiKeyLabel": "API 키",
+    "showKey": "키 보기",
+    "hideKey": "키 숨기기",
+    "testingInline": "연결을 확인하는 중입니다…",
+    "testOk": "연결됨 · 이제 등록할 수 있습니다",
+    "testFailPrefix": "키 형식을 확인하세요 ({{prefix}}로 시작)",
+    "testFailGeneric": "연결에 실패했습니다 · 키를 확인하세요",
+    "gatePrimary": "먼저 '연결 테스트'를 통과하세요",
+    "gateSecondary": "모델명과 API 키를 입력한 뒤 연결 테스트를 실행하세요",
+    "storageNote": "API 키는 <device>이 기기에만 저장</device>되며 외부 서버로 전송되지 않습니다.",
+    "storageNoteDb": "로컬 데이터베이스(state.db)에 평문으로 보관됩니다.",
+    "toastConnecting": "연결 확인 중",
+    "toastConnOk": "연결 성공",
+    "toastConnFail": "연결 실패",
+    "providers": {
+      "openai": {
+        "baseUrlLabel": "Base URL (선택)",
+        "baseUrlPlaceholder": "https://api.openai.com/v1",
+        "keyPlaceholder": "sk-...",
+        "keyLabel": "API 키"
+      },
+      "anthropic": {
+        "keyPlaceholder": "sk-ant-...",
+        "keyLabel": "API 키"
+      },
+      "watsonx": {
+        "keyLabel": "IBM Cloud API 키",
+        "keyPlaceholder": "IBM Cloud API 키",
+        "baseUrlLabel": "지역 엔드포인트",
+        "baseUrlPlaceholder": "https://us-south.ml.cloud.ibm.com"
+      },
+      "custom": {
+        "label": "OpenAI 호환 (커스텀)",
+        "keyPlaceholder": "API 키를 입력하세요",
+        "baseUrlLabel": "Base URL",
+        "baseUrlPlaceholder": "https://my-gateway/v1",
+        "keyLabel": "API 키"
+      }
+    }
   }
 }

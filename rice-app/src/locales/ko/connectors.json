@@ -146,6 +146,20 @@
     "usedByEmpty": "아직 이 커넥터의 도구를 쓰는 스킬·플러그인이 없어요."
   },
 
+  "catalog": {
+    "category": {
+      "dev": "개발",
+      "docs": "문서",
+      "issueTracker": "이슈 트래커",
+      "crm": "CRM",
+      "marketingCrm": "마케팅·CRM",
+      "project": "프로젝트",
+      "storage": "스토리지",
+      "database": "데이터베이스",
+      "customerSupport": "고객지원"
+    }
+  },
+
   "toast": {
     "connectStart": "연결 시작 중",
     "browserLoginWaiting": "브라우저에서 로그인 대기 중",
@@ -159,5 +173,264 @@
     "applyUpdateFail": "업데이트를 적용하지 못했어요.",
     "permSaveFail": "권한 변경을 저장하지 못했어요.",
     "customConnectFail": "연결을 시작하지 못했어요. 입력값을 확인하고 다시 시도하세요."
+  },
+
+  "badge": {
+    "popular": "인기",
+    "new": "새로 생성",
+    "recommended": "추천"
+  },
+
+  "directory": {
+    "title": "커넥터 둘러보기",
+    "searchPlaceholder": "커넥터 검색…",
+    "sourceChip": "IBM 및 파트너",
+    "catalogCount": "카탈로그 · {{count}}",
+    "comingSoonHint": "\"준비 중\" 항목은 아직 바로 연결할 수 없어요. MCP 서버 URL을 알고 있다면",
+    "comingSoonCta": "\"커스텀 추가\"",
+    "comingSoonSuffix": "로 바로 연결해보세요.",
+    "noResults": "\"{{query}}\"에 해당하는 커넥터가 없어요.",
+    "tagComingSoon": "준비 중",
+    "alreadyAdded": "이미 추가됨",
+    "comingSoonDisabled": "MVP에서는 아직 바로 연결할 수 없어요 — MCP 서버 URL이 있다면 \"커스텀 추가\"를 이용하세요",
+    "addAriaLabel": "{{name}} 추가"
+  },
+
+  "required": {
+    "title": "활성화 전 연결 필요",
+    "later": "나중에",
+    "goToConnectors": "커넥터 화면으로",
+    "tagWaiting": "연결 대기",
+    "descriptionLine1": "플러그인을 켜기 전에 접근할 커넥터를 먼저 승인해야 합니다.",
+    "descriptionLine2": "연결 후 다시 활성화하면 이 플러그인의 스킬과 도구가 에이전트에 붙습니다.",
+    "sectionLabel": "필수 커넥터",
+    "tagNeedsConnection": "연결 필요",
+    "fallbackConnectorName": "필요한 커넥터",
+    "hint": "연결은 커넥터 화면에서 권한 범위를 확인한 뒤 진행됩니다. 지금 닫아도 플러그인은 설치 상태로 남아요."
+  },
+
+  "custom": {
+    "title": "커스텀 커넥터 추가",
+    "cancel": "취소",
+    "discoverBtn_idle": "OAuth 설정 검사",
+    "discoverBtn_checking": "검사 중…",
+    "discoverBtn_done": "다시 검사",
+    "addBtn": "추가하고 연결",
+    "addBtnTooltip": "이름과 authorize/token 엔드포인트가 필요해요 — 검사로 자동 채우거나 직접 입력하세요",
+    "description": "OAuth 로 인증하는 원격 MCP 서버 URL 을 입력하면, authorize/token 엔드포인트와 client 등록 가능 여부를 자동으로 찾아봐요. 표준을 따르지 않는 서버는 아래에서 직접 입력하면 돼요.",
+    "labelDisplayName": "표시 이름",
+    "placeholderDisplayName": "예: Notion, Linear, Sentry",
+    "labelMcpUrl": "MCP 서버 URL",
+    "discoverOk": "이 서버의 OAuth 설정을 자동으로 찾았어요. 그대로 추가하거나 아래에서 고칠 수 있어요.",
+    "discoverFail": "자동으로 찾지 못했어요 — authorize/token 엔드포인트를 직접 입력해주세요.",
+    "discoverDynamicReg": "동적 client 등록을 지원해요 — client ID/secret 을 직접 입력하지 않아도 돼요.",
+    "labelAuthorize": "Authorize 엔드포인트",
+    "labelToken": "Token 엔드포인트",
+    "advancedToggle": "고급 설정 · scope · client ID/secret 직접 입력",
+    "labelScope": "Scope",
+    "scopeHint": "· 공백으로 구분 · 선택",
+    "labelDynReg": "Dynamic registration 엔드포인트",
+    "dynRegHint": "· 선택",
+    "labelClientId": "Client ID",
+    "clientIdHint": "· 직접 등록한 client 가 있을 때만",
+    "labelClientSecret": "Client secret",
+    "securityNote_pre": "Client secret 은",
+    "securityNote_strong": "OS 키체인에만",
+    "securityNote_post": "저장돼요. \"추가하고 연결\"을 누르면 시스템 브라우저에서 로그인 화면이 열려요."
+  },
+
+  "marketplaceHeader": {
+    "searchAriaLabel": "{{title}} 검색",
+    "searchPlaceholder": "검색",
+    "clearSearch": "검색어 지우기",
+    "sortAriaLabel": "정렬 기준",
+    "tagFilterAriaLabel": "태그 필터"
+  },
+
+  "mcpRegister": {
+    "modalTitle": "로컬 MCP 서버 등록",
+    "cancel": "취소",
+    "btnTesting": "테스트 중…",
+    "btnTest": "연결 테스트",
+    "btnRegister": "등록",
+    "tooltipPaste": "MCP 서버 설정을 붙여넣거나 파일을 가져오세요",
+    "tooltipNeedTest": "먼저 '연결 테스트'를 통과하세요",
+    "warningExec": "로컬 MCP 서버는 {{strong}}합니다. 신뢰할 수 있는 출처의 설정만 등록하세요.",
+    "warningExecStrong": "내 컴퓨터에서 직접 코드를 실행",
+    "sectionInputLabel": "MCP 서버 설정 (JSON)",
+    "importFromFile": "파일에서 가져오기",
+    "dragDropLabel": "여기에 놓아서 불러오기",
+    "inputHint": "MCP 서버 문서의 설치 스니펫을 그대로 붙여넣거나, JSON 파일을 위 입력창에 끌어다 놓으세요. 붙여넣고 다른 곳을 클릭하면 자동으로 서버 목록을 만들어요. 서버가 여러 개면(예: 기존 .mcp.json 파일) 전부 인식해서 목록으로 보여줘요.",
+    "serverListTitle": "찾은 서버 · {{count}}개",
+    "namePlaceholder": "이름을 입력하세요",
+    "testOk": "연결됨 · 도구 {{count}}개 발견",
+    "registered": "✓ 등록됨",
+    "storageHint": "서버 설정은 <path>~/.rice/.mcp.json</path>에 저장돼요. 등록하면 바로 실행되고, 다음에 앱을 열어도 그대로 남아 있어요.",
+    "parseErrorInvalidJson": "올바른 JSON이 아니에요.",
+    "parseErrorNotObject": "올바른 JSON 객체가 아니에요.",
+    "parseErrorNoServer": "command 또는 url이 있는 MCP 서버 설정을 찾지 못했어요.",
+    "testFail": "연결을 확인하지 못했어요.",
+    "registerFail": "등록 실패 — 이 이름이 이미 등록되어 있는지 확인하세요",
+    "registerSummaryAllFail": "등록하지 못했어요. 아래 항목별 오류를 확인하세요.",
+    "registerSummaryPartial": "{{success}}/{{total}}개만 등록됐어요 — 나머지 항목을 확인하세요."
+  },
+
+  "loopStages": {
+    "exp": { "label": "경험", "desc": "대화·작업에서 패턴 관찰" },
+    "gen": { "label": "스킬 생성", "desc": "반복을 재사용 스킬로" },
+    "use": { "label": "사용·개선", "desc": "쓸수록 규칙 보강" },
+    "model": { "label": "유저 모델", "desc": "세션을 넘어 기억" }
+  },
+
+  "fixture": {
+    "lastSync": {
+      "justNow": "방금",
+      "min2Ago": "2분 전",
+      "min5Ago": "5분 전",
+      "min10Ago": "10분 전",
+      "hour1Ago": "1시간 전",
+      "yesterday": "어제"
+    },
+    "usedByKind": {
+      "skill": "스킬",
+      "plugin": "플러그인",
+      "automation": "자동화",
+      "conversation": "대화"
+    },
+    "db2": {
+      "category": "데이터베이스",
+      "summary": "분기 매출 조회·스키마 점검에 쓰는 운영 데이터베이스 연결이에요.",
+      "scopes": [
+        "연결된 데이터베이스의 스키마·테이블 목록을 조회합니다.",
+        "특정 테이블의 컬럼·타입·인덱스를 설명합니다.",
+        "읽기 전용 SQL(SELECT) 쿼리를 실행합니다.",
+        "쿼리 실행 계획(EXPLAIN)을 조회합니다.",
+        "INSERT·UPDATE·DELETE 문을 실행합니다."
+      ],
+      "usedBy": [
+        { "kind": "skill", "name": "분기 매출 요약" },
+        { "kind": "skill", "name": "Db2 스키마 점검" },
+        { "kind": "plugin", "name": "Db2 전문가" }
+      ],
+      "examples": ["sales 테이블 스키마를 리뷰해줘", "2026 Q1 매출 요약 만들어줘"]
+    },
+    "slack": {
+      "category": "메시징",
+      "summary": "요약·리포트를 채널로 보내고 멘션을 읽어옵니다.",
+      "scopes": [
+        "워크스페이스의 채널 목록을 조회합니다.",
+        "채널의 최근 메시지를 읽어옵니다.",
+        "워크스페이스 전체에서 메시지를 검색합니다.",
+        "사용자를 멘션한 메시지를 조회합니다.",
+        "채널에 메시지를 게시합니다.",
+        "스레드에 답글을 작성합니다.",
+        "채널에 파일을 업로드합니다."
+      ],
+      "usedBy": [
+        { "kind": "automation", "name": "주간 매출 리포트 → Slack" }
+      ],
+      "examples": ["이번 주 요약을 #sales-report 채널로 보내줘"]
+    },
+    "outlook": {
+      "category": "메일·일정",
+      "summary": "메일 초안 작성·발송과 일정 확인에 사용합니다.",
+      "scopes": [
+        "받은 편지함의 메일 목록을 조회합니다.",
+        "특정 메일의 본문·첨부를 가져옵니다.",
+        "지정한 기간의 캘린더 일정을 읽어옵니다.",
+        "메일 초안을 생성합니다.",
+        "메일을 발송합니다.",
+        "캘린더 일정을 생성합니다."
+      ],
+      "usedBy": [
+        { "kind": "conversation", "name": "임원 보고 메일 초안" }
+      ],
+      "examples": ["이 요약으로 임원 보고 메일 초안 만들어줘"]
+    },
+    "jira": {
+      "category": "이슈 트래커",
+      "summary": "스프린트·이슈를 읽어 회고 정리에 활용합니다.",
+      "scopes": [
+        "JQL로 이슈를 검색합니다.",
+        "특정 이슈의 상세 정보를 조회합니다.",
+        "보드의 스프린트 목록을 가져옵니다.",
+        "새 이슈를 생성합니다.",
+        "이슈에 댓글을 추가합니다.",
+        "이슈의 상태를 전환합니다."
+      ],
+      "usedBy": [
+        { "kind": "skill", "name": "회의록 액션아이템 추출" }
+      ],
+      "examples": ["이번 스프린트 회고를 정리해줘"]
+    },
+    "gdrive": {
+      "category": "스토리지",
+      "summary": "문서를 읽어 요약하거나 결과 파일을 저장합니다.",
+      "scopes": [
+        "파일·폴더 목록을 조회합니다.",
+        "이름이나 내용으로 파일을 검색합니다.",
+        "문서 내용을 읽거나 내보냅니다.",
+        "새 파일을 생성합니다.",
+        "기존 파일을 수정합니다."
+      ],
+      "usedBy": [],
+      "examples": ["이 폴더의 문서들을 요약해줘"]
+    },
+    "orchestrate": {
+      "category": "자동화",
+      "summary": "워크플로를 스케줄·트리거로 자동 실행합니다.",
+      "scopes": [
+        "사용 가능한 워크플로 목록을 조회합니다.",
+        "워크플로 실행 상태·기록을 확인합니다.",
+        "워크플로를 실행합니다.",
+        "워크플로 스케줄을 등록·변경합니다."
+      ],
+      "usedBy": [
+        { "kind": "automation", "name": "분기 매출 요약 · 매주 월 08:00" }
+      ],
+      "examples": ["매주 월요일 아침 리포트 자동화를 만들어줘"]
+    },
+    "gmail": {
+      "category": "메일",
+      "summary": "메일을 읽어 요약하거나 임원 보고 메일을 작성·발송합니다. 프로토타입 기본 커넥터예요.",
+      "usedBy": [
+        { "kind": "conversation", "name": "임원 보고 메일 발송" }
+      ],
+      "examples": ["받은 편지함에서 이번 주 중요 메일만 요약해줘", "이 요약으로 임원 보고 메일 초안 만들어줘"]
+    },
+    "mcp-filesystem": {
+      "category": "파일 시스템",
+      "summary": "내 컴퓨터의 지정한 폴더를 읽고 써서 에이전트가 로컬 파일을 다룰 수 있게 합니다.",
+      "usedBy": [
+        { "kind": "skill", "name": "로컬 문서 요약" }
+      ],
+      "examples": ["바탕화면의 마크다운 파일들을 정리해줘"]
+    },
+    "mcp-git": {
+      "category": "버전 관리",
+      "summary": "로컬 저장소의 커밋·diff·로그를 읽어 코드 변경을 설명하거나 요약합니다.",
+      "usedBy": [
+        { "kind": "conversation", "name": "변경사항 리뷰" }
+      ],
+      "examples": ["최근 커밋들의 변경 요약해줘"]
+    },
+    "mcp-sqlite": {
+      "category": "데이터베이스",
+      "summary": "로컬 SQLite 파일을 쿼리해 분석합니다. 연결하면 노출 도구를 확인할 수 있어요.",
+      "usedBy": [],
+      "examples": ["data.db의 테이블 목록을 보여줘"]
+    },
+    "catalog": {
+      "github": { "summary": "이슈·PR·코드를 읽어 변경을 요약하거나 리뷰를 돕습니다.", "examples": ["이 저장소의 열린 PR을 요약해줘"] },
+      "notion": { "summary": "워크스페이스 문서를 검색·요약하고 페이지를 작성합니다.", "examples": ["이번 주 회의 노트를 한 페이지로 정리해줘"] },
+      "linear": { "summary": "이슈·사이클을 읽어 진행 상황을 정리하고 티켓을 생성합니다.", "examples": ["이번 사이클 남은 이슈를 정리해줘"] },
+      "confluence": { "summary": "스페이스 문서를 검색해 답을 찾거나 보고서를 작성합니다.", "examples": ["온보딩 문서를 요약해줘"] },
+      "salesforce": { "summary": "거래·고객 데이터를 조회해 파이프라인을 분석합니다.", "examples": ["이번 분기 파이프라인 상위 거래를 보여줘"] },
+      "hubspot": { "summary": "컨택·딜·캠페인 데이터를 읽어 리포트를 만듭니다.", "examples": ["이번 달 신규 리드 추이를 요약해줘"] },
+      "asana": { "summary": "태스크·프로젝트를 읽어 상태를 정리하고 업무를 만듭니다.", "examples": ["마감 임박한 태스크를 알려줘"] },
+      "dropbox": { "summary": "폴더의 문서를 읽어 요약하거나 결과 파일을 저장합니다.", "examples": ["이 폴더의 PDF들을 한 줄씩 요약해줘"] },
+      "postgres": { "summary": "스키마를 점검하고 읽기 전용 쿼리로 데이터를 분석합니다.", "examples": ["orders 테이블의 최근 추세를 분석해줘"] },
+      "zendesk": { "summary": "티켓을 읽어 이슈를 분류하고 응답 초안을 작성합니다.", "examples": ["오늘 들어온 긴급 티켓을 정리해줘"] }
+    }
   }
 }

@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Icon, Modal, Tag } from '../ui';
-import { CONNECTOR_CATALOG, type CatalogConnector } from '../../lib/learningData';
+import { CONNECTOR_CATALOG, type BadgeCode, type CatalogConnector } from '../../lib/learningData';
 
 /**
  * ConnectorDirectoryModal — "커넥터 둘러보기".
@@ -20,8 +21,8 @@ export interface ConnectorDirectoryModalProps {
   onAdd: (entry: CatalogConnector) => void;
 }
 
-const badgeType = (b: string): React.ComponentProps<typeof Tag>['type'] =>
-  b === '인기' ? 'blue' : b === '추천' ? 'purple' : 'teal';
+const badgeType = (b: BadgeCode): React.ComponentProps<typeof Tag>['type'] =>
+  b === 'popular' ? 'blue' : b === 'recommended' ? 'purple' : 'teal';
 
 export const ConnectorDirectoryModal: React.FC<ConnectorDirectoryModalProps> = ({
   open,
@@ -30,6 +31,7 @@ export const ConnectorDirectoryModal: React.FC<ConnectorDirectoryModalProps> = (
   onAdd,
 }) => {
   const [query, setQuery] = useState('');
+  const { t } = useTranslation('connectors');
 
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -43,7 +45,7 @@ export const ConnectorDirectoryModal: React.FC<ConnectorDirectoryModalProps> = (
   }, [query]);
 
   return (
-    <Modal open={open} onClose={onClose} title="커넥터 둘러보기" size="lg">
+    <Modal open={open} onClose={onClose} title={t('directory.title')} size="lg">
       <div className="space-y-4">
         {/* 검색 */}
         <div className="relative">
@@ -52,7 +54,7 @@ export const ConnectorDirectoryModal: React.FC<ConnectorDirectoryModalProps> = (
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="커넥터 검색…"
+            placeholder={t('directory.searchPlaceholder')}
             autoFocus
             className="w-full h-9 pl-9 pr-3 bg-field-01 text-text-primary text-body-short-01 border border-border-strong-01 rounded-lg outline-none transition-colors focus:border-focus focus:ring-1 focus:ring-focus placeholder:text-text-placeholder"
           />
@@ -61,23 +63,24 @@ export const ConnectorDirectoryModal: React.FC<ConnectorDirectoryModalProps> = (
         {/* 출처 칩 */}
         <div className="flex items-center gap-2">
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-layer-selected-01 border border-border-subtle-01 text-caption-01 font-semibold text-text-primary">
-            <Icon name="bookmark" size={12} /> IBM 및 파트너
+            <Icon name="bookmark" size={12} /> {t('directory.sourceChip')}
           </span>
-          <span className="text-caption-01 text-text-helper">카탈로그 · {results.length}</span>
+          <span className="text-caption-01 text-text-helper">{t('directory.catalogCount', { count: results.length })}</span>
         </div>
 
         {/* 준비 중 안내 — "준비 중" 항목은 미리보기용이라 바로 연결은 안 되고, 커스텀 추가로 안내한다. */}
         {results.some((c) => c.comingSoon) && (
           <p className="text-caption-01 text-text-helper leading-relaxed -mt-1.5">
-            "준비 중" 항목은 아직 바로 연결할 수 없어요. MCP 서버 URL을 알고 있다면{' '}
-            <span className="text-text-secondary font-medium">"커스텀 추가"</span>로 바로 연결해보세요.
+            {t('directory.comingSoonHint')}{' '}
+            <span className="text-text-secondary font-medium">{t('directory.comingSoonCta')}</span>
+            {t('directory.comingSoonSuffix')}
           </p>
         )}
 
         {/* 카드 그리드 */}
         {results.length === 0 ? (
           <div className="py-16 text-center text-body-short-01 text-text-helper">
-            "{query}"에 해당하는 커넥터가 없어요.
+            {t('directory.noResults', { query })}
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -85,11 +88,11 @@ export const ConnectorDirectoryModal: React.FC<ConnectorDirectoryModalProps> = (
               const added = existingIds.includes(c.id);
               const comingSoon = !!c.comingSoon;
               const disabled = added || comingSoon;
-              const title = added
-                ? '이미 추가됨'
+              const btnTitle = added
+                ? t('directory.alreadyAdded')
                 : comingSoon
-                ? 'MVP에서는 아직 바로 연결할 수 없어요 — MCP 서버 URL이 있다면 "커스텀 추가"를 이용하세요'
-                : `${c.name} 추가`;
+                ? t('directory.comingSoonDisabled')
+                : t('directory.addAriaLabel', { name: c.name });
               return (
                 <div
                   key={c.id}
@@ -109,12 +112,12 @@ export const ConnectorDirectoryModal: React.FC<ConnectorDirectoryModalProps> = (
                       <span className="text-body-short-01 font-semibold text-text-primary truncate">{c.name}</span>
                       {comingSoon ? (
                         <Tag type="gray" size="sm">
-                          준비 중
+                          {t('directory.tagComingSoon')}
                         </Tag>
                       ) : (
                         c.badges?.map((b) => (
                           <Tag key={b} type={badgeType(b)} size="sm">
-                            {b}
+                            {t(`badge.${b}`)}
                           </Tag>
                         ))
                       )}
@@ -126,8 +129,8 @@ export const ConnectorDirectoryModal: React.FC<ConnectorDirectoryModalProps> = (
                   <button
                     onClick={() => !disabled && onAdd(c)}
                     disabled={disabled}
-                    title={title}
-                    aria-label={title}
+                    title={btnTitle}
+                    aria-label={btnTitle}
                     className={`absolute top-2.5 right-2.5 w-7 h-7 flex items-center justify-center rounded-lg transition-colors ${
                       added
                         ? 'text-support-success cursor-default'

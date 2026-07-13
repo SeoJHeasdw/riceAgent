@@ -6,6 +6,7 @@
   "conflict": "The request conflicts with the current state.",
   "permission_denied": "You don't have permission to do that.",
   "provider_error": "Failed to reach the model provider.",
+  "provider_unavailable": "AI editing isn't available — no model provider is connected.",
   "workspace": {
     "path_not_absolute": "The save location must be an absolute path.",
     "mkdir_failed": "Couldn't create the save folder: {{detail}}",
@@ -23,6 +24,24 @@
     "validation_failed": "Skill validation failed: {{detail}}",
     "already_exists": "A skill with this name already exists: {{name}}",
     "edit_empty": "The edit instructions are empty.",
-    "edit_unparseable": "Couldn't interpret the AI edit response. Try rephrasing your instructions."
+    "edit_unparseable": "Couldn't interpret the AI edit response. Try rephrasing your instructions.",
+    "patch_target_deleted": "Skill {{skillId}} was deleted, so this proposal (based on v{{expectedVersion}}) can no longer be applied.",
+    "patch_version_mismatch": "Skill {{skillId}} moved from v{{expectedVersion}} to v{{currentVersion}}. This proposal is based on a stale version — please request a new one.",
+    "builtin_immutable": "{{skillId}} is a builtin skill — you can't {{action}} it, only enable or disable.",
+    "builtin_state_invalid": "Builtin skill {{name}} only supports active/archived(inactive) state (got {{state}}).",
+    "invalid_name": "Skill names must be kebab-case (lowercase letters, digits, hyphens, 2-64 chars): {{name}}",
+    "edit_too_long": "The edit instructions are too long ({{length}} chars) — keep it under {{max}} chars.",
+    "body_too_long": "The body is too long ({{length}} chars > max {{max}}) — split it into a shorter procedure."
+  },
+  "plugins": {
+    "builtin_immutable": "Builtin plugin {{name}} can't {{action}} — only enable/disable is allowed.",
+    "missing_connectors": "Plugin {{name}} requires connectors that aren't connected yet: {{missing}}. Connect them first."
+  },
+  "eval": {
+    "no_results": "No eval results found — run the eval harness (python -m eval.runner) first."
+  },
+  "connectors": {
+    "custom_client_id_missing": "{{displayName}} has no OAuth client ID. This server doesn't support dynamic client registration, or registration failed — remove the connector, then re-add it via \"Add custom\" and enter the client ID (and secret, if you have one) manually in advanced settings.",
+    "dynamic_registration_failed": "Couldn't obtain an OAuth client ID from this server — dynamic client registration (RFC 7591) failed or isn't supported. Enter the client ID (and secret, if you have one) manually in advanced settings."
   }
 }

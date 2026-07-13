@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Icon } from './Icon';
 import type { IconName } from './Icon';
 
@@ -27,7 +28,8 @@ export interface OverflowMenuProps {
   label?: string;
 }
 
-export const OverflowMenu: React.FC<OverflowMenuProps> = ({ items, align = 'right', direction = 'down', label = '더보기' }) => {
+export const OverflowMenu: React.FC<OverflowMenuProps> = ({ items, align = 'right', direction = 'down', label }) => {
+  const { t } = useTranslation('common');
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -75,7 +77,7 @@ export const OverflowMenu: React.FC<OverflowMenuProps> = ({ items, align = 'righ
       <button
         ref={triggerRef}
         onClick={() => setOpen((o) => !o)}
-        aria-label={label}
+        aria-label={label ?? t('moreActions')}
         aria-haspopup="menu"
         aria-expanded={open}
         className={`w-7 h-7 flex items-center justify-center rounded-lg transition-colors ${

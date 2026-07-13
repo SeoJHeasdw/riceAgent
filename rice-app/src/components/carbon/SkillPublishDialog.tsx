@@ -1,4 +1,5 @@
 import React, { useId, useMemo, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Button, Icon } from '../ui';
 import { dialogBackdropCls } from '../ui/surfaces';
 import type { Skill, SkillDetail } from '../../lib/learningData';
@@ -19,6 +20,7 @@ export interface SkillPublishDialogProps {
 }
 
 export const SkillPublishDialog: React.FC<SkillPublishDialogProps> = ({ open, skill, detail, onConfirm, onClose }) => {
+  const { t } = useTranslation('skills');
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   useDialogA11y({ open, dialogRef, onClose });
@@ -57,8 +59,8 @@ export const SkillPublishDialog: React.FC<SkillPublishDialogProps> = ({ open, sk
             <Icon name="share" size={16} className="text-purple-60" />
           </span>
           <div className="min-w-0">
-            <h2 id={titleId} className="text-body-short-02 font-semibold text-text-primary">Skill Market에 공개</h2>
-            <p className="text-caption-01 text-text-helper">아래 내용이 마켓에 이렇게 보여요</p>
+            <h2 id={titleId} className="text-body-short-02 font-semibold text-text-primary">{t('publish.title')}</h2>
+            <p className="text-caption-01 text-text-helper">{t('publish.subtitle')}</p>
           </div>
         </div>
 
@@ -76,18 +78,18 @@ export const SkillPublishDialog: React.FC<SkillPublishDialogProps> = ({ open, sk
                     {skill.ver}
                   </span>
                 </div>
-                <div className="text-caption-01 text-text-helper">작성자 · 나</div>
+                <div className="text-caption-01 text-text-helper">{t('publish.authorLabel', { name: t('author.previewAuthorMe') })}</div>
               </div>
             </div>
             <p className="mt-2.5 text-caption-01 text-text-secondary leading-4 line-clamp-2">{detail.summary}</p>
             <div className="mt-2.5 pt-2.5 border-t border-border-subtle-01 flex items-center gap-3 text-caption-01 text-text-helper">
               {!synthesized && (
                 <span className="inline-flex items-center gap-1">
-                  <Icon name="document" size={12} /> 파일 {fileCount}
+                  <Icon name="document" size={12} /> {t('publish.fileCount', { count: fileCount })}
                 </span>
               )}
               <span className="inline-flex items-center gap-1">
-                <Icon name="rule" size={12} /> 규칙 {ruleCount}
+                <Icon name="rule" size={12} /> {t('publish.ruleCount', { count: ruleCount })}
               </span>
             </div>
             {reshareOf && (
@@ -95,7 +97,10 @@ export const SkillPublishDialog: React.FC<SkillPublishDialogProps> = ({ open, sk
                 <Icon name="download" size={12} className="text-link-primary flex-shrink-0" />
                 <span className="text-text-helper">
                   <span className="text-text-secondary font-medium">{reshareOf.author}</span>
-                  {reshareOf.team ? ` · ${reshareOf.team}` : ''} 스킬 기준 재공유 — 원작 표기가 유지돼요
+                  {t('publish.reshareLabel', {
+                    author: '',
+                    team: reshareOf.team ? ` · ${reshareOf.team}` : '',
+                  })}
                 </span>
               </div>
             )}
@@ -106,7 +111,7 @@ export const SkillPublishDialog: React.FC<SkillPublishDialogProps> = ({ open, sk
         <div className="px-5 py-3">
           <div className="flex items-start gap-2 text-caption-01 text-text-secondary leading-4">
             <Icon name="idea" size={14} className="text-icon-primary flex-shrink-0 mt-px" />
-            <span>공개하면 다른 사용자가 설치·사용할 수 있어요. 언제든 마켓에서 다시 내릴 수 있어요.</span>
+            <span>{t('publish.notice')}</span>
           </div>
         </div>
 
@@ -116,10 +121,10 @@ export const SkillPublishDialog: React.FC<SkillPublishDialogProps> = ({ open, sk
             onClick={onClose}
             className="h-7 px-3 rounded-lg text-body-short-01 font-semibold text-text-primary bg-layer-02 border border-border-strong-01 hover:bg-layer-hover-01 transition-colors"
           >
-            취소
+            {t('publish.cancelBtn')}
           </button>
           <Button kind="primary" size="sm" className="!h-7" icon={<Icon name="share" size={14} />} onClick={onConfirm}>
-            Market에 공개
+            {t('publish.confirmBtn')}
           </Button>
         </div>
       </div>

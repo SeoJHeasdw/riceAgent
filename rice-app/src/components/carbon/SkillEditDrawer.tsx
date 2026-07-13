@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Button, ConfirmDialog, Icon } from '../ui';
 import type { Skill, SkillDetail } from '../../lib/learningData';
 import { ownedSkillFiles } from '../../lib/skillBridge';
@@ -15,13 +16,15 @@ import { api } from '../../lib/api';
  * 반복 지시를 위한 것.
  */
 
+type DiffEntry = { t: 'add' | 'remove' | 'ctx'; text: string } | { t: 'collapsed'; count: number };
+
 export interface EditPatch {
   fromVer: string;
   toVer: string;
   /** 한 줄 changelog (= 사용자 지시) */
   changelog: string;
   /** 본문 변경 diff (렌더용) */
-  diff: { t: 'add' | 'remove' | 'ctx'; text: string }[];
+  diff: DiffEntry[];
   /** 승인 시 저장될 대상 파일 전체 (편집 모드에서 수정 가능) */
   proposedBody: string;
   /** 편집 대상 파일 경로 (SKILL.md 또는 번들 내 다른 파일) */
@@ -30,7 +33,15 @@ export interface EditPatch {
   targetLabel: string;
 }
 
-type Msg = { role: 'user' | 'agent'; text: string };
+/**
+ * 에이전트 메시지.
+ * - 번역이 필요한 메시지는 msgKey + msgParams에 stable code를 저장하고 렌더 시 t()로 변환.
+ * - 사용자 발화(role='user')는 text를 그대로 표시한다.
+ */
+type Msg =
+  | { role: 'user'; text: string }
+  | { role: 'agent'; text: string; msgKey?: never; msgParams?: never }
+  | { role: 'agent'; text?: never; msgKey: string; msgParams?: Record<string, unknown> };
 
 const nextVer = (v: string): string => {
   const m = v.match(/\d+/);
@@ -40,7 +51,7 @@ const nextVer = (v: string): string => {
 const isSkillMdPath = (p: string) => p.toLowerCase().endsWith('skill.md');
 
 /** 현재 본문 → 제안 본문의 라인 단위 diff (LCS). 파일이 20k자 상한이라 O(n·m)로 충분. */
-function lineDiff(before: string, after: string): EditPatch['diff'] {
+function lineDiff(before: string, after: string): { t: 'add' | 'remove' | 'ctx'; text: string }[] {
   const a = before.replace(/\s*$/, '').split('\n');
   const b = after.replace(/\s*$/, '').split('\n');
   const n = a.length;
@@ -51,7 +62,7 @@ function lineDiff(before: string, after: string): EditPatch['diff'] {
       dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
     }
   }
-  const out: EditPatch['diff'] = [];
+  const out: { t: 'add' | 'remove' | 'ctx'; text: string }[] = [];
   let i = 0;
   let j = 0;
   while (i < n && j < m) {
@@ -70,17 +81,17 @@ function lineDiff(before: string, after: string): EditPatch['diff'] {
   return out;
 }
 
-/** 변경 주변 pad줄만 남기고 긴 무변경 구간은 "⋯ N줄 ⋯"로 접는다(카드 가독성). */
-function collapseContext(diff: EditPatch['diff'], pad = 3): EditPatch['diff'] {
+/** 변경 주변 pad줄만 남기고 긴 무변경 구간은 collapsed 항목으로 접는다(카드 가독성). */
+function collapseContext(diff: { t: 'add' | 'remove' | 'ctx'; text: string }[], pad = 3): DiffEntry[] {
   const keep = new Array(diff.length).fill(false);
   diff.forEach((d, i) => {
     if (d.t === 'ctx') return;
     for (let k = Math.max(0, i - pad); k <= Math.min(diff.length - 1, i + pad); k++) keep[k] = true;
   });
-  const out: EditPatch['diff'] = [];
+  const out: DiffEntry[] = [];
   let hidden = 0;
   const flush = () => {
-    if (hidden > 0) out.push({ t: 'ctx', text: `⋯ 변경 없는 ${hidden}줄 ⋯` });
+    if (hidden > 0) out.push({ t: 'collapsed', count: hidden });
     hidden = 0;
   };
   for (let i = 0; i < diff.length; i++) {
@@ -93,7 +104,15 @@ function collapseContext(diff: EditPatch['diff'], pad = 3): EditPatch['diff'] {
   return out;
 }
 
-const DiffLine: React.FC<{ line: EditPatch['diff'][number] }> = ({ line }) => {
+const DiffLine: React.FC<{ line: DiffEntry; collapsedLabel: string }> = ({ line, collapsedLabel }) => {
+  if (line.t === 'collapsed') {
+    return (
+      <div className="flex gap-2 px-2.5 py-0.5 text-text-helper border-l-2 border-l-transparent">
+        <span className="select-none opacity-70 w-2 flex-shrink-0 text-center"> </span>
+        <span className="whitespace-pre-wrap break-all">{collapsedLabel}</span>
+      </div>
+    );
+  }
   const gutter = line.t === 'add' ? '+' : line.t === 'remove' ? '−' : ' ';
   const cls =
     line.t === 'add'
@@ -109,8 +128,6 @@ const DiffLine: React.FC<{ line: EditPatch['diff'][number] }> = ({ line }) => {
   );
 };
 
-const SUGGESTIONS = ['출력은 항상 한국어로', '결과 맨 위에 요약 한 줄 추가', '실행 전 확인 단계 추가'];
-
 export const SkillEditDrawer: React.FC<{
   open: boolean;
   skill: Skill;
@@ -121,6 +138,7 @@ export const SkillEditDrawer: React.FC<{
   /** 승인 → 버전++·대상 파일 갱신. editedBody가 있으면 그 본문으로 저장. */
   onApply: (patch: EditPatch, editedBody?: string) => void;
 }> = ({ open, skill, detail, targetPath, onClose, onApply }) => {
+  const { t } = useTranslation('skills');
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState('');
   const [pending, setPending] = useState<EditPatch | null>(null);
@@ -210,24 +228,31 @@ export const SkillEditDrawer: React.FC<{
     const res = await api.proposeSkillEdit(skill.id, {
       targetPath: target?.path ?? 'SKILL.md',
       instruction: text,
-      history,
+      // API는 { role, text: string }[] 를 기대 — msgKey 기반 메시지는 text가 없으므로 필터
+      history: history.map((msg) => ({
+        role: msg.role,
+        text: msg.role === 'user' ? msg.text : (msg.msgKey ? '' : (msg.text ?? '')),
+      })),
     });
     if (seq !== reqSeq.current) return; // 그 사이 대화가 리셋됨 — 늦은 응답 폐기
     setThinking(false);
     if (!res.success || !res.data) {
       const offline = res.code === 'provider_unavailable' || !api.isEnabled;
-      const msg = offline
-        ? 'AI 편집은 런타임이 모델에 연결돼 있어야 해요. 런타임을 켠 뒤 다시 시도해 주세요.'
-        : `제안을 만들지 못했어요${res.error ? ` — ${res.error}` : ''}. 지시를 바꿔 다시 시도해 주세요.`;
-      setMessages((m) => [...m, { role: 'agent', text: msg }]);
+      setMessages((m) => [
+        ...m,
+        {
+          role: 'agent',
+          msgKey: offline ? 'editDrawer.msgOffline' : 'editDrawer.msgFailed',
+        },
+      ]);
       return;
     }
     const d = res.data;
     const diff = collapseContext(lineDiff(d.current_body, d.proposed_body));
-    if (!diff.some((l) => l.t !== 'ctx')) {
+    if (!diff.some((l) => l.t !== 'ctx' && l.t !== 'collapsed')) {
       setMessages((m) => [
         ...m,
-        { role: 'agent', text: '요청을 반영해도 바뀌는 내용이 없었어요. 조금 더 구체적으로 지시해 주세요.' },
+        { role: 'agent', msgKey: 'editDrawer.msgNoChange' },
       ]);
       return;
     }
@@ -242,7 +267,11 @@ export const SkillEditDrawer: React.FC<{
     };
     setMessages((m) => [
       ...m,
-      { role: 'agent', text: `이렇게 바꾸면 다음 실행부터 반영돼요. 검토하고 적용하세요 — ${patch.fromVer} → ${patch.toVer}.` },
+      {
+        role: 'agent',
+        msgKey: 'editDrawer.msgProposed',
+        msgParams: { fromVer: patch.fromVer, toVer: patch.toVer },
+      },
     ]);
     setBody(patch.proposedBody);
     setEditing(false);
@@ -255,17 +284,37 @@ export const SkillEditDrawer: React.FC<{
     onApply(pending, edited ? body : undefined);
     setMessages((m) => [
       ...m,
-      { role: 'agent', text: `${pending.toVer}로 적용했어요${edited ? ' (편집 반영)' : ''}. 이전 버전은 히스토리에 보관됐어요.` },
+      {
+        role: 'agent',
+        msgKey: edited ? 'editDrawer.msgAppliedEdited' : 'editDrawer.msgApplied',
+        msgParams: { ver: pending.toVer },
+      },
     ]);
     setPending(null);
     setEditing(false);
   };
 
   const dismiss = () => {
-    setMessages((m) => [...m, { role: 'agent', text: '제안을 취소했어요. 다시 지시해 주세요.' }]);
+    setMessages((m) => [...m, { role: 'agent', msgKey: 'editDrawer.msgDismissed' }]);
     setPending(null);
     setEditing(false);
   };
+
+  /** 에이전트 메시지를 현재 언어로 렌더한다. */
+  const renderAgentMsg = (msg: Msg): string => {
+    if (msg.role !== 'agent') return '';
+    if (msg.msgKey) {
+      // 동적 키 — skills 네임스페이스의 editDrawer 하위 키
+      return (t as unknown as (k: string, params?: Record<string, unknown>) => string)(msg.msgKey, msg.msgParams);
+    }
+    return msg.text ?? '';
+  };
+
+  const suggestions = [
+    t('editDrawer.suggestion0'),
+    t('editDrawer.suggestion1'),
+    t('editDrawer.suggestion2'),
+  ];
 
   return (
     <div className="fixed inset-0 z-[60] flex">
@@ -281,14 +330,14 @@ export const SkillEditDrawer: React.FC<{
             <Icon name="sparkle" size={17} className="text-blue-30" />
           </div>
           <div className="flex-1 min-w-0">
-            <div className="text-body-short-02 font-semibold text-text-primary">AI로 스킬 수정</div>
+            <div className="text-body-short-02 font-semibold text-text-primary">{t('editDrawer.title')}</div>
             <div className="text-caption-01 text-text-helper truncate">
-              {skill.name} · 제안 확인 후 {skill.ver}의 다음 버전으로 저장
+              {t('editDrawer.subtitle', { ver: skill.ver })}
             </div>
           </div>
           <button
             onClick={requestClose}
-            aria-label="닫기"
+            aria-label={t('editDrawer.closeAriaLabel')}
             className="w-7 h-7 flex items-center justify-center rounded-md text-icon-secondary hover:bg-layer-hover-01 hover:text-text-primary transition-colors flex-shrink-0"
           >
             <Icon name="close" size={16} />
@@ -296,7 +345,7 @@ export const SkillEditDrawer: React.FC<{
           </div>
 
           <label className="mt-4 block">
-            <span className="mb-1.5 block text-caption-01 font-semibold text-text-secondary">수정할 파일</span>
+            <span className="mb-1.5 block text-caption-01 font-semibold text-text-secondary">{t('editDrawer.targetFileLabel')}</span>
             <div className="relative">
               <Icon name="document" size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-icon-secondary" />
               <select
@@ -314,7 +363,7 @@ export const SkillEditDrawer: React.FC<{
               >
                 {files.map((file) => (
                   <option key={file.path} value={file.path}>
-                    {file.path}{isSkillMdPath(file.path) ? ' — 핵심 지침' : ''}
+                    {file.path}{isSkillMdPath(file.path) ? t('editDrawer.coreInstructionSuffix') : ''}
                   </option>
                 ))}
               </select>
@@ -331,9 +380,16 @@ export const SkillEditDrawer: React.FC<{
                 <Icon name="idea" size={15} className="text-icon-primary flex-shrink-0 mt-0.5" />
                 <div className="text-caption-01 text-text-secondary leading-5">
                   {targetIsSkillMd ? (
-                    <>스킬이 언제 어떻게 행동해야 하는지 자연어로 알려주세요. AI 제안을 <span className="text-text-primary font-semibold">변경 내용으로 검토한 뒤 적용</span>하면 새 버전으로 안전하게 저장돼요.</>
+                    <>
+                      {t('editDrawer.hintSkillMdPlain')}{' '}
+                      <span className="text-text-primary font-semibold">{t('editDrawer.hintSkillMdEmphasis')}</span>{' '}
+                      {t('editDrawer.hintSkillMdSuffix')}
+                    </>
                   ) : (
-                    <><span className="font-mono text-text-secondary">{targetFile?.path}</span>가 어떤 역할을 해야 하는지 알려주세요. 다른 파일은 그대로 두고 이 파일의 변경만 먼저 검토할 수 있어요.</>
+                    <>
+                      <span className="font-mono text-text-secondary">{targetFile?.path}</span>
+                      {t('editDrawer.hintFilePlain')}
+                    </>
                   )}
                 </div>
               </div>
@@ -348,7 +404,7 @@ export const SkillEditDrawer: React.FC<{
             ) : (
               <div key={i} className="self-start max-w-[90%] text-body-short-01 text-text-secondary leading-5 flex items-start gap-2">
                 <Icon name="skill" size={15} className="text-icon-primary flex-shrink-0 mt-0.5" />
-                <span>{m.text}</span>
+                <span>{renderAgentMsg(m)}</span>
               </div>
             ),
           )}
@@ -358,7 +414,7 @@ export const SkillEditDrawer: React.FC<{
             <div className="self-start max-w-[90%] text-body-short-01 text-text-helper leading-5 flex items-center gap-2">
               <Icon name="sparkle" size={15} className="text-blue-30 flex-shrink-0 animate-pulse" />
               <span className="inline-flex items-center gap-1">
-                변경 내용을 만드는 중이에요
+                {t('editDrawer.thinking')}
                 <span className="inline-flex gap-0.5">
                   <span className="w-1 h-1 rounded-full bg-icon-secondary animate-bounce" style={{ animationDelay: '0ms' }} />
                   <span className="w-1 h-1 rounded-full bg-icon-secondary animate-bounce" style={{ animationDelay: '150ms' }} />
@@ -374,7 +430,7 @@ export const SkillEditDrawer: React.FC<{
               <div className="flex items-center gap-2 px-3.5 py-2.5 border-b border-border-subtle-01">
                 <Icon name="renew" size={14} className="text-blue-40 flex-shrink-0" />
                 <div className="min-w-0">
-                  <div className="text-body-short-01 font-semibold text-text-primary">변경 제안</div>
+                  <div className="text-body-short-01 font-semibold text-text-primary">{t('editDrawer.patchCardTitle')}</div>
                   <div className="truncate font-mono text-label-micro text-text-helper">{pending.targetPath}</div>
                 </div>
                 <span className="ml-auto inline-flex items-center gap-1.5 font-mono text-caption-01">
@@ -393,13 +449,15 @@ export const SkillEditDrawer: React.FC<{
               <div className="m-3.5 border border-border-subtle-01 rounded-lg overflow-hidden bg-layer-01">
                 <div className="px-3 py-1.5 border-b border-border-subtle-01 flex items-center gap-1.5">
                   <Icon name="renew" size={12} className="text-icon-secondary opacity-70" />
-                  <span className="text-caption-01 font-semibold text-text-secondary">{editing ? `${pending.targetLabel} 직접 조정` : '바뀌는 내용'}</span>
+                  <span className="text-caption-01 font-semibold text-text-secondary">
+                    {editing ? t('editDrawer.patchEditLabel', { targetLabel: pending.targetLabel }) : t('editDrawer.patchDiffLabel')}
+                  </span>
                   <button
                     onClick={() => setEditing((e) => !e)}
                     className="ml-auto text-caption-01 text-link-primary hover:underline inline-flex items-center gap-1"
                   >
                     <Icon name={editing ? 'view' : 'edit'} size={12} />
-                    {editing ? '변경 보기' : '직접 조정'}
+                    {editing ? t('editDrawer.patchViewBtn') : t('editDrawer.patchEditBtn')}
                   </button>
                 </div>
                 {editing ? (
@@ -412,8 +470,12 @@ export const SkillEditDrawer: React.FC<{
                   />
                 ) : (
                   <div className="py-1 text-label-micro font-mono leading-[18px] max-h-[300px] overflow-y-auto">
-                    {pending.diff.map((line, i) => (
-                      <DiffLine key={i} line={line} />
+                    {(pending.diff as DiffEntry[]).map((line, i) => (
+                      <DiffLine
+                        key={i}
+                        line={line}
+                        collapsedLabel={line.t === 'collapsed' ? t('editDrawer.contextCollapsed', { count: line.count }) : ''}
+                      />
                     ))}
                   </div>
                 )}
@@ -421,11 +483,11 @@ export const SkillEditDrawer: React.FC<{
 
               <div className="flex items-center gap-2 px-3.5 pb-3.5">
                 <Button kind="ghost" size="sm" onClick={dismiss}>
-                  제안 버리기
+                  {t('editDrawer.dismissBtn')}
                 </Button>
                 <div className="flex-1" />
                 <Button kind="primary" size="sm" icon={<Icon name="check" size={14} />} onClick={apply}>
-                  {editing && body !== pending.proposedBody ? '조정한 내용 적용' : '변경 적용'}
+                  {editing && body !== pending.proposedBody ? t('editDrawer.applyEditedBtn') : t('editDrawer.applyBtn')}
                 </Button>
               </div>
             </div>
@@ -436,7 +498,7 @@ export const SkillEditDrawer: React.FC<{
         <div className="flex-shrink-0 border-t border-border-subtle-01 px-4 py-3">
           {messages.length === 0 && !pending && targetIsSkillMd && (
             <div className="flex flex-wrap gap-1.5 mb-2.5">
-              {SUGGESTIONS.map((s) => (
+              {suggestions.map((s) => (
                 <button
                   key={s}
                   onClick={() => setInput(s)}
@@ -457,13 +519,21 @@ export const SkillEditDrawer: React.FC<{
                   void propose();
                 }
               }}
-              placeholder={pending ? '먼저 위 제안을 적용하거나 버려주세요' : thinking ? '변경 내용을 만드는 중이에요…' : targetIsSkillMd ? '원하는 동작을 설명해 주세요… (예: 결과는 항상 한국어로 요약해줘)' : `${targetName}에서 무엇을 바꿀까요?`}
+              placeholder={
+                pending
+                  ? t('editDrawer.placeholderPending')
+                  : thinking
+                    ? t('editDrawer.placeholderThinking')
+                    : targetIsSkillMd
+                      ? t('editDrawer.placeholderSkillMd')
+                      : t('editDrawer.placeholderFile', { name: targetName })
+              }
               disabled={!!pending || thinking}
               rows={2}
               className="flex-1 resize-none rounded-lg border border-border-subtle-01 bg-background px-3 py-2 text-body-short-01 text-text-primary placeholder:text-text-helper outline-none focus:ring-1 focus:ring-focus disabled:opacity-50"
             />
             <Button kind="primary" size="sm" icon={<Icon name="send" size={14} />} onClick={() => void propose()} disabled={!input.trim() || !!pending || thinking}>
-              변경 제안
+              {t('editDrawer.proposeBtn')}
             </Button>
           </div>
         </div>
@@ -472,10 +542,10 @@ export const SkillEditDrawer: React.FC<{
       <ConfirmDialog
         open={confirmLeaveOpen}
         tone="danger"
-        title="AI 답변을 기다리지 않고 나갈까요?"
-        description="지금 나가면 AI가 준비하고 있는 변경 내용이 사라져요."
-        cancelLabel="계속 기다리기"
-        confirmLabel="나가기"
+        title={t('editDrawer.leaveTitle')}
+        description={t('editDrawer.leaveDesc')}
+        cancelLabel={t('editDrawer.leaveCancelBtn')}
+        confirmLabel={t('editDrawer.leaveConfirmBtn')}
         confirmIcon="close"
         stackingClassName="z-[70]"
         onClose={() => setConfirmLeaveOpen(false)}

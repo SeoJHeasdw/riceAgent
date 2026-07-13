@@ -31,7 +31,12 @@ const translate = i18n.t.bind(i18n) as unknown as (
 /**
  * 에러 봉투를 지역화 문자열로. 매핑 우선순위:
  *   1) errors:<code>  (있으면 params 로 보간)
- *   2) errors:unknown (dev 메시지를 defaultValue 로)
+ *   2) err.error      (code가 없거나 카탈로그에 없는 미분류 에러 — 최후 폴백, 미번역 dev 문구)
+ *   3) errors:unknown (그마저도 없으면 완전 제네릭 문구)
+ *
+ * 주의: i18next의 `{ defaultValue }`는 대상 키가 **존재하지 않을 때만** 쓰인다.
+ * `errors:unknown`은 항상 존재하는 키라 `t('errors:unknown', { defaultValue: ... })`로는
+ * 절대 defaultValue가 나오지 않는다 — 그래서 폴백을 아래처럼 직접 분기한다.
  */
 export function apiErrorMessage(err: BackendError | null | undefined): string {
   const code = err?.code;
@@ -40,5 +45,8 @@ export function apiErrorMessage(err: BackendError | null | undefined): string {
   if (code && i18n.exists(`errors:${code}`)) {
     return translate(`errors:${code}`, params);
   }
-  return translate('errors:unknown', { defaultValue: err?.error ?? undefined });
+  if (err?.error) {
+    return err.error;
+  }
+  return translate('errors:unknown');
 }

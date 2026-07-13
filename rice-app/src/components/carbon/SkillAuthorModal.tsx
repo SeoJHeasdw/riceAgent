@@ -143,33 +143,37 @@ export const SkillAuthorModal: React.FC<SkillAuthorModalProps> = ({
     }
   }, [open]);
 
-  // 기본 정보로부터 자동 생성되는 SKILL.md 템플릿 (모델용 프롬프트 — 번역 대상 아님)
+  // 기본 정보로부터 자동 생성되는 SKILL.md 템플릿.
+  // 구조(헤더·플레이스홀더)는 우리 UI가 정적으로 박아 넣는 텍스트라 현재 UI 언어를
+  // 따라야 한다 — 모델이 스스로 언어를 고르는 "대화 언어를 따르라" 류의 자유생성
+  // 프롬프트(title 등)와는 다르다. 안 그러면 영문 UI에서 작성해도 헤더만 한글로
+  // 박혀 모델이 매번 읽는 SKILL.md의 언어가 뒤섞인다.
   const generatedDef = useMemo(() => {
     const slug = slugify(name) || 'my-skill';
     const tagBlock = tags.length
       ? tags.map((tag) => `- ${tag}`).join('\n')
-      : '- 어떤 상황에서 이 스킬을 쓰면 좋은지 적어주세요.';
+      : t('author.template.tagPlaceholder');
     return `---
 name: ${slug}
-description: ${description.trim() || '한 줄 설명을 적어주세요.'}
+description: ${description.trim() || t('author.template.descriptionPlaceholder')}
 version: ${version.trim() || '1.0.0'}
 ---
 
-# ${name.trim() || '스킬 이름'}
+# ${name.trim() || t('author.template.namePlaceholder')}
 
-${description.trim() || '이 스킬이 무엇을 하는지 설명하세요.'}
+${description.trim() || t('author.template.bodyPlaceholder')}
 
-## 사용 시점
+${t('author.template.whenToUseHeading')}
 
 ${tagBlock}
 
-## 동작 방식
+${t('author.template.howItWorksHeading')}
 
-1. 필요한 입력을 모읍니다.
-2. 작업을 단계별로 수행합니다.
-3. 결과를 검토하고 다듬습니다.
+${t('author.template.defaultStep1')}
+${t('author.template.defaultStep2')}
+${t('author.template.defaultStep3')}
 `;
-  }, [name, description, version, tags]);
+  }, [name, description, version, tags, t]);
 
   // 실제로 게시될 본문
   const effectiveDef = defTouched ? definition : generatedDef;

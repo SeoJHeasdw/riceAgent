@@ -98,7 +98,9 @@ class BuiltinSkillCatalog:
             raise ValidationError(f"unknown builtin skill: {name!r}")
         if state not in _ALLOWED_SETTABLE:
             raise ValidationError(
-                f"빌트인 스킬 '{name}'은(는) 활성(active)/비활성(archived/inactive)만 전환할 수 있습니다 (got {state!r})."
+                f"builtin skill {name!r} only supports active/archived(inactive) state (got {state!r})",
+                code="skill.builtin_state_invalid",
+                params={"name": name, "state": state},
             )
         normalized = "archived" if state == "inactive" else state
         states = self._states()

@@ -199,25 +199,29 @@ class TestScreenProposals:
 class TestFinalGate:
     def test_apply_patch_creation_fail_closed(self):
         svc = _service()
-        with pytest.raises(ValidationError, match="검증 실패"):
+        with pytest.raises(ValidationError) as exc_info:
             svc.apply_patch("gate-sk", approved=True, proposed_body="1. run\n```sh\ntrunc")
+        assert exc_info.value.code == "skill.validation_failed"
         assert svc.get_skill("gate-sk") is None
 
     def test_apply_patch_user_edited_body_also_gated(self):
         """카드에서 사용자가 직접 고친 본문(edited_body)이 무결성을 깨면 역시 차단."""
         svc = _service()
         svc.create_skill(name="edit-sk", body=_GOOD_BODY)
-        with pytest.raises(ValidationError, match="검증 실패"):
+        with pytest.raises(ValidationError) as exc_info:
             svc.apply_patch("edit-sk", approved=True, edited_body="---\nname: edit-sk\n---\n1. pasted whole file")
+        assert exc_info.value.code == "skill.validation_failed"
 
     def test_update_skill_fail_closed(self):
         svc = _service()
         svc.create_skill(name="upd-sk", body=_GOOD_BODY)
-        with pytest.raises(ValidationError, match="검증 실패"):
+        with pytest.raises(ValidationError) as exc_info:
             svc.update_skill("upd-sk", body="```\nbroken fence body")
+        assert exc_info.value.code == "skill.validation_failed"
         assert "gather the inputs" in svc.get_skill("upd-sk").body  # 원본 무손상
 
     def test_create_skill_fail_closed(self):
         svc = _service()
-        with pytest.raises(ValidationError, match="검증 실패"):
+        with pytest.raises(ValidationError) as exc_info:
             svc.create_skill(name="new-sk", body="x")
+        assert exc_info.value.code == "skill.validation_failed"

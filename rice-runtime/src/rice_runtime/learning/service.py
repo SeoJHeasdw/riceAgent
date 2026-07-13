@@ -856,7 +856,9 @@ class LearningService(ILearningService):
             if expected_version not in (None, 0):
                 # 제안은 기존 스킬 vN의 patch였는데 그 스킬이 사라졌다 — 적용 불가.
                 raise ConflictError(
-                    f"스킬 '{skill_id}'이(가) 삭제되어 v{expected_version} 기준 제안을 적용할 수 없습니다."
+                    f"skill {skill_id!r} was deleted; cannot apply proposal based on v{expected_version}",
+                    code="skill.patch_target_deleted",
+                    params={"skillId": skill_id, "expectedVersion": expected_version},
                 )
             new_body = edited_body if edited_body is not None else proposed_body
             if new_body is None:
@@ -894,8 +896,14 @@ class LearningService(ILearningService):
             # 스킬은 존재하지만 제안이 만들어진 이후 버전이 움직였다(다른 제안 승인,
             # 직접 편집, rollback 등). 그대로 쓰면 그 변경을 덮어쓴다 — rebase 필요.
             raise ConflictError(
-                f"스킬 '{skill_id}'이(가) v{expected_version} → v{current.version}(으)로 변경되었습니다. "
-                "이 제안은 이전 버전 기준이라 적용할 수 없습니다 — 새로 제안을 받아주세요."
+                f"skill {skill_id!r} moved from v{expected_version} to v{current.version}; "
+                "this proposal is based on a stale version",
+                code="skill.patch_version_mismatch",
+                params={
+                    "skillId": skill_id,
+                    "expectedVersion": expected_version,
+                    "currentVersion": current.version,
+                },
             )
 
         # ① 현재 본문 history로 보관
@@ -994,7 +1002,11 @@ class LearningService(ILearningService):
                 origin="apply",
                 detail=report.to_detail(),
             )
-            raise ValidationError(f"스킬 검증 실패: {report.failure_text()}")
+            raise ValidationError(
+                f"skill validation failed: {report.failure_text()}",
+                code="skill.validation_failed",
+                params={"detail": report.failure_text()},
+            )
 
     def _screen_proposals(
         self,
@@ -1498,7 +1510,9 @@ class LearningService(ILearningService):
         우회할 수 없다."""
         if self._builtin_skills.is_builtin(skill_id):
             raise ValidationError(
-                f"'{skill_id}'은(는) 빌트인 스킬입니다 — {action}할 수 없고 활성/비활성 전환만 가능합니다."
+                f"{skill_id!r} is a builtin skill — cannot {action}, only enable/disable is allowed",
+                code="skill.builtin_immutable",
+                params={"skillId": skill_id, "action": action},
             )
 
     def list_skills(self) -> list[SkillSummary]:
@@ -1578,12 +1592,18 @@ class LearningService(ILearningService):
         """사용자 직접 스킬 생성 (POST /skills, CONTRACTS §1.3)."""
         if not skill_guard.VALID_SKILL_NAME.match(name):
             raise ValidationError(
-                f"스킬 이름은 kebab-case(소문자/숫자/하이픈, 2~64자)여야 합니다: {name!r}"
+                f"skill name must be kebab-case (lowercase/digits/hyphens, 2-64 chars): {name!r}",
+                code="skill.invalid_name",
+                params={"name": name},
             )
         self._ensure_not_builtin(name, "같은 이름으로 생성")
         try:
             self._skill_store.read(name)
-            raise ValidationError(f"이미 존재하는 스킬입니다: {name!r}")
+            raise ValidationError(
+                f"skill already exists: {name!r}",
+                code="skill.already_exists",
+                params={"name": name},
+            )
         except NotFoundError:
             pass
 
@@ -1861,10 +1881,13 @@ class LearningService(ILearningService):
         self._ensure_not_builtin(skill_id, "AI 편집")
         instruction = (instruction or "").strip()
         if not instruction:
-            raise ValidationError("편집 지시가 비어 있습니다")
+            raise ValidationError("edit instruction is empty", code="skill.edit_empty")
         if len(instruction) > SKILL_EDIT_INSTRUCTION_MAX_CHARS:
             raise ValidationError(
-                f"편집 지시가 너무 깁니다 ({len(instruction)}자) — {SKILL_EDIT_INSTRUCTION_MAX_CHARS}자 이내로 줄여주세요"
+                f"edit instruction too long ({len(instruction)} chars) — "
+                f"keep it under {SKILL_EDIT_INSTRUCTION_MAX_CHARS} chars",
+                code="skill.edit_too_long",
+                params={"length": len(instruction), "max": SKILL_EDIT_INSTRUCTION_MAX_CHARS},
             )
 
         skill = self._read_any_skill(skill_id)
@@ -1943,7 +1966,10 @@ class LearningService(ILearningService):
             log.warning(
                 "skill edit returned unusable output for %s (%d chars)", skill_id, len(raw)
             )
-            raise ValidationError("AI 편집 응답을 해석하지 못했어요. 지시를 바꿔 다시 시도해 주세요.")
+            raise ValidationError(
+                "could not parse the AI edit response — try rephrasing your instruction",
+                code="skill.edit_unparseable",
+            )
 
         changelog = str(data.get("changelog") or "").strip() or instruction
         self._ledger.record(

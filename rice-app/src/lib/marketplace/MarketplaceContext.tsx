@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import { Skill, Plugin } from '../types';
 import { installedPluginId, installedSkillId, platformArtifactToSkill, platformArtifactToPlugin } from '../skillBridge';
 import { platform, api } from '../api';
+import i18n from '../i18n';
 
 /**
  * MarketplaceContext — single source of truth for the skill/plugin market,
@@ -297,7 +298,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
       name: draft.name.trim(),
       description: draft.description.trim(),
       version: draft.version.trim() || '1.0.0',
-      author: '나',
+      author: i18n.t('common:me'),
       team: draft.team?.trim() || undefined,
       category: draft.category,
       tags: draft.tags,

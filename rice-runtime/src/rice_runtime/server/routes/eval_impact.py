@@ -54,5 +54,6 @@ async def impact(c: Container = Depends(get_container)):
             continue  # 손상/경합 — 다음 후보로 (fail-safe)
         return {"success": True, "data": report}
     raise NotFoundError(
-        "eval 결과가 없습니다 — eval harness(python -m eval.runner)를 먼저 실행하세요."
+        "no eval results found — run the eval harness (python -m eval.runner) first",
+        code="eval.no_results",
     )

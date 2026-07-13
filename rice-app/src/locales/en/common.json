@@ -8,5 +8,50 @@
   "save": "Save",
   "delete": "Delete",
   "edit": "Edit",
-  "retry": "Retry"
+  "retry": "Retry",
+  "me": "Me",
+  "dialog": "Dialog",
+  "closeDialog": "Close dialog",
+  "mainMenu": "Main menu",
+  "moreActions": "More actions",
+  "statusToggle": "Toggle status",
+  "commandPalette": {
+    "ariaLabel": "Command palette",
+    "searchPlaceholder": "Search navigation, skills, quick actions…",
+    "noResults": "No results found",
+    "groupActions": "Quick actions",
+    "groupNav": "Navigate",
+    "groupSkills": "Run skill",
+    "footerNavigate": "navigate",
+    "footerExecute": "execute",
+    "footerToggle": "open/close",
+    "actionNewChat": "Start new chat",
+    "actionNewChatSub": "End current conversation and start fresh",
+    "actionNewChatKeywords": "new chat start",
+    "actionReplayTour": "Replay guide tour",
+    "actionReplayTourSub": "Bubble tour of key features",
+    "actionReplayTourKeywords": "tour guide",
+    "actionReplayOnboarding": "Replay model onboarding",
+    "actionReplayOnboardingSub": "Re-configure run location and model",
+    "actionReplayOnboardingKeywords": "onboarding model settings",
+    "skillUses": "{{count}} uses"
+  },
+  "languageSelect": {
+    "continueButton": "Continue in English",
+    "welcome": "Welcome",
+    "heading": "Choose your language",
+    "description": "Select the language you want to use with RICE.",
+    "footer": "You can change this anytime in settings"
+  },
+  "markdown": {
+    "codeCopy": "Copy",
+    "codeCopied": "Copied",
+    "codeAriaLabel": "Copy code",
+    "fileOpenTitle": "Open file · {{path}}",
+    "tableBuilding": "Building table…"
+  },
+  "fileViewer": {
+    "openedSuccess": "Opened with default app · {{path}}",
+    "openFailed": "Could not open file"
+  }
 }

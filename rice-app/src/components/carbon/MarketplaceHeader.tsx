@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 
 /**
  * MarketplaceHeader - Header for marketplace screens with search, sort, and filters
@@ -29,6 +30,8 @@ export const MarketplaceHeader: React.FC<MarketplaceHeaderProps> = ({
   selectedTags = [],
   onTagToggle,
 }) => {
+  const { t } = useTranslation('connectors');
+
   return (
     <div className="px-8 pt-7 pb-1">
       {/* Title and subtitle */}
@@ -53,17 +56,17 @@ export const MarketplaceHeader: React.FC<MarketplaceHeaderProps> = ({
           </svg>
           <input
             type="text"
-            aria-label={`${title} 검색`}
+            aria-label={t('marketplaceHeader.searchAriaLabel', { title })}
             value={searchValue}
             onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="검색"
+            placeholder={t('marketplaceHeader.searchPlaceholder')}
             className="flex-1 min-w-0 bg-transparent border-0 outline-none text-text-primary text-body-short-01 placeholder:text-text-placeholder"
           />
           {searchValue && (
             <button
               onClick={() => onSearchChange('')}
               className="p-0.5 rounded hover:bg-layer-hover-01 transition-colors"
-              aria-label="검색어 지우기"
+              aria-label={t('marketplaceHeader.clearSearch')}
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="text-icon-secondary">
                 <path d="M18 6 6 18M6 6l12 12" />
@@ -73,7 +76,7 @@ export const MarketplaceHeader: React.FC<MarketplaceHeaderProps> = ({
         </div>
 
         {/* Sort — segmented control */}
-        <div role="group" aria-label="정렬 기준" className="ml-auto flex items-center gap-0.5 p-1 bg-field-01 border border-border-subtle-01 rounded-xl">
+        <div role="group" aria-label={t('marketplaceHeader.sortAriaLabel')} className="ml-auto flex items-center gap-0.5 p-1 bg-field-01 border border-border-subtle-01 rounded-xl">
           {sortOptions.map((option) => {
             const isActive = sortValue === option.value;
             return (
@@ -96,7 +99,7 @@ export const MarketplaceHeader: React.FC<MarketplaceHeaderProps> = ({
 
       {/* Filter tags */}
       {filterTags && filterTags.length > 0 && onTagToggle && (
-        <div role="group" aria-label="태그 필터" className="flex flex-wrap gap-2 mt-4">
+        <div role="group" aria-label={t('marketplaceHeader.tagFilterAriaLabel')} className="flex flex-wrap gap-2 mt-4">
           {filterTags.map((tag) => {
             const isSelected = selectedTags.includes(tag);
             return (

@@ -44,6 +44,24 @@ function renderUpdated(updated: string, t: ReturnType<typeof useTranslation<'plu
   }
 }
 
+/**
+ * plugin.source stable code → 번역 문자열.
+ * 'plugin_source_market:<provider>' — "Plugin Market · <provider>"
+ * 'plugin_source_builtin'           — 앱 기본 내장
+ * 'plugin_source_runtime'           — 런타임 설치
+ * 레거시 자유 문자열은 그대로 반환한다.
+ */
+function renderSource(source: string, t: ReturnType<typeof useTranslation<'plugins'>>['t']): string {
+  if (source.startsWith('plugin_source_market:')) {
+    const provider = source.slice('plugin_source_market:'.length);
+    return t('myPlugins.sourceMarket', { provider });
+  }
+  if (source === 'plugin_source_builtin') return t('myPlugins.sourceBuiltin');
+  if (source === 'plugin_source_runtime') return t('myPlugins.sourceRuntime');
+  // 레거시 자유 문자열 폴백
+  return source;
+}
+
 const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) => {
   const navigate = useNavigate();
   const { t } = useTranslation('plugins');
@@ -91,7 +109,7 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
     plugin.update && patch((x) => ({ ...x, update: undefined, version: plugin.update!.version, updated: 'plugin_updated_just_installed' }));
 
   const meta: [string, string][] = [
-    [t('myPlugins.metaSource'),   plugin.source],
+    [t('myPlugins.metaSource'),   renderSource(plugin.source, t)],
     [t('myPlugins.metaVersion'),  plugin.version],
     [t('myPlugins.metaAuthor'),   plugin.author],
     [t('myPlugins.metaUpdated'),  renderUpdated(plugin.updated, t)],

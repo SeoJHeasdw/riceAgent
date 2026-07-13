@@ -56,5 +56,99 @@
     "reset": "Reset all settings",
     "resetDesc": "Restore every setting to its default value",
     "resetButton": "Reset"
+  },
+
+  "modelPicker": {
+    "runLocation": "Run location",
+    "saasCaption": "Cloud API",
+    "localCaption": "Ollama · on-device",
+    "sectionModel": "Model",
+    "addModel": "Add model",
+    "emptyTitle": "No models registered",
+    "emptyDesc": "Use \"Add model\" to register an API model and key",
+    "unregister": "Unregister",
+    "ollamaEndpointLabel": "Ollama endpoint",
+    "btnTestConn": "Test connection",
+    "connOk": "Connected · Ollama responding normally",
+    "connFail": "Connection failed · check your endpoint",
+    "localPreTitle": "Models not yet checked",
+    "localPreDesc": "Loads the model list from your local Ollama",
+    "btnFetchModels": "Check local models",
+    "localEmptyTitle": "No models installed",
+    "localEmptyDesc_pre": "Run <code>ollama pull &lt;model-name&gt;</code> to install a model, then check again",
+    "btnRefetch": "Check again",
+    "installedModels": "Installed models ({{count}})",
+    "btnRefresh": "Refresh",
+    "titleRefresh": "Refresh",
+    "params": {
+      "title": "Response settings",
+      "temperatureLabel": "Creativity (Temperature)",
+      "temperatureLow": "Precise",
+      "temperatureHigh": "Creative",
+      "showThinkingLabel": "Show Thinking",
+      "showThinkingDesc": "Show the local model's reasoning trace in the conversation"
+    },
+    "toast": {
+      "fetchingModels": "Checking local models",
+      "modelsFound": "{{count}} models found",
+      "ollamaConnectFail": "Can't connect to Ollama",
+      "connTestLabel": "Testing connection",
+      "connTestEndpoint": "endpoint",
+      "connOk": "Connection successful",
+      "connFail": "Connection failed"
+    }
+  },
+
+  "modelRegister": {
+    "title": "Register Model",
+    "cancel": "Cancel",
+    "register": "Register",
+    "testBtn": "Test Connection",
+    "testingBtn": "Testing…",
+    "retestBtn": "Retest",
+    "providerLabel": "Provider",
+    "modelIdLabel": "Model ID",
+    "modelIdPlaceholder": "Enter model identifier",
+    "projectIdLabel": "project_id",
+    "projectIdPlaceholder": "watsonx Project ID",
+    "apiKeyLabel": "API Key",
+    "showKey": "Show key",
+    "hideKey": "Hide key",
+    "testingInline": "Checking connection…",
+    "testOk": "Connected · You can now register",
+    "testFailPrefix": "Check your key format (must start with {{prefix}})",
+    "testFailGeneric": "Connection failed · please check your key",
+    "gatePrimary": "Pass the 'Test Connection' first",
+    "gateSecondary": "Enter a model ID and API key, then run the connection test",
+    "storageNote": "API keys are stored <device>on this device only</device> and are never sent to external servers.",
+    "storageNoteDb": "Stored in plain text in the local database (state.db).",
+    "toastConnecting": "Checking connection",
+    "toastConnOk": "Connection successful",
+    "toastConnFail": "Connection failed",
+    "providers": {
+      "openai": {
+        "baseUrlLabel": "Base URL (optional)",
+        "baseUrlPlaceholder": "https://api.openai.com/v1",
+        "keyPlaceholder": "sk-...",
+        "keyLabel": "API Key"
+      },
+      "anthropic": {
+        "keyPlaceholder": "sk-ant-...",
+        "keyLabel": "API Key"
+      },
+      "watsonx": {
+        "keyLabel": "IBM Cloud API Key",
+        "keyPlaceholder": "IBM Cloud API Key",
+        "baseUrlLabel": "Regional endpoint",
+        "baseUrlPlaceholder": "https://us-south.ml.cloud.ibm.com"
+      },
+      "custom": {
+        "label": "OpenAI-compatible (Custom)",
+        "keyPlaceholder": "Enter API key",
+        "baseUrlLabel": "Base URL",
+        "baseUrlPlaceholder": "https://my-gateway/v1",
+        "keyLabel": "API Key"
+      }
+    }
   }
 }

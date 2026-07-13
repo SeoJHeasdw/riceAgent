@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
+import { useI18n } from '../../lib/i18n/I18nContext';
 import { Button, Icon, Tag } from '../ui';
 import type { ImpactReport, ImpactMetricSet } from '../../lib/types';
 
@@ -13,6 +15,12 @@ import type { ImpactReport, ImpactMetricSet } from '../../lib/types';
 const roundPct = (v: number) => Math.round(Math.abs(v) * 100);
 const fmtRate = (r: number) => `${Math.round(r * 100)}%`;
 
+/** 앱 언어 코드 → Intl locale 태그 */
+const LOCALE_MAP: Record<string, string> = {
+  ko: 'ko-KR',
+  en: 'en-US',
+};
+
 // one metric compared cold → warm, as two scaled bars
 const MetricRow: React.FC<{
   label: string;
@@ -23,12 +31,14 @@ const MetricRow: React.FC<{
   betterIsLower: boolean;
   /** preformatted delta, e.g. "54% ↓" or "+20pt" */
   delta: string;
-}> = ({ label, cold, warm, format, betterIsLower, delta }) => {
+  barColdLabel: string;
+  barWarmLabel: string;
+}> = ({ label, cold, warm, format, betterIsLower, delta, barColdLabel, barWarmLabel }) => {
   const max = Math.max(cold, warm, 0.0001);
   const improved = betterIsLower ? warm <= cold : warm >= cold;
   const Bar: React.FC<{ value: number; tone: 'cold' | 'warm' }> = ({ value, tone }) => (
     <div className="flex items-center gap-2">
-      <span className="text-label-micro text-text-helper w-9 flex-shrink-0">{tone === 'cold' ? '학습 전' : '학습 후'}</span>
+      <span className="text-label-micro text-text-helper w-9 flex-shrink-0">{tone === 'cold' ? barColdLabel : barWarmLabel}</span>
       <div className="flex-1 h-3 bg-layer-02 rounded-sm overflow-hidden">
         <div
           className={`h-full rounded-sm ${tone === 'warm' ? 'bg-blue-50' : 'bg-layer-03'}`}
@@ -56,11 +66,13 @@ const MetricRow: React.FC<{
   );
 };
 
-const TaskMetrics: React.FC<{ cold: ImpactMetricSet; warm: ImpactMetricSet; delta: { turns_pct: number; tool_calls_pct: number; success_pp: number } }> = ({
-  cold,
-  warm,
-  delta,
-}) => (
+const TaskMetrics: React.FC<{
+  cold: ImpactMetricSet;
+  warm: ImpactMetricSet;
+  delta: { turns_pct: number; tool_calls_pct: number; success_pp: number };
+  barColdLabel: string;
+  barWarmLabel: string;
+}> = ({ cold, warm, delta, barColdLabel, barWarmLabel }) => (
   <div className="flex flex-col gap-3">
     <MetricRow
       label="Turns"
@@ -69,6 +81,8 @@ const TaskMetrics: React.FC<{ cold: ImpactMetricSet; warm: ImpactMetricSet; delt
       format={(n) => `${n}`}
       betterIsLower
       delta={`${roundPct(delta.turns_pct)}% ↓`}
+      barColdLabel={barColdLabel}
+      barWarmLabel={barWarmLabel}
     />
     <MetricRow
       label="Tool calls"
@@ -77,6 +91,8 @@ const TaskMetrics: React.FC<{ cold: ImpactMetricSet; warm: ImpactMetricSet; delt
       format={(n) => `${n}`}
       betterIsLower
       delta={`${roundPct(delta.tool_calls_pct)}% ↓`}
+      barColdLabel={barColdLabel}
+      barWarmLabel={barWarmLabel}
     />
     <MetricRow
       label="Success"
@@ -85,6 +101,8 @@ const TaskMetrics: React.FC<{ cold: ImpactMetricSet; warm: ImpactMetricSet; delt
       format={fmtRate}
       betterIsLower={false}
       delta={`+${Math.round(delta.success_pp * 100)}pt`}
+      barColdLabel={barColdLabel}
+      barWarmLabel={barWarmLabel}
     />
   </div>
 );
@@ -104,9 +122,15 @@ export const LearningImpactPanel: React.FC<{
   /** true = eval harness 실측(GET /eval/impact) 아님 — 데모 fixture 표시 */
   demo?: boolean;
 }> = ({ report, onRerun, demo }) => {
+  const { t } = useTranslation('chat');
+  const { language } = useI18n();
   const [showTasks, setShowTasks] = useState(true);
   const a = report.aggregate;
-  const when = new Date(report.generated_at).toLocaleDateString('ko-KR', { month: 'long', day: 'numeric' });
+  const locale = LOCALE_MAP[language] ?? 'en-US';
+  const when = new Date(report.generated_at).toLocaleDateString(locale, { month: 'long', day: 'numeric' });
+
+  const barColdLabel = t('impact.barCold');
+  const barWarmLabel = t('impact.barWarm');
 
   return (
     <div className="flex-1 min-w-0 overflow-y-auto">
@@ -118,25 +142,31 @@ export const LearningImpactPanel: React.FC<{
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="text-heading-03 font-semibold text-text-primary">학습 효과 (Learning Impact)</h2>
+              <h2 className="text-heading-03 font-semibold text-text-primary">{t('impact.title')}</h2>
               {demo ? (
-                <span title="eval 결과가 아직 없어 데모 fixture를 표시 중 — eval harness를 실행하면 실측으로 바뀝니다">
-                  <Tag type="yellow" size="sm">데모 데이터</Tag>
+                <span title={t('impact.tagDemoTitle')}>
+                  <Tag type="yellow" size="sm">{t('impact.tagDemo')}</Tag>
                 </span>
               ) : (
-                <span title="eval harness 실측 결과 (GET /eval/impact)">
-                  <Tag type="green" size="sm">평가 suite 실측</Tag>
+                <span title={t('impact.tagLiveTitle')}>
+                  <Tag type="green" size="sm">{t('impact.tagLive')}</Tag>
                 </span>
               )}
             </div>
             <p className="text-caption-01 text-text-helper mt-0.5">
-              같은 작업, 학습 전(cold) vs 후(warm) · suite {report.task_suite} · n={report.runs_per_task} · {report.model} · {when}
+              {t('impact.headerSub', { suite: report.task_suite, runs: report.runs_per_task, model: report.model, when })}
             </p>
           </div>
         </div>
         <p className="mt-3 text-body-short-01 leading-5 text-text-secondary">
-          축적된 스킬·메모리가 같은 과제를 <span className="text-text-primary font-semibold">더 적은 turn·tool call</span>로
-          <span className="text-text-primary font-semibold"> 더 높은 성공률</span>에 도달시킵니다. "쓸수록 똑똑해짐"을 숫자로 보여주는 증거예요.
+          <Trans
+            i18nKey="impact.description"
+            ns="chat"
+            components={{
+              highlight1: <span className="text-text-primary font-semibold" />,
+              highlight2: <span className="text-text-primary font-semibold" />,
+            }}
+          />
         </p>
       </div>
 
@@ -144,19 +174,18 @@ export const LearningImpactPanel: React.FC<{
         {/* aggregate hero */}
         <div>
           <div className="flex items-center mb-2.5">
-            <span className="text-caption-01 font-semibold uppercase tracking-wider text-text-secondary">전체 평균 (cold → warm)</span>
+            <span className="text-caption-01 font-semibold uppercase tracking-wider text-text-secondary">{t('impact.aggregateHeading')}</span>
           </div>
           <div className="flex gap-3 flex-wrap">
-            <StatTile label="Turns" value={`${roundPct(a.turns_pct)}% ↓`} sub="완료까지 왕복" good />
-            <StatTile label="Tool calls" value={`${roundPct(a.tool_calls_pct)}% ↓`} sub="과제당 호출" good />
-            <StatTile label="Success" value={`+${Math.round(a.success_pp * 100)}pt`} sub="성공률 상승" good />
-            <StatTile label="관련 스킬 주입" value={fmtRate(a.skill_hit_rate)} sub="skill_hit (검색 품질)" good={a.skill_hit_rate >= 0.99} />
+            <StatTile label="Turns" value={`${roundPct(a.turns_pct)}% ↓`} sub={t('impact.statTurnsSub')} good />
+            <StatTile label="Tool calls" value={`${roundPct(a.tool_calls_pct)}% ↓`} sub={t('impact.statToolCallsSub')} good />
+            <StatTile label="Success" value={`+${Math.round(a.success_pp * 100)}pt`} sub={t('impact.statSuccessSub')} good />
+            <StatTile label={t('impact.statSkillHitLabel')} value={fmtRate(a.skill_hit_rate)} sub={t('impact.statSkillHitSub')} good={a.skill_hit_rate >= 0.99} />
           </div>
           <p className="mt-2.5 text-caption-01 text-text-helper flex items-start gap-1.5">
             <Icon name="idea" size={13} className="mt-0.5 flex-shrink-0 opacity-80" />
             <span>
-              <span className="font-mono">skill_hit</span> 은 "학습 실패"와 "검색 실패"를 분리 진단합니다 — warm인데 미주입이면
-              스킬이 아니라 검색(FTS5)이 못 끌어온 것 (RICE_LEARNING_EVAL 2장).
+              <span className="font-mono">skill_hit</span> {t('impact.skillHitNote')}
             </span>
           </p>
         </div>
@@ -164,39 +193,39 @@ export const LearningImpactPanel: React.FC<{
         {/* per-task breakdown */}
         <div>
           <div className="flex items-center mb-2.5">
-            <span className="text-caption-01 font-semibold uppercase tracking-wider text-text-secondary">과제별 · {report.tasks.length}</span>
+            <span className="text-caption-01 font-semibold uppercase tracking-wider text-text-secondary">{t('impact.perTaskHeading', { count: report.tasks.length })}</span>
             <button
               onClick={() => setShowTasks((s) => !s)}
               className="ml-auto inline-flex items-center gap-1 text-caption-01 text-link-primary hover:underline"
             >
-              {showTasks ? '접기' : '과제별 보기'}
+              {showTasks ? t('impact.collapseToggle') : t('impact.expandToggle')}
               <Icon name={showTasks ? 'chevron-up' : 'chevron-down'} size={13} />
             </button>
           </div>
           {showTasks && (
             <div className="flex flex-col gap-3">
-              {report.tasks.map((t) => (
-                <div key={t.id} className="bg-background border border-border-subtle-01 rounded-lg px-4 py-3.5">
+              {report.tasks.map((taskItem) => (
+                <div key={taskItem.id} className="bg-background border border-border-subtle-01 rounded-lg px-4 py-3.5">
                   <div className="flex items-center gap-2 mb-3 flex-wrap">
-                    <span className="text-caption-01 font-mono text-text-helper">{t.id}</span>
-                    <span className="text-body-short-01 font-semibold text-text-primary">{t.title}</span>
+                    <span className="text-caption-01 font-mono text-text-helper">{taskItem.id}</span>
+                    <span className="text-body-short-01 font-semibold text-text-primary">{taskItem.title}</span>
                     <span className="ml-auto flex-shrink-0">
-                      {t.warm.skill_hit ? (
+                      {taskItem.warm.skill_hit ? (
                         <Tag type="green" size="sm">
-                          스킬 주입 ✓
+                          {t('impact.tagSkillHit')}
                         </Tag>
                       ) : (
                         <Tag type="gray" size="sm">
-                          스킬 미주입
+                          {t('impact.tagSkillMiss')}
                         </Tag>
                       )}
                     </span>
                   </div>
-                  <TaskMetrics cold={t.cold} warm={t.warm} delta={t.delta} />
-                  {t.warm.skills_used && t.warm.skills_used.length > 0 && (
+                  <TaskMetrics cold={taskItem.cold} warm={taskItem.warm} delta={taskItem.delta} barColdLabel={barColdLabel} barWarmLabel={barWarmLabel} />
+                  {taskItem.warm.skills_used && taskItem.warm.skills_used.length > 0 && (
                     <div className="mt-3 flex items-center gap-1.5 flex-wrap">
-                      <span className="text-caption-01 text-text-helper">주입된 스킬</span>
-                      {t.warm.skills_used.map((s) => (
+                      <span className="text-caption-01 text-text-helper">{t('impact.injectedSkillsLabel')}</span>
+                      {taskItem.warm.skills_used.map((s) => (
                         <span
                           key={s}
                           className="inline-flex items-center gap-1 bg-layer-01 border border-border-subtle-01 rounded px-1.5 py-0.5 text-caption-01 font-mono text-text-secondary"
@@ -217,11 +246,11 @@ export const LearningImpactPanel: React.FC<{
         <div className="border-t border-border-subtle-01 pt-4 flex items-center gap-3 flex-wrap">
           <span className="text-caption-01 text-text-helper flex items-start gap-1.5">
             <Icon name="check-circle" size={14} className="text-icon-secondary mt-0.5 flex-shrink-0" />
-            harness가 cold/warm 프로파일로 suite를 {report.runs_per_task}회씩 실제 실행한 결과예요 (eval/results/latest.json).
+            {t('impact.footerNote', { runs: report.runs_per_task })}
           </span>
           <div className="flex-1" />
           <Button kind="secondary" size="sm" icon={<Icon name="renew" size={15} />} onClick={onRerun} disabled={!onRerun}>
-            eval 다시 실행
+            {t('impact.rerunButton')}
           </Button>
         </div>
       </div>

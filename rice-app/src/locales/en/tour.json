@@ -1,0 +1,47 @@
+{
+  "ui": {
+    "skip": "Skip",
+    "next": "Next",
+    "start": "Get started",
+    "close": "Close tour",
+    "stepAria": "Tour step {{step}}: {{title}}"
+  },
+  "steps": {
+    "learning-loop": {
+      "title": "Learning loop",
+      "body": "The more you chat, the more your work patterns collect here. See what RICE has learned and which skills were auto-generated at a glance."
+    },
+    "chat-input": {
+      "title": "Chat input",
+      "body": "Send messages to the agent here. Type / to instantly pull up saved skills — attachments are supported too."
+    },
+    "model-settings": {
+      "title": "Model settings",
+      "body": "Check and switch the connected AI model. Both SaaS (cloud API) and local (Ollama) are supported."
+    },
+    "my-skills": {
+      "title": "My Skills",
+      "body": "Manage skills auto-generated from chats or built by hand. Run them instantly with / commands, and they improve automatically as you use them."
+    },
+    "myplugins": {
+      "title": "My Plugins",
+      "body": "Manage installed plugins. A plugin is a bundle of skills — install one and the agent becomes an expert in that domain."
+    },
+    "connectors": {
+      "title": "Connectors",
+      "body": "Connect external services like Google Drive and Notion. Once connected, plugins use them automatically."
+    },
+    "skills-market": {
+      "title": "Skill Market",
+      "body": "Find community-built skills and install them instantly. Add all kinds of workflows in one click."
+    },
+    "plugins-market": {
+      "title": "Plugin Market",
+      "body": "Browse plugins that package domain expertise. Add specialists for areas like legal, data analysis, and workflow automation."
+    },
+    "settings": {
+      "title": "Settings",
+      "body": "Reconfigure model connections and app preferences anytime. Even after onboarding, you can change or add AI models here."
+    }
+  }
+}

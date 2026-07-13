@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Icon, Kbd } from '../ui';
 import { NavIcon } from '../../lib/navigation/NavIcon';
@@ -41,6 +42,9 @@ export const CommandPalette: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { skills } = useLearning();
+  const { t: tRaw } = useTranslation('common');
+  // i18next TFunction 오버로드가 useMemo 타입 추론을 과도하게 깊게 만드는 것을 방지한다.
+  const t = tRaw as (key: string, opts?: Record<string, unknown>) => string;
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -90,28 +94,28 @@ export const CommandPalette: React.FC = () => {
       {
         key: 'new-chat',
         icon: <Icon name="add" size={15} />,
-        title: '새 대화 시작',
-        sub: '현재 대화를 접고 새로 시작',
+        title: t('commandPalette.actionNewChat'),
+        sub: t('commandPalette.actionNewChatSub'),
         tint: TINT.action,
-        keywords: '새 대화 new chat',
+        keywords: t('commandPalette.actionNewChatKeywords'),
         run: () => dispatchToChat(startNewChat),
       },
       {
         key: 'replay-tour',
         icon: <Icon name="idea" size={15} />,
-        title: '가이드 투어 다시보기',
-        sub: '핵심 기능 말풍선 투어',
+        title: t('commandPalette.actionReplayTour'),
+        sub: t('commandPalette.actionReplayTourSub'),
         tint: TINT.action,
-        keywords: '투어 가이드 tour guide',
+        keywords: t('commandPalette.actionReplayTourKeywords'),
         run: replayTour,
       },
       {
         key: 'replay-onboarding',
         icon: <Icon name="model" size={15} />,
-        title: '모델 온보딩 다시보기',
-        sub: '실행 위치·모델 다시 설정',
+        title: t('commandPalette.actionReplayOnboarding'),
+        sub: t('commandPalette.actionReplayOnboardingSub'),
         tint: TINT.action,
-        keywords: '온보딩 모델 설정 onboarding model',
+        keywords: t('commandPalette.actionReplayOnboardingKeywords'),
         run: replayOnboarding,
       },
     ].filter((r) => hit(r.title, r.sub, r.keywords));
@@ -137,14 +141,14 @@ export const CommandPalette: React.FC = () => {
         key: `skill-${s.id}`,
         icon: <Icon name="skill" size={15} />,
         title: s.name,
-        sub: `/${s.command} · ${s.ver} · ${s.uses}회 사용`,
+        sub: `/${s.command} · ${s.ver} · ${t('commandPalette.skillUses', { count: s.uses })}`,
         tint: TINT.skill,
         keywords: `${s.name} ${s.command}`,
         run: () => dispatchToChat(() => runSkillCommand(s.command!)),
       }));
 
     return { actions, nav, skillRows };
-  }, [q, skills, location.pathname]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [q, skills, location.pathname, t]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const flat = [...groups.actions, ...groups.nav, ...groups.skillRows];
   const activeIdx = Math.min(active, Math.max(flat.length - 1, 0));
@@ -218,7 +222,7 @@ export const CommandPalette: React.FC = () => {
         ref={panelRef}
         role="dialog"
         aria-modal="true"
-        aria-label="커맨드 팔레트"
+        aria-label={t('commandPalette.ariaLabel')}
         className="relative z-[1] w-[560px] max-w-[92vw] max-h-[60vh] bg-layer-02/95 backdrop-blur-md border border-border-subtle-01 rounded-xl shadow-elevation-3 overflow-hidden flex flex-col"
         style={{ animation: 'cpPanelIn 160ms cubic-bezier(0.16, 1, 0.3, 1)' }}
       >
@@ -250,7 +254,7 @@ export const CommandPalette: React.FC = () => {
                 close();
               }
             }}
-            placeholder="이동·스킬·빠른 작업 검색…"
+            placeholder={t('commandPalette.searchPlaceholder')}
             className="flex-1 min-w-0 bg-transparent border-none outline-none text-body-short-01 text-text-primary placeholder:text-text-placeholder"
           />
           <Kbd>esc</Kbd>
@@ -258,23 +262,23 @@ export const CommandPalette: React.FC = () => {
 
         {/* Results */}
         <div id="command-palette-results" ref={listRef} role="listbox" className="flex-1 overflow-y-auto py-1">
-          {empty && <div className="px-3 py-8 text-center text-caption-01 text-text-helper">검색 결과가 없어요</div>}
+          {empty && <div className="px-3 py-8 text-center text-caption-01 text-text-helper">{t('commandPalette.noResults')}</div>}
 
           {groups.actions.length > 0 && (
             <div>
-              <GroupLabel tint={TINT.action}>빠른 작업</GroupLabel>
+              <GroupLabel tint={TINT.action}>{t('commandPalette.groupActions')}</GroupLabel>
               {groups.actions.map(renderRow)}
             </div>
           )}
           {groups.nav.length > 0 && (
             <div>
-              <GroupLabel tint={TINT.nav}>이동</GroupLabel>
+              <GroupLabel tint={TINT.nav}>{t('commandPalette.groupNav')}</GroupLabel>
               {groups.nav.map(renderRow)}
             </div>
           )}
           {groups.skillRows.length > 0 && (
             <div>
-              <GroupLabel tint={TINT.skill}>스킬 실행</GroupLabel>
+              <GroupLabel tint={TINT.skill}>{t('commandPalette.groupSkills')}</GroupLabel>
               {groups.skillRows.map(renderRow)}
             </div>
           )}
@@ -282,10 +286,10 @@ export const CommandPalette: React.FC = () => {
 
         {/* Footer */}
         <div className="flex items-center gap-1 px-3 py-2 border-t border-border-subtle-01 text-label-micro text-text-helper select-none flex-shrink-0">
-          <Kbd>↑↓</Kbd> 탐색
-          <Kbd>↵</Kbd> 실행
+          <Kbd>↑↓</Kbd> {t('commandPalette.footerNavigate')}
+          <Kbd>↵</Kbd> {t('commandPalette.footerExecute')}
           <span className="ml-auto flex items-center gap-1">
-            <Kbd>⌘K</Kbd> 열기/닫기
+            <Kbd>⌘K</Kbd> {t('commandPalette.footerToggle')}
           </span>
         </div>
       </div>

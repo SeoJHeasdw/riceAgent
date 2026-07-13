@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { Button, Icon, Modal, Tag } from '../ui';
 
 interface ConnectorRequiredModalProps {
@@ -15,23 +16,24 @@ export function ConnectorRequiredModal({
   onClose,
   onConnect,
 }: ConnectorRequiredModalProps) {
-  const names = connectors.length ? connectors : ['필요한 커넥터'];
+  const { t } = useTranslation('connectors');
+  const names = connectors.length ? connectors : [t('required.fallbackConnectorName')];
   const connectorCount = names.length;
 
   return (
     <Modal
       open={open}
       onClose={onClose}
-      title="활성화 전 연결 필요"
+      title={t('required.title')}
       size="sm"
       className="max-w-[520px]"
       footer={
         <>
           <Button kind="ghost" size="sm" onClick={onClose}>
-            나중에
+            {t('required.later')}
           </Button>
           <Button kind="primary" size="sm" icon={<Icon name="arrow-up-right" size={14} />} onClick={onConnect}>
-            커넥터 화면으로
+            {t('required.goToConnectors')}
           </Button>
         </>
       }
@@ -47,12 +49,13 @@ export function ConnectorRequiredModal({
                 {pluginName}
               </p>
               <Tag type="purple" size="sm">
-                연결 대기
+                {t('required.tagWaiting')}
               </Tag>
             </div>
             <p className="mt-1.5 text-body-short-01 text-text-secondary leading-5">
-              플러그인을 켜기 전에 접근할 커넥터를 먼저 승인해야 합니다.
-              연결 후 다시 활성화하면 이 플러그인의 스킬과 도구가 에이전트에 붙습니다.
+              {t('required.descriptionLine1')}
+              {' '}
+              {t('required.descriptionLine2')}
             </p>
           </div>
         </div>
@@ -60,7 +63,7 @@ export function ConnectorRequiredModal({
         <div className="rounded-xl border border-border-subtle-01 bg-background overflow-hidden">
           <div className="flex items-center justify-between px-3.5 py-2 border-b border-border-subtle-01">
             <span className="text-caption-01 font-semibold uppercase tracking-wider text-text-secondary">
-              필수 커넥터
+              {t('required.sectionLabel')}
             </span>
             <span className="text-caption-01 font-mono text-text-helper">{connectorCount}</span>
           </div>
@@ -74,7 +77,7 @@ export function ConnectorRequiredModal({
                   {name}
                 </span>
                 <Tag type="yellow" size="sm">
-                  연결 필요
+                  {t('required.tagNeedsConnection')}
                 </Tag>
               </div>
             ))}
@@ -84,7 +87,7 @@ export function ConnectorRequiredModal({
         <div className="flex items-start gap-2 rounded-lg border border-purple-50/20 bg-purple-60/[0.055] px-3 py-2.5">
           <Icon name="lock" size={15} className="mt-0.5 flex-shrink-0 text-purple-40" />
           <p className="text-caption-01 leading-5 text-text-secondary">
-            연결은 커넥터 화면에서 권한 범위를 확인한 뒤 진행됩니다. 지금 닫아도 플러그인은 설치 상태로 남아요.
+            {t('required.hint')}
           </p>
         </div>
       </div>

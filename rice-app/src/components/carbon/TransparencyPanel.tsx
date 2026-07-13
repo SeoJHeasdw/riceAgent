@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Icon, Modal, Tag } from '../ui';
 import type { IconName } from '../ui/Icon';
 import { api } from '../../lib/api';
@@ -35,22 +36,22 @@ interface ContextRenderSummary {
   masked: number;
 }
 
-// learning_events.kind → 사람이 읽는 라벨 + 아이콘 + 톤
-const EVENT_META: Record<string, { label: string; icon: IconName; tone: 'pos' | 'neg' | 'warn' | 'neutral' }> = {
-  proposed: { label: '스킬 제안됨', icon: 'idea', tone: 'neutral' },
-  approved: { label: '승인·반영됨', icon: 'check-circle', tone: 'pos' },
-  rejected: { label: '거부됨', icon: 'close', tone: 'neutral' },
-  timeout: { label: '보류(제안함으로 이동)', icon: 'renew', tone: 'warn' },
-  disconnected: { label: '연결 끊김(제안함 보존)', icon: 'renew', tone: 'warn' },
-  conflict: { label: '버전 충돌(적용 취소)', icon: 'warning', tone: 'warn' },
-  memory_written: { label: '메모리 기록', icon: 'bookmark', tone: 'pos' },
-  memory_quarantined: { label: '메모리 격리(승인 대기)', icon: 'lock', tone: 'warn' },
-  memory_blocked: { label: '메모리 차단(위험 신호)', icon: 'warning', tone: 'neg' },
-  memory_approved: { label: '격리 메모리 승인', icon: 'check', tone: 'pos' },
-  memory_deleted: { label: '메모리 삭제', icon: 'trash', tone: 'neutral' },
-  context_rendered: { label: '컨텍스트 렌더', icon: 'flow', tone: 'neutral' },
-  suggestion_added: { label: '제안함에 추가', icon: 'add', tone: 'neutral' },
-  discovery_run: { label: '패턴 발굴 실행', icon: 'search', tone: 'neutral' },
+// learning_events.kind → 아이콘 + 톤 (라벨은 카탈로그에서 가져옴 — 렌더링 시 t()로)
+const EVENT_META: Record<string, { icon: IconName; tone: 'pos' | 'neg' | 'warn' | 'neutral' }> = {
+  proposed: { icon: 'idea', tone: 'neutral' },
+  approved: { icon: 'check-circle', tone: 'pos' },
+  rejected: { icon: 'close', tone: 'neutral' },
+  timeout: { icon: 'renew', tone: 'warn' },
+  disconnected: { icon: 'renew', tone: 'warn' },
+  conflict: { icon: 'warning', tone: 'warn' },
+  memory_written: { icon: 'bookmark', tone: 'pos' },
+  memory_quarantined: { icon: 'lock', tone: 'warn' },
+  memory_blocked: { icon: 'warning', tone: 'neg' },
+  memory_approved: { icon: 'check', tone: 'pos' },
+  memory_deleted: { icon: 'trash', tone: 'neutral' },
+  context_rendered: { icon: 'flow', tone: 'neutral' },
+  suggestion_added: { icon: 'add', tone: 'neutral' },
+  discovery_run: { icon: 'search', tone: 'neutral' },
 };
 
 const toneClass: Record<'pos' | 'neg' | 'warn' | 'neutral', string> = {
@@ -93,7 +94,14 @@ const SectionTitle: React.FC<{ icon: IconName; children: React.ReactNode; count?
   </div>
 );
 
+// t()로 eventKind 라벨을 가져올 때 동적 키라 넓혀야 함 — apiError.ts와 동일한 패턴
+type TranslateWide = (key: string, opts?: Record<string, unknown>) => string;
+
 export const TransparencyPanel: React.FC<TransparencyPanelProps> = ({ open, onClose }) => {
+  const { t } = useTranslation('chat');
+  // 동적 eventKind 키(카탈로그에 있지만 TS 타입이 좁음)를 위한 우회 — tour/TourOverlay.tsx 와 동일 패턴
+  const tt = t as unknown as TranslateWide;
+
   const [events, setEvents] = useState<LearningEvent[]>([]);
   const [memories, setMemories] = useState<RuntimeMemory[]>([]);
   const [loading, setLoading] = useState(false);
@@ -157,45 +165,52 @@ export const TransparencyPanel: React.FC<TransparencyPanelProps> = ({ open, onCl
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="학습 투명성" size="xl">
+    <Modal open={open} onClose={onClose} title={t('transparency.modalTitle')} size="xl">
       <div className="flex flex-col gap-5 max-h-[76vh] overflow-y-auto pr-1">
         {/* 1. 컨텍스트 렌더 — 모델이 본 것 / 못 본 것 / 압축한 것 */}
         <section>
-          <SectionTitle icon="flow">모델이 본 것 · 못 본 것</SectionTitle>
+          <SectionTitle icon="flow">{t('transparency.sectionContext')}</SectionTitle>
           {latestRender ? (
             <>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 <StatTile
-                  label="컨텍스트 토큰"
+                  label={t('transparency.statContextTokens')}
                   value={`${latestRender.tokensAfter.toLocaleString()}`}
                   hint={
                     latestRender.tokensBefore !== latestRender.tokensAfter
-                      ? `압축 전 ${latestRender.tokensBefore.toLocaleString()}`
-                      : '압축 없음'
+                      ? t('transparency.statContextTokensHintCompressed', { before: latestRender.tokensBefore.toLocaleString() })
+                      : t('transparency.statContextTokensHintNone')
                   }
                 />
-                <StatTile label="LLM 호출" value={latestRender.llmCalls} hint={`관리 ${latestRender.managedCalls}회`} />
                 <StatTile
-                  label="요약으로 대체"
+                  label={t('transparency.statLlmCalls')}
+                  value={latestRender.llmCalls}
+                  hint={t('transparency.statLlmCallsHint', { count: latestRender.managedCalls })}
+                />
+                <StatTile
+                  label={t('transparency.statOmitted')}
                   value={latestRender.omitted}
-                  hint="오래된 메시지"
+                  hint={t('transparency.statOmittedHint')}
                   danger={latestRender.omitted > 0}
                 />
                 <StatTile
-                  label="wire 정리로 삭제"
+                  label={t('transparency.statDropped')}
                   value={latestRender.droppedMsgs + latestRender.droppedToolCalls}
-                  hint={`메시지 ${latestRender.droppedMsgs} · 도구 ${latestRender.droppedToolCalls}`}
+                  hint={t('transparency.statDroppedHint', { msgs: latestRender.droppedMsgs, tools: latestRender.droppedToolCalls })}
                   danger={latestRender.droppedMsgs + latestRender.droppedToolCalls > 0}
                 />
               </div>
               <p className="text-caption-01 text-text-helper mt-2">
-                가장 최근 턴의 컨텍스트 렌더 기록 · {fmtTime(latestRender.ts)} · 증류 {latestRender.distilled} · 시크릿
-                마스킹 {latestRender.masked}
+                {t('transparency.renderCaption', {
+                  time: fmtTime(latestRender.ts),
+                  distilled: latestRender.distilled,
+                  masked: latestRender.masked,
+                })}
               </p>
             </>
           ) : (
             <p className="text-body-short-01 text-text-helper">
-              {loading ? '불러오는 중…' : '아직 컨텍스트 렌더 기록이 없습니다. 대화를 한 번 진행해 보세요.'}
+              {loading ? t('transparency.loading') : t('transparency.noContext')}
             </p>
           )}
         </section>
@@ -203,12 +218,11 @@ export const TransparencyPanel: React.FC<TransparencyPanelProps> = ({ open, onCl
         {/* 2. 격리된 메모리 — 외부 콘텐츠 유래, 승인 전까지 주입 안 됨 */}
         <section>
           <SectionTitle icon="lock" count={quarantined.length}>
-            승인 대기 메모리 (격리됨)
+            {t('transparency.sectionQuarantine')}
           </SectionTitle>
           {quarantined.length === 0 ? (
             <p className="text-body-short-01 text-text-helper">
-              격리된 메모리가 없습니다. 외부 콘텐츠(메일·웹·도구 결과)에서 유도된 메모리는 여기서 승인해야
-              주입됩니다.
+              {t('transparency.quarantineEmpty')}
             </p>
           ) : (
             <ul className="flex flex-col gap-2">
@@ -220,8 +234,8 @@ export const TransparencyPanel: React.FC<TransparencyPanelProps> = ({ open, onCl
                   <Icon name="warning" className="w-4 h-4 text-text-error mt-0.5 flex-shrink-0" />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 mb-0.5">
-                      <Tag size="sm">{m.kind === 'fact' ? '사실' : '선호'}</Tag>
-                      <span className="text-label-micro text-text-helper">외부 콘텐츠 유래</span>
+                      <Tag size="sm">{m.kind === 'fact' ? t('transparency.memoryKindFact') : t('transparency.memoryKindPref')}</Tag>
+                      <span className="text-label-micro text-text-helper">{t('transparency.memoryOriginExternal')}</span>
                     </div>
                     <p className="text-body-short-01 text-text-primary break-words">{m.content}</p>
                   </div>
@@ -232,7 +246,7 @@ export const TransparencyPanel: React.FC<TransparencyPanelProps> = ({ open, onCl
                       onClick={() => void approveMemory(m.id)}
                       className="text-caption-01 px-2 py-1 rounded bg-layer-selected-01 text-text-primary hover:bg-layer-hover-02 disabled:opacity-50"
                     >
-                      승인
+                      {t('transparency.approveBtn')}
                     </button>
                     <button
                       type="button"
@@ -240,7 +254,7 @@ export const TransparencyPanel: React.FC<TransparencyPanelProps> = ({ open, onCl
                       onClick={() => void dismissMemory(m.id)}
                       className="text-caption-01 px-2 py-1 rounded text-text-secondary hover:bg-layer-hover-01 disabled:opacity-50"
                     >
-                      삭제
+                      {t('transparency.deleteBtn')}
                     </button>
                   </div>
                 </li>
@@ -253,7 +267,7 @@ export const TransparencyPanel: React.FC<TransparencyPanelProps> = ({ open, onCl
         {blocked.length > 0 && (
           <section>
             <SectionTitle icon="warning" count={blocked.length}>
-              차단된 메모리 (위험 신호)
+              {t('transparency.sectionBlocked')}
             </SectionTitle>
             <ul className="flex flex-col gap-1.5">
               {blocked.map((e) => {
@@ -280,9 +294,11 @@ export const TransparencyPanel: React.FC<TransparencyPanelProps> = ({ open, onCl
 
         {/* 4. 학습 타임라인 — 되돌릴 수 있는 결정 이력 */}
         <section>
-          <SectionTitle icon="growth">학습 타임라인</SectionTitle>
+          <SectionTitle icon="growth">{t('transparency.sectionTimeline')}</SectionTitle>
           {events.length === 0 ? (
-            <p className="text-body-short-01 text-text-helper">{loading ? '불러오는 중…' : '아직 기록이 없습니다.'}</p>
+            <p className="text-body-short-01 text-text-helper">
+              {loading ? t('transparency.loading') : t('transparency.timelineEmpty')}
+            </p>
           ) : (
             <ul className="flex flex-col">
               {events
@@ -290,15 +306,18 @@ export const TransparencyPanel: React.FC<TransparencyPanelProps> = ({ open, onCl
                 .slice(0, 40)
                 .map((e) => {
                   const meta = EVENT_META[e.kind] ?? {
-                    label: e.kind,
                     icon: 'chat' as IconName,
                     tone: 'neutral' as const,
                   };
+                  // 카탈로그에 있는 kind는 t()로, 없는 unknown kind는 원본 코드를 그대로 표시
+                  const label = tt(`transparency.eventKind.${e.kind}`, {
+                    defaultValue: e.kind,
+                  });
                   const version = e.detail?.version as number | undefined;
                   return (
                     <li key={e.id} className="flex items-center gap-2 py-1.5 border-b border-border-subtle-01 last:border-0">
                       <Icon name={meta.icon} className={`w-3.5 h-3.5 flex-shrink-0 ${toneClass[meta.tone]}`} />
-                      <span className={`text-body-short-01 ${toneClass[meta.tone]}`}>{meta.label}</span>
+                      <span className={`text-body-short-01 ${toneClass[meta.tone]}`}>{label}</span>
                       {e.skill_id && (
                         <span className="text-caption-01 text-text-secondary truncate">· {e.skill_id}</span>
                       )}
@@ -316,8 +335,11 @@ export const TransparencyPanel: React.FC<TransparencyPanelProps> = ({ open, onCl
         </section>
 
         <p className="text-caption-01 text-text-helper border-t border-border-subtle-01 pt-3">
-          활성 메모리 {activeCount}개 · 격리 {quarantined.length}개 · 이벤트 {events.length}건. 모든 학습 변경은
-          여기서 감사·되돌리기가 가능합니다.
+          {t('transparency.footer', {
+            active: activeCount,
+            quarantine: quarantined.length,
+            events: events.length,
+          })}
         </p>
       </div>
     </Modal>

@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { Card, Icon, Tag, Toggle } from '../ui';
 
 /**
@@ -41,13 +42,16 @@ export const PluginCard: React.FC<PluginCardProps> = ({
   onToggle,
   onOpenDetails,
 }) => {
+  const { t } = useTranslation('plugins');
   const connectorCount = connectors?.length ?? 0;
   const knowledgeCount = knowledge?.length ?? 0;
-  const composition = [
-    { n: skillCount, label: '스킬', accent: 'text-blue-50' },
-    { n: connectorCount, label: '커넥터', accent: 'text-teal-40' },
-    { n: knowledgeCount, label: '지식', accent: 'text-magenta-50' },
-  ].filter((c, i) => i === 0 || c.n > 0); // 스킬은 항상, 커넥터·지식은 있을 때만
+  type CompositionKey = 'card.compositionSkill' | 'card.compositionConnector' | 'card.compositionKnowledge';
+  const allComposition: Array<{ n: number; labelKey: CompositionKey; accent: string }> = [
+    { n: skillCount, labelKey: 'card.compositionSkill' as const, accent: 'text-blue-50' },
+    { n: connectorCount, labelKey: 'card.compositionConnector' as const, accent: 'text-teal-40' },
+    { n: knowledgeCount, labelKey: 'card.compositionKnowledge' as const, accent: 'text-magenta-50' },
+  ];
+  const composition = allComposition.filter((c, i) => i === 0 || c.n > 0); // 스킬은 항상, 커넥터·지식은 있을 때만
   return (
     <Card
       padding="md"
@@ -83,16 +87,16 @@ export const PluginCard: React.FC<PluginCardProps> = ({
         </div>
         {builtin ? (
           <Tag type="teal" size="sm">
-            기본 내장
+            {t('myPlugins.tagBuiltin')}
           </Tag>
         ) : installed ? (
           enabled ? (
             <Tag type="green" size="sm" dot>
-              활성
+              {t('myPlugins.statusActive')}
             </Tag>
           ) : (
             <Tag type="gray" size="sm">
-              설치됨
+              {t('installed')}
             </Tag>
           )
         ) : (
@@ -104,7 +108,7 @@ export const PluginCard: React.FC<PluginCardProps> = ({
             }}
             className="flex-shrink-0 inline-flex items-center gap-1 h-7 px-3 rounded-full text-caption-01 font-semibold bg-transparent text-text-secondary ring-1 ring-inset ring-border-strong-01 hover:bg-layer-hover-01 hover:text-text-primary transition-colors cursor-pointer"
           >
-            설치
+            {t('install')}
           </button>
         )}
       </div>
@@ -117,11 +121,11 @@ export const PluginCard: React.FC<PluginCardProps> = ({
       {/* Composition — plugin의 "무게"(스킬·커넥터·지식)를 한눈에. skill 카드와 구분되는 지점. */}
       <div className="relative flex flex-wrap items-center gap-x-2.5 gap-y-1 mb-2.5 text-caption-01">
         {composition.map((c, i) => (
-          <React.Fragment key={c.label}>
+          <React.Fragment key={c.labelKey}>
             {i > 0 && <span className="text-text-helper/50" aria-hidden="true">·</span>}
             <span className="inline-flex items-baseline gap-1">
               <span className={`font-semibold tabular-nums ${c.accent}`}>{c.n}</span>
-              <span className="text-text-helper">{c.label}</span>
+              <span className="text-text-helper">{t(c.labelKey)}</span>
             </span>
           </React.Fragment>
         ))}
@@ -152,12 +156,12 @@ export const PluginCard: React.FC<PluginCardProps> = ({
             checked={enabled}
             onChange={onToggle}
             tone="purple"
-            aria-label={`${name} ${enabled ? '비활성화' : '활성화'}`}
+            aria-label={enabled ? t('card.ariaToggleDisable', { name }) : t('card.ariaToggleEnable', { name })}
           />
           <span className="flex items-center gap-1.5 flex-1 min-w-0">
             <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${enabled ? 'bg-support-success' : 'bg-text-helper'}`} />
             <span className="text-caption-01 text-text-secondary truncate">
-              {enabled ? '에이전트가 사용 중' : '일시정지됨'}
+              {enabled ? t('card.statusActive') : t('card.statusPaused')}
             </span>
           </span>
         </div>

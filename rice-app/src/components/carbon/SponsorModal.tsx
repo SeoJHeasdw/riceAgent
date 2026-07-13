@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Button } from '../ui';
 import { dialogBackdropCls } from '../ui/surfaces';
+import { useI18n } from '../../lib/i18n/I18nContext';
+import { formatNumber } from '../../lib/i18n/formatters';
 
 /**
  * SponsorModal - Modal for sponsoring skill authors with Blue Points
@@ -23,6 +26,8 @@ export const SponsorModal: React.FC<SponsorModalProps> = ({
   onSponsor,
   balance = 12480,
 }) => {
+  const { t } = useTranslation('skills');
+  const { language } = useI18n();
   const [amount, setAmount] = useState(500);
   const presetAmounts = [200, 500, 1000, 2500];
 
@@ -44,7 +49,7 @@ export const SponsorModal: React.FC<SponsorModalProps> = ({
         <div className="flex items-center px-5 py-4 border-b border-border-subtle-01">
           <div className="flex-1">
             <div className="text-heading-02 font-semibold text-text-primary">
-              스킬 후원
+              {t('sponsor.modalTitle')}
             </div>
             <div className="text-caption-01 text-text-helper">{skillName}</div>
           </div>
@@ -62,8 +67,9 @@ export const SponsorModal: React.FC<SponsorModalProps> = ({
         {/* Content */}
         <div className="p-5">
           <div className="text-body-short-01 text-text-secondary mb-1.5">
-            제작자{' '}
-            <strong className="text-text-primary">{authorName}</strong>에게 IBM 블루 포인트를 보냅니다
+            {t('sponsor.descriptionPrefix')}{' '}
+            <strong className="text-text-primary">{authorName}</strong>
+            {t('sponsor.descriptionSuffix') ? <>{' '}{t('sponsor.descriptionSuffix')}</> : null}
           </div>
 
           {/* Balance */}
@@ -72,7 +78,7 @@ export const SponsorModal: React.FC<SponsorModalProps> = ({
               <rect x="2" y="5" width="20" height="14" rx="2" />
               <path d="M2 10h20" />
             </svg>
-            내 잔액 {balance.toLocaleString()} BP
+            {t('sponsor.balanceLabel', { balance: formatNumber(balance, language) })}
           </div>
 
           {/* Amount selection — 세그먼트 그리드 (앱 공통 segmented control 문법) */}
@@ -88,7 +94,7 @@ export const SponsorModal: React.FC<SponsorModalProps> = ({
                     : 'bg-transparent text-text-secondary hover:bg-layer-hover-01 hover:text-text-primary'
                 }`}
               >
-                {preset.toLocaleString()}
+                {formatNumber(preset, language)}
               </button>
             ))}
           </div>
@@ -105,7 +111,7 @@ export const SponsorModal: React.FC<SponsorModalProps> = ({
               </svg>
             }
           >
-            {amount.toLocaleString()} BP 후원
+            {t('sponsor.sponsorBtn', { amount: formatNumber(amount, language) })}
           </Button>
         </div>
       </div>

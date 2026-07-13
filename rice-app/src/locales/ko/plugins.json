@@ -1,4 +1,13 @@
 {
+  "card": {
+    "compositionSkill": "스킬",
+    "compositionConnector": "커넥터",
+    "compositionKnowledge": "지식",
+    "statusActive": "에이전트가 사용 중",
+    "statusPaused": "일시정지됨",
+    "ariaToggleEnable": "{{name}} 활성화",
+    "ariaToggleDisable": "{{name}} 비활성화"
+  },
   "title": "플러그인 마켓",
   "subtitle": "솔루션 전문가를 설치해 에이전트를 해당 도메인 전문가로 만드세요 — 고객 데모, 온프레미스 구축, 오류 처리에 활용할 수 있습니다",
   "search": "플러그인 검색...",
@@ -103,6 +112,9 @@
     "listEmpty": "아직 설치된 플러그인이 없어요. 마켓에서 솔루션 전문가를 설치해보세요.",
     "listEmptyBrowse": "Plugin Market 둘러보기",
     "listNoMatch": "해당하는 플러그인이 없어요.",
-    "listLoading": "불러오는 중…"
+    "listLoading": "불러오는 중…",
+    "sourceBuiltin": "앱 기본 내장",
+    "sourceRuntime": "런타임 설치",
+    "sourceMarket": "Plugin Market · {{provider}}"
   }
 }

@@ -112,6 +112,7 @@ const SignalRow: React.FC<{ s: UserSignal; onEdit: (v: string) => void; onRemove
   };
   const renderSource = (raw: string): string => {
     if (raw === 'signal_source_runtime') return t('learning.signalSourceRuntime');
+    if (raw === 'signal_source_edited') return t('learning.signalSourceEdited');
     return raw;
   };
 
@@ -594,7 +595,7 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpe
                         key={u.id}
                         s={u}
                         onEdit={(v) =>
-                          setSignals((arr) => arr.map((x) => (x.id === u.id ? { ...x, value: v, source: t('learning.signalSourceEdited') } : x)))
+                          setSignals((arr) => arr.map((x) => (x.id === u.id ? { ...x, value: v, source: 'signal_source_edited' } : x)))
                         }
                         // 런타임 메모리(mem_*)는 서버에서도 삭제된다 — HITL 없는 유일한
                         // 학습 경로의 사후 통제 수단(Self-Improvement v3 위생).

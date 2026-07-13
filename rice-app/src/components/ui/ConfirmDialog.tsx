@@ -1,4 +1,5 @@
 import React, { useId, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Button } from './Button';
 import { Icon } from './Icon';
 import type { IconName } from './Icon';
@@ -38,14 +39,15 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   open,
   title,
   description,
-  confirmLabel = '확인',
-  cancelLabel = '취소',
+  confirmLabel,
+  cancelLabel,
   tone = 'primary',
   confirmIcon,
   onConfirm,
   onClose,
   stackingClassName = 'z-[60]',
 }) => {
+  const { t } = useTranslation('common');
   const dialogRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const titleId = useId();
@@ -92,7 +94,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
             onClick={onClose}
             className="h-8 px-3 rounded-lg text-body-short-01 font-medium text-text-secondary hover:text-text-primary hover:bg-layer-hover-01 transition-colors"
           >
-            {cancelLabel}
+            {cancelLabel ?? t('cancel')}
           </button>
           <Button
             kind={tone}
@@ -101,7 +103,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
             icon={confirmIcon ? <Icon name={confirmIcon} size={14} /> : undefined}
             onClick={onConfirm}
           >
-            {confirmLabel}
+            {confirmLabel ?? t('confirm')}
           </Button>
         </div>
       </div>

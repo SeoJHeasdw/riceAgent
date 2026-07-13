@@ -1,0 +1,77 @@
+{
+  "ui": {
+    "dialogAriaLabel": "Get started with RICE"
+  },
+  "cinematic": {
+    "skip": "Skip to setup",
+    "privacy": "Learning data stays securely on this device",
+    "awakening": {
+      "eyebrow": "RICE / FIRST LIGHT",
+      "assembling": "Assembling cognition core",
+      "awake": "Core online",
+      "title": "Intelligence that evolves with you",
+      "description": "RICE does more than answer. It learns how you work and turns each task into an ability it can use better next time."
+    },
+    "loop": {
+      "eyebrow": "SELF-IMPROVEMENT LOOP",
+      "title": "The more you use it, the more it becomes yours",
+      "description": "The work ends, but the learning remains. Repeated patterns become skills that improve with every run.",
+      "nodes": [
+        { "label": "Talk", "caption": "Delegate a task" },
+        { "label": "Learn", "caption": "Understand patterns" },
+        { "label": "Build", "caption": "Save an ability" },
+        { "label": "Improve", "caption": "Do it better next time" }
+      ],
+      "dragHint": "Drag to move through the learning field",
+      "next": "Expand its abilities"
+    },
+    "ecosystem": {
+      "eyebrow": "EXPAND THE ORBIT",
+      "title": "Put the abilities you need into orbit",
+      "description": "The RICE core stays focused while new capabilities connect around the way you work.",
+      "capabilities": [
+        {
+          "id": "skill",
+          "eyebrow": "01 / WORKFLOW MEMORY",
+          "title": "Skill",
+          "description": "Remember repeatable workflows and run them in one move next time.",
+          "metric": "Turn repetition into a reusable ability",
+          "accent": "#5b8cff"
+        },
+        {
+          "id": "connector",
+          "eyebrow": "02 / REAL-WORLD ACCESS",
+          "title": "Connector",
+          "description": "Securely reach the mail, calendar, and documents you use every day.",
+          "metric": "Only the data you allow, only when needed",
+          "accent": "#36d8c4"
+        },
+        {
+          "id": "plugin",
+          "eyebrow": "03 / DOMAIN EXPERTISE",
+          "title": "Plugin",
+          "description": "Combine proven skills and connectors into domain expertise.",
+          "metric": "Specialized capability in one install",
+          "accent": "#aa7dff"
+        }
+      ],
+      "add": "Attach next module",
+      "continue": "Connect an AI model",
+      "assembled": "Three capability modules are synchronized with the core"
+    },
+    "model": {
+      "eyebrow": "FINAL LINK",
+      "title": "Choose the AI that powers RICE",
+      "description": "Connect a cloud API or a model running locally on your device. You can change it anytime in Settings.",
+      "local": "Keys and learning preferences remain on this device",
+      "blocked": "Connect one available model to continue",
+      "connect": "Start with RICE",
+      "back": "Back"
+    },
+    "handoff": {
+      "eyebrow": "SYSTEM READY",
+      "title": "What should we learn together first?",
+      "description": "Start your first conversation. From this moment, RICE grows around the way you work."
+    }
+  }
+}

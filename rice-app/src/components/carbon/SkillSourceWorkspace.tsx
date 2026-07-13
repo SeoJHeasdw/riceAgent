@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Icon } from '../ui';
 import type { SkillFile, SkillFileLanguage } from '../../lib/types';
 import type { Skill, SkillDetail } from '../../lib/learningData';
@@ -17,6 +18,10 @@ import { FileTypeIcon, FolderIcon } from './FileTypeIcon';
 // 풀스크린 오버레이가 타이틀바까지 덮으므로, macOS 트래픽 라이트(x:16) 공간을 좌측에 비워둔다 (Layout과 동일).
 const isElectron = navigator.userAgent.toLowerCase().includes('electron');
 
+// SKILL.md 먼저, 그다음 README, 나머지 알파벳 — 루트 파일 정렬
+const rootRank = (name: string) => (/^skill\.md$/i.test(name) ? 0 : /^readme/i.test(name) ? 1 : 2);
+
+// 언어 식별자는 고유명사 — 번역 대상 아님
 const LANG_LABEL: Record<SkillFileLanguage, string> = {
   markdown: 'Markdown',
   shell: 'Shell',
@@ -25,19 +30,6 @@ const LANG_LABEL: Record<SkillFileLanguage, string> = {
   html: 'HTML',
   json: 'JSON',
 };
-
-const fileRole = (path: string): { label: string; description: string } => {
-  const name = path.split('/').pop()?.toLowerCase() ?? path.toLowerCase();
-  if (name === 'skill.md') return { label: '스킬 지침', description: 'AI가 언제, 어떻게 이 스킬을 사용할지 정의해요.' };
-  if (name.startsWith('readme')) return { label: '사용 안내', description: '사람을 위한 설치·사용 설명이에요.' };
-  if (path.startsWith('scripts/') || /\.(sh|py)$/i.test(path)) return { label: '실행 도구', description: '스킬이 실제 작업을 수행할 때 사용하는 코드예요.' };
-  if (/\.(html|htm)$/i.test(path)) return { label: '화면·템플릿', description: '결과물의 화면이나 문서 모양을 만들어요.' };
-  if (/\.json$/i.test(path)) return { label: '설정·데이터', description: '스킬이 참고하는 구조화된 설정이에요.' };
-  return { label: '참고 파일', description: '스킬 실행이나 설명에 함께 사용되는 파일이에요.' };
-};
-
-// SKILL.md 먼저, 그다음 README, 나머지 알파벳 — 루트 파일 정렬
-const rootRank = (name: string) => (/^skill\.md$/i.test(name) ? 0 : /^readme/i.test(name) ? 1 : 2);
 
 export const SkillSourceWorkspace: React.FC<{
   open: boolean;
@@ -48,6 +40,8 @@ export const SkillSourceWorkspace: React.FC<{
    *  생략하면 읽기 전용 — 빌트인 스킬처럼 편집이 허용되지 않는 소스 뷰. */
   onEdit?: (path: string) => void;
 }> = ({ open, skill, detail, onClose, onEdit }) => {
+  const { t } = useTranslation('skills');
+
   const { files, synthesized } = useMemo(() => ownedSkillFiles(skill, detail), [skill, detail]);
 
   const { roots, folders } = useMemo(() => {
@@ -92,6 +86,18 @@ export const SkillSourceWorkspace: React.FC<{
   const isMarkdown = active?.language === 'markdown';
   const showRaw = raw || !isMarkdown;
   const folderCount = Object.keys(folders).length;
+
+  // 파일 경로에 따른 역할 라벨/설명 — 렌더링 시 t()로 현재 언어 적용
+  const fileRole = (path: string): { label: string; description: string } => {
+    const name = path.split('/').pop()?.toLowerCase() ?? path.toLowerCase();
+    if (name === 'skill.md') return { label: t('sourceWorkspace.roleSkillMdLabel'), description: t('sourceWorkspace.roleSkillMdDesc') };
+    if (name.startsWith('readme')) return { label: t('sourceWorkspace.roleReadmeLabel'), description: t('sourceWorkspace.roleReadmeDesc') };
+    if (path.startsWith('scripts/') || /\.(sh|py)$/i.test(path)) return { label: t('sourceWorkspace.roleScriptLabel'), description: t('sourceWorkspace.roleScriptDesc') };
+    if (/\.(html|htm)$/i.test(path)) return { label: t('sourceWorkspace.roleHtmlLabel'), description: t('sourceWorkspace.roleHtmlDesc') };
+    if (/\.json$/i.test(path)) return { label: t('sourceWorkspace.roleJsonLabel'), description: t('sourceWorkspace.roleJsonDesc') };
+    return { label: t('sourceWorkspace.roleDefaultLabel'), description: t('sourceWorkspace.roleDefaultDesc') };
+  };
+
   const activeRole = active ? fileRole(active.path) : null;
 
   const copy = async () => {
@@ -125,7 +131,7 @@ export const SkillSourceWorkspace: React.FC<{
       >
         <FileTypeIcon path={file.path} size={16} />
         <span className="truncate flex-1 min-w-0">{base}</span>
-        {isEntry && <span className="text-label-micro font-medium text-link-primary flex-shrink-0">핵심</span>}
+        {isEntry && <span className="text-label-micro font-medium text-link-primary flex-shrink-0">{t('sourceWorkspace.coreFileTag')}</span>}
       </button>
     );
   };
@@ -138,8 +144,8 @@ export const SkillSourceWorkspace: React.FC<{
         <div className="flex items-center gap-3 px-4 h-14">
         <button
           onClick={onClose}
-          title="스킬 상세로 돌아가기 (Esc)"
-          aria-label="스킬 상세로 돌아가기"
+          title={t('sourceWorkspace.backTitle')}
+          aria-label={t('sourceWorkspace.backAriaLabel')}
           className="electron-no-drag inline-flex h-9 w-9 items-center justify-center rounded-lg text-text-secondary bg-layer-02 border border-border-subtle-01 hover:bg-layer-hover-01 hover:text-text-primary hover:border-border-strong-01 transition-colors flex-shrink-0"
         >
           <Icon name="arrow-right" size={16} className="rotate-180" />
@@ -152,7 +158,11 @@ export const SkillSourceWorkspace: React.FC<{
             <span className="text-body-short-02 font-semibold text-text-primary truncate">{skill.name}</span>
             <span className="text-caption-01 font-mono text-text-helper">{skill.ver}</span>
           </div>
-          <div className="text-caption-01 text-text-helper">스킬 구성 · {files.length}개 파일{folderCount > 0 ? ` · ${folderCount}개 폴더` : ''}</div>
+          <div className="text-caption-01 text-text-helper">
+            {folderCount > 0
+              ? t('sourceWorkspace.headerSummaryWithFolders', { count: files.length, folders: folderCount })
+              : t('sourceWorkspace.headerSummary', { count: files.length })}
+          </div>
         </div>
         <div className="flex-1" />
         {/* 편집 = 지금 보고 있는 파일 대상. 어느 파일인지 라벨에 드러낸다.
@@ -161,19 +171,19 @@ export const SkillSourceWorkspace: React.FC<{
           <button
             onClick={() => active && onEdit(active.path)}
             disabled={!active}
-            title={active ? `${active.path}를 AI와 수정` : 'AI로 수정'}
+            title={active ? t('sourceWorkspace.editBtnTitle', { path: active.path }) : t('sourceWorkspace.editBtnLabel')}
             className="electron-no-drag inline-flex items-center gap-2 h-9 px-3.5 rounded-lg text-body-short-01 font-semibold bg-interactive text-text-on-color hover:bg-interactive-hover transition-colors flex-shrink-0 disabled:opacity-40 max-w-[300px]"
           >
             <Icon name="sparkle" size={14} className="flex-shrink-0" />
-            <span className="truncate">AI로 이 파일 수정</span>
+            <span className="truncate">{t('sourceWorkspace.editBtnLabel')}</span>
           </button>
         ) : (
           <span
-            title="기본 내장 스킬은 수정할 수 없어요 — 사본이 필요하면 목록 하단의 내보내기를 쓰세요"
+            title={t('sourceWorkspace.readOnlyTitle')}
             className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-caption-01 font-semibold text-text-helper bg-layer-02 border border-border-subtle-01 flex-shrink-0"
           >
             <Icon name="lock" size={13} />
-            읽기 전용
+            {t('sourceWorkspace.readOnlyLabel')}
           </span>
         )}
         </div>
@@ -184,7 +194,7 @@ export const SkillSourceWorkspace: React.FC<{
         <div className="flex-shrink-0 flex items-center gap-2 px-5 py-2 bg-interactive/8 border-b border-border-subtle-01">
           <Icon name="idea" size={14} className="text-icon-primary flex-shrink-0" />
           <span className="text-caption-01 text-text-secondary">
-            대화에서 배운 내용을 바탕으로 기본 파일 구성이 만들어졌어요. 원하는 파일을 고른 뒤 AI에게 자연어로 수정을 요청할 수 있습니다.
+            {t('sourceWorkspace.synthesizedBanner')}
           </span>
         </div>
       )}
@@ -196,14 +206,14 @@ export const SkillSourceWorkspace: React.FC<{
           <div className="mb-3 rounded-xl border border-border-subtle-01 bg-background p-3">
             <div className="flex items-center gap-2 text-body-short-01 font-semibold text-text-primary">
               <Icon name="skill" size={15} className="text-blue-30" />
-              하나의 스킬, 여러 파일
+              {t('sourceWorkspace.treeSectionTitle')}
             </div>
             <p className="mt-1.5 text-caption-01 leading-4 text-text-helper">
-              <span className="font-mono text-text-secondary">SKILL.md</span>는 지침을, 나머지 파일은 실행 도구와 참고 자료를 담아요.
+              {t('sourceWorkspace.treeSectionBody', { skillMd: 'SKILL.md' })}
             </p>
           </div>
           <div className="flex items-center gap-1.5 px-2.5 pb-2">
-            <span className="text-caption-01 font-semibold text-text-secondary">파일</span>
+            <span className="text-caption-01 font-semibold text-text-secondary">{t('sourceWorkspace.filesLabel')}</span>
             <span className="ml-auto text-caption-01 text-text-helper">{files.length}</span>
           </div>
           {roots.map((f) => (
@@ -251,7 +261,7 @@ export const SkillSourceWorkspace: React.FC<{
                       !raw ? 'bg-layer-01 text-text-primary shadow-elevation-1' : 'text-text-helper hover:text-text-primary'
                     }`}
                   >
-                      미리보기
+                    {t('sourceWorkspace.previewBtn')}
                   </button>
                   <button
                     onClick={() => setRaw(true)}
@@ -259,17 +269,17 @@ export const SkillSourceWorkspace: React.FC<{
                       raw ? 'bg-layer-01 text-text-primary shadow-elevation-1' : 'text-text-helper hover:text-text-primary'
                     }`}
                   >
-                      원문
+                    {t('sourceWorkspace.rawBtn')}
                   </button>
                 </div>
               )}
               <button
                 onClick={copy}
-                title="복사"
+                title={t('sourceWorkspace.copyTitle')}
                 className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-caption-01 text-icon-secondary hover:bg-layer-hover-01 hover:text-text-primary transition-colors"
               >
                 <Icon name={copied ? 'check' : 'copy'} size={14} className={copied ? 'text-support-success' : ''} />
-                {copied ? '복사됨' : '복사'}
+                {copied ? t('sourceWorkspace.copiedLabel') : t('sourceWorkspace.copyLabel')}
               </button>
             </div>
           </div>
@@ -277,7 +287,7 @@ export const SkillSourceWorkspace: React.FC<{
           {/* file body */}
           <div className="flex-1 overflow-y-auto">
             {!active ? (
-              <div className="h-full flex items-center justify-center text-body-short-01 text-text-helper">파일이 없어요.</div>
+              <div className="h-full flex items-center justify-center text-body-short-01 text-text-helper">{t('sourceWorkspace.emptyFile')}</div>
             ) : showRaw ? (
               <pre className="mx-auto max-w-[980px] px-10 py-8 text-code-02 font-mono leading-6 text-text-primary whitespace-pre-wrap break-words">
                 {active.content}

@@ -1,4 +1,5 @@
 import React, { useId } from 'react';
+import { useTranslation } from 'react-i18next';
 
 /**
  * Toggle - iOS-style toggle switch.
@@ -33,6 +34,7 @@ export const Toggle: React.FC<ToggleProps> = ({
   tone = 'blue',
   'aria-label': ariaLabel,
 }) => {
+  const { t } = useTranslation('common');
   const accent = toneStyles[tone];
   const id = useId();
   const labelId = label ? `${id}-label` : undefined;
@@ -42,7 +44,7 @@ export const Toggle: React.FC<ToggleProps> = ({
       type="button"
       role="switch"
       aria-checked={checked}
-      aria-label={label ? undefined : ariaLabel ?? '상태 전환'}
+      aria-label={label ? undefined : ariaLabel ?? t('statusToggle')}
       aria-labelledby={labelId}
       aria-describedby={descriptionId}
       disabled={disabled}

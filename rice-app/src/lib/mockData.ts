@@ -34,20 +34,6 @@ export const skillCategoryCodes = [
 export type SkillCategoryCode = (typeof skillCategoryCodes)[number];
 
 /**
- * Legacy display strings kept for SkillAuthorModal (not yet migrated to i18n).
- * TODO(i18n): migrate SkillAuthorModal to use skillCategoryCodes + t()
- */
-export const skillCategories = [
-  'All',
-  '데이터 분석',
-  '자동화',
-  '연동',
-  '개발',
-  '커뮤니케이션',
-  '생산성',
-];
-
-/**
  * Plugin categories — stable codes used in PluginMarketScreen (i18n-ready).
  * Rendered via t('plugins:category.<code>').
  */

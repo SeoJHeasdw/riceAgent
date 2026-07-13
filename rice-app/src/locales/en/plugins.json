@@ -1,4 +1,13 @@
 {
+  "card": {
+    "compositionSkill": "skill",
+    "compositionConnector": "connector",
+    "compositionKnowledge": "knowledge",
+    "statusActive": "In use by agent",
+    "statusPaused": "Paused",
+    "ariaToggleEnable": "Enable {{name}}",
+    "ariaToggleDisable": "Disable {{name}}"
+  },
   "title": "Plugin Market",
   "subtitle": "Install solution experts to turn your agent into a domain expert — for customer demos, on-premises deployments, and error handling",
   "search": "Search plugins...",
@@ -103,6 +112,9 @@
     "listEmpty": "No plugins installed yet. Find a solution expert in the Market.",
     "listEmptyBrowse": "Browse Plugin Market",
     "listNoMatch": "No matching plugins.",
-    "listLoading": "Loading…"
+    "listLoading": "Loading…",
+    "sourceBuiltin": "Bundled with app",
+    "sourceRuntime": "Runtime install",
+    "sourceMarket": "Plugin Market · {{provider}}"
   }
 }

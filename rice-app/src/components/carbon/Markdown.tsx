@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
@@ -96,6 +97,7 @@ const Frontmatter: React.FC<{ entries: Array<[string, string]> }> = ({ entries }
 };
 
 const CodeBlock: React.FC<{ code: string; language?: string }> = ({ code, language }) => {
+  const { t } = useTranslation('common');
   const [copied, setCopied] = useState(false);
   const lang = (language || 'text').toLowerCase();
   const isShell = SHELL_LANGS.has(lang);
@@ -117,10 +119,10 @@ const CodeBlock: React.FC<{ code: string; language?: string }> = ({ code, langua
           type="button"
           onClick={copy}
           className="ml-auto inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-caption-01 text-text-helper transition-colors hover:bg-layer-hover-01 hover:text-text-primary"
-          aria-label="코드 복사"
+          aria-label={t('markdown.codeAriaLabel')}
         >
           <Icon name={copied ? 'check' : 'copy'} size={13} />
-          {copied ? '복사됨' : '복사'}
+          {copied ? t('markdown.codeCopied') : t('markdown.codeCopy')}
         </button>
       </div>
       <pre className="m-0 overflow-x-auto p-3 text-code-02 leading-5 text-text-primary">
@@ -130,18 +132,21 @@ const CodeBlock: React.FC<{ code: string; language?: string }> = ({ code, langua
   );
 };
 
-const FileChip: React.FC<{ path: string; onFileClick: (path: string) => void }> = ({ path, onFileClick }) => (
-  <button
-    type="button"
-    onClick={() => onFileClick(cleanFileTarget(path))}
-    title={`파일 열기 · ${path}`}
-    className="mx-0.5 inline-flex max-w-full items-center gap-1 rounded-md border border-border-subtle-01 bg-layer-02 px-1.5 py-0.5 align-baseline font-mono text-code-02 text-link-primary transition-colors hover:border-border-strong-01 hover:bg-layer-hover-02"
-  >
-    <Icon name="document" size={12} className="flex-shrink-0" />
-    <span className="truncate">{path}</span>
-    <Icon name="arrow-up-right" size={10} className="flex-shrink-0 opacity-60" />
-  </button>
-);
+const FileChip: React.FC<{ path: string; onFileClick: (path: string) => void }> = ({ path, onFileClick }) => {
+  const { t } = useTranslation('common');
+  return (
+    <button
+      type="button"
+      onClick={() => onFileClick(cleanFileTarget(path))}
+      title={t('markdown.fileOpenTitle', { path })}
+      className="mx-0.5 inline-flex max-w-full items-center gap-1 rounded-md border border-border-subtle-01 bg-layer-02 px-1.5 py-0.5 align-baseline font-mono text-code-02 text-link-primary transition-colors hover:border-border-strong-01 hover:bg-layer-hover-02"
+    >
+      <Icon name="document" size={12} className="flex-shrink-0" />
+      <span className="truncate">{path}</span>
+      <Icon name="arrow-up-right" size={10} className="flex-shrink-0 opacity-60" />
+    </button>
+  );
+};
 
 export interface MarkdownProps {
   source: string;
@@ -151,6 +156,7 @@ export interface MarkdownProps {
 }
 
 export const Markdown: React.FC<MarkdownProps> = ({ source, onFileClick, streaming = false }) => {
+  const { t } = useTranslation('common');
   const parsed = useMemo(() => {
     const frontmatter = extractFrontmatter(source);
     const stable = stabilizeStreamingSource(frontmatter.body, streaming);
@@ -195,7 +201,7 @@ export const Markdown: React.FC<MarkdownProps> = ({ source, onFileClick, streami
               type="button"
               onClick={() => onFileClick(cleanFileTarget(decodeURIComponent(href)))}
               className="inline-flex items-center gap-1 rounded px-1 text-link-primary underline decoration-link-primary/35 underline-offset-2 transition-colors hover:bg-layer-hover-01 hover:decoration-link-primary"
-              title={`파일 열기 · ${href}`}
+              title={t('markdown.fileOpenTitle', { path: href })}
             >
               <Icon name="document" size={12} />
               {children}
@@ -239,7 +245,7 @@ export const Markdown: React.FC<MarkdownProps> = ({ source, onFileClick, streami
         </td>
       ),
     }),
-    [onFileClick],
+    [onFileClick, t],
   );
 
   return (
@@ -251,7 +257,7 @@ export const Markdown: React.FC<MarkdownProps> = ({ source, onFileClick, streami
       {parsed.pendingTable && (
         <div className="mb-2 mt-1 inline-flex items-center gap-2 rounded-md border border-border-subtle-01 bg-layer-01 px-2.5 py-1.5 text-caption-01 text-text-helper" role="status">
           <span className="ia-spinner h-3 w-3" aria-hidden="true" />
-          표 구성 중…
+          {t('markdown.tableBuilding')}
         </div>
       )}
     </div>
