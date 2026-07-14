@@ -45,7 +45,7 @@ npm install
 | 구분 | 모델 |
 |------|------|
 | 최소 | `gpt-oss:20b` |
-| 권장 | `qwen3.6:27b` 이상 |
+| 권장 | `qwen3.6:35b-a3b-q4_K_M` (M4 Max 36GB 기준 MoE, 속도·메모리 균형) |
 
 모델 호출은 **Ollama 데몬(:11434)** 이 떠 있어야 함 (`ollama serve`).
 

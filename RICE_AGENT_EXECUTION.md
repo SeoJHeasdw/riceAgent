@@ -703,7 +703,7 @@ fake는 영향이 없다.
 
 **모듈**: `agent/profiles.py::OrchestrationProfile` (resolve는 orchestrator가 턴마다).
 
-권장 로컬 모델(qwen3 27b급)과 프론티어(Claude 등)를 **하나의 실행 모델**로 서빙하되,
+권장 로컬 모델(qwen3.6:35b-a3b-q4_K_M급, MoE)과 프론티어(Claude 등)를 **하나의 실행 모델**로 서빙하되,
 차이는 보정 장치의 강도로 흡수한다. 소형 모델에게는 지시의 위치(recency)·반복(넛지)·
 물리적 예산(num_ctx)이 곧 준수율이다 — 이 판단이 루프 본문에 "이 모델은 작으니까"
 분기로 흩어지지 않도록 프로파일 하나로 모은다.
