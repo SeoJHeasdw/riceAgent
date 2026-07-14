@@ -178,6 +178,16 @@ ipcMain.handle('dialog:select-directory', async (_event, defaultPath?: string) =
   return result.canceled ? null : result.filePaths[0] ?? null;
 });
 
+// Open the workspace output folder in the OS file manager (Finder / Explorer).
+// The path must be an absolute directory path, otherwise the call is rejected.
+ipcMain.handle('dialog:open-directory', async (_event, dirPath: string) => {
+  if (typeof dirPath !== 'string' || !path.isAbsolute(dirPath)) {
+    throw new Error('invalid directory path');
+  }
+  await shell.openPath(dirPath);
+  return true;
+});
+
 // Open an external URL in the user's default browser (OAuth consent — CONTRACTS
 // §4.2 step 3). Restricted to http/https so the renderer can't launch arbitrary
 // schemes/executables.

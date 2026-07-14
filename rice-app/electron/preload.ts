@@ -35,6 +35,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   dialog: {
     selectDirectory: (defaultPath?: string) => ipcRenderer.invoke('dialog:select-directory', defaultPath),
+    openDirectory: (dirPath: string) => ipcRenderer.invoke('dialog:open-directory', dirPath),
   },
 
   // Artifact 다운로드 (platform tar.gz → 임시 경로 + 체크섬). 마켓 설치 파이프라인용.
@@ -70,6 +71,7 @@ export interface ElectronAPI {
   };
   dialog: {
     selectDirectory: (defaultPath?: string) => Promise<string | null>;
+    openDirectory: (dirPath: string) => Promise<boolean>;
   };
   artifact: {
     download: (url: string) => Promise<{ path: string; checksum: string }>;

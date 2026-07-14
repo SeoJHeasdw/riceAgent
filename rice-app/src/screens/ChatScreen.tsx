@@ -1057,6 +1057,20 @@ function ChatScreen() {
       .finally(() => setWorkspaceSaving(false));
   };
 
+  const openWorkspaceFolder = () => {
+    if (!workspacePath) return;
+    const opener = (
+      window as { electronAPI?: { dialog?: { openDirectory: (dirPath: string) => Promise<boolean> } } }
+    ).electronAPI?.dialog?.openDirectory;
+    if (!opener) {
+      toast.notify({ message: t('folderOnlyDesktop'), variant: 'info' });
+      return;
+    }
+    void opener(workspacePath).catch(() =>
+      toast.notify({ message: t('workspaceFolderOpenFailed'), variant: 'error' }),
+    );
+  };
+
   // When connected, restore persisted settings (model/provider/endpoint) from
   // config.yaml via GET /settings, then load the session list.
   useEffect(() => {
@@ -2504,18 +2518,27 @@ function ChatScreen() {
                 </div>
               </div>
               {workspacePath && (
-                <div className="mt-3 flex items-center px-1">
-                  <Tooltip label={t('saveLocationTooltip', { path: workspacePath })}>
+                <div className="mt-3 flex min-w-0 max-w-full items-center gap-1 px-1 text-caption-01 text-text-helper">
+                  <Tooltip label={t('saveLocationOpenTooltip')}>
+                    <button
+                      type="button"
+                      onClick={openWorkspaceFolder}
+                      className="flex flex-shrink-0 items-center gap-1.5 rounded-md py-1 pr-1 transition-colors hover:text-text-primary"
+                      aria-label={t('saveLocationOpenAriaLabel')}
+                    >
+                      <Icon name="folder" size={18} className="flex-shrink-0 text-icon-secondary" />
+                      <span className="text-text-secondary">{t('saveLocation')}</span>
+                    </button>
+                  </Tooltip>
+                  <Tooltip label={t('saveLocationChangeTooltip', { path: workspacePath })}>
                     <button
                       type="button"
                       onClick={chooseWorkspaceFolder}
                       disabled={workspaceSaving}
-                      className="flex min-w-0 max-w-full items-center gap-2 rounded-md py-1 text-caption-01 text-text-helper transition-colors hover:text-text-primary"
-                      aria-label={t('saveLocationAriaLabel', { path: workspacePath })}
+                      className="min-w-0 truncate rounded-md py-1 font-mono transition-colors hover:text-text-primary hover:underline"
+                      aria-label={t('saveLocationChangeAriaLabel', { path: workspacePath })}
                     >
-                      <Icon name="folder" size={18} className="flex-shrink-0 text-icon-secondary" />
-                      <span className="flex-shrink-0 text-text-secondary">{t('saveLocation')}</span>
-                      <span className="truncate font-mono">{workspacePath}</span>
+                      {workspacePath}
                     </button>
                   </Tooltip>
                 </div>
