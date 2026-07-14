@@ -15,6 +15,8 @@ export interface LayoutProps {
   railItems: IconRailItem[];
   activeRailId: string;
   onNavigate: (id: string, path: string) => void;
+  /** Route rendered beneath an overlay destination such as Settings. */
+  contentPath?: string;
 }
 
 export const Layout: React.FC<LayoutProps> = ({
@@ -22,12 +24,13 @@ export const Layout: React.FC<LayoutProps> = ({
   railItems,
   activeRailId,
   onNavigate,
+  contentPath,
 }) => {
   // ChatScreen은 AppShell에서 항상 mount한 채 가시성만 바꾼다. 여기서 경로를
   // key로 삼으면 숨겨진 ChatScreen까지 remount되어 진행 중 SSE 상태가 유실된다.
   // 화면별 진입 애니메이션은 AppShell의 가시 wrapper가 담당한다.
   const location = useLocation();
-  const screenKey = location.pathname.split('/')[1] || 'home';
+  const screenKey = (contentPath ?? location.pathname).split('/')[1] || 'home';
   const isChatScreen = screenKey === 'chat';
 
   return (

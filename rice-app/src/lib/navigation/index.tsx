@@ -135,7 +135,7 @@ export const navDestinations: NavDestination[] = [
     label: 'Settings',
     title: '설정',
     path: '/settings',
-    description: '모델과 앱 환경을 설정해요',
+    description: '외관, 학습과 개인정보를 설정해요',
     group: 'system',
     pinBottom: true,
     iconPaths: (

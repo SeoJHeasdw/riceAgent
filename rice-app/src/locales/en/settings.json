@@ -3,6 +3,17 @@
   "saved": "Saved",
   "unsaved": "Unsaved",
   "saveButton": "Save Settings",
+  "close": "Close settings",
+  "autoSave": "Changes are saved to this device automatically.",
+  "autoSaveShort": "Auto-save",
+  "nav": {
+    "general": "General",
+    "generalDesc": "Appearance and launch",
+    "privacy": "Learning & privacy",
+    "privacyDesc": "Personalization and data",
+    "about": "About RICE",
+    "aboutDesc": "Help and reset"
+  },
   "appearance": {
     "title": "Appearance",
     "description": "Theme, language, and font preferences",
@@ -17,9 +28,11 @@
   },
   "apiRuntime": {
     "title": "API & Runtime",
-    "description": "Model provider credentials and local runtime",
+    "description": "Manage model connections and app startup",
+    "modelSettingsTitle": "Manage model connections in Chat",
     "claudeManagedInChat": "The Claude (SaaS) API key is managed in the chat model settings.",
     "ollamaEndpoint": "Ollama endpoint",
+    "ollamaHelper": "Only change this when using a local model",
     "ollamaPlaceholder": "http://localhost:11434",
     "runtimeAutoStart": "Start runtime on launch",
     "runtimeAutoStartDesc": "Automatically start the RICE runtime when the app opens"
@@ -27,6 +40,8 @@
   "learningPrivacy": {
     "title": "Learning · Privacy",
     "description": "Control what the learning loop can collect and where it lives",
+    "localFirstTitle": "RICE is local-first by default",
+    "localFirstDesc": "Learning data stays on this device by default, and anonymous usage data is never shared until you choose to enable it.",
     "userModeling": "Enable user modeling",
     "userModelingDesc": "Learn from your interactions to personalize responses",
     "localStorage": "Store user model locally only",
@@ -51,11 +66,14 @@
     "start": "Start"
   },
   "danger": {
-    "title": "Danger zone",
-    "description": "Irreversible actions — be careful",
+    "title": "Reset settings",
+    "description": "Return to the defaults whenever you need a fresh start",
     "reset": "Reset all settings",
     "resetDesc": "Restore every setting to its default value",
-    "resetButton": "Reset"
+    "resetButton": "Reset",
+    "resetConfirm": "Reset appearance, privacy, and runtime settings to their defaults?",
+    "cancel": "Cancel",
+    "confirmReset": "Reset settings"
   },
 
   "modelPicker": {

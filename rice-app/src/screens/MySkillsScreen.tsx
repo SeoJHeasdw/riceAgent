@@ -1054,23 +1054,25 @@ const downloadSkillBundle = (skill: Skill, detail: SkillDetail) => {
   URL.revokeObjectURL(url);
 };
 
-// 소스 보기 런처 — 아이콘만 남기면 의미 발견성이 떨어진다.
-// 스킬의 차별점(소스 열람·편집 가능)을 텍스트로 드러내되, 플러그인 헤더보다 무겁지 않게 유지한다.
+// 소스 보기 런처 — AI 수정(primary)의 보조 액션이므로 같은 높이의 secondary를 쓴다.
+// 아이콘만 남기면 의미 발견성이 떨어져 파일 수와 텍스트는 유지한다.
 const SourceLauncher: React.FC<{ skill: Skill; detail: SkillDetail; onOpen: () => void }> = ({ skill, detail, onOpen }) => {
   const { t } = useTranslation('skills');
   const { files } = ownedSkillFiles(skill, detail);
   const readOnly = isBuiltinSkill(skill);
   return (
-    <button
+    <Button
+      kind="secondary"
+      size="sm"
       onClick={onOpen}
       title={readOnly ? t('mySkills.sourceLauncherReadOnlyTitle') : t('mySkills.sourceLauncherTitle')}
-      className="group inline-flex h-8 items-center gap-2 rounded-lg border border-border-strong-01 bg-layer-01 px-3 text-body-short-01 font-semibold text-text-secondary transition-colors duration-150 hover:bg-layer-hover-01 hover:text-text-primary flex-shrink-0"
+      className="group"
+      icon={<Icon name="folder" size={14} className="text-icon-secondary group-hover:text-icon-primary" />}
     >
-      <Icon name="folder" size={15} className="text-icon-secondary group-hover:text-icon-primary" />
       {t('mySkills.sourceLauncherLabel')}
-      <span className="text-caption-01 font-normal text-text-helper">{files.length}</span>
-      <Icon name="arrow-right" size={13} className="text-icon-secondary opacity-70" />
-    </button>
+      <span className="text-label-micro font-normal text-text-helper">{files.length}</span>
+      <Icon name="arrow-right" size={12} className="text-icon-secondary opacity-70" />
+    </Button>
   );
 };
 

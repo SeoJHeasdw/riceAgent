@@ -1,19 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { Button, Card, Input, Tag, Toggle } from '../components/ui';
+import { Button, Icon, Input, Toggle } from '../components/ui';
+import { dialogBackdropCls, dialogSurfaceCls } from '../components/ui/surfaces';
+import { useDialogA11y } from '../hooks/useDialogA11y';
 import { useI18n } from '../lib/i18n/I18nContext';
 import { replayOnboarding, replayTour } from '../lib/tutorial';
 import { applyAppearance } from '../lib/appearance';
-
-/**
- * SettingsScreen - Application preferences
- * Sections: Appearance, API & Runtime, Learning & Privacy, About, Danger zone
- *
- * i18n 레퍼런스 화면. 다른 화면 마이그레이션 시 이 파일의 패턴을 따르세요:
- *   - 문자열: useTranslation('<네임스페이스>') 로 받은 t('키')
- *   - 언어 읽기/전환: useI18n() 의 { language, setLanguage }
- *   - 언어명 라벨(English/한국어)처럼 "그 언어로 표기해야 하는" 값은 번역하지 않음
- */
 
 interface AppSettings {
   theme: 'dark' | 'light';
@@ -26,6 +19,14 @@ interface AppSettings {
   userModelingEnabled: boolean;
   localStorageOnly: boolean;
 }
+
+interface SettingsScreenProps {
+  open: boolean;
+  onClose: () => void;
+}
+
+type SettingsSectionId = 'general' | 'privacy' | 'about';
+type GlyphName = 'general' | 'privacy' | 'about' | 'sun' | 'moon';
 
 const DEFAULT_SETTINGS: AppSettings = {
   theme: 'dark',
@@ -46,401 +47,507 @@ function loadSettings(): AppSettings {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) return { ...DEFAULT_SETTINGS, ...JSON.parse(stored) };
   } catch {
-    // fall through to defaults
+    // Invalid or unavailable local storage falls back to safe defaults.
   }
   return DEFAULT_SETTINGS;
 }
 
-/** Section wrapper: tinted icon chip + title + description + card body */
-const SettingsSection: React.FC<{
+const Glyph: React.FC<{ name: GlyphName; size?: number; className?: string }> = ({
+  name,
+  size = 17,
+  className = '',
+}) => {
+  const paths: Record<GlyphName, React.ReactNode> = {
+    general: (
+      <>
+        <circle cx="12" cy="12" r="3" />
+        <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.9 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1A2 2 0 1 1 4.3 17l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.9-2.8l.1.1a1.7 1.7 0 0 0 1.8.3 1.7 1.7 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1A2 2 0 1 1 19.7 7l-.1.1a1.7 1.7 0 0 0-.3 1.8 1.7 1.7 0 0 0 1.5 1h.2a2 2 0 0 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z" />
+      </>
+    ),
+    privacy: (
+      <>
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" />
+        <path d="m9 12 2 2 4-4" />
+      </>
+    ),
+    about: (
+      <>
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 11v5M12 8h.01" />
+      </>
+    ),
+    sun: (
+      <>
+        <circle cx="12" cy="12" r="4" />
+        <path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+      </>
+    ),
+    moon: <path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z" />,
+  };
+
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      {paths[name]}
+    </svg>
+  );
+};
+
+interface SegmentOption<T extends string> {
+  value: T;
+  label: string;
+  icon?: React.ReactNode;
+}
+
+function SegmentedControl<T extends string>({
+  value,
+  options,
+  onChange,
+  ariaLabel,
+}: {
+  value: T;
+  options: SegmentOption<T>[];
+  onChange: (value: T) => void;
+  ariaLabel: string;
+}) {
+  return (
+    <div
+      className="grid gap-1 rounded-lg border border-border-subtle-01 bg-field-01 p-1"
+      style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
+      role="group"
+      aria-label={ariaLabel}
+    >
+      {options.map((option) => {
+        const active = value === option.value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => onChange(option.value)}
+            aria-pressed={active}
+            className={`flex h-8 min-w-0 items-center justify-center gap-1.5 rounded-md border px-2 text-caption-01 font-medium transition-colors ${
+              active
+                ? 'border-border-strong-01/70 bg-layer-selected-01 text-text-primary shadow-elevation-1'
+                : 'border-transparent text-text-secondary hover:bg-layer-hover-01 hover:text-text-primary'
+            }`}
+          >
+            {option.icon}
+            <span className="truncate">{option.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+const SettingsGroup: React.FC<{
   title: string;
   description?: string;
-  icon: React.ReactNode;
-  iconClass?: string;
   children: React.ReactNode;
-}> = ({ title, description, icon, iconClass = 'bg-interactive/15 text-blue-40', children }) => (
-  <section>
-    <div className="flex items-center gap-2.5 mb-1">
-      <div
-        className={`flex items-center justify-center w-7 h-7 rounded-lg flex-shrink-0 ${iconClass}`}
-        aria-hidden="true"
-      >
-        {icon}
-      </div>
-      <h2 className="text-heading-02 font-semibold text-text-primary">{title}</h2>
+}> = ({ title, description, children }) => (
+  <section className="space-y-2.5">
+    <div>
+      <h3 className="text-body-short-01 font-semibold text-text-primary">{title}</h3>
+      {description && <p className="mt-0.5 text-caption-01 text-text-helper">{description}</p>}
     </div>
-    {description && (
-      <p className="text-body-short-01 text-text-helper mb-3 ml-[38px]">{description}</p>
-    )}
-    {!description && <div className="mb-3" />}
-    <Card padding="lg" className="space-y-5">
+    <div className="overflow-hidden rounded-xl border border-border-subtle-01 bg-layer-01 divide-y divide-border-subtle-01">
       {children}
-    </Card>
+    </div>
   </section>
 );
 
-const SectionIcon: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <svg
-    width="15"
-    height="15"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.8"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    {children}
-  </svg>
+const SettingRow: React.FC<{
+  title: string;
+  description?: string;
+  children: React.ReactNode;
+  alignStart?: boolean;
+}> = ({ title, description, children, alignStart = false }) => (
+  <div className={`flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:justify-between ${alignStart ? 'sm:items-start' : 'sm:items-center'}`}>
+    <div className="min-w-0 sm:max-w-[290px]">
+      <div className="text-body-short-01 text-text-primary">{title}</div>
+      {description && <div className="mt-0.5 text-caption-01 leading-5 text-text-helper">{description}</div>}
+    </div>
+    <div className="w-full flex-shrink-0 sm:w-[300px]">{children}</div>
+  </div>
 );
 
-function SettingsScreen() {
+function SettingsScreen({ open, onClose }: SettingsScreenProps) {
   const { language, setLanguage } = useI18n();
   const { t } = useTranslation('settings');
   const [settings, setSettings] = useState<AppSettings>(loadSettings);
+  const [activeSection, setActiveSection] = useState<SettingsSectionId>('general');
   const [saved, setSaved] = useState(false);
-  const [hasChanges, setHasChanges] = useState(false);
+  const [resetConfirming, setResetConfirming] = useState(false);
+  const savedTimerRef = useRef<number | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const initialFocusRef = useRef<HTMLButtonElement>(null);
+  const titleId = useId();
 
-  // Sync stored language into the i18n context (no-op once they match)
+  useDialogA11y({ open, dialogRef, onClose, initialFocusRef });
+
   useEffect(() => {
-    if (settings.language !== language) {
-      setLanguage(settings.language);
-    }
+    if (settings.language !== language) setLanguage(settings.language);
   }, [settings.language, language, setLanguage]);
 
   useEffect(() => {
     applyAppearance({ font: settings.font, theme: settings.theme });
   }, [settings.font, settings.theme]);
 
-  const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
-    setSettings((prev) => ({ ...prev, [key]: value }));
-    setHasChanges(true);
+  useEffect(() => {
+    if (!open) return;
+    setActiveSection('general');
+    setResetConfirming(false);
+  }, [open]);
 
-    // If language changes, update i18n context immediately
-    if (key === 'language') {
-      setLanguage(value as 'en' | 'ko');
+  useEffect(
+    () => () => {
+      if (savedTimerRef.current) window.clearTimeout(savedTimerRef.current);
+    },
+    [],
+  );
+
+  const showSaved = () => {
+    setSaved(true);
+    if (savedTimerRef.current) window.clearTimeout(savedTimerRef.current);
+    savedTimerRef.current = window.setTimeout(() => setSaved(false), 1800);
+  };
+
+  const persist = (next: AppSettings) => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      showSaved();
+    } catch {
+      // The current session still reflects the choice when storage is unavailable.
     }
   };
 
-  const handleSave = () => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
-    setHasChanges(false);
-    setSaved(true);
-    window.setTimeout(() => setSaved(false), 2000);
+  const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
+    const next = { ...settings, [key]: value };
+    setSettings(next);
+    persist(next);
+    if (key === 'language') setLanguage(value as AppSettings['language']);
   };
 
   const handleReset = () => {
     setSettings(DEFAULT_SETTINGS);
     setLanguage(DEFAULT_SETTINGS.language);
-    setHasChanges(true);
+    persist(DEFAULT_SETTINGS);
+    setResetConfirming(false);
   };
 
-  return (
-    <div className="flex flex-col h-full bg-background">
-      {/* Header */}
-      {/* 채팅·사이드바와 같은 52px 헤더 라인 */}
-      <header className="h-[52px] flex-shrink-0 bg-layer-01 border-b border-border-subtle-01 flex items-center gap-3 px-5">
-        <h1 className="text-body-short-02 font-semibold text-text-primary">{t('title')}</h1>
-        {saved && (
-          <Tag type="green" size="sm" className="animate-fade-in" role="status">
-            {t('saved')}
-          </Tag>
-        )}
-        {hasChanges && !saved && (
-          <Tag type="yellow" size="sm" role="status">
-            {t('unsaved')}
-          </Tag>
-        )}
-        <div className="flex-1" />
-        <Button
-          kind="primary"
-          size="sm"
-          onClick={handleSave}
-          disabled={!hasChanges}
-        >
-          {t('saveButton')}
-        </Button>
-      </header>
+  const launchTutorial = (action: () => void) => {
+    onClose();
+    window.setTimeout(action, 120);
+  };
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-[720px] mx-auto px-8 py-8 space-y-8">
-          {/* About — hero card */}
-          <div className="domain-summary domain-summary--brand relative overflow-hidden rounded-xl p-5 text-white">
-            <div className="relative flex items-center gap-4">
-              <div
-                className="
-                  flex items-center justify-center w-12 h-12 rounded-2xl
-                  bg-white/15 backdrop-blur-sm border border-white/20
-                  text-white font-mono font-bold text-heading-03 select-none
-                "
-                aria-hidden="true"
-              >
-                R
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-heading-03 font-semibold leading-tight">
-                    {t('about.appName')}
-                  </span>
-                  <span className="px-2 py-0.5 rounded-full bg-white/15 text-caption-01 font-medium">
-                    {t('about.beta')}
-                  </span>
-                </div>
-                <div className="text-body-short-01 text-white/75 truncate">
-                  {t('about.appDescription')}
-                </div>
-              </div>
+  if (!open) return null;
+
+  const sections: Array<{
+    id: SettingsSectionId;
+    title: string;
+    description: string;
+    icon: GlyphName;
+  }> = [
+    { id: 'general', title: t('nav.general'), description: t('nav.generalDesc'), icon: 'general' },
+    { id: 'privacy', title: t('nav.privacy'), description: t('nav.privacyDesc'), icon: 'privacy' },
+    { id: 'about', title: t('nav.about'), description: t('nav.aboutDesc'), icon: 'about' },
+  ];
+  const currentSection = sections.find((section) => section.id === activeSection) ?? sections[0];
+
+  const content = {
+    general: (
+      <div className="space-y-6">
+        <SettingsGroup title={t('appearance.title')} description={t('appearance.description')}>
+          <SettingRow title={t('appearance.theme')}>
+            <SegmentedControl
+              value={settings.theme}
+              ariaLabel={t('appearance.theme')}
+              onChange={(value) => update('theme', value)}
+              options={[
+                { value: 'dark', label: t('appearance.themeDark'), icon: <Glyph name="moon" size={14} /> },
+                { value: 'light', label: t('appearance.themeLight'), icon: <Glyph name="sun" size={14} /> },
+              ]}
+            />
+          </SettingRow>
+          <SettingRow title={t('appearance.language')}>
+            <SegmentedControl
+              value={settings.language}
+              ariaLabel={t('appearance.language')}
+              onChange={(value) => update('language', value)}
+              options={[
+                { value: 'en', label: 'English' },
+                { value: 'ko', label: '한국어' },
+              ]}
+            />
+          </SettingRow>
+          <SettingRow title={t('appearance.font')}>
+            <SegmentedControl
+              value={settings.font}
+              ariaLabel={t('appearance.font')}
+              onChange={(value) => update('font', value)}
+              options={[
+                { value: 'system', label: t('appearance.fontSystem') },
+                { value: 'mono', label: t('appearance.fontMono') },
+                { value: 'sans', label: t('appearance.fontSans') },
+              ]}
+            />
+          </SettingRow>
+        </SettingsGroup>
+
+        <SettingsGroup title={t('apiRuntime.title')} description={t('apiRuntime.description')}>
+          <div className="flex items-start gap-3 bg-blue-60/5 px-4 py-3.5">
+            <span className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-blue-60/12 text-blue-40">
+              <Icon name="model" size={15} />
+            </span>
+            <div>
+              <div className="text-body-short-01 font-medium text-text-primary">{t('apiRuntime.modelSettingsTitle')}</div>
+              <p className="mt-0.5 text-caption-01 leading-5 text-text-helper">{t('apiRuntime.claudeManagedInChat')}</p>
             </div>
           </div>
-
-          {/* Appearance */}
-          <SettingsSection
-            title={t('appearance.title')}
-            description={t('appearance.description')}
-            iconClass="bg-purple-60/15 text-purple-30"
-            icon={
-              <SectionIcon>
-                <circle cx="12" cy="12" r="4" />
-                <path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
-              </SectionIcon>
-            }
+          <SettingRow
+            title={t('apiRuntime.ollamaEndpoint')}
+            description={t('apiRuntime.ollamaHelper')}
+            alignStart
           >
-            <div>
-              <div className="text-label-01 text-text-secondary mb-2">{t('appearance.theme')}</div>
-              <div className="grid grid-cols-2 gap-1 p-1 bg-field-01 border border-border-subtle-01 rounded-xl max-w-[320px]">
-                {([
-                  { value: 'dark' as const, label: t('appearance.themeDark'), enabled: true },
-                  { value: 'light' as const, label: t('appearance.themeLight'), enabled: true },
-                ]).map(({ value, label, enabled }) => {
-                  const isActive = settings.theme === value;
-                  return (
-                    <button
-                      key={value}
-                      disabled={!enabled}
-                      onClick={() => update('theme', value)}
-                      aria-pressed={isActive}
-                      className={`flex items-center justify-center gap-1.5 py-2 text-body-short-01 font-semibold rounded-lg border transition-colors duration-150 ${
-                        isActive
-                          ? 'bg-layer-selected-01 text-text-primary border-interactive'
-                          : enabled
-                          ? 'bg-transparent text-text-secondary border-transparent hover:bg-layer-hover-01'
-                          : 'bg-transparent text-text-placeholder border-transparent cursor-not-allowed'
-                      }`}
-                    >
-                      {value === 'dark' ? (
-                        <SectionIcon>
-                          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-                        </SectionIcon>
-                      ) : (
-                        <SectionIcon>
-                          <circle cx="12" cy="12" r="4" />
-                          <path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
-                        </SectionIcon>
-                      )}
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div>
-              <div className="text-label-01 text-text-secondary mb-2">
-                {t('appearance.language')}
-              </div>
-              <div className="grid grid-cols-2 gap-1 p-1 bg-field-01 border border-border-subtle-01 rounded-xl max-w-[320px]">
-                {/* 언어명은 각 언어 표기 그대로 — 번역 대상 아님 */}
-                {([
-                  { value: 'en' as const, label: 'English' },
-                  { value: 'ko' as const, label: '한국어' },
-                ]).map(({ value, label }) => {
-                  const isActive = settings.language === value;
-                  return (
-                    <button
-                      key={value}
-                      onClick={() => update('language', value)}
-                      aria-pressed={isActive}
-                      className={`py-2 text-body-short-01 font-semibold rounded-lg border transition-colors duration-150 ${
-                        isActive
-                          ? 'bg-layer-selected-01 text-text-primary border-interactive'
-                          : 'bg-transparent text-text-secondary border-transparent hover:bg-layer-hover-01'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            <div>
-              <div className="text-label-01 text-text-secondary mb-2">
-                {t('appearance.font')}
-              </div>
-              <div className="grid grid-cols-3 gap-1 p-1 bg-field-01 border border-border-subtle-01 rounded-xl max-w-[320px]">
-                {([
-                  { value: 'system' as const, label: t('appearance.fontSystem') },
-                  { value: 'mono'   as const, label: t('appearance.fontMono') },
-                  { value: 'sans'   as const, label: t('appearance.fontSans') },
-                ]).map(({ value, label }) => {
-                  const isActive = settings.font === value;
-                  return (
-                    <button
-                      key={value}
-                      onClick={() => update('font', value)}
-                      aria-pressed={isActive}
-                      className={`py-2 text-body-short-01 font-semibold rounded-lg border transition-colors duration-150 ${
-                        isActive
-                          ? 'bg-layer-selected-01 text-text-primary border-interactive'
-                          : 'bg-transparent text-text-secondary border-transparent hover:bg-layer-hover-01'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </SettingsSection>
-
-          {/* API & Runtime */}
-          <SettingsSection
-            title={t('apiRuntime.title')}
-            description={t('apiRuntime.description')}
-            iconClass="bg-interactive/15 text-blue-40"
-            icon={
-              <SectionIcon>
-                <rect x="2" y="2" width="20" height="8" rx="2" />
-                <rect x="2" y="14" width="20" height="8" rx="2" />
-                <path d="M6 6h.01M6 18h.01" />
-              </SectionIcon>
-            }
-          >
-            <p className="text-caption-01 text-text-helper -mt-1">
-              {t('apiRuntime.claudeManagedInChat')}
-            </p>
-
-            <div>
-              <label className="text-label-01 text-text-secondary mb-1.5 block">
-                {t('apiRuntime.ollamaEndpoint')}
-              </label>
-              <Input
-                type="text"
-                value={settings.ollamaEndpoint}
-                onChange={(e) => update('ollamaEndpoint', e.target.value)}
-                placeholder={t('apiRuntime.ollamaPlaceholder')}
-              />
-            </div>
-
+            <Input
+              type="text"
+              size="sm"
+              value={settings.ollamaEndpoint}
+              onChange={(event) => update('ollamaEndpoint', event.target.value)}
+              placeholder={t('apiRuntime.ollamaPlaceholder')}
+            />
+          </SettingRow>
+          <div className="px-4 py-3.5">
             <Toggle
               checked={settings.runtimeAutoStart}
               onChange={(checked) => update('runtimeAutoStart', checked)}
               label={t('apiRuntime.runtimeAutoStart')}
               description={t('apiRuntime.runtimeAutoStartDesc')}
             />
-          </SettingsSection>
+          </div>
+        </SettingsGroup>
+      </div>
+    ),
+    privacy: (
+      <div className="space-y-6">
+        <div className="relative overflow-hidden rounded-xl border border-green-40/25 bg-support-success/5 p-4">
+          <div className="absolute inset-y-0 left-0 w-0.5 bg-support-success" aria-hidden="true" />
+          <div className="flex items-start gap-3">
+            <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-support-success/12 text-green-30">
+              <Glyph name="privacy" size={17} />
+            </span>
+            <div>
+              <h3 className="text-body-short-01 font-semibold text-text-primary">{t('learningPrivacy.localFirstTitle')}</h3>
+              <p className="mt-1 text-caption-01 leading-5 text-text-secondary">{t('learningPrivacy.localFirstDesc')}</p>
+            </div>
+          </div>
+        </div>
 
-          {/* Learning & Privacy */}
-          <SettingsSection
-            title={t('learningPrivacy.title')}
-            description={t('learningPrivacy.description')}
-            iconClass="bg-support-success/15 text-green-30"
-            icon={
-              <SectionIcon>
-                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-              </SectionIcon>
-            }
-          >
+        <SettingsGroup title={t('learningPrivacy.title')} description={t('learningPrivacy.description')}>
+          <div className="px-4 py-3.5">
             <Toggle
               checked={settings.userModelingEnabled}
               onChange={(checked) => update('userModelingEnabled', checked)}
               label={t('learningPrivacy.userModeling')}
               description={t('learningPrivacy.userModelingDesc')}
+              tone="purple"
             />
+          </div>
+          <div className="px-4 py-3.5">
             <Toggle
               checked={settings.localStorageOnly}
               onChange={(checked) => update('localStorageOnly', checked)}
               disabled={!settings.userModelingEnabled}
               label={t('learningPrivacy.localStorage')}
               description={t('learningPrivacy.localStorageDesc')}
+              tone="green"
             />
+          </div>
+          <div className="px-4 py-3.5">
             <Toggle
               checked={settings.telemetryEnabled}
               onChange={(checked) => update('telemetryEnabled', checked)}
               label={t('learningPrivacy.telemetry')}
               description={t('learningPrivacy.telemetryDesc')}
             />
-          </SettingsSection>
-
-          {/* Tutorial — 온보딩/투어 다시 보기 */}
-          <SettingsSection
-            title={t('tutorial.title')}
-            description={t('tutorial.description')}
-            iconClass="bg-orange-40/15 text-orange-30"
-            icon={
-              <SectionIcon>
-                <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
-                <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
-              </SectionIcon>
-            }
-          >
-            <div className="flex items-center gap-3">
-              <div className="flex-1 min-w-0">
-                <div className="text-body-short-02 text-text-primary">
-                  {t('tutorial.replayOnboarding')}
-                </div>
-                <div className="text-caption-01 text-text-helper">
-                  {t('tutorial.replayOnboardingDesc')}
-                </div>
-              </div>
-              <Button kind="secondary" size="sm" onClick={replayOnboarding}>
-                {t('tutorial.replay')}
-              </Button>
+          </div>
+        </SettingsGroup>
+      </div>
+    ),
+    about: (
+      <div className="space-y-6">
+        <div className="gradient-brand relative overflow-hidden rounded-xl border border-white/10 p-5 text-white">
+          <div className="absolute -right-8 -top-10 h-32 w-32 rounded-full bg-white/10 blur-2xl" aria-hidden="true" />
+          <div className="relative flex items-center gap-4">
+            <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl border border-white/20 bg-white/15 font-mono text-heading-03 font-bold shadow-elevation-1">
+              R
             </div>
-            <div className="flex items-center gap-3">
-              <div className="flex-1 min-w-0">
-                <div className="text-body-short-02 text-text-primary">
-                  {t('tutorial.restartTour')}
-                </div>
-                <div className="text-caption-01 text-text-helper">
-                  {t('tutorial.restartTourDesc')}
-                </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <h3 className="text-heading-03 font-semibold">{t('about.appName')}</h3>
+                <span className="rounded-full bg-white/15 px-2 py-0.5 text-label-micro font-semibold">{t('about.beta')}</span>
               </div>
-              <Button kind="secondary" size="sm" onClick={replayTour}>
-                {t('tutorial.start')}
-              </Button>
+              <p className="mt-0.5 text-caption-01 text-white/75">{t('about.appDescription')}</p>
             </div>
-          </SettingsSection>
+          </div>
+        </div>
 
-          {/* Danger zone */}
-          <SettingsSection
-            title={t('danger.title')}
-            description={t('danger.description')}
-            iconClass="bg-red-60/15 text-red-40"
-            icon={
-              <SectionIcon>
-                <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-                <path d="M12 9v4m0 4h.01" />
-              </SectionIcon>
-            }
-          >
-            <div className="flex items-center gap-3">
-              <div className="flex-1">
-                <div className="text-body-short-02 text-text-primary">
-                  {t('danger.reset')}
-                </div>
-                <div className="text-caption-01 text-text-helper">
-                  {t('danger.resetDesc')}
-                </div>
+        <SettingsGroup title={t('tutorial.title')} description={t('tutorial.description')}>
+          <div className="flex items-center gap-3 px-4 py-3.5">
+            <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-orange-40/12 text-orange-30">
+              <Icon name="model" size={16} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="text-body-short-01 text-text-primary">{t('tutorial.replayOnboarding')}</div>
+              <div className="mt-0.5 text-caption-01 text-text-helper">{t('tutorial.replayOnboardingDesc')}</div>
+            </div>
+            <Button kind="secondary" size="sm" onClick={() => launchTutorial(replayOnboarding)}>
+              {t('tutorial.replay')}
+            </Button>
+          </div>
+          <div className="flex items-center gap-3 px-4 py-3.5">
+            <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-purple-60/12 text-purple-40">
+              <Icon name="idea" size={16} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="text-body-short-01 text-text-primary">{t('tutorial.restartTour')}</div>
+              <div className="mt-0.5 text-caption-01 text-text-helper">{t('tutorial.restartTourDesc')}</div>
+            </div>
+            <Button kind="secondary" size="sm" onClick={() => launchTutorial(replayTour)}>
+              {t('tutorial.start')}
+            </Button>
+          </div>
+        </SettingsGroup>
+
+        <SettingsGroup title={t('danger.title')} description={t('danger.description')}>
+          <div className="flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center">
+            <div className="min-w-0 flex-1">
+              <div className="text-body-short-01 text-text-primary">{t('danger.reset')}</div>
+              <div className="mt-0.5 text-caption-01 text-text-helper">
+                {resetConfirming ? t('danger.resetConfirm') : t('danger.resetDesc')}
               </div>
-              <Button kind="danger" size="sm" onClick={handleReset}>
+            </div>
+            {resetConfirming ? (
+              <div className="flex items-center justify-end gap-1.5">
+                <Button kind="ghost" size="sm" onClick={() => setResetConfirming(false)}>
+                  {t('danger.cancel')}
+                </Button>
+                <Button kind="danger" size="sm" onClick={handleReset}>
+                  {t('danger.confirmReset')}
+                </Button>
+              </div>
+            ) : (
+              <Button kind="danger-ghost" size="sm" onClick={() => setResetConfirming(true)}>
                 {t('danger.resetButton')}
               </Button>
+            )}
+          </div>
+        </SettingsGroup>
+      </div>
+    ),
+  }[activeSection];
+
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+      <div className={dialogBackdropCls} onClick={onClose} aria-hidden="true" />
+
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className={`relative flex h-[min(700px,calc(100vh-32px))] min-h-0 w-[min(920px,calc(100vw-32px))] flex-col overflow-hidden sm:flex-row ${dialogSurfaceCls}`}
+      >
+        <aside className="flex w-full flex-shrink-0 flex-col border-b border-border-subtle-01 bg-field-01 sm:w-[210px] sm:border-b-0 sm:border-r">
+          <div className="flex h-[58px] items-center gap-2.5 border-b border-border-subtle-01 px-4 sm:h-[70px] sm:border-b-0">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-blue-60 to-purple-60 font-mono text-body-short-01 font-bold text-white shadow-elevation-1">
+              R
             </div>
-          </SettingsSection>
+            <div className="min-w-0">
+              <div className="text-body-short-01 font-semibold text-text-primary">RICE</div>
+              <div className="text-label-micro text-text-helper">{t('about.beta')} · v0.1.0</div>
+            </div>
+          </div>
+
+          <nav className="flex gap-1 overflow-x-auto p-2 sm:flex-col sm:overflow-visible sm:p-3" aria-label={t('title')}>
+            {sections.map((section, index) => {
+              const active = section.id === activeSection;
+              return (
+                <button
+                  key={section.id}
+                  ref={index === 0 ? initialFocusRef : undefined}
+                  type="button"
+                  onClick={() => {
+                    setActiveSection(section.id);
+                    setResetConfirming(false);
+                  }}
+                  aria-current={active ? 'page' : undefined}
+                  className={`relative flex min-w-max items-center gap-2.5 rounded-lg px-3 py-2 text-left transition-colors sm:min-w-0 ${
+                    active
+                      ? 'bg-layer-selected-01 text-text-primary'
+                      : 'text-text-secondary hover:bg-layer-hover-01 hover:text-text-primary'
+                  }`}
+                >
+                  <span className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg ${active ? 'bg-interactive/12 text-blue-40' : 'text-icon-secondary'}`}>
+                    <Glyph name={section.icon} size={15} />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-body-short-01 font-medium">{section.title}</span>
+                    <span className="hidden truncate text-label-micro text-text-helper sm:block">{section.description}</span>
+                  </span>
+                  {active && <span className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-interactive" aria-hidden="true" />}
+                </button>
+              );
+            })}
+          </nav>
+
+          <div className="mt-auto hidden border-t border-border-subtle-01 p-4 text-label-micro leading-5 text-text-helper sm:block">
+            {t('autoSave')}
+          </div>
+        </aside>
+
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
+          <header className="flex h-[70px] flex-shrink-0 items-center gap-3 border-b border-border-subtle-01 bg-layer-01 px-5 sm:px-6">
+            <div className="min-w-0 flex-1">
+              <h2 id={titleId} className="text-heading-02 font-semibold text-text-primary">{currentSection.title}</h2>
+              <p className="mt-0.5 truncate text-caption-01 text-text-helper">{currentSection.description}</p>
+            </div>
+            <div
+              className={`hidden items-center gap-1.5 text-caption-01 transition-colors sm:flex ${saved ? 'text-green-30' : 'text-text-helper'}`}
+              role="status"
+              aria-live="polite"
+            >
+              {saved ? <Icon name="check-circle" size={14} /> : <span className="h-1.5 w-1.5 rounded-full bg-support-success" />}
+              {saved ? t('saved') : t('autoSaveShort')}
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-icon-secondary transition-colors hover:bg-layer-hover-01 hover:text-icon-primary"
+              aria-label={t('close')}
+            >
+              <Icon name="close" size={16} />
+            </button>
+          </header>
+
+          <div className="flex-1 overflow-y-auto px-5 py-5 sm:px-7 sm:py-6">
+            <div className="mx-auto max-w-[640px]">{content}</div>
+          </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

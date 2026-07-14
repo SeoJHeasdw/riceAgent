@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { api } from './lib/api';
@@ -41,11 +41,30 @@ interface AppShellProps {
 function AppShell({ tourActive, onTourDone }: AppShellProps) {
   const location = useLocation();
   const navigate = useNavigate();
-  const isChatRoute = location.pathname === '/chat';
+  const settingsOpen = location.pathname === '/settings';
 
-  const activeRailId =
-    railItems.find((item) => location.pathname === item.path || location.pathname.startsWith(`${item.path}/`))?.id ??
+  // Settings is a destination in the URL, but visually it is an overlay. Keep
+  // the last workspace route mounted beneath it so opening preferences never
+  // feels like leaving the task in progress. A direct /settings launch falls
+  // back to Chat, which is the app's default workspace.
+  const currentPath = `${location.pathname}${location.search}${location.hash}`;
+  const backgroundPathRef = useRef(location.pathname === '/settings' ? '/chat' : currentPath);
+  if (!settingsOpen) backgroundPathRef.current = currentPath;
+
+  const contentPath = settingsOpen ? backgroundPathRef.current : currentPath;
+  const contentPathname = contentPath.split(/[?#]/, 1)[0];
+  const isChatRoute = contentPathname === '/chat';
+
+  const contentRailId =
+    railItems.find((item) => contentPathname === item.path || contentPathname.startsWith(`${item.path}/`))?.id ??
     'home';
+  const activeRailId = settingsOpen ? 'settings' : contentRailId;
+
+  const closeSettings = () => {
+    const historyIndex = (window.history.state as { idx?: number } | null)?.idx ?? 0;
+    if (historyIndex > 0) navigate(-1);
+    else navigate(backgroundPathRef.current, { replace: true });
+  };
 
   return (
     <>
@@ -53,6 +72,7 @@ function AppShell({ tourActive, onTourDone }: AppShellProps) {
         railItems={railItems}
         activeRailId={activeRailId}
         onNavigate={(_, path) => navigate(path)}
+        contentPath={contentPathname}
       >
         {/* Keep ChatScreen mounted while another top-level screen is open. Its
             SSE handlers own the in-progress turn renderer; unmounting it used to
@@ -62,8 +82,8 @@ function AppShell({ tourActive, onTourDone }: AppShellProps) {
         </div>
 
         {!isChatRoute && (
-          <div key={activeRailId} className="flex flex-1 flex-col min-h-0 animate-fade-in">
-            <Routes>
+          <div key={contentRailId} className="flex flex-1 flex-col min-h-0 animate-fade-in">
+            <Routes location={contentPath}>
               <Route path="/" element={<Navigate to="/chat" replace />} />
               <Route path="/home" element={<HomeScreen />} />
               <Route path="/my-skills" element={<MySkillsScreen />} />
@@ -72,12 +92,13 @@ function AppShell({ tourActive, onTourDone }: AppShellProps) {
               <Route path="/plugins" element={<PluginMarketScreen />} />
               <Route path="/connectors" element={<ConnectorsScreen />} />
               <Route path="/connectors/:id" element={<ConnectorsScreen />} />
-              <Route path="/settings" element={<SettingsScreen />} />
               <Route path="*" element={<Navigate to="/chat" replace />} />
             </Routes>
           </div>
         )}
       </Layout>
+
+      <SettingsScreen open={settingsOpen} onClose={closeSettings} />
 
       <CommandPalette />
 
