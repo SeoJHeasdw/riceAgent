@@ -351,7 +351,11 @@ def tools(paths: RicePaths) -> list[tuple[ToolSpec, BuiltinTool]]:
                     "diagrams. Long text auto-shrinks to fit its box. Returns a per-slide "
                     "summary (+ any `warnings`); QA the result with read_file on the .pptx "
                     "(extracts slide text + notes). To change slides later, use "
-                    "edit_presentation instead of regenerating the whole deck."
+                    "edit_presentation instead of regenerating the whole deck. "
+                    "Facts discipline: use only figures the user supplied or a tool "
+                    "computed/found. NEVER invent statistics or attribute numbers to real "
+                    "organizations or studies (Gartner, McKinsey, ...); label illustrative "
+                    "numbers explicitly as examples."
                 ),
                 parameters=_PRESENTATION_PARAMETERS,
                 source="builtin",
@@ -401,7 +405,9 @@ def tools(paths: RicePaths) -> list[tuple[ToolSpec, BuiltinTool]]:
                     "quotes, callouts, dividers). Use for reports, analyses, proposals, memos, "
                     "one-pagers — any long-form prose deliverable (vs slides or spreadsheets). "
                     "Returns a structural outline (+ any `warnings`); QA with read_file on the "
-                    ".docx."
+                    ".docx. Facts discipline: use only figures the user supplied or a tool "
+                    "computed/found. NEVER invent statistics or attribute numbers to real "
+                    "organizations or studies; label illustrative numbers explicitly as examples."
                 ),
                 parameters=_DOCUMENT_PARAMETERS,
                 source="builtin",

@@ -105,16 +105,21 @@ async def _wait_or_abort(abort: asyncio.Event, delay: float) -> bool:
 
 # ── 계획 종결 강제 (P1: plan enforcement) ─────────────────────────────────────
 # active plan 에 미종결 단계가 남았는데 모델이 tool call 없이 답을 끝내면, 그대로
-# final 로 받지 않고 1회 reconcile 을 강제한다. 그래도 무시하면 런타임이 미종결
-# 단계를 skipped 로 닫는다(PlanState.reconcile_abandoned) — 프롬프트의 "계획을
-# 정직하게 유지하라"는 희망사항이 아니라 런타임 불변식이어야 한다.
+# final 로 받지 않고 1회 reconcile 을 강제한다. 이때 이미 스트리밍된 본문이 이 턴의
+# canonical 최종 답이다: reconcile 라운드에서 모델이 지시를 어기고 답을 다시
+# 생성해도 사용자에게 흘리지 않고(중복 출력 차단), update_plan 정리만 소비한 뒤
+# 런타임이 보관해 둔 답으로 턴을 닫는다 — 재질의하면 소형 모델은 답을 통째로
+# 재생성한다(2026-07-14 실측: 정리 후 "final answer를 달라"는 문구 하나로 10초
+# 추론 + 전체 답 중복이 났다). 넛지까지 무시하면 런타임이 미종결 단계를 skipped 로
+# 닫는다(PlanState.reconcile_abandoned) — 프롬프트의 "계획을 정직하게 유지하라"는
+# 희망사항이 아니라 런타임 불변식이어야 한다.
 _PLAN_RECONCILE_RETRIES = 1
 _PLAN_RECONCILE_NUDGE = (
-    "STOP — your plan still has unfinished steps. Do NOT rewrite your answer. "
-    "If work actually remains, continue it now (call the tools you need). If the "
-    "work is done or no longer needed, call update_plan once, marking every "
-    "remaining step done/failed/skipped with a one-line note — then give your "
-    "final answer."
+    "STOP — your final answer is already delivered; do NOT write it again. Your "
+    "plan still has unfinished steps. If work actually remains, continue it now "
+    "(call the tools you need). Otherwise call update_plan once, marking every "
+    "remaining step done/failed/skipped with a one-line note. The turn ends "
+    "there — no further text is needed."
 )
 
 # NOTE: 사용자용 1줄 preamble 을 런타임이 템플릿으로 합성하던 fallback 은 제거됐다
@@ -294,6 +299,12 @@ class AgentLoop:
         iteration = 0
         empty_retries = 0
         plan_reconcile_nudges = 0
+        # reconcile 모드: 미종결 계획인 채 최종 답이 이미 스트리밍됐을 때 그 답을
+        # 보관한다. None이 아닌 동안 이후 라운드의 본문은 사용자에게 흘리지 않고
+        # (중복 답 재생성 차단), 계획 정리(update_plan)만 소비한 뒤 런타임이 이
+        # 텍스트로 턴을 닫는다. 실제 작업 도구가 다시 불리면 조기 final이었던
+        # 것이므로 해제하고 정상 흐름으로 복귀한다.
+        reconcile_final_text: str | None = None
         # 서사(NARRATE) 준수 추적 — 본문 없이 실제 도구만 부른 연속 라운드 수와
         # 이 턴에 이미 쓴 넛지 수(프로파일 상한, local만 활성).
         silent_tool_rounds = 0
@@ -371,7 +382,10 @@ class AgentLoop:
                                 yield ev_thinking(chunk.text)
                         elif chunk.kind == "text" and chunk.text:
                             assistant_parts.append(chunk.text)
-                            yield ev_message(delta=chunk.text)
+                            # reconcile 모드의 본문은 일단 버퍼만 한다 — 라운드가
+                            # 끝나야 재작성(억제)인지 작업 재개(방출)인지 판별된다.
+                            if reconcile_final_text is None:
+                                yield ev_message(delta=chunk.text)
                         elif chunk.kind == "tool_call" and chunk.tool_call is not None:
                             pending_calls.append(chunk.tool_call)
                         elif chunk.kind == "done":
@@ -411,6 +425,23 @@ class AgentLoop:
                 break  # stop without emitting a partial answer as final
 
             assistant_text = "".join(assistant_parts)
+            # ── reconcile 모드 판별: 확정된 답 이후의 라운드다 ────────────────────
+            # 실제 작업 도구가 있으면 그 "final"은 조기 종료였던 것 — 버퍼해 둔 이번
+            # 라운드 서사를 지금 흘리고 정상 흐름으로 복귀한다. 계획 정리 호출뿐이거나
+            # 도구가 없으면 본문은 이미 전달된 답의 재작성이므로 사용자에게도 durable
+            # 히스토리 content에도 싣지 않는다(리로드가 라이브와 같은 그림을 그리도록
+            # metadata로만 보관).
+            suppress_round_text = False
+            if reconcile_final_text is not None:
+                resumed_real_work = any(
+                    c.tool_name not in (UPDATE_PLAN_SPEC.name, START_PLAN_SPEC.name) for c in pending_calls
+                )
+                if resumed_real_work:
+                    if assistant_text.strip():
+                        yield ev_message(delta=assistant_text)
+                    reconcile_final_text = None
+                else:
+                    suppress_round_text = True
             # Stash this round's reasoning on the assistant message so it persists
             # for trace reconstruction on reload. Providers ignore metadata when
             # assembling history, so the model never re-sees stale thinking.
@@ -419,12 +450,19 @@ class AgentLoop:
             # 노출 여부의 단일 권위). 라이브 억제(위)와 짝을 이룬다.
             thinking_text = "".join(thinking_parts) if self._show_thinking else ""
             metadata: dict = {"thinking": thinking_text} if thinking_text else {}
+            if suppress_round_text and assistant_text:
+                metadata["suppressed_text"] = assistant_text
             if pending_plan_meta is not None:
                 # 계획 생성 스냅샷은 턴의 첫 어시스턴트 메시지에 1회 부착(리로드 복원용).
                 metadata.update(pending_plan_meta)
                 pending_plan_meta = None
             messages.append(
-                Message(role="assistant", content=assistant_text, tool_calls=tuple(pending_calls), metadata=metadata)
+                Message(
+                    role="assistant",
+                    content="" if suppress_round_text else assistant_text,
+                    tool_calls=tuple(pending_calls),
+                    metadata=metadata,
+                )
             )
 
             # No tool calls → this is the final answer for the turn.
@@ -432,7 +470,14 @@ class AgentLoop:
                 # 소형 모델 방어: 도구를 이미 썼는데 본문 없이 끝났다(또는 thinking만
                 # 있다) — 빈 답을 확정하기 전에 넛지를 주고 재시도한다. 순수 대화
                 # 첫 턴(tool_calls_made==0)의 빈 응답은 provider 문제라 그대로 둔다.
-                if not assistant_text.strip() and tool_calls_made > 0 and empty_retries < _EMPTY_RESPONSE_RETRIES:
+                # (reconcile 모드에선 빈 응답 방어를 건너뛴다 — 답은 이미 확정됐고,
+                # 여기서 받아낼 것은 계획 정리뿐이다.)
+                if (
+                    not assistant_text.strip()
+                    and tool_calls_made > 0
+                    and empty_retries < _EMPTY_RESPONSE_RETRIES
+                    and reconcile_final_text is None
+                ):
                     empty_retries += 1
                     log.warning("empty final answer after tool use — nudging (retry %d)", empty_retries)
                     messages.append(Message(role="user", content=_EMPTY_NUDGE, metadata={"synthetic": "empty_nudge"}))
@@ -447,6 +492,13 @@ class AgentLoop:
                             "final answer with unfinished plan — forcing reconciliation (nudge %d)",
                             plan_reconcile_nudges,
                         )
+                        if assistant_text.strip():
+                            # 이 본문이 이 턴의 canonical 최종 답이다 — authoritative
+                            # content 이벤트로 지금 확정해 클라이언트가 버블을 봉인하게
+                            # 한다. 이후 라운드는 계획 정리만 소비하고 런타임이 이
+                            # 답으로 턴을 닫는다(모델에게 답을 재요구하지 않는다).
+                            reconcile_final_text = assistant_text
+                            yield ev_message(content=assistant_text)
                         messages.append(
                             Message(role="user", content=_PLAN_RECONCILE_NUDGE, metadata={"synthetic": "plan_reconcile"})
                         )
@@ -459,8 +511,13 @@ class AgentLoop:
                     # (AGENT_EXECUTION §3.4의 알려진 한계) 해소. metadata dict는
                     # frozen Message에서도 가변이라 append 이후 부착이 안전하다.
                     messages[-1].metadata["plan"] = plan_state.plan.to_dict()
-                final_text = assistant_text
-                yield ev_message(content=assistant_text)
+                if reconcile_final_text is not None:
+                    # 답은 넛지 시점에 이미 확정·전송됐다 — 재전송하면 클라이언트에
+                    # 중복 버블이 생긴다. 이번 라운드의 재작성 본문은 위에서 억제됐다.
+                    final_text = reconcile_final_text
+                else:
+                    final_text = assistant_text
+                    yield ev_message(content=assistant_text)
                 break
 
             # Dispatch requested tools through the scheduler. Safe independent
@@ -600,6 +657,19 @@ class AgentLoop:
                         Message(role="tool", content=_render_tool_result(res), metadata=tool_metadata)
                     )
                     tool_calls_made += 1
+
+            # ── reconcile 종결: 확정된 답 이후, 계획 정리 호출만으로 끝난 라운드 —
+            # 추가 LLM 라운드를 돌리지 않고 여기서 턴을 닫는다(재질의하면 소형 모델은
+            # 답을 통째로 재생성한다). 모델이 일부 단계만 닫았다면 나머지는 런타임이
+            # skipped 로 정직하게 정리한다 — reconcile 기회는 이미 소진됐다.
+            if reconcile_final_text is not None:
+                if plan_state is not None and not plan_state.all_terminal:
+                    log.warning("reconcile round left steps open — auto-closing remainder as skipped")
+                    plan_state.reconcile_abandoned()
+                    yield ev_plan_updated(plan_state.plan)
+                    messages[-1].metadata["plan"] = plan_state.plan.to_dict()
+                final_text = reconcile_final_text
+                break
 
             # ── ReAct drift guard 카운터: 도구 라운드가 계획 보고 없이 지나가면
             # 누적 — 임계 도달 시 다음 반복 프롬프트가 재평가를 강제한다. 계획 관련

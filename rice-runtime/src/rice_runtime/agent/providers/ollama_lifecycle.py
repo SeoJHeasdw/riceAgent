@@ -126,6 +126,10 @@ class OllamaLifecycleManager:
             state.unload_task = None
             if pending is not None and not pending.done():
                 pending.cancel()
+                # 대기 중이던 unload 취소 = 턴 종료 후 후속 작업(제목/학습 리뷰,
+                # 또는 유예 내 새 턴)이 로드된 모델을 재사용해 상주가 연장되는
+                # 순간이다 — residency 진단의 반대쪽 절반(성공 로그는 _delayed_unload).
+                log.info("Ollama unload grace for %s cancelled — follow-up work reuses the loaded model", key.model)
             state.leases += 1
             state.idle.clear()
             state.idle_seconds = max(0.0, float(idle_seconds))
@@ -307,6 +311,11 @@ class OllamaLifecycleManager:
                     )
                 else:
                     state.touched = False
+                    # INFO인 이유: "턴이 끝나도 모델이 5분 상주한다"는 리포트가
+                    # 왔을 때(2026-07-14) 명시 해제의 성공/실패가 콘솔에서 보이지
+                    # 않아 진단이 불가능했다 — unload는 턴당 최대 1회라 시끄럽지
+                    # 않고, 이 한 줄이 residency 문제를 자가 진단 가능하게 만든다.
+                    log.info("Ollama model %s unloaded after %.0fs idle grace", key.model, delay)
         except asyncio.CancelledError:
             return
         finally:
@@ -345,5 +354,10 @@ class OllamaLifecycleManager:
         if self._client is None:
             import httpx  # noqa: PLC0415 - optional provider dependency
 
-            self._client = httpx.AsyncClient(timeout=5.0)
+            # 10초인 이유: unload/refresh는 state.lock을 쥔 채 실행되므로 이
+            # 타임아웃이 곧 새 lease admission의 최악 대기 상한이다. 유휴 모델
+            # unload는 실측 ~0.1초(Ollama 0.31.2)지만, 서버가 다른 모델을 로드
+            # 중이면 명령이 큐에 걸린다 — 5초는 그 경우를 조용히 죽여 keep_alive
+            # 만료(5분)까지 상주하게 만들었다.
+            self._client = httpx.AsyncClient(timeout=10.0)
         return self._client

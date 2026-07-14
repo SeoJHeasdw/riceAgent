@@ -74,6 +74,10 @@ Design rules the tool doesn't enforce for you:
   comparison, or visual structure — no wall-of-bullets slides.
 - Stat values stay short ("$4.4B", "17%"); explanation goes in `label`/`note`.
 - Put the delivery script and assumptions in `notes` (speaker notes) per slide.
+- Every number on a slide comes from the workbook you built or from the user.
+  NEVER cite invented third-party statistics ("73% of enterprises — Gartner");
+  a made-up citation in an investor deck is worse than no number at all. If a
+  figure is an assumption, say so on the slide or in its notes.
 
 ## Step 5 — QA loop (mandatory)
 

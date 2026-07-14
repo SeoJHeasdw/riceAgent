@@ -132,19 +132,33 @@ const CodeBlock: React.FC<{ code: string; language?: string }> = ({ code, langua
   );
 };
 
+// <button>이 아닌 이유: 브라우저는 폼 컨트롤 내부 텍스트를 문서 텍스트 선택에서
+// 제외한다 — 답변을 드래그 복사하면 파일명만 통째로 빠진 텍스트가 나온다(2026-07-14
+// 실측). 파일 참조는 답변 본문의 일부이므로 선택/복사에 참여하는 요소로 그린다.
 const FileChip: React.FC<{ path: string; onFileClick: (path: string) => void }> = ({ path, onFileClick }) => {
   const { t } = useTranslation('common');
+  const open = () => onFileClick(cleanFileTarget(path));
   return (
-    <button
-      type="button"
-      onClick={() => onFileClick(cleanFileTarget(path))}
+    <a
+      role="button"
+      tabIndex={0}
+      onClick={(e) => {
+        e.preventDefault();
+        open();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          open();
+        }
+      }}
       title={t('markdown.fileOpenTitle', { path })}
-      className="mx-0.5 inline-flex max-w-full items-center gap-1 rounded-md border border-border-subtle-01 bg-layer-02 px-1.5 py-0.5 align-baseline font-mono text-code-02 text-link-primary transition-colors hover:border-border-strong-01 hover:bg-layer-hover-02"
+      className="mx-0.5 inline-flex max-w-full cursor-pointer items-center gap-1 rounded-md border border-border-subtle-01 bg-layer-02 px-1.5 py-0.5 align-baseline font-mono text-code-02 text-link-primary no-underline transition-colors hover:border-border-strong-01 hover:bg-layer-hover-02"
     >
       <Icon name="document" size={12} className="flex-shrink-0" />
       <span className="truncate">{path}</span>
       <Icon name="arrow-up-right" size={10} className="flex-shrink-0 opacity-60" />
-    </button>
+    </a>
   );
 };
 
@@ -196,17 +210,28 @@ export const Markdown: React.FC<MarkdownProps> = ({ source, onFileClick, streami
         ),
       a: ({ href = '', children }) => {
         if (onFileClick && isFileTarget(href)) {
+          // FileChip과 같은 이유로 <button> 금지 — 선택/복사에서 텍스트가 빠진다.
           return (
-            <button
-              type="button"
-              onClick={() => onFileClick(cleanFileTarget(decodeURIComponent(href)))}
-              className="inline-flex items-center gap-1 rounded px-1 text-link-primary underline decoration-link-primary/35 underline-offset-2 transition-colors hover:bg-layer-hover-01 hover:decoration-link-primary"
+            <a
+              role="button"
+              tabIndex={0}
+              onClick={(e) => {
+                e.preventDefault();
+                onFileClick(cleanFileTarget(decodeURIComponent(href)));
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onFileClick(cleanFileTarget(decodeURIComponent(href)));
+                }
+              }}
+              className="inline-flex cursor-pointer items-center gap-1 rounded px-1 text-link-primary underline decoration-link-primary/35 underline-offset-2 transition-colors hover:bg-layer-hover-01 hover:decoration-link-primary"
               title={t('markdown.fileOpenTitle', { path: href })}
             >
               <Icon name="document" size={12} />
               {children}
               <Icon name="arrow-up-right" size={10} className="opacity-60" />
-            </button>
+            </a>
           );
         }
         return (

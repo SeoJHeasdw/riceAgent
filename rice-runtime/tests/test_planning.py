@@ -459,12 +459,14 @@ async def test_loop_drift_guard_forces_reassessment():
 @pytest.mark.asyncio
 async def test_loop_blocks_final_answer_while_plan_unfinished():
     """P1 plan enforcement: 미종결 단계가 남은 채 tool call 없이 답하면 final 로
-    받지 않고 reconcile 을 강제한다 — 모델이 update_plan 으로 종결한 뒤에야 끝."""
+    받지 않고 reconcile 을 강제한다. 이미 스트리밍된 답이 canonical final — 모델의
+    update_plan 종결을 소비한 뒤 런타임이 그 답으로 턴을 닫고, 답을 재질의하지
+    않는다(중복 재생성 차단)."""
     provider = _ScriptedProvider(
         [
             _text(_PLAN_JSON),  # planner
             _text("다 됐습니다"),  # 미종결 상태의 성급한 final 시도 → 넛지
-            [  # 넛지 후: 계획 종결 보고
+            [  # 넛지 후: 계획 종결 보고 — 여기서 턴이 끝난다(추가 라운드 없음)
                 ProviderChunk(
                     kind="tool_call",
                     tool_call=ToolCall(
@@ -479,7 +481,6 @@ async def test_loop_blocks_final_answer_while_plan_unfinished():
                     ),
                 ),
             ],
-            _text("진짜 최종 답변"),
         ]
     )
     loop = AgentLoop(
@@ -496,18 +497,22 @@ async def test_loop_blocks_final_answer_while_plan_unfinished():
     plan_events = [e for e in events if e.type == EventType.PLAN_UPDATED]
     assert [e.data["revision"] for e in plan_events] == [1, 2]
     assert plan_events[-1].data["status"] == "completed"
-    assert result.final_message == "진짜 최종 답변"
+    # 정리 라운드 뒤 재질의가 없다: planner + 답 + update_plan = 3회
+    assert len(provider.calls) == 3
+    assert result.final_message == "다 됐습니다"
 
 
 @pytest.mark.asyncio
 async def test_loop_auto_reconciles_abandoned_plan():
     """넛지까지 무시되면 런타임이 미종결 단계를 skipped 로 닫는다 — 계획 카드가
-    영원히 열린 채 남지 않는 것은 프롬프트 희망사항이 아니라 런타임 불변식."""
+    영원히 열린 채 남지 않는 것은 프롬프트 희망사항이 아니라 런타임 불변식.
+    이때 최종 답은 이미 확정된 첫 답("끝1")이고, 넛지에 대한 재작성("끝2")은
+    사용자에게 흘러가지 않는다."""
     provider = _ScriptedProvider(
         [
             _text(_PLAN_JSON),  # planner
             _text("끝1"),  # 미종결 final 시도 → 넛지
-            _text("끝2"),  # 넛지도 무시 → auto-reconcile 후 final 수용
+            _text("끝2"),  # 넛지도 무시하고 답 재작성 → 억제, auto-reconcile
         ]
     )
     loop = AgentLoop(
@@ -523,7 +528,12 @@ async def test_loop_auto_reconciles_abandoned_plan():
     final_plan = plan_events[-1].data
     assert final_plan["status"] == "completed"
     assert all(s["status"] == "skipped" for s in final_plan["steps"])  # 성공 위조 금지
-    assert result.final_message == "끝2"
+    assert result.final_message == "끝1"
+    # 재작성 본문은 message 이벤트로 새 나가지 않고 metadata로만 남는다
+    msg_events = [e for e in events if e.type == EventType.MESSAGE]
+    assert "끝2" not in "".join(e.data.get("delta", "") + str(e.data.get("content", "")) for e in msg_events)
+    last_assistant = [m for m in result.history if m.role == "assistant"][-1]
+    assert last_assistant.metadata["suppressed_text"] == "끝2"
 
 
 @pytest.mark.asyncio

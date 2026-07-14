@@ -1516,6 +1516,9 @@ function ChatScreen() {
   // Feed a streamed delta (or the authoritative final `content`) into the pump.
   const feedAnswer = (sessionId: string, d: { delta?: string; content?: string }) => {
     const a = answerRef.current;
+    // authoritative `content`로 확정된 버블 뒤에 도착한 델타는 새 세그먼트다
+    // (reconcile 후 작업이 재개된 턴) — 확정된 답에 이어붙이지 않는다.
+    if (a.active && a.complete && typeof d.delta === 'string') sealAnswer(sessionId);
     if (!a.active) {
       a.active = true;
       a.sessionId = sessionId;
@@ -1525,8 +1528,13 @@ function ChatScreen() {
       a.lastFeedAt = Date.now();
       updateThreadFor(sessionId, (p) => [...p, { kind: 'agent', text: '', streaming: true, sentAt: Date.now() }]);
     }
-    if (typeof d.content === 'string') a.target = d.content;
-    else a.target += d.delta ?? '';
+    if (typeof d.content === 'string') {
+      // 백엔드가 이 본문을 턴의 확정 답으로 선언(일반 final, 또는 계획 reconcile
+      // 시점의 조기 확정) — 타자기 꼬리가 다 그려지면 버블이 스스로 봉인되어,
+      // 뒤따르는 도구 라운드가 이 답을 캡션으로 걷어가지 못한다.
+      a.target = d.content;
+      a.complete = true;
+    } else a.target += d.delta ?? '';
     a.lastFeedAt = Date.now();
     ensureAnswerPump();
   };
@@ -1574,6 +1582,13 @@ function ChatScreen() {
   const takeStreamingAnswer = (sessionId: string): string | null => {
     const a = answerRef.current;
     if (!a.active || a.sessionId !== sessionId) return null;
+    // 확정(complete)된 본문은 rationale이 아니라 이 턴의 답이다 — 캡션으로
+    // 걷어가지 말고 제자리에 봉인한다(reconcile 직후 도구 라운드가 최종 답을
+    // 삼키는 것을 방지).
+    if (a.complete) {
+      sealAnswer(sessionId);
+      return null;
+    }
     const text = a.target.trim();
     a.active = false;
     a.target = '';
