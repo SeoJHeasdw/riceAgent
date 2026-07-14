@@ -3,8 +3,8 @@
  *
  * 사용 예:
  *   const { language } = useI18n();
- *   formatNumber(1234, language)  // ko → "1,234", en → "1,234"
- *   formatDate(iso, language)     // ko → "2025년 1월 6일", en → "Jan 6, 2025"
+ *   formatNumber(1234, language)  // ko/en/ja → "1,234"
+ *   formatDate(iso, language)     // ko → "2025년 1월 6일", en → "Jan 6, 2025", ja → "2025年1月6日"
  *
  * 중요: 브라우저/OS 로케일이 아니라 현재 앱 언어 기준으로 표시한다.
  */
@@ -15,6 +15,7 @@ import type { Language } from './index';
 export const LOCALE_MAP: Record<Language, string> = {
   ko: 'ko-KR',
   en: 'en-US',
+  ja: 'ja-JP',
 };
 
 /** 숫자를 앱 언어에 맞게 포맷한다. */

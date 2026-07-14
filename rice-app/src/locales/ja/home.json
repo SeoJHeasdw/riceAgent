@@ -1,0 +1,75 @@
+{
+  "greeting": {
+    "lateNight": "夜遅くまでお疲れ様です",
+    "morning": "おはようございます",
+    "afternoon": "こんにちは",
+    "evening": "こんばんは"
+  },
+  "hero": {
+    "headline": "今日は何をしますか？",
+    "description": "RICEはチャットを通じて作業スタイルを学習し、繰り返しのタスクをスキルとして保存します。続きから始めましょう。",
+    "newChat": "新しいチャットを開始",
+    "browseSkills": "スキルマーケットを見る"
+  },
+  "learning": {
+    "sectionTitle": "学習状況",
+    "proposals": "{{count}}件の保留中の提案",
+    "proposals_other": "{{count}}件の保留中の提案",
+    "statSavedSkills": "保存済みスキル",
+    "statTotalUses": "合計使用回数",
+    "statAutoImproved": "自動改善",
+    "statLearnedSignals": "学習済みシグナル",
+    "emptyTitle": "まだ何も学習されていません",
+    "emptyDesc": "チャットを始めると、作業パターンとスキルがここに蓄積され、使うたびに速くなります。"
+  },
+  "topSkills": {
+    "sectionTitle": "よく使うスキル",
+    "viewAll": "すべて見る",
+    "hot": "人気",
+    "usageCount": "{{count}}回使用",
+    "patchCount": "{{count}}回改善",
+    "newSkill": "新しいスキルを作成",
+    "newSkillDesc": "チャットから繰り返しのタスクをスキルとして保存"
+  },
+  "nav": {
+    "groups": {
+      "workspace": "ワークスペース",
+      "market": "マーケットプレイス",
+      "system": "接続と設定"
+    },
+    "destinations": {
+      "home": {
+        "title": "ホーム",
+        "description": "すべての機能を確認してナビゲート"
+      },
+      "chat": {
+        "title": "チャット",
+        "description": "エージェントとチャットして作業を進める"
+      },
+      "my-skills": {
+        "title": "マイスキル",
+        "description": "作成・保存したスキルを管理"
+      },
+      "myplugins": {
+        "title": "マイプラグイン",
+        "description": "インストール済みのプラグインを管理"
+      },
+      "skills": {
+        "title": "スキルマーケット",
+        "description": "コミュニティのスキルを探して追加"
+      },
+      "plugins": {
+        "title": "プラグインマーケット",
+        "description": "機能を拡張するプラグインを探す"
+      },
+      "connectors": {
+        "title": "コネクター",
+        "description": "外部アカウントとデータソースを接続"
+      },
+      "settings": {
+        "title": "設定",
+        "description": "外観、学習、プライバシーを設定"
+      }
+    }
+  }
+}

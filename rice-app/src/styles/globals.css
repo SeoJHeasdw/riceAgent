@@ -1166,22 +1166,24 @@ button,
 
 .language-dock__options {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
 
 .language-dock__options button {
+  position: relative;
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: 1fr;
+  justify-items: center;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   min-width: 0;
   padding: 14px;
   color: rgba(215, 221, 229, 0.76);
   border: 1px solid rgba(151, 168, 190, 0.22);
   border-radius: 13px;
   background: rgba(24, 29, 37, 0.72);
-  text-align: left;
+  text-align: center;
   transition: border-color 180ms ease, background 180ms ease, color 180ms ease, transform 180ms ease;
 }
 
@@ -1227,6 +1229,9 @@ button,
 }
 
 .language-dock__radio {
+  position: absolute;
+  top: 10px;
+  right: 10px;
   display: grid;
   width: 15px;
   height: 15px;

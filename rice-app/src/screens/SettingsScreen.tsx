@@ -346,6 +346,7 @@ function SettingsScreen({ open, onClose }: SettingsScreenProps) {
               options={[
                 { value: 'en', label: 'English' },
                 { value: 'ko', label: '한국어' },
+                { value: 'ja', label: '日本語' },
               ]}
             />
           </SettingRow>

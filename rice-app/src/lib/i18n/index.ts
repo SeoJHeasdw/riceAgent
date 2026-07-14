@@ -23,6 +23,17 @@ import enHome from '../../locales/en/home.json';
 import enOnboarding from '../../locales/en/onboarding.json';
 import enTour from '../../locales/en/tour.json';
 
+import jaCommon from '../../locales/ja/common.json';
+import jaSettings from '../../locales/ja/settings.json';
+import jaChat from '../../locales/ja/chat.json';
+import jaSkills from '../../locales/ja/skills.json';
+import jaPlugins from '../../locales/ja/plugins.json';
+import jaErrors from '../../locales/ja/errors.json';
+import jaConnectors from '../../locales/ja/connectors.json';
+import jaHome from '../../locales/ja/home.json';
+import jaOnboarding from '../../locales/ja/onboarding.json';
+import jaTour from '../../locales/ja/tour.json';
+
 /**
  * i18n 초기화 (단일 진입점).
  *
@@ -32,7 +43,7 @@ import enTour from '../../locales/en/tour.json';
  */
 
 /** 지원 언어 목록. ko = 원본(source of truth). */
-export const SUPPORTED_LANGUAGES = ['ko', 'en'] as const;
+export const SUPPORTED_LANGUAGES = ['ko', 'en', 'ja'] as const;
 export type Language = (typeof SUPPORTED_LANGUAGES)[number];
 
 /** 네임스페이스 = 기능 단위 카탈로그. 새 화면은 새 네임스페이스를 권장. */
@@ -72,19 +83,35 @@ const resources = {
     onboarding: enOnboarding,
     tour: enTour,
   },
+  ja: {
+    common: jaCommon,
+    settings: jaSettings,
+    chat: jaChat,
+    skills: jaSkills,
+    plugins: jaPlugins,
+    errors: jaErrors,
+    connectors: jaConnectors,
+    home: jaHome,
+    onboarding: jaOnboarding,
+    tour: jaTour,
+  },
 } as const;
+
+function isSupportedLanguage(value: unknown): value is Language {
+  return typeof value === 'string' && SUPPORTED_LANGUAGES.includes(value as Language);
+}
 
 function detectInitialLanguage(): Language {
   try {
     const stored = localStorage.getItem(LANGUAGE_STORAGE_KEY);
-    if (stored === 'ko' || stored === 'en') return stored;
+    if (isSupportedLanguage(stored)) return stored;
 
     // One-time compatibility fallback for users whose language predates
     // rice.language. Once found, promote it to the canonical language store.
     const legacySettings = localStorage.getItem(LEGACY_SETTINGS_STORAGE_KEY);
     if (legacySettings) {
       const legacyLanguage = (JSON.parse(legacySettings) as { language?: unknown }).language;
-      if (legacyLanguage === 'ko' || legacyLanguage === 'en') {
+      if (isSupportedLanguage(legacyLanguage)) {
         localStorage.setItem(LANGUAGE_STORAGE_KEY, legacyLanguage);
         return legacyLanguage;
       }
@@ -92,9 +119,12 @@ function detectInitialLanguage(): Language {
   } catch {
     // localStorage 접근 불가 시 브라우저 언어로 폴백
   }
-  return typeof navigator !== 'undefined' && navigator.language.toLowerCase().startsWith('ko')
-    ? 'ko'
-    : 'en';
+  if (typeof navigator !== 'undefined') {
+    const browserLanguage = navigator.language.toLowerCase();
+    if (browserLanguage.startsWith('ko')) return 'ko';
+    if (browserLanguage.startsWith('ja')) return 'ja';
+  }
+  return 'en';
 }
 
 if (!i18n.isInitialized) {

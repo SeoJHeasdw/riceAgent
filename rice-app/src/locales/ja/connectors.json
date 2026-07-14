@@ -1,0 +1,436 @@
+{
+  "title": "コネクター",
+  "localMcp": "ローカルMCP",
+  "developerTag": "開発者",
+
+  "meta": {
+    "fallbackSummary": "{{type}}コネクター",
+    "justNow": "たった今",
+    "localHttpCategory": "HTTP MCP",
+    "localStdioCategory": "ローカルMCP",
+    "localHttpProvider": "ローカルMCP · http",
+    "localStdioProvider": "ローカルMCP · stdio",
+    "localSummaryRunning": ".mcp.jsonに登録されたローカルMCPサーバーです。{{count}}個のツールが見つかりました。",
+    "localSummaryIdle": ".mcp.jsonに登録されたローカルMCPサーバーです。ツールを検出するには更新してください。",
+    "gmail": {
+      "category": "メール",
+      "connectedSummary": "接続後、エージェントはリモートMCPサーバーが提供するメールツールを使用できます。",
+      "connectableSummary": "接続するとブラウザでGoogleサインインが開き、メールの検索・読み取り・送信が可能になります。",
+      "examples": ["受信トレイの重要なメールを要約", "この内容で返信の下書きを作成"]
+    },
+    "calendar": {
+      "category": "カレンダー",
+      "connectedSummary": "接続後、エージェントはリモートMCPサーバーが提供するカレンダーツールを使用できます。",
+      "connectableSummary": "接続するとブラウザでGoogleサインインが開き、イベントの照会・作成・返答が可能になります。",
+      "examples": ["今日の予定は？", "明日の午後3時にチームミーティングを予約"]
+    },
+    "drive": {
+      "category": "ストレージ",
+      "connectedSummary": "接続後、エージェントはリモートMCPサーバーが提供するDriveツールを使用できます。",
+      "connectableSummary": "接続するとブラウザでGoogleサインインが開き、ファイルの検索・読み取り・作成が可能になります。",
+      "examples": ["最近編集したドキュメントを探す", "この内容で新しいドキュメントを作成"]
+    }
+  },
+
+  "kindTab": {
+    "remote": "リモート",
+    "localMcp": "ローカルMCP"
+  },
+
+  "summary": {
+    "connectedConnectors": "接続済みコネクター",
+    "runningMcpServers": "稼働中のMCPサーバー",
+    "unit": "",
+    "stopped": "停止中",
+    "needsConnection": "接続が必要",
+    "updates": "アップデート"
+  },
+
+  "filter": {
+    "label": "フィルター",
+    "all": "すべて",
+    "connected": "接続済み",
+    "needsConnection": "接続が必要",
+    "hasUpdate": "アップデートあり"
+  },
+
+  "rail": {
+    "tipLocal": "ローカルMCPサーバーはコンピューターで直接コードを実行します。信頼できるソースのサーバーのみ登録してください。",
+    "tipRemote": "コネクターはエージェントが外部サービスやデータにアクセスするための橋渡しです。必要なものだけ許可してください。"
+  },
+
+  "list": {
+    "addServer": "サーバーを登録",
+    "add": "追加",
+    "browse": "ブラウズ",
+    "addCustom": "カスタムを追加",
+    "noLocalEmpty": "ローカルMCPサーバーが登録されていません。",
+    "noRemoteEmpty": "一致するコネクターがありません。",
+    "registerServer": "サーバーを登録",
+    "addConnector": "コネクターを追加",
+    "statusRunning": "稼働中",
+    "statusConnected": "接続済み",
+    "statusStopped": "停止中",
+    "statusNeedsConnection": "接続が必要",
+    "updateBadge": "アップデート"
+  },
+
+  "detail": {
+    "noSelection": "コネクターを選択してください。",
+    "tagConnected": "接続済み",
+    "tagNeedsConnection": "接続が必要",
+    "tagReconnectNeeded": "再接続が必要",
+    "btnRemove": "削除",
+    "btnCancel": "キャンセル",
+    "btnConfirmRemove": "削除",
+    "confirmRemovePrompt": "本当に削除しますか？",
+    "btnConnecting": "ブラウザのログイン待ち…",
+    "btnRefreshing": "更新中…",
+    "btnProcessing": "処理中…",
+    "btnRefresh": "更新",
+    "btnStop": "停止",
+    "btnRun": "実行",
+    "btnDisconnect": "切断",
+    "btnReconnect": "再接続",
+    "btnConnect": "接続",
+    "update": {
+      "newServerVersion": "新しいサーバーバージョン",
+      "newVersion": "新しいバージョン",
+      "available": "利用可能",
+      "btnApply": "アップデート",
+      "added": "{{count}}個のツールを追加",
+      "removed": "{{count}}個を削除",
+      "versionLabel": "{{count}}件の変更",
+      "note": "リモートサーバーがツールを更新しました — {{summary}}。"
+    },
+    "localWarning": "このサーバーはコンピューターで<strong>直接コードを実行します</strong>。信頼できるソースのコマンドのみ実行してください。",
+    "localWarning_pre": "このサーバーは",
+    "localWarning_strong": "コンピューターで直接コードを実行します",
+    "localWarning_post": "。信頼できるソースのコマンドのみ実行してください。",
+    "resyncTitleLocal": "サーバーを再起動してツール一覧を更新",
+    "resyncTitleRemote": "リモートMCPサーバーからツール一覧を再読み込み",
+    "sectionInfo": "情報",
+    "metaTransport": "トランスポート",
+    "metaTransportHttp": "HTTP（ローカル）",
+    "metaTransportStdio": "stdio（ローカルプロセス）",
+    "metaCategory": "カテゴリー",
+    "metaEndpoint": "コマンド / エンドポイント",
+    "metaLastVerified": "最終確認",
+    "metaProvider": "プロバイダー",
+    "metaAccount": "アカウント",
+    "metaLastSync": "最終同期",
+    "resyncLabel": "再起動",
+    "resyncLabelRemote": "ツールを更新",
+    "resyncLabelBusy": "更新中…",
+    "sectionTools": "ツールの権限 · {{count}}",
+    "toolsDesc_remote": "{{provider}}が提供するツールです。エージェントが各ツールを呼び出せるタイミングを決定してください —",
+    "toolsDesc_local": "このサーバーが公開しているツールです。エージェントが各ツールを呼び出せるタイミングを決定してください —",
+    "toolsEmpty_connectedLocal": "このサーバーはツールを公開していません。",
+    "toolsEmpty_connectedRemote": "このコネクターはツールを提供していません。",
+    "toolsEmpty_disconnectedLocal": "サーバーを実行してツールを確認してください。",
+    "toolsEmpty_disconnectedRemote": "接続して利用可能なツールを確認してください。",
+    "toolGroupRead": "読み取り専用ツール",
+    "toolGroupWrite": "書き込み/削除ツール",
+    "toolGroupExec": "実行ツール",
+    "permSetAll": "すべて設定",
+    "permAllow": "許可",
+    "permApproval": "承認",
+    "permBlock": "ブロック",
+    "permAllowFull": "常に許可",
+    "permApprovalFull": "承認が必要",
+    "permBlockFull": "ブロック",
+    "toolExpand": "もっと見る",
+    "toolCollapse": "折りたたむ",
+    "sectionUsedBy": "使用者 · {{count}}",
+    "usedByDesc": "このコネクターのツールを呼び出すスキル、プラグイン、オートメーション。",
+    "usedByEmpty": "このコネクターを使用するスキルやプラグインはまだありません。"
+  },
+
+  "catalog": {
+    "category": {
+      "dev": "開発",
+      "docs": "ドキュメント",
+      "issueTracker": "課題管理",
+      "crm": "CRM",
+      "marketingCrm": "マーケティング & CRM",
+      "project": "プロジェクト管理",
+      "storage": "ストレージ",
+      "database": "データベース",
+      "customerSupport": "カスタマーサポート"
+    }
+  },
+
+  "toast": {
+    "connectStart": "接続を開始中",
+    "browserLoginWaiting": "ブラウザのログイン待ち",
+    "loginTimeout": "ログインがタイムアウトしました。もう一度試してください。",
+    "connectSuccess": "{{name}}に接続しました",
+    "connectFail": "{{name}}の接続を開始できませんでした。",
+    "disconnectFail": "{{name}}の切断に失敗しました。",
+    "resyncFail": "ツール一覧を更新できませんでした。",
+    "refreshLocalFail": "ローカルMCPサーバーを更新できませんでした。",
+    "removeLocalFail": "{{name}}の削除に失敗しました。",
+    "applyUpdateFail": "アップデートを適用できませんでした。",
+    "permSaveFail": "権限の変更を保存できませんでした。",
+    "customConnectFail": "接続を開始できませんでした。入力内容を確認してもう一度試してください。"
+  },
+
+  "badge": {
+    "popular": "人気",
+    "new": "新着",
+    "recommended": "おすすめ"
+  },
+
+  "directory": {
+    "title": "コネクターを探す",
+    "searchPlaceholder": "コネクターを検索…",
+    "sourceChip": "IBM & パートナー",
+    "catalogCount": "カタログ · {{count}}",
+    "comingSoonHint": "「近日公開」のアイテムはまだ直接接続できません。MCPサーバーのURLをお持ちの場合は試してみてください",
+    "comingSoonCta": "「カスタムを追加」",
+    "comingSoonSuffix": "をすぐに接続できます。",
+    "noResults": "「{{query}}」に一致するコネクターが見つかりません。",
+    "tagComingSoon": "近日公開",
+    "alreadyAdded": "追加済み",
+    "comingSoonDisabled": "MVP ではまだ利用できません — MCPサーバーのURLをお持ちの場合は「カスタムを追加」を使用してください",
+    "addAriaLabel": "{{name}}を追加"
+  },
+
+  "required": {
+    "title": "有効化する前に接続が必要",
+    "later": "後で",
+    "goToConnectors": "コネクターへ移動",
+    "tagWaiting": "接続待ち",
+    "descriptionLine1": "有効にする前に、このプラグインがアクセスするコネクターを承認する必要があります。",
+    "descriptionLine2": "接続後、プラグインを再度有効にするとスキルとツールがエージェントに追加されます。",
+    "sectionLabel": "必要なコネクター",
+    "tagNeedsConnection": "接続が必要",
+    "fallbackConnectorName": "必要なコネクター",
+    "hint": "接続は権限スコープを確認後にコネクター画面から完了します。閉じてもプラグインはインストール済みのままです。"
+  },
+
+  "custom": {
+    "title": "カスタムコネクターを追加",
+    "cancel": "キャンセル",
+    "discoverBtn_idle": "OAuth設定を確認",
+    "discoverBtn_checking": "確認中…",
+    "discoverBtn_done": "再確認",
+    "addBtn": "追加して接続",
+    "addBtnTooltip": "名前と認証/トークンエンドポイントが必要です — 確認で自動入力するか手動で入力してください",
+    "description": "OAuth認証を使用するリモートMCPサーバーのURLを入力すると、認証/トークンエンドポイントと動的クライアント登録のサポート状況を自動的に検出します。標準に従っていないサーバーの場合は、以下のフィールドに手動で入力してください。",
+    "labelDisplayName": "表示名",
+    "placeholderDisplayName": "例：Notion、Linear、Sentry",
+    "labelMcpUrl": "MCPサーバーURL",
+    "discoverOk": "このサーバーのOAuth設定が自動的に見つかりました。そのまま追加するか、以下を編集してください。",
+    "discoverFail": "設定を自動的に見つけられませんでした — 認証/トークンエンドポイントを手動で入力してください。",
+    "discoverDynamicReg": "動的クライアント登録がサポートされています — クライアントID/シークレットを手動で入力する必要はありません。",
+    "labelAuthorize": "認証エンドポイント",
+    "labelToken": "トークンエンドポイント",
+    "advancedToggle": "詳細設定 · スコープ · クライアントID/シークレットを手動入力",
+    "labelScope": "スコープ",
+    "scopeHint": "· スペース区切り · 任意",
+    "labelDynReg": "動的登録エンドポイント",
+    "dynRegHint": "· 任意",
+    "labelClientId": "クライアントID",
+    "clientIdHint": "· 事前登録済みクライアントがある場合のみ",
+    "labelClientSecret": "クライアントシークレット",
+    "securityNote_pre": "クライアントシークレットは",
+    "securityNote_strong": "OSキーチェーンにのみ保存されます",
+    "securityNote_post": "。「追加して接続」をクリックするとシステムブラウザでログイン画面が開きます。"
+  },
+
+  "marketplaceHeader": {
+    "searchAriaLabel": "{{title}}を検索",
+    "searchPlaceholder": "検索",
+    "clearSearch": "検索をクリア",
+    "sortAriaLabel": "並び替え",
+    "tagFilterAriaLabel": "タグフィルター"
+  },
+
+  "mcpRegister": {
+    "modalTitle": "ローカルMCPサーバーを登録",
+    "cancel": "キャンセル",
+    "btnTesting": "テスト中…",
+    "btnTest": "接続をテスト",
+    "btnRegister": "登録",
+    "tooltipPaste": "MCPサーバー設定を貼り付けるかファイルをインポート",
+    "tooltipNeedTest": "先に「接続をテスト」を完了してください",
+    "warningExec": "ローカルMCPサーバーはコンピューターで{{strong}}。信頼できるソースの設定のみ登録してください。",
+    "warningExecStrong": "直接コードを実行します",
+    "sectionInputLabel": "MCPサーバー設定（JSON）",
+    "importFromFile": "ファイルからインポート",
+    "dragDropLabel": "ここにドロップして読み込む",
+    "inputHint": "MCPサーバードキュメントのインストールスニペットを貼り付けるか、JSONファイルを上の入力欄にドラッグしてください。貼り付け後に外側をクリックすると自動解析されます。複数のサーバー（既存の.mcp.jsonなど）もすべて認識されてリストされます。",
+    "serverListTitle": "見つかったサーバー · {{count}}",
+    "namePlaceholder": "名前を入力",
+    "testOk": "接続済み · {{count}}個のツールが見つかりました",
+    "registered": "✓ 登録済み",
+    "storageHint": "サーバー設定は<path>~/.rice/.mcp.json</path>に保存されます。登録後すぐに起動し、アプリの再起動後も持続します。",
+    "parseErrorInvalidJson": "有効なJSONではありません。",
+    "parseErrorNotObject": "有効なJSONオブジェクトではありません。",
+    "parseErrorNoServer": "コマンドまたはURLを持つMCPサーバー設定が見つかりません。",
+    "testFail": "接続を確認できませんでした。",
+    "registerFail": "登録に失敗しました — この名前がすでに登録されているか確認してください",
+    "registerSummaryAllFail": "登録に失敗しました。アイテムごとのエラーを確認してください。",
+    "registerSummaryPartial": "{{success}}/{{total}}件のみ登録されました — 残りのアイテムを確認してください。"
+  },
+
+  "loopStages": {
+    "exp": { "label": "経験", "desc": "チャットとタスクからパターンを観察" },
+    "gen": { "label": "スキル作成", "desc": "繰り返しを再利用可能なスキルに変換" },
+    "use": { "label": "使用と改善", "desc": "使うたびにルールが強化される" },
+    "model": { "label": "ユーザーモデル", "desc": "セッションをまたいで記憶" }
+  },
+
+  "fixture": {
+    "lastSync": {
+      "justNow": "たった今",
+      "min2Ago": "2分前",
+      "min5Ago": "5分前",
+      "min10Ago": "10分前",
+      "hour1Ago": "1時間前",
+      "yesterday": "昨日"
+    },
+    "usedByKind": {
+      "skill": "スキル",
+      "plugin": "プラグイン",
+      "automation": "オートメーション",
+      "conversation": "会話"
+    },
+    "db2": {
+      "category": "データベース",
+      "summary": "四半期売上照会とスキーマチェックに使用する本番データベース接続。",
+      "scopes": [
+        "接続されたデータベースのスキーマとテーブルを一覧表示。",
+        "特定のテーブルの列、型、インデックスを説明。",
+        "読み取り専用SQL（SELECT）クエリを実行。",
+        "クエリ実行計画（EXPLAIN）を取得。",
+        "INSERT、UPDATE、DELETEステートメントを実行。"
+      ],
+      "usedBy": [
+        { "kind": "skill", "name": "四半期売上サマリー" },
+        { "kind": "skill", "name": "Db2スキーマチェック" },
+        { "kind": "plugin", "name": "Db2エキスパート" }
+      ],
+      "examples": ["売上テーブルのスキーマを確認", "2026年Q1の売上サマリーを作成"]
+    },
+    "slack": {
+      "category": "メッセージング",
+      "summary": "サマリーとレポートをチャンネルに送信し、メンションを読む。",
+      "scopes": [
+        "ワークスペースのチャンネルを一覧表示。",
+        "チャンネルの最新メッセージを読む。",
+        "ワークスペース全体でメッセージを検索。",
+        "ユーザーへのメンションを取得。",
+        "チャンネルにメッセージを投稿。",
+        "スレッドに返信。",
+        "チャンネルにファイルをアップロード。"
+      ],
+      "usedBy": [
+        { "kind": "automation", "name": "週次売上レポート → Slack" }
+      ],
+      "examples": ["今週のサマリーを#sales-reportチャンネルに送信"]
+    },
+    "outlook": {
+      "category": "メール & カレンダー",
+      "summary": "メールの下書きと送信、カレンダーの確認。",
+      "scopes": [
+        "受信トレイのメールを一覧表示。",
+        "特定のメールの本文と添付ファイルを取得。",
+        "指定期間のカレンダーイベントを読む。",
+        "メールの下書きを作成。",
+        "メールを送信。",
+        "カレンダーイベントを作成。"
+      ],
+      "usedBy": [
+        { "kind": "conversation", "name": "役員レポートメールの下書き" }
+      ],
+      "examples": ["このサマリーから役員レポートのメールを下書き"]
+    },
+    "jira": {
+      "category": "課題管理",
+      "summary": "スプリントと課題を読み取り、レトロスペクティブを整理。",
+      "scopes": [
+        "JQLで課題を検索。",
+        "特定の課題の詳細を取得。",
+        "ボードのスプリントを一覧表示。",
+        "新しい課題を作成。",
+        "課題にコメントを追加。",
+        "課題のステータスを遷移。"
+      ],
+      "usedBy": [
+        { "kind": "skill", "name": "ミーティングアクションアイテムの抽出" }
+      ],
+      "examples": ["このスプリントのレトロスペクティブを要約"]
+    },
+    "gdrive": {
+      "category": "ストレージ",
+      "summary": "ドキュメントを読んで要約、または出力ファイルを保存。",
+      "scopes": [
+        "ファイルとフォルダーを一覧表示。",
+        "名前またはコンテンツでファイルを検索。",
+        "ドキュメントのコンテンツを読む/エクスポート。",
+        "新しいファイルを作成。",
+        "既存のファイルを編集。"
+      ],
+      "usedBy": [],
+      "examples": ["このフォルダーのドキュメントを要約"]
+    },
+    "orchestrate": {
+      "category": "オートメーション",
+      "summary": "スケジュールまたはトリガーでワークフローを自動実行。",
+      "scopes": [
+        "利用可能なワークフローを一覧表示。",
+        "ワークフローの実行状況と履歴を確認。",
+        "ワークフローを実行。",
+        "ワークフロースケジュールを登録または変更。"
+      ],
+      "usedBy": [
+        { "kind": "automation", "name": "四半期売上サマリー · 毎週月曜08:00" }
+      ],
+      "examples": ["月曜朝のレポートオートメーションを設定"]
+    },
+    "gmail": {
+      "category": "メール",
+      "summary": "メールを読んで要約、または役員レポートの下書きと送信。デフォルトのプロトタイプコネクター。",
+      "usedBy": [
+        { "kind": "conversation", "name": "役員レポートメールの送信" }
+      ],
+      "examples": ["今週の受信トレイの重要メールを要約", "このサマリーから役員レポートのメールを下書き"]
+    },
+    "mcp-filesystem": {
+      "category": "ファイルシステム",
+      "summary": "コンピューターの指定フォルダーへの読み書きにより、エージェントがローカルファイルで作業できます。",
+      "usedBy": [
+        { "kind": "skill", "name": "ローカルドキュメントサマリー" }
+      ],
+      "examples": ["デスクトップのMarkdownファイルを整理"]
+    },
+    "mcp-git": {
+      "category": "バージョン管理",
+      "summary": "ローカルリポジトリのコミット、差分、ログを読み取り、コードの変更を説明または要約。",
+      "usedBy": [
+        { "kind": "conversation", "name": "変更レビュー" }
+      ],
+      "examples": ["最近のコミットの変更を要約"]
+    },
+    "mcp-sqlite": {
+      "category": "データベース",
+      "summary": "分析のためにローカルSQLiteファイルをクエリ。ツールを検出するには接続してください。",
+      "usedBy": [],
+      "examples": ["data.dbのテーブルを表示"]
+    },
+    "catalog": {
+      "github": { "summary": "課題、PR、コードを読み取り、変更を要約またはレビューを支援。", "examples": ["このリポジトリのオープンPRを要約"] },
+      "notion": { "summary": "ワークスペースのドキュメントを検索・要約し、ページを書き込む。", "examples": ["今週のミーティングメモを1ページにまとめる"] },
+      "linear": { "summary": "課題とサイクルを読み取り、進捗の追跡とチケットの作成。", "examples": ["このサイクルの残り課題を整理"] },
+      "confluence": { "summary": "スペースのドキュメントを検索して回答を探すかレポートを書く。", "examples": ["オンボーディングドキュメントを要約"] },
+      "salesforce": { "summary": "案件と顧客データをクエリしてパイプラインを分析。", "examples": ["今四半期のパイプラインのトップ案件を表示"] },
+      "hubspot": { "summary": "連絡先、案件、キャンペーンデータを読み取ってレポートを作成。", "examples": ["今月の新規リードの傾向を要約"] },
+      "asana": { "summary": "タスクとプロジェクトを読み取り、状況の追跡と作業アイテムの作成。", "examples": ["期限が近いタスクを教えて"] },
+      "dropbox": { "summary": "フォルダー内のドキュメントを読んで要約、または出力ファイルを保存。", "examples": ["このフォルダーの各PDFを1行で要約"] },
+      "postgres": { "summary": "スキーマを確認し、読み取り専用クエリでデータを分析。", "examples": ["ordersテーブルの最近のトレンドを分析"] },
+      "zendesk": { "summary": "チケットを読み取り、問題を分類して返答を下書き。", "examples": ["今日の緊急チケットを整理"] }
+    }
+  }
+}

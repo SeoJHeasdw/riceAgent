@@ -1,0 +1,173 @@
+{
+  "title": "設定",
+  "saved": "保存済み",
+  "unsaved": "未保存",
+  "saveButton": "設定を保存",
+  "close": "設定を閉じる",
+  "autoSave": "変更はこのデバイスに自動的に保存されます。",
+  "autoSaveShort": "自動保存",
+  "nav": {
+    "general": "一般",
+    "generalDesc": "外観と起動",
+    "privacy": "学習とプライバシー",
+    "privacyDesc": "パーソナライズとデータ",
+    "about": "RICEについて",
+    "aboutDesc": "ヘルプとリセット"
+  },
+  "appearance": {
+    "title": "外観",
+    "description": "テーマ、言語、フォントの設定",
+    "theme": "テーマ",
+    "themeDark": "ダーク",
+    "themeLight": "ライト",
+    "language": "言語",
+    "font": "フォント",
+    "fontSystem": "システムデフォルト",
+    "fontMono": "等幅",
+    "fontSans": "サンセリフ"
+  },
+  "apiRuntime": {
+    "title": "API & ランタイム",
+    "description": "モデル接続とアプリ起動の管理",
+    "modelSettingsTitle": "チャットでモデル接続を管理",
+    "claudeManagedInChat": "Claude（SaaS）のAPIキーはチャットのモデル設定で管理されます。",
+    "ollamaEndpoint": "Ollamaエンドポイント",
+    "ollamaHelper": "ローカルモデルを使用する場合のみ変更してください",
+    "ollamaPlaceholder": "http://localhost:11434",
+    "runtimeAutoStart": "起動時にランタイムを開始",
+    "runtimeAutoStartDesc": "アプリを開くときにRICEランタイムを自動的に起動する"
+  },
+  "learningPrivacy": {
+    "title": "学習 · プライバシー",
+    "description": "学習ループが収集できる内容と保存場所を管理",
+    "localFirstTitle": "RICEはデフォルトでローカルファースト",
+    "localFirstDesc": "学習データはデフォルトでこのデバイスに保存され、有効にするまで匿名の使用データが共有されることはありません。",
+    "userModeling": "ユーザーモデリングを有効にする",
+    "userModelingDesc": "インタラクションから学習してレスポンスをパーソナライズ",
+    "localStorage": "ユーザーモデルをローカルのみに保存",
+    "localStorageDesc": "すべての学習データをデバイスに保管",
+    "telemetry": "匿名の使用データを共有",
+    "telemetryDesc": "匿名のテレメトリを送信してRICEの改善に協力"
+  },
+  "about": {
+    "title": "について",
+    "appName": "RICE",
+    "appDescription": "Runtime Intelligence & Continual Evolution · v0.1.0",
+    "beta": "ベータ"
+  },
+  "tutorial": {
+    "title": "チュートリアル",
+    "description": "いつでも初回起動時のガイダンスに戻れます。",
+    "replayOnboarding": "オンボーディングを再生",
+    "replayOnboardingDesc": "RICEのコンセプトとモデル設定を再度確認します。",
+    "replay": "再生",
+    "restartTour": "ツアーを再スタート",
+    "restartTourDesc": "アプリの主要な機能をもう一度ハイライトします。",
+    "start": "開始"
+  },
+  "danger": {
+    "title": "危険な操作",
+    "description": "RICEが保存したすべてのデータを完全に削除",
+    "irreversible": "この操作は元に戻せません",
+    "reset": "すべてのRICEデータを削除",
+    "resetDesc": "会話、学習履歴、保存済みスキル、プラグイン、接続、アプリ設定がすべて削除されます。",
+    "resetButton": "すべてのデータを削除",
+    "resetConfirm": "本当によろしいですか？すべての記録がすぐに消え、復元できません。",
+    "cancel": "キャンセル",
+    "confirmReset": "すべてを完全に削除"
+  },
+
+  "modelPicker": {
+    "runLocation": "実行場所",
+    "saasCaption": "クラウドAPI",
+    "localCaption": "Ollama · デバイス上",
+    "sectionModel": "モデル",
+    "addModel": "モデルを追加",
+    "emptyTitle": "モデルが登録されていません",
+    "emptyDesc": "「モデルを追加」でAPIモデルとキーを登録してください",
+    "unregister": "登録解除",
+    "ollamaEndpointLabel": "Ollamaエンドポイント",
+    "btnTestConn": "接続をテスト",
+    "connOk": "接続済み · Ollamaが正常に応答しています",
+    "connFail": "接続失敗 · エンドポイントを確認してください",
+    "localPreTitle": "モデルはまだ確認されていません",
+    "localPreDesc": "ローカルOllamaからモデル一覧を読み込みます",
+    "btnFetchModels": "ローカルモデルを確認",
+    "localEmptyTitle": "モデルがインストールされていません",
+    "localEmptyDesc_pre": "<code>ollama pull &lt;model-name&gt;</code>を実行してモデルをインストールしてから再確認してください",
+    "btnRefetch": "再確認",
+    "installedModels": "インストール済みモデル（{{count}}）",
+    "btnRefresh": "更新",
+    "titleRefresh": "更新",
+    "params": {
+      "title": "レスポンス設定",
+      "temperatureLabel": "創造性（Temperature）",
+      "temperatureLow": "正確",
+      "temperatureHigh": "創造的",
+      "showThinkingLabel": "思考を表示",
+      "showThinkingDesc": "会話にローカルモデルの推論トレースを表示する"
+    },
+    "toast": {
+      "fetchingModels": "ローカルモデルを確認中",
+      "modelsFound": "{{count}}個のモデルが見つかりました",
+      "ollamaConnectFail": "Ollamaに接続できません",
+      "connTestLabel": "接続をテスト中",
+      "connTestEndpoint": "エンドポイント",
+      "connOk": "接続成功",
+      "connFail": "接続失敗"
+    }
+  },
+
+  "modelRegister": {
+    "title": "モデルを登録",
+    "cancel": "キャンセル",
+    "register": "登録",
+    "testBtn": "接続をテスト",
+    "testingBtn": "テスト中…",
+    "retestBtn": "再テスト",
+    "providerLabel": "プロバイダー",
+    "modelIdLabel": "モデルID",
+    "modelIdPlaceholder": "モデル識別子を入力",
+    "projectIdLabel": "project_id",
+    "projectIdPlaceholder": "watsonx プロジェクトID",
+    "apiKeyLabel": "APIキー",
+    "showKey": "キーを表示",
+    "hideKey": "キーを非表示",
+    "testingInline": "接続を確認中…",
+    "testOk": "接続済み · 登録できます",
+    "testFailPrefix": "キーの形式を確認してください（{{prefix}}で始まる必要があります）",
+    "testFailGeneric": "接続失敗 · キーを確認してください",
+    "gatePrimary": "先に「接続をテスト」を完了してください",
+    "gateSecondary": "モデルIDとAPIキーを入力してから接続テストを実行してください",
+    "storageNote": "APIキーは<device>このデバイスのみ</device>に保存され、外部サーバーに送信されることはありません。",
+    "storageNoteDb": "ローカルデータベース（state.db）にプレーンテキストで保存されます。",
+    "toastConnecting": "接続を確認中",
+    "toastConnOk": "接続成功",
+    "toastConnFail": "接続失敗",
+    "providers": {
+      "openai": {
+        "baseUrlLabel": "ベースURL（任意）",
+        "baseUrlPlaceholder": "https://api.openai.com/v1",
+        "keyPlaceholder": "sk-...",
+        "keyLabel": "APIキー"
+      },
+      "anthropic": {
+        "keyPlaceholder": "sk-ant-...",
+        "keyLabel": "APIキー"
+      },
+      "watsonx": {
+        "keyLabel": "IBM Cloud APIキー",
+        "keyPlaceholder": "IBM Cloud APIキー",
+        "baseUrlLabel": "リージョナルエンドポイント",
+        "baseUrlPlaceholder": "https://us-south.ml.cloud.ibm.com"
+      },
+      "custom": {
+        "label": "OpenAI互換（カスタム）",
+        "keyPlaceholder": "APIキーを入力",
+        "baseUrlLabel": "ベースURL",
+        "baseUrlPlaceholder": "https://my-gateway/v1",
+        "keyLabel": "APIキー"
+      }
+    }
+  }
+}

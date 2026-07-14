@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { useI18n } from '../../lib/i18n/I18nContext';
 import type { Language } from '../../lib/i18n';
@@ -12,6 +12,7 @@ export interface LanguageSelectDialogProps {
 const LANGUAGES: Array<{ value: Language; code: string; label: string; caption: string }> = [
   { value: 'ko', code: 'KO', label: '한국어', caption: 'Korean' },
   { value: 'en', code: 'EN', label: 'English', caption: '영어' },
+  { value: 'ja', code: 'JA', label: '日本語', caption: 'Japanese' },
 ];
 
 const ArrowIcon = () => (
@@ -23,18 +24,8 @@ const ArrowIcon = () => (
 export const LanguageSelectDialog: React.FC<LanguageSelectDialogProps> = ({ open, onConfirm }) => {
   const { language, setLanguage } = useI18n();
   const { t } = useTranslation('common');
-  const [selected, setSelected] = useState<Language>(language);
-
-  useEffect(() => {
-    if (open) setSelected(language);
-  }, [language, open]);
 
   if (!open) return null;
-
-  const handleConfirm = () => {
-    setLanguage(selected);
-    onConfirm();
-  };
 
   return (
     <div className="cinematic-language" role="dialog" aria-modal="true" aria-labelledby="language-title">
@@ -53,13 +44,13 @@ export const LanguageSelectDialog: React.FC<LanguageSelectDialogProps> = ({ open
         </div>
         <div className="language-dock__options">
           {LANGUAGES.map((item) => {
-            const active = selected === item.value;
+            const active = language === item.value;
             return (
               <button
                 key={item.value}
                 type="button"
                 className={active ? 'is-active' : ''}
-                onClick={() => setSelected(item.value)}
+                onClick={() => setLanguage(item.value)}
                 aria-pressed={active}
               >
                 <span className="language-dock__code">{item.code}</span>
@@ -69,8 +60,8 @@ export const LanguageSelectDialog: React.FC<LanguageSelectDialogProps> = ({ open
             );
           })}
         </div>
-        <button type="button" className="language-dock__continue" onClick={handleConfirm}>
-          <span>{t('languageSelect.continueButton', { lng: selected })}</span>
+        <button type="button" className="language-dock__continue" onClick={onConfirm}>
+          <span>{t('languageSelect.continueButton')}</span>
           <ArrowIcon />
         </button>
         <p className="language-dock__foot">{t('languageSelect.footer')}</p>

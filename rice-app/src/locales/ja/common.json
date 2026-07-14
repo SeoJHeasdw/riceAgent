@@ -1,0 +1,57 @@
+{
+  "loading": "読み込み中…",
+  "error": "エラー",
+  "success": "成功",
+  "cancel": "キャンセル",
+  "confirm": "確認",
+  "close": "閉じる",
+  "save": "保存",
+  "delete": "削除",
+  "edit": "編集",
+  "retry": "再試行",
+  "me": "自分",
+  "dialog": "ダイアログ",
+  "closeDialog": "ダイアログを閉じる",
+  "mainMenu": "メインメニュー",
+  "moreActions": "その他のアクション",
+  "statusToggle": "ステータスを切り替え",
+  "commandPalette": {
+    "ariaLabel": "コマンドパレット",
+    "searchPlaceholder": "ナビゲーション、スキル、クイックアクションを検索…",
+    "noResults": "結果が見つかりません",
+    "groupActions": "クイックアクション",
+    "groupNav": "ナビゲート",
+    "groupSkills": "スキルを実行",
+    "footerNavigate": "ナビゲート",
+    "footerExecute": "実行",
+    "footerToggle": "開く/閉じる",
+    "actionNewChat": "新しいチャットを開始",
+    "actionNewChatSub": "現在の会話を終了して新たに開始",
+    "actionNewChatKeywords": "新しいチャット 開始",
+    "actionReplayTour": "ガイドツアーを再開",
+    "actionReplayTourSub": "主要機能のバブルツアー",
+    "actionReplayTourKeywords": "ツアー ガイド",
+    "actionReplayOnboarding": "モデルのオンボーディングを再生",
+    "actionReplayOnboardingSub": "実行場所とモデルを再設定",
+    "actionReplayOnboardingKeywords": "オンボーディング モデル設定",
+    "skillUses": "{{count}}回使用"
+  },
+  "languageSelect": {
+    "continueButton": "日本語で続ける",
+    "welcome": "ようこそ",
+    "heading": "言語を選択",
+    "description": "RICEで使用する言語を選択してください。",
+    "footer": "設定からいつでも変更できます"
+  },
+  "markdown": {
+    "codeCopy": "コピー",
+    "codeCopied": "コピー済み",
+    "codeAriaLabel": "コードをコピー",
+    "fileOpenTitle": "ファイルを開く · {{path}}",
+    "tableBuilding": "テーブルを構築中…"
+  },
+  "fileViewer": {
+    "openedSuccess": "デフォルトアプリで開きました · {{path}}",
+    "openFailed": "ファイルを開けませんでした"
+  }
+}

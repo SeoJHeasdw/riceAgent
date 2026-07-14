@@ -1,0 +1,47 @@
+{
+  "unknown": "問題が発生しました。",
+  "internal_error": "内部エラーが発生しました。",
+  "not_found": "見つかりません。",
+  "validation_error": "入力内容を確認してください。",
+  "conflict": "リクエストが現在の状態と競合しています。",
+  "permission_denied": "その操作を行う権限がありません。",
+  "provider_error": "モデルプロバイダーへの接続に失敗しました。",
+  "provider_unavailable": "AI編集は利用できません — モデルプロバイダーが接続されていません。",
+  "workspace": {
+    "path_not_absolute": "保存場所は絶対パスである必要があります。",
+    "mkdir_failed": "保存フォルダーを作成できませんでした: {{detail}}",
+    "open_failed": "開けませんでした: {{detail}}"
+  },
+  "ollama": {
+    "unreachable": "Ollamaに接続できません: {{baseUrl}}",
+    "bad_response": "Ollamaがエラーを返しました。"
+  },
+  "session": {
+    "generating": "このセッションはすでに回答を生成中です。完了してからもう一度試してください。",
+    "nothing_to_regenerate": "再生成するユーザーメッセージがありません。"
+  },
+  "skill": {
+    "validation_failed": "スキルの検証に失敗しました: {{detail}}",
+    "already_exists": "この名前のスキルはすでに存在します: {{name}}",
+    "edit_empty": "編集の指示が空です。",
+    "edit_unparseable": "AIの編集レスポンスを解釈できませんでした。指示を言い換えてみてください。",
+    "patch_target_deleted": "スキル{{skillId}}は削除されたため、この提案（v{{expectedVersion}}に基づく）は適用できなくなりました。",
+    "patch_version_mismatch": "スキル{{skillId}}がv{{expectedVersion}}からv{{currentVersion}}に変わりました。この提案は古いバージョンに基づいています — 新しいものをリクエストしてください。",
+    "builtin_immutable": "{{skillId}}は組み込みスキルです — {{action}}はできません。有効/無効のみ可能です。",
+    "builtin_state_invalid": "組み込みスキル{{name}}はactive/archived（inactive）状態のみサポートしています（{{state}}を受け取りました）。",
+    "invalid_name": "スキル名は小文字・数字・ハイフンのみ（2〜64文字）で入力してください（例: my-skill）: {{name}}",
+    "edit_too_long": "編集の指示が長すぎます（{{length}}文字）— {{max}}文字以内にしてください。",
+    "body_too_long": "本文が長すぎます（{{length}}文字 > 最大{{max}}文字）— より短い手順に分割してください。"
+  },
+  "plugins": {
+    "builtin_immutable": "組み込みプラグイン{{name}}は{{action}}できません — 有効/無効のみ可能です。",
+    "missing_connectors": "プラグイン{{name}}にはまだ接続されていないコネクターが必要です: {{missing}}。先に接続してください。"
+  },
+  "eval": {
+    "no_results": "評価結果が見つかりません — 先に評価ハーネスを実行してください（python -m eval.runner）。"
+  },
+  "connectors": {
+    "custom_client_id_missing": "{{displayName}}にOAuthクライアントIDがありません。このサーバーは動的クライアント登録をサポートしていないか、登録に失敗しました — コネクターを削除してから「カスタムを追加」で再追加し、詳細設定でクライアントID（および必要であればシークレット）を手動で入力してください。",
+    "dynamic_registration_failed": "このサーバーからOAuthクライアントIDを取得できませんでした — 動的クライアント登録（RFC 7591）が失敗したかサポートされていません。詳細設定でクライアントID（および必要であればシークレット）を手動で入力してください。"
+  }
+}
