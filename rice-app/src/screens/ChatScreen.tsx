@@ -14,7 +14,7 @@ import { RUN_SKILL_EVENT, NEW_CHAT_EVENT, openCommandPalette } from '../lib/comm
 import { api } from '../lib/api';
 import { sseClient } from '../lib/sse';
 import type { ApprovalMode, PatchTrigger, PendingApproval, PlanUpdatedEventData, ToolApprovalRequiredData, SkillPatchProposedData, MemoryWrittenEventData, SSEEvent } from '../lib/types';
-import { Icon, Kbd, ResizeHandle, ConfirmDialog, Tooltip, Toggle } from '../components/ui';
+import { CompanionCloudIcon, Icon, Kbd, ResizeHandle, ConfirmDialog, Tooltip, Toggle } from '../components/ui';
 import type { IconName } from '../components/ui/Icon';
 import { FileViewerProvider } from '../lib/fileViewer/FileViewerProvider';
 import { useToast } from '../lib/toast/ToastContext';
@@ -811,36 +811,7 @@ const ChatStarter: React.FC<{
         aria-label={t('starter.companionLabel')}
         title={t('starter.companionLabel')}
       >
-        <svg viewBox="0 0 64 56" className="h-full w-full overflow-visible" aria-hidden="true">
-          <defs>
-            <linearGradient id="starter-companion-gradient" x1="10" y1="8" x2="52" y2="46" gradientUnits="userSpaceOnUse">
-              <stop stopColor="#78a9ff" />
-              <stop offset="0.55" stopColor="#a56eff" />
-              <stop offset="1" stopColor="#3ddbd9" />
-            </linearGradient>
-          </defs>
-          <g className="starter-companion__burst" fill="url(#starter-companion-gradient)">
-            <circle cx="7" cy="27" r="2" />
-            <circle cx="14" cy="8" r="1.7" />
-            <circle cx="52" cy="11" r="1.8" />
-            <circle cx="58" cy="32" r="1.6" />
-            <circle cx="48" cy="49" r="1.5" />
-            <circle cx="15" cy="47" r="1.4" />
-          </g>
-          <g className="starter-companion__puff">
-            <path
-              d="M17.5 43.5c-6 0-10.8-4.5-10.8-10.1 0-4.9 3.6-9 8.5-9.9C17 16.2 23.4 11 31 11c8.2 0 14.9 6 15.6 13.8 5.2.7 9.2 5 9.2 10.1 0 5.8-5 10.5-11.2 10.5H17.5Z"
-              fill="url(#starter-companion-gradient)"
-              fillOpacity="0.11"
-              stroke="url(#starter-companion-gradient)"
-              strokeWidth="2.2"
-              strokeLinejoin="round"
-            />
-            <circle cx="26" cy="31" r="1.5" fill="currentColor" />
-            <circle cx="37.5" cy="31" r="1.5" fill="currentColor" />
-            <path d="M27.5 36c2.6 2 5.8 2 8.4 0" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-          </g>
-        </svg>
+        <CompanionCloudIcon withBurst className="h-full w-full overflow-visible" />
       </button>
       <h1 className="mb-8 text-heading-04 font-light text-text-primary">{t('starter.greeting')}</h1>
 

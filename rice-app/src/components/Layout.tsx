@@ -1,6 +1,7 @@
 import React from 'react';
 import { useLocation } from 'react-router-dom';
 import { IconRail, IconRailItem } from './carbon';
+import { CompanionCloudIcon } from './ui';
 
 /**
  * Layout - Main app layout: titlebar + icon rail + content
@@ -45,17 +46,7 @@ export const Layout: React.FC<LayoutProps> = ({
             ${isElectron ? 'pl-[84px]' : 'pl-4'} pr-4
           `}
         >
-          <div
-            className="
-              flex items-center justify-center w-6 h-6 rounded-md
-              bg-gradient-to-br from-blue-60 to-purple-60
-              text-text-on-color font-mono font-bold text-caption-01
-              select-none
-            "
-            aria-hidden="true"
-          >
-            R
-          </div>
+          <CompanionCloudIcon className="h-6 w-7 flex-shrink-0 text-shell-text" />
           <span className="text-body-short-01 font-semibold text-shell-text select-none">
             RICE
           </span>

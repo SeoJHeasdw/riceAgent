@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { Button, Icon, Tag } from '../ui';
+import { Button, CompanionCloudIcon, Icon, Tag } from '../ui';
 import { connectorIdForScope, type ThreadMessage, type ToolCall, type SkillRef, type EditDiffRow } from '../../lib/learningData';
 import type { PlanStepData } from '../../lib/types';
 import { useFileViewer } from '../../lib/fileViewer/FileViewerContext';
@@ -116,15 +116,17 @@ const TypingDots: React.FC = () => {
 // ── avatar ───────────────────────────────────────────────────
 const Avatar: React.FC<{ kind: 'user' | 'agent' }> = ({ kind }) => {
   const agent = kind === 'agent';
+  if (agent) {
+    return (
+      <span className="flex h-7 w-8 flex-shrink-0 items-center justify-center text-text-secondary" aria-hidden="true">
+        <CompanionCloudIcon className="h-7 w-8" />
+      </span>
+    );
+  }
+
   return (
-    <div
-      className={`w-7 h-7 flex-shrink-0 flex items-center justify-center rounded-lg border text-caption-01 font-semibold font-mono ${
-        agent
-          ? 'border-blue-50/25 bg-blue-60/15 text-blue-30'
-          : 'border-border-subtle-02 bg-layer-03 text-text-secondary'
-      }`}
-    >
-      {agent ? 'R' : 'U'}
+    <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg border border-border-subtle-02 bg-layer-03 font-mono text-caption-01 font-semibold text-text-secondary">
+      U
     </div>
   );
 };

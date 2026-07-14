@@ -42,6 +42,9 @@ export type { ToggleProps } from './Toggle';
 export { Icon } from './Icon';
 export type { IconProps, IconName } from './Icon';
 
+export { CompanionCloudIcon } from './CompanionCloudIcon';
+export type { CompanionCloudIconProps } from './CompanionCloudIcon';
+
 export { Kbd } from './Kbd';
 
 export { Tooltip } from './Tooltip';
