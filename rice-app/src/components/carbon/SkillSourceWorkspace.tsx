@@ -141,17 +141,17 @@ export const SkillSourceWorkspace: React.FC<{
       {/* 저장소를 개발자 IDE가 아니라 스킬의 '구성'으로 설명하는 상단 바. */}
       <div className="flex-shrink-0 border-b border-border-subtle-01 bg-layer-01">
         {isElectron && <div className="h-7 w-full electron-drag" />}
-        <div className="flex items-center gap-3 px-4 h-14">
+        <div className="flex h-12 items-center gap-2.5 px-4">
         <button
           onClick={onClose}
           title={t('sourceWorkspace.backTitle')}
           aria-label={t('sourceWorkspace.backAriaLabel')}
-          className="electron-no-drag inline-flex h-9 w-9 items-center justify-center rounded-lg text-text-secondary bg-layer-02 border border-border-subtle-01 hover:bg-layer-hover-01 hover:text-text-primary hover:border-border-strong-01 transition-colors flex-shrink-0"
+          className="electron-no-drag inline-flex h-8 w-8 items-center justify-center rounded-lg text-text-secondary bg-layer-02 border border-border-subtle-01 hover:bg-layer-hover-01 hover:text-text-primary hover:border-border-strong-01 transition-colors flex-shrink-0"
         >
-          <Icon name="arrow-right" size={16} className="rotate-180" />
+          <Icon name="arrow-right" size={15} className="rotate-180" />
         </button>
-        <div className="w-9 h-9 flex-shrink-0 flex items-center justify-center rounded-xl bg-blue-60/15 border border-blue-50/25">
-          <Icon name="folder" size={17} className="text-blue-30" />
+        <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-blue-50/25 bg-blue-60/15">
+          <Icon name="folder" size={16} className="text-blue-30" />
         </div>
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -172,7 +172,7 @@ export const SkillSourceWorkspace: React.FC<{
             onClick={() => active && onEdit(active.path)}
             disabled={!active}
             title={active ? t('sourceWorkspace.editBtnTitle', { path: active.path }) : t('sourceWorkspace.editBtnLabel')}
-            className="electron-no-drag inline-flex items-center gap-2 h-9 px-3.5 rounded-lg text-body-short-01 font-semibold bg-interactive text-text-on-color hover:bg-interactive-hover transition-colors flex-shrink-0 disabled:opacity-40 max-w-[300px]"
+            className="electron-no-drag inline-flex items-center gap-2 h-8 px-3 rounded-lg text-body-short-01 font-semibold bg-interactive text-text-on-color hover:bg-interactive-hover transition-colors flex-shrink-0 disabled:opacity-40 max-w-[300px]"
           >
             <Icon name="sparkle" size={14} className="flex-shrink-0" />
             <span className="truncate">{t('sourceWorkspace.editBtnLabel')}</span>
@@ -243,7 +243,7 @@ export const SkillSourceWorkspace: React.FC<{
         {/* content */}
         <div className="flex-1 min-w-0 flex flex-col bg-background">
           {/* file toolbar */}
-          <div className="flex-shrink-0 flex items-center gap-3 px-5 h-14 border-b border-border-subtle-01 bg-layer-01">
+          <div className="flex h-[54px] flex-shrink-0 items-center gap-2.5 border-b border-border-subtle-01 bg-layer-01 px-4">
             {active && <FileTypeIcon path={active.path} size={15} />}
             <div className="min-w-0">
               <div className="flex items-center gap-2">
@@ -261,7 +261,7 @@ export const SkillSourceWorkspace: React.FC<{
                       !raw ? 'bg-layer-01 text-text-primary shadow-elevation-1' : 'text-text-helper hover:text-text-primary'
                     }`}
                   >
-                    {t('sourceWorkspace.previewBtn')}
+                    {'Preview'}
                   </button>
                   <button
                     onClick={() => setRaw(true)}
@@ -269,17 +269,17 @@ export const SkillSourceWorkspace: React.FC<{
                       raw ? 'bg-layer-01 text-text-primary shadow-elevation-1' : 'text-text-helper hover:text-text-primary'
                     }`}
                   >
-                    {t('sourceWorkspace.rawBtn')}
+                    {'Source'}
                   </button>
                 </div>
               )}
               <button
                 onClick={copy}
-                title={t('sourceWorkspace.copyTitle')}
+                title="Copy"
                 className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-caption-01 text-icon-secondary hover:bg-layer-hover-01 hover:text-text-primary transition-colors"
               >
                 <Icon name={copied ? 'check' : 'copy'} size={14} className={copied ? 'text-support-success' : ''} />
-                {copied ? t('sourceWorkspace.copiedLabel') : t('sourceWorkspace.copyLabel')}
+                {copied ? 'Copied!' : 'Copy'}
               </button>
             </div>
           </div>
