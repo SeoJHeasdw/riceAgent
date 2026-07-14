@@ -6,6 +6,8 @@ import type { AwakeningBeat, CinematicPhase } from '../sequences/types';
 interface EnergyCoreProps {
   phase: CinematicPhase;
   awakeningBeat: AwakeningBeat;
+  reducedMotion: boolean;
+  lowPower: boolean;
 }
 
 const RINGS = [
@@ -16,18 +18,32 @@ const RINGS = [
 
 const easeOutExpo = (value: number) => (value >= 1 ? 1 : 1 - 2 ** (-10 * value));
 
-const HudRing = ({ spec, index }: { spec: (typeof RINGS)[number]; index: number }) => {
+const HudRing = ({
+  spec,
+  index,
+  reducedMotion,
+  lowPower,
+}: {
+  spec: (typeof RINGS)[number];
+  index: number;
+  reducedMotion: boolean;
+  lowPower: boolean;
+}) => {
   const ref = useRef<THREE.Group>(null);
 
   useFrame((state, delta) => {
     const group = ref.current;
     if (!group) return;
-    const progress = THREE.MathUtils.clamp((state.clock.elapsedTime - spec.delay) / 1.5, 0, 1);
+    const progress = reducedMotion ? 1 : THREE.MathUtils.clamp((state.clock.elapsedTime - spec.delay) / 1.5, 0, 1);
     const eased = easeOutExpo(progress);
     group.scale.setScalar(Math.max(eased, 0.001));
-    group.rotation.z += delta * spec.speed;
-    group.rotation.y += delta * spec.speed * 0.25;
+    if (!reducedMotion) {
+      group.rotation.z += delta * spec.speed;
+      group.rotation.y += delta * spec.speed * 0.25;
+    }
   });
+
+  const markerCount = lowPower ? (index === 2 ? 12 : 8) : (index === 2 ? 24 : 12);
 
   return (
     <group ref={ref} rotation={spec.tilt}>
@@ -41,8 +57,8 @@ const HudRing = ({ spec, index }: { spec: (typeof RINGS)[number]; index: number 
           depthWrite={false}
         />
       </mesh>
-      {Array.from({ length: index === 2 ? 24 : 12 }, (_, marker) => {
-        const angle = (marker / (index === 2 ? 24 : 12)) * Math.PI * 2;
+      {Array.from({ length: markerCount }, (_, marker) => {
+        const angle = (marker / markerCount) * Math.PI * 2;
         return (
           <mesh
             key={marker}
@@ -58,38 +74,41 @@ const HudRing = ({ spec, index }: { spec: (typeof RINGS)[number]; index: number 
   );
 };
 
-export const EnergyCore = ({ phase, awakeningBeat }: EnergyCoreProps) => {
+export const EnergyCore = ({ phase, awakeningBeat, reducedMotion, lowPower }: EnergyCoreProps) => {
   const groupRef = useRef<THREE.Group>(null);
   const shellRef = useRef<THREE.Mesh>(null);
   const pulseRef = useRef<THREE.Mesh>(null);
   const phaseScale = phase === 'handoff' ? 1.24 : phase === 'model' ? 0.84 : 1;
-  const fragments = useMemo(
-    () =>
-      Array.from({ length: 18 }, (_, index) => ({
-        angle: (index / 18) * Math.PI * 2,
+  const fragments = useMemo(() => {
+    const fragmentCount = lowPower ? 10 : 18;
+    return Array.from({ length: fragmentCount }, (_, index) => ({
+        angle: (index / fragmentCount) * Math.PI * 2,
         radius: 1.18 + (index % 3) * 0.08,
         z: ((index % 5) - 2) * 0.085,
-      })),
-    [],
-  );
+      }));
+  }, [lowPower]);
 
   useFrame((state, delta) => {
     const group = groupRef.current;
     if (!group) return;
     const introScale = awakeningBeat === 'void' ? 0.02 : awakeningBeat === 'assembly' ? 0.88 : 1;
     const targetScale = introScale * phaseScale;
-    const next = THREE.MathUtils.damp(group.scale.x, targetScale, 3.2, delta);
+    const next = reducedMotion ? targetScale : THREE.MathUtils.damp(group.scale.x, targetScale, 3.2, delta);
     group.scale.setScalar(next);
-    group.rotation.y += delta * (phase === 'handoff' ? 0.2 : 0.055);
-    group.rotation.x = THREE.MathUtils.damp(group.rotation.x, state.pointer.y * 0.08, 2.4, delta);
-    group.rotation.z = THREE.MathUtils.damp(group.rotation.z, -state.pointer.x * 0.05, 2.4, delta);
+    if (!reducedMotion) {
+      group.rotation.y += delta * (phase === 'handoff' ? 0.2 : 0.055);
+    }
+    const pointerY = reducedMotion ? 0 : state.pointer.y;
+    const pointerX = reducedMotion ? 0 : state.pointer.x;
+    group.rotation.x = THREE.MathUtils.damp(group.rotation.x, pointerY * 0.055, 2.4, delta);
+    group.rotation.z = THREE.MathUtils.damp(group.rotation.z, -pointerX * 0.035, 2.4, delta);
 
-    if (shellRef.current) {
+    if (shellRef.current && !reducedMotion) {
       shellRef.current.rotation.y -= delta * 0.09;
       shellRef.current.rotation.z += delta * 0.035;
     }
     if (pulseRef.current) {
-      const pulse = 1 + Math.sin(state.clock.elapsedTime * 2.1) * 0.055;
+      const pulse = reducedMotion ? 1 : 1 + Math.sin(state.clock.elapsedTime * 2.1) * 0.055;
       pulseRef.current.scale.setScalar(pulse);
     }
   });
@@ -100,7 +119,7 @@ export const EnergyCore = ({ phase, awakeningBeat }: EnergyCoreProps) => {
       <pointLight position={[0.8, -0.6, 1.5]} color="#9d70ff" intensity={5} distance={5} />
 
       <mesh ref={pulseRef}>
-        <sphereGeometry args={[0.63, 64, 64]} />
+        <sphereGeometry args={[0.63, lowPower ? 32 : 64, lowPower ? 32 : 64]} />
         <meshPhysicalMaterial
           color="#0b4dba"
           emissive="#1677ff"
@@ -112,11 +131,11 @@ export const EnergyCore = ({ phase, awakeningBeat }: EnergyCoreProps) => {
         />
       </mesh>
       <mesh scale={0.77}>
-        <icosahedronGeometry args={[0.72, 3]} />
+        <icosahedronGeometry args={[0.72, lowPower ? 2 : 3]} />
         <meshBasicMaterial color="#bce9ff" wireframe transparent opacity={0.32} blending={THREE.AdditiveBlending} />
       </mesh>
       <mesh ref={shellRef}>
-        <icosahedronGeometry args={[1.02, 3]} />
+        <icosahedronGeometry args={[1.02, lowPower ? 2 : 3]} />
         <meshPhysicalMaterial
           color="#061326"
           emissive="#0a4da8"
@@ -129,7 +148,7 @@ export const EnergyCore = ({ phase, awakeningBeat }: EnergyCoreProps) => {
         />
       </mesh>
       <mesh scale={1.06}>
-        <sphereGeometry args={[1, 48, 48]} />
+        <sphereGeometry args={[1, lowPower ? 24 : 48, lowPower ? 24 : 48]} />
         <meshBasicMaterial
           color="#2d8dff"
           side={THREE.BackSide}
@@ -156,9 +175,14 @@ export const EnergyCore = ({ phase, awakeningBeat }: EnergyCoreProps) => {
       ))}
 
       {RINGS.map((ring, index) => (
-        <HudRing key={ring.radius} spec={ring} index={index} />
+        <HudRing
+          key={ring.radius}
+          spec={ring}
+          index={index}
+          reducedMotion={reducedMotion}
+          lowPower={lowPower}
+        />
       ))}
     </group>
   );
 };
-

@@ -1,31 +1,30 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { AwakeningBeat, CinematicPhase } from './types';
 
-const HANDOFF_DURATION = 1900;
-
-export const useCinematicSequence = (onFinished: () => void) => {
+export const useCinematicSequence = (onFinished: () => void, reducedMotion = false) => {
   const [phase, setPhase] = useState<CinematicPhase>('awakening');
   const [awakeningBeat, setAwakeningBeat] = useState<AwakeningBeat>('void');
   const [capabilityIndex, setCapabilityIndex] = useState(0);
 
   useEffect(() => {
-    const assemble = window.setTimeout(() => setAwakeningBeat('assembly'), 180);
-    const awake = window.setTimeout(() => setAwakeningBeat('awake'), 2900);
+    if (phase !== 'awakening') return;
+    const assemble = window.setTimeout(() => setAwakeningBeat('assembly'), reducedMotion ? 40 : 180);
+    const awake = window.setTimeout(() => setAwakeningBeat('awake'), reducedMotion ? 120 : 2900);
     // Leave the promise on screen long enough to read after the core wakes.
     // The skip action remains available throughout for returning users.
-    const revealLoop = window.setTimeout(() => setPhase('loop'), 5200);
+    const revealLoop = window.setTimeout(() => setPhase('loop'), reducedMotion ? 1000 : 5200);
     return () => {
       window.clearTimeout(assemble);
       window.clearTimeout(awake);
       window.clearTimeout(revealLoop);
     };
-  }, []);
+  }, [phase, reducedMotion]);
 
   useEffect(() => {
     if (phase !== 'handoff') return;
-    const finish = window.setTimeout(onFinished, HANDOFF_DURATION);
+    const finish = window.setTimeout(onFinished, reducedMotion ? 450 : 1900);
     return () => window.clearTimeout(finish);
-  }, [onFinished, phase]);
+  }, [onFinished, phase, reducedMotion]);
 
   const enterEcosystem = useCallback(() => {
     setCapabilityIndex(0);

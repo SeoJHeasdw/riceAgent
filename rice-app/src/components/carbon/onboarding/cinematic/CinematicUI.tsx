@@ -42,6 +42,43 @@ const CapabilityIcon = ({ id }: { id: 'skill' | 'connector' | 'plugin' }) => {
   );
 };
 
+const useCapabilityCardResponse = (reducedMotion: boolean) => {
+  const ref = React.useRef<HTMLDivElement>(null);
+  const frame = React.useRef<number | null>(null);
+
+  const reset = React.useCallback(() => {
+    if (frame.current !== null) window.cancelAnimationFrame(frame.current);
+    frame.current = null;
+    const card = ref.current;
+    if (!card) return;
+    card.style.setProperty('--card-tilt-x', '0deg');
+    card.style.setProperty('--card-tilt-y', '0deg');
+    card.style.setProperty('--card-light-x', '50%');
+    card.style.setProperty('--card-light-y', '18%');
+  }, []);
+
+  React.useEffect(() => reset, [reset]);
+
+  const handlePointerMove = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (reducedMotion || event.pointerType === 'touch') return;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const x = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
+    const y = Math.max(0, Math.min(1, (event.clientY - bounds.top) / bounds.height));
+    if (frame.current !== null) window.cancelAnimationFrame(frame.current);
+    frame.current = window.requestAnimationFrame(() => {
+      const card = ref.current;
+      if (!card) return;
+      card.style.setProperty('--card-tilt-x', `${((0.5 - y) * 4).toFixed(2)}deg`);
+      card.style.setProperty('--card-tilt-y', `${((x - 0.5) * 6).toFixed(2)}deg`);
+      card.style.setProperty('--card-light-x', `${(x * 100).toFixed(1)}%`);
+      card.style.setProperty('--card-light-y', `${(y * 100).toFixed(1)}%`);
+      frame.current = null;
+    });
+  }, [reducedMotion]);
+
+  return { ref, handlePointerMove, reset };
+};
+
 export const CinematicHeader = ({ phase, copy, onSkip }: { phase: CinematicPhase; copy: CinematicCopy; onSkip: () => void }) => {
   const stages: Array<{ id: CinematicPhase; label: string }> = [
     { id: 'loop', label: 'LEARN' },
@@ -126,29 +163,47 @@ export const EcosystemOverlay = ({
   onSelect,
   onAdvance,
   onContinue,
+  reducedMotion,
 }: {
   copy: CinematicCopy;
   capabilityIndex: number;
   onSelect: (index: number) => void;
   onAdvance: () => void;
   onContinue: () => void;
+  reducedMotion: boolean;
 }) => {
   const capability = copy.ecosystem.capabilities[capabilityIndex];
   const complete = capabilityIndex === copy.ecosystem.capabilities.length - 1;
+  const {
+    ref: cardRef,
+    handlePointerMove: handleCardPointerMove,
+    reset: resetCardResponse,
+  } = useCapabilityCardResponse(reducedMotion);
+  React.useEffect(() => resetCardResponse(), [capabilityIndex, resetCardResponse]);
   return (
     <section className="ecosystem-overlay cinematic-enter">
       <div className="ecosystem-panel">
         <span className="cinematic-eyebrow">{copy.ecosystem.eyebrow}</span>
         <h1>{copy.ecosystem.title}</h1>
         <p className="ecosystem-panel__intro">{copy.ecosystem.description}</p>
-        <div key={capability.id} className="capability-card cinematic-enter" style={{ '--capability-accent': capability.accent } as React.CSSProperties}>
-          <div className="capability-card__topline">
-            <span>{capability.eyebrow}</span>
-            <i><CapabilityIcon id={capability.id} /></i>
+        <div key={capability.id} className="capability-card-stage cinematic-enter">
+          <div
+            ref={cardRef}
+            className="capability-card"
+            style={{ '--capability-accent': capability.accent } as React.CSSProperties}
+            onPointerMove={handleCardPointerMove}
+            onPointerLeave={resetCardResponse}
+            onPointerUp={resetCardResponse}
+            onPointerCancel={resetCardResponse}
+          >
+            <div className="capability-card__topline">
+              <span>{capability.eyebrow}</span>
+              <i><CapabilityIcon id={capability.id} /></i>
+            </div>
+            <h2>{capability.title}</h2>
+            <p>{capability.description}</p>
+            <div className="capability-card__metric"><span />{capability.metric}</div>
           </div>
-          <h2>{capability.title}</h2>
-          <p>{capability.description}</p>
-          <div className="capability-card__metric"><span />{capability.metric}</div>
         </div>
         <div className="capability-tabs">
           {copy.ecosystem.capabilities.map((item, index) => (

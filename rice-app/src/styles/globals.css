@@ -1158,6 +1158,7 @@ button,
   inset: 0;
   z-index: 1;
   touch-action: none;
+  user-select: none;
 }
 
 .cinematic-viewport.is-draggable { cursor: grab; }
@@ -1170,10 +1171,20 @@ button,
 
 .cinematic-nebula,
 .cinematic-grid,
+.cinematic-phase-transition,
 .cinematic-vignette {
   position: absolute;
   inset: 0;
   pointer-events: none;
+}
+
+.cinematic-phase-transition {
+  z-index: 3;
+  opacity: 0;
+  background:
+    radial-gradient(circle at 50% 48%, rgba(111, 170, 238, 0.085), transparent 31%),
+    linear-gradient(90deg, transparent 20%, rgba(173, 201, 235, 0.025) 50%, transparent 80%);
+  animation: cinematicPhaseBloom 720ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .cinematic-nebula {
@@ -1621,6 +1632,10 @@ button,
 
 .capability-card {
   --capability-accent: #5b8cff;
+  --card-tilt-x: 0deg;
+  --card-tilt-y: 0deg;
+  --card-light-x: 50%;
+  --card-light-y: 18%;
   position: relative;
   min-height: 188px;
   padding: 20px;
@@ -1632,6 +1647,33 @@ button,
     linear-gradient(145deg, rgba(31, 37, 48, 0.94), rgba(22, 26, 34, 0.92));
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.16);
   backdrop-filter: blur(18px);
+  transform: perspective(900px) rotateX(var(--card-tilt-x)) rotateY(var(--card-tilt-y));
+  transform-style: preserve-3d;
+  transition:
+    transform 180ms cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 260ms ease,
+    box-shadow 260ms ease;
+  will-change: transform;
+}
+
+.capability-card-stage {
+  min-height: 188px;
+  perspective: 900px;
+}
+
+.capability-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    circle at var(--card-light-x) var(--card-light-y),
+    color-mix(in srgb, var(--capability-accent) 18%, transparent),
+    transparent 48%
+  );
+  opacity: 0.9;
+  transition: opacity 180ms ease;
 }
 
 .capability-card::after {
@@ -1643,6 +1685,22 @@ button,
   width: 2px;
   background: var(--capability-accent);
   box-shadow: 0 0 18px var(--capability-accent);
+}
+
+.capability-card > * {
+  --card-content-depth: 6px;
+  position: relative;
+  z-index: 1;
+  animation: capabilityContentIn 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.capability-card > :nth-child(2) { --card-content-depth: 12px; animation-delay: 45ms; }
+.capability-card > :nth-child(3) { --card-content-depth: 8px; animation-delay: 80ms; }
+.capability-card > :nth-child(4) { --card-content-depth: 4px; animation-delay: 115ms; }
+
+.capability-card:hover {
+  border-color: color-mix(in srgb, var(--capability-accent) 44%, transparent);
+  box-shadow: 0 22px 50px rgba(0, 0, 0, 0.19);
 }
 
 .capability-card__topline {
@@ -1936,8 +1994,19 @@ button,
 }
 
 @keyframes cinematicEnter {
-  from { opacity: 0; transform: translateY(14px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; filter: blur(2px); transform: translateY(14px) scale(0.996); }
+  to { opacity: 1; filter: blur(0); transform: translateY(0) scale(1); }
+}
+
+@keyframes cinematicPhaseBloom {
+  0% { opacity: 0; transform: scale(0.985); }
+  34% { opacity: 1; }
+  100% { opacity: 0; transform: scale(1.025); }
+}
+
+@keyframes capabilityContentIn {
+  from { opacity: 0; transform: translate3d(0, 7px, -5px); }
+  to { opacity: 1; transform: translate3d(0, 0, var(--card-content-depth)); }
 }
 
 @keyframes handoffOverlayIn {
@@ -1974,6 +2043,41 @@ button,
 @keyframes cinematicHandoff {
   0%, 68% { opacity: 1; }
   100% { opacity: 0; }
+}
+
+.cinematic-onboarding.is-low-power .cinematic-nebula {
+  filter: none;
+  animation: none;
+}
+
+.cinematic-onboarding.is-low-power .capability-card,
+.cinematic-onboarding.is-low-power .ecosystem-panel,
+.cinematic-onboarding.is-low-power .model-dock,
+.cinematic-onboarding.is-low-power .loop-node {
+  backdrop-filter: none;
+}
+
+.cinematic-onboarding.is-reduced-motion .cinematic-viewport {
+  cursor: default;
+}
+
+.cinematic-onboarding.is-reduced-motion .capability-card {
+  transform: none;
+  will-change: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cinematic-phase-transition,
+  .cinematic-nebula,
+  .loop-node,
+  .loop-drag-hint {
+    animation: none !important;
+  }
+
+  .capability-card,
+  .capability-card > * {
+    transform: none !important;
+  }
 }
 
 @media (max-width: 1040px) {
@@ -2021,6 +2125,7 @@ button,
   .ecosystem-panel h1 { font-size: 29px; }
   .ecosystem-panel__intro { margin-bottom: 12px; }
   .capability-card { min-height: 0; padding: 15px 16px; }
+  .capability-card-stage { min-height: 0; }
   .capability-card__topline i { width: 32px; height: 32px; }
   .capability-card h2 { margin-top: 8px; font-size: 24px; }
   .capability-card__metric { margin-top: 8px; }

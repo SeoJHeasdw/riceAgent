@@ -21,9 +21,13 @@ const seededRandom = (seed: number) => {
 export const SignalField = ({
   phase,
   drag,
+  reducedMotion,
+  lowPower,
 }: {
   phase: CinematicPhase;
   drag: MutableRefObject<SceneDragState>;
+  reducedMotion: boolean;
+  lowPower: boolean;
 }) => {
   const fieldRef = useRef<THREE.LineSegments>(null);
   const geometry = useMemo(() => {
@@ -35,9 +39,10 @@ export const SignalField = ({
     const violet = new THREE.Color('#8d819d');
     const teal = new THREE.Color('#718f8c');
 
-    for (let layer = 0; layer < 3; layer += 1) {
-      const columns = 15;
-      const rows = 9;
+    const layers = lowPower ? 2 : 3;
+    for (let layer = 0; layer < layers; layer += 1) {
+      const columns = lowPower ? 11 : 15;
+      const rows = lowPower ? 7 : 9;
       for (let row = 0; row < rows; row += 1) {
         for (let column = 0; column < columns; column += 1) {
           // The deliberate gaps keep the pattern airy and non-repetitive.
@@ -71,13 +76,14 @@ export const SignalField = ({
     next.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
     next.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
     return next;
-  }, []);
+  }, [lowPower]);
 
   useFrame((state, delta) => {
     const field = fieldRef.current;
     if (!field) return;
 
-    if (phase === 'loop' && !drag.current.dragging) {
+    const interactive = phase === 'loop' || phase === 'ecosystem' || phase === 'model';
+    if (!reducedMotion && interactive && !drag.current.dragging) {
       drag.current.rotationY += drag.current.velocityY * delta * 60;
       drag.current.rotationX = THREE.MathUtils.clamp(
         drag.current.rotationX + drag.current.velocityX * delta * 60,
@@ -88,13 +94,13 @@ export const SignalField = ({
       drag.current.velocityY *= Math.pow(0.935, delta * 60);
     }
 
-    const loopRotationY = phase === 'loop' ? drag.current.rotationY * 0.34 : 0;
-    const loopRotationX = phase === 'loop' ? drag.current.rotationX * 0.22 : 0;
-    const targetY = state.clock.elapsedTime * 0.0018 + loopRotationY;
-    const targetX = Math.sin(state.clock.elapsedTime * 0.045) * 0.012 + loopRotationX;
+    const sceneRotationY = reducedMotion ? 0 : drag.current.rotationY * 0.3;
+    const sceneRotationX = reducedMotion ? 0 : drag.current.rotationX * 0.2;
+    const targetY = reducedMotion ? 0 : state.clock.elapsedTime * 0.0015 + sceneRotationY;
+    const targetX = reducedMotion ? 0 : Math.sin(state.clock.elapsedTime * 0.045) * 0.01 + sceneRotationX;
     field.rotation.y = THREE.MathUtils.damp(field.rotation.y, targetY, 6, delta);
     field.rotation.x = THREE.MathUtils.damp(field.rotation.x, targetX, 6, delta);
-    field.position.y = Math.sin(state.clock.elapsedTime * 0.12) * 0.035;
+    field.position.y = reducedMotion ? 0 : Math.sin(state.clock.elapsedTime * 0.12) * 0.03;
   });
 
   return (

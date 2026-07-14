@@ -11,9 +11,18 @@ interface CoreSceneProps {
   awakeningBeat: AwakeningBeat;
   capabilityIndex: number;
   drag: MutableRefObject<SceneDragState>;
+  reducedMotion: boolean;
+  lowPower: boolean;
 }
 
-export const CoreScene = ({ phase, awakeningBeat, capabilityIndex, drag }: CoreSceneProps) => {
+export const CoreScene = ({
+  phase,
+  awakeningBeat,
+  capabilityIndex,
+  drag,
+  reducedMotion,
+  lowPower,
+}: CoreSceneProps) => {
   const rigRef = useRef<THREE.Group>(null);
   const { viewport } = useThree();
 
@@ -27,10 +36,15 @@ export const CoreScene = ({ phase, awakeningBeat, capabilityIndex, drag }: CoreS
     if (!compact && phase === 'model') targetX = -2.45;
     if (compact && phase === 'ecosystem') targetY = 0.65;
     if (compact && phase === 'model') targetY = 1.65;
-    rig.position.x = THREE.MathUtils.damp(rig.position.x, targetX, 3.2, delta);
-    rig.position.y = THREE.MathUtils.damp(rig.position.y, targetY, 3.2, delta);
-    const dragRotation = phase === 'loop' ? drag.current.rotationY * 0.09 : 0;
-    rig.rotation.y = THREE.MathUtils.damp(rig.rotation.y, state.pointer.x * 0.06 + dragRotation, 2, delta);
+    const motionPointerX = reducedMotion ? 0 : state.pointer.x;
+    const motionPointerY = reducedMotion ? 0 : state.pointer.y;
+    const response = reducedMotion ? 100 : 3.2;
+    rig.position.x = THREE.MathUtils.damp(rig.position.x, targetX, response, delta);
+    rig.position.y = THREE.MathUtils.damp(rig.position.y, targetY, response, delta);
+    const dragRotationY = reducedMotion ? 0 : drag.current.rotationY * 0.11;
+    const dragRotationX = reducedMotion ? 0 : drag.current.rotationX * 0.08;
+    rig.rotation.y = THREE.MathUtils.damp(rig.rotation.y, motionPointerX * 0.045 + dragRotationY, 2.4, delta);
+    rig.rotation.x = THREE.MathUtils.damp(rig.rotation.x, -motionPointerY * 0.025 + dragRotationX, 2.4, delta);
   });
 
   return (
@@ -38,10 +52,10 @@ export const CoreScene = ({ phase, awakeningBeat, capabilityIndex, drag }: CoreS
       <fog attach="fog" args={['#101319', 9, 30]} />
       <ambientLight intensity={0.34} color="#9fb7d1" />
       <directionalLight position={[3, 4, 6]} intensity={1.1} color="#bfdcff" />
-      <SignalField phase={phase} drag={drag} />
+      <SignalField phase={phase} drag={drag} reducedMotion={reducedMotion} lowPower={lowPower} />
       <group ref={rigRef}>
-        <EnergyCore phase={phase} awakeningBeat={awakeningBeat} />
-        <CapabilityOrbit phase={phase} capabilityIndex={capabilityIndex} />
+        <EnergyCore phase={phase} awakeningBeat={awakeningBeat} reducedMotion={reducedMotion} lowPower={lowPower} />
+        <CapabilityOrbit phase={phase} capabilityIndex={capabilityIndex} reducedMotion={reducedMotion} lowPower={lowPower} />
       </group>
     </>
   );

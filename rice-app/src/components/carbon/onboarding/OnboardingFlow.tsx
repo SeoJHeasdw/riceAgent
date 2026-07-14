@@ -14,6 +14,7 @@ import {
 } from './cinematic/CinematicUI';
 import { getCinematicCopy } from './sequences/cinematicCopy';
 import { useCinematicSequence } from './sequences/useCinematicSequence';
+import { useCinematicPreferences } from './useCinematicPreferences';
 
 export interface OnboardingFlowProps {
   currentModel: string;
@@ -39,6 +40,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
   const { language } = useI18n();
   const { t } = useTranslation('onboarding');
   const copy = useMemo(() => getCinematicCopy(language), [language]);
+  const { reducedMotion, lowPower } = useCinematicPreferences();
   const [draft, setDraft] = useState<ModelDraft>({
     modelId: currentModel,
     settings,
@@ -50,21 +52,24 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
     onComplete({ modelId: draft.modelId, settings: draft.settings, mode: draft.mode });
   }, [draft, onComplete]);
 
-  const sequence = useCinematicSequence(complete);
+  const sequence = useCinematicSequence(complete, reducedMotion);
 
   return (
     <div
-      className={`cinematic-onboarding cinematic-onboarding--${sequence.phase}`}
+      className={`cinematic-onboarding cinematic-onboarding--${sequence.phase}${reducedMotion ? ' is-reduced-motion' : ''}${lowPower ? ' is-low-power' : ''}`}
       role="dialog"
       aria-modal="true"
       aria-label={t('ui.dialogAriaLabel')}
     >
       <div className="cinematic-nebula" aria-hidden="true" />
       <div className="cinematic-grid" aria-hidden="true" />
+      <div key={sequence.phase} className="cinematic-phase-transition" aria-hidden="true" />
       <CinematicCanvas
         phase={sequence.phase}
         awakeningBeat={sequence.awakeningBeat}
         capabilityIndex={sequence.capabilityIndex}
+        reducedMotion={reducedMotion}
+        lowPower={lowPower}
       />
 
       <CinematicHeader phase={sequence.phase} copy={copy} onSkip={sequence.enterModel} />
@@ -82,6 +87,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
           onSelect={sequence.selectCapability}
           onAdvance={sequence.advanceCapability}
           onContinue={sequence.enterModel}
+          reducedMotion={reducedMotion}
         />
       )}
       {sequence.phase === 'model' && (
@@ -103,4 +109,3 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
     </div>
   );
 };
-
