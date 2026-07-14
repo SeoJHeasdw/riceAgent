@@ -33,6 +33,25 @@ from ...core.types import Message
 _CHARS_PER_TOKEN = 4  # _clip의 char 상한 환산용(추정과 무관)
 
 
+def filter_learning_history(history: Sequence[Message]) -> list[Message]:
+    """학습 판단의 근거가 될 실제 대화만 남긴다.
+
+    AgentLoop는 계획 종결·빈 응답·서사 교정을 위해 모델에게 synthetic
+    user 메시지를 넣는다. 이 메시지는 런타임 감사와 다음 라운드 역할
+    인접을 위해 세션에 보존될 수 있지만, 사용자가 밝힌 선호·교정·사실은
+    아니다. 마찬가지로 ephemeral 렌더 메시지도 영속 학습 근거가 아니다.
+
+    이 필터는 리뷰 프롬프트뿐 아니라 리뷰 게이트와 usage/friction
+    텔레메트리에서도 공유해, 내부 제어문이 학습 신호로 변질되는
+    경로를 한 곳에서 차단한다.
+    """
+    return [
+        message
+        for message in history
+        if not message.metadata.get("synthetic") and not message.metadata.get("ephemeral")
+    ]
+
+
 def _estimate_tokens(text: str) -> int:
     from ...core.tokens import estimate_tokens  # noqa: PLC0415
 
@@ -75,8 +94,9 @@ class LearningContextManager:
 
     def render(self, history: Sequence[Message]) -> list[Message]:
         cfg = self._config
-        recent = list(history[-cfg.recent_messages :]) if cfg.recent_messages > 0 else list(history)
-        older = list(history[: len(history) - len(recent)])
+        reviewable = filter_learning_history(history)
+        recent = reviewable[-cfg.recent_messages :] if cfg.recent_messages > 0 else reviewable
+        older = reviewable[: len(reviewable) - len(recent)]
 
         blocks: list[tuple[str, str]] = []  # (role, text) — 병합 전
         if older:

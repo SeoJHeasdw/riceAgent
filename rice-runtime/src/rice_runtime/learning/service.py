@@ -69,7 +69,7 @@ from .ledger import LearningLedger
 from .memory.search import MemorySearch
 from .memory.store import MemoryStore
 from .proposals import make_create_proposal, make_patch_proposal, proposal_to_payload
-from .review.context import LearningContextManager, ReviewContextConfig
+from .review.context import LearningContextManager, ReviewContextConfig, filter_learning_history
 from .review.engine import ReviewEngine
 from .review.gate import ReviewGate
 from .signals import has_correction_signal, has_failure_signal
@@ -98,7 +98,7 @@ def _turn_tool_names(history: tuple[Message, ...]) -> list[str]:
     """이 턴에서 호출된 도구 이름들 — 마지막 user 메시지 이후의 assistant
     tool_calls 를 수집한다 (observed 도구 ledger 의 원천)."""
     names: list[str] = []
-    for m in reversed(history):
+    for m in reversed(filter_learning_history(history)):
         if m.role == "user":
             break
         for tc in m.tool_calls or ():
@@ -751,9 +751,10 @@ class LearningService(ILearningService):
 
         # ① 텔레메트리 — 노출(injected)과 관여(use)를 분리 집계한다.
         viewed = self._viewed_skills.pop(outcome.session_id, set())
-        turn_tools = set(_turn_tool_names(outcome.history)) if not outcome.aborted else set()
+        learning_history = filter_learning_history(outcome.history)
+        turn_tools = set(_turn_tool_names(tuple(learning_history))) if not outcome.aborted else set()
         user_text = next(
-            (m.content for m in reversed(outcome.history) if m.role == "user"), ""
+            (m.content for m in reversed(learning_history) if m.role == "user"), ""
         ) or ""
         user_tokens = lexical.tokens(user_text)
         friction_turn = not outcome.aborted and (
@@ -1388,6 +1389,7 @@ class LearningService(ILearningService):
     # ── post-turn, LLM-backed (Phase A.3; 서버 소유 잡으로 재구성) ─
     @staticmethod
     def _gate_inputs(history: list[Message]) -> tuple[str, str | None]:
+        history = filter_learning_history(history)
         final_message = next(
             (m.content for m in reversed(history) if m.role == "assistant" and m.content), ""
         )

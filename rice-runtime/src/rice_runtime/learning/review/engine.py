@@ -41,7 +41,7 @@ from ..proposals import make_create_proposal, make_patch_proposal
 from ..skill import guard as skill_guard
 from ..skill.store import SkillStore
 from ..skill.usage import UsageStore
-from .context import LearningContextManager
+from .context import LearningContextManager, filter_learning_history
 
 log = logging.getLogger("rice.learning.review")
 
@@ -172,16 +172,19 @@ class ReviewEngine:
             # 구조화된 제안을 만들 수 없다(에코는 입력을 그대로 반사할 뿐).
             return []
 
-        # 외부 콘텐츠(도구 결과) 근거를 *원본* history에서 계산한다 — 렌더된
-        # 히스토리는 순수 텍스트라 tool_source 메타데이터가 사라진다.
-        external, evidence_ids = _external_evidence(history)
+        # 런타임이 모델에게만 주입한 계획 정리/서사 넛지는 사용자 발화가
+        # 아니다. 리뷰 컨텍스트 렌더러가 없는 단위 조합에서도 안전하게 먼저
+        # 제거한다. 외부 콘텐츠(도구 결과) 근거는 메타데이터가 남은 이
+        # 필터된 원본에서 계산한다.
+        review_history = filter_learning_history(history)
+        external, evidence_ids = _external_evidence(review_history)
 
         full_body_skills, compact_skills, patchable_ids = self._build_catalog()
         known_facts = self._recent_fact_strings()
         kwargs = {} if instruction is None else {"instruction": instruction}
         # 리뷰 전용 렌더: 긴 세션에서도 호출이 bounded가 되고, 도구
         # 라운드는 순수 텍스트라 wire 규칙 위반이 구조적으로 불가능해진다.
-        rendered_history = self._context.render(history) if self._context is not None else history
+        rendered_history = self._context.render(review_history) if self._context is not None else review_history
         _, messages = build_review_messages(
             rendered_history,
             full_body_skills=full_body_skills,

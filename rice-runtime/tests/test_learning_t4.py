@@ -36,6 +36,7 @@ from rice_runtime.core.paths import RicePaths
 from rice_runtime.core.storage.sqlite import Database
 from rice_runtime.core.types import ApprovalResponse, EventType, Message, ToolCall, ToolSpec, TurnOutcome
 from rice_runtime.learning.interfaces import MemoryWritten, PatchProposal
+from rice_runtime.learning.review.context import LearningContextManager, ReviewContextConfig
 from rice_runtime.learning.review.engine import ReviewEngine
 from rice_runtime.learning.review.gate import ReviewGate
 from rice_runtime.learning.service import LearningService
@@ -74,6 +75,7 @@ class _FakeProvider:
 
     def __init__(self, tool_calls: Sequence[ToolCall] = ()) -> None:
         self._tool_calls = list(tool_calls)
+        self.seen_messages: list[Message] = []
 
     def capabilities(self) -> ProviderCapabilities:
         return ProviderCapabilities()
@@ -81,6 +83,7 @@ class _FakeProvider:
     async def stream(
         self, *, system: str, messages, tools: Sequence[ToolSpec] = (), temperature: float = 0.7
     ) -> AsyncIterator[ProviderChunk]:
+        self.seen_messages = list(messages)
         for call in self._tool_calls:
             yield ProviderChunk(kind="tool_call", tool_call=call)
         yield ProviderChunk(kind="done", stop_reason="tool_use" if self._tool_calls else "end_turn")
@@ -160,6 +163,51 @@ class TestReviewGate:
         gate.should_review("session-a", tool_calls_made=0, final_message="ok")  # a: turn 1
         assert gate.should_review("session-b", tool_calls_made=0, final_message="ok") is False  # b: turn 1
         assert gate.should_review("session-a", tool_calls_made=0, final_message="ok") is True  # a: turn 2
+
+
+# ── synthetic 런타임 메시지 학습 격리 테스트 ───────────────────────
+
+class TestLearningEvidenceFiltering:
+    def test_review_context_excludes_synthetic_and_ephemeral_messages(self):
+        context = LearningContextManager(ReviewContextConfig(recent_messages=1))
+        rendered = context.render(
+            [
+                Message(role="user", content="실제 사용자 요청"),
+                Message(
+                    role="user",
+                    content="STOP — do not write the final answer again",
+                    metadata={"synthetic": "plan_reconcile"},
+                ),
+                Message(
+                    role="user",
+                    content="internal plan snapshot",
+                    metadata={"ephemeral": True},
+                ),
+                Message(role="assistant", content="완료했습니다"),
+            ]
+        )
+
+        transcript = "\n".join(message.content for message in rendered)
+        assert "실제 사용자 요청" in transcript
+        assert "완료했습니다" in transcript
+        assert "STOP" not in transcript
+        assert "internal plan snapshot" not in transcript
+
+    def test_review_gate_inputs_ignore_synthetic_last_user_message(self):
+        final_message, user_text = LearningService._gate_inputs(
+            [
+                Message(role="user", content="PPT로 만들어줘"),
+                Message(role="assistant", content="PPT를 만들었습니다"),
+                Message(
+                    role="user",
+                    content="STOP — do not repeat or summarize it again",
+                    metadata={"synthetic": "plan_reconcile"},
+                ),
+            ]
+        )
+
+        assert final_message == "PPT를 만들었습니다"
+        assert user_text == "PPT로 만들어줘"
 
 
 # ── apply_patch(from_version=0) 신규 생성 테스트 (Phase A.1) ─────────────────
@@ -245,6 +293,34 @@ class TestReviewEngine:
         engine = self._engine(_FakeProvider([]))
         effects = await engine.review("s1", [Message(role="user", content="hi")])
         assert effects == []
+
+    @pytest.mark.asyncio
+    async def test_review_engine_never_sends_synthetic_messages_to_provider(self):
+        """실배선의 context manager 유무와 무관하게 엔진 경계에서도 차단한다.
+
+        2026-07-14 회귀: plan_reconcile 넓지가 실제 user 교정으로 리뷰 모델에
+        노출돼 영어 preference 메모리와 스킬 patch를 동시에 만들었다.
+        """
+        provider = _FakeProvider([])
+        engine = self._engine(provider)  # context=None인 최소 조합도 안전해야 한다.
+        effects = await engine.review(
+            "s1",
+            [
+                Message(role="user", content="이쁘게 PPT로도 줄래?"),
+                Message(role="assistant", content="PPT 파일을 만들었습니다."),
+                Message(
+                    role="user",
+                    content="STOP — do not repeat or summarize it again",
+                    metadata={"synthetic": "plan_reconcile"},
+                ),
+            ],
+        )
+
+        assert effects == []
+        transcript = "\n".join(message.content for message in provider.seen_messages)
+        assert "이쁘게 PPT로도 줄래?" in transcript
+        assert "STOP" not in transcript
+        assert "do not repeat" not in transcript
 
     @pytest.mark.asyncio
     async def test_propose_skill_create_maps_to_patch_proposal_from_v0(self):
