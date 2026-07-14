@@ -941,61 +941,66 @@ const BuiltinToolCard: React.FC<{ m: Extract<ThreadMessage, { kind: 'toolcall' }
           {m.rationale}
         </p>
       )}
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-2 w-full text-left text-caption-01 text-text-secondary hover:text-text-primary transition-colors"
-      >
-        <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dot}`} />
-        <span className="font-semibold text-text-secondary">{toolLabel}</span>
-        {path && <span className="font-mono text-text-helper truncate">{path}</span>}
-        <span className="text-text-helper">
-          {m.status === 'running' ? t('message.toolRunning') : m.status === 'error' ? t('message.toolError') : t('message.toolDone')}
-        </span>
-        <Icon name={open ? 'chevron-up' : 'chevron-down'} size={14} className="ml-auto flex-shrink-0" />
-      </button>
-      {open && (
-        <div className="mt-2 ml-3.5 border-l border-border-subtle-01 pl-3 flex flex-col gap-2.5">
-          {rows.length > 0 && (
-            <div className="grid grid-cols-[72px_minmax(0,1fr)] gap-x-3 gap-y-1">
-              {rows.map((row) => (
-                <React.Fragment key={row.label}>
-                  <span className="text-caption-01 text-text-helper">{row.label}</span>
-                  <span
-                    className={`text-caption-01 text-text-secondary min-w-0 break-words ${
-                      row.mono ? 'font-mono' : ''
-                    }`}
-                  >
-                    {row.value}
-                  </span>
-                </React.Fragment>
-              ))}
-            </div>
-          )}
-          {m.error != null && <span className="text-caption-01 font-mono text-support-error break-all">{m.error}</span>}
-          {path && (
+      {/* Header/result details shrink to their content. Previously the block took
+          the full 680px cap and ml-auto pushed the chevron unnaturally far away
+          even for a short "tool · file · done" line. */}
+      <div className="w-fit min-w-[260px] max-w-full">
+        <button
+          onClick={() => setOpen((o) => !o)}
+          className="flex w-full min-w-0 items-center gap-2 text-left text-caption-01 text-text-secondary transition-colors hover:text-text-primary"
+        >
+          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dot}`} />
+          <span className="font-semibold text-text-secondary flex-shrink-0">{toolLabel}</span>
+          {path && <span className="min-w-0 truncate font-mono text-text-helper">{path}</span>}
+          <span className="text-text-helper flex-shrink-0">
+            {m.status === 'running' ? t('message.toolRunning') : m.status === 'error' ? t('message.toolError') : t('message.toolDone')}
+          </span>
+          <Icon name={open ? 'chevron-up' : 'chevron-down'} size={14} className="ml-auto flex-shrink-0" />
+        </button>
+        {open && (
+          <div className="mt-2 ml-3.5 border-l border-border-subtle-01 pl-3 flex flex-col gap-2.5">
+            {rows.length > 0 && (
+              <div className="grid grid-cols-[72px_minmax(0,1fr)] gap-x-3 gap-y-1">
+                {rows.map((row) => (
+                  <React.Fragment key={row.label}>
+                    <span className="text-caption-01 text-text-helper">{row.label}</span>
+                    <span
+                      className={`text-caption-01 text-text-secondary min-w-0 break-words ${
+                        row.mono ? 'font-mono' : ''
+                      }`}
+                    >
+                      {row.value}
+                    </span>
+                  </React.Fragment>
+                ))}
+              </div>
+            )}
+            {m.error != null && <span className="text-caption-01 font-mono text-support-error break-all">{m.error}</span>}
+            {path && (
+              <button
+                onClick={() => openFile(path)}
+                className="self-start inline-flex items-center gap-1.5 text-caption-01 text-link-primary hover:underline"
+              >
+                <Icon name="document" size={13} />
+                {t('message.toolOpenFile', { path })}
+              </button>
+            )}
             <button
-              onClick={() => openFile(path)}
-              className="self-start inline-flex items-center gap-1.5 text-caption-01 text-link-primary hover:underline"
+              type="button"
+              onClick={() => setRawOpen((o) => !o)}
+              className="self-start inline-flex items-center gap-1 text-caption-01 text-text-helper hover:text-text-secondary transition-colors"
             >
-              <Icon name="document" size={13} />
-              {t('message.toolOpenFile', { path })}
+              <Icon name={rawOpen ? 'chevron-up' : 'chevron-down'} size={12} />
+              {t('message.toolRawDetails')} {rawOpen ? t('message.toolRawCollapse') : t('message.toolRawExpand')}
             </button>
-          )}
-          <button
-            type="button"
-            onClick={() => setRawOpen((o) => !o)}
-            className="self-start inline-flex items-center gap-1 text-caption-01 text-text-helper hover:text-text-secondary transition-colors"
-          >
-            <Icon name={rawOpen ? 'chevron-up' : 'chevron-down'} size={12} />
-            {t('message.toolRawDetails')} {rawOpen ? t('message.toolRawCollapse') : t('message.toolRawExpand')}
-          </button>
-          {rawOpen && (
-            <pre className="max-h-[260px] overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-border-subtle-01 bg-background px-3 py-2 text-label-micro leading-[18px] text-text-helper font-mono m-0">
-              {rawDetails}
-            </pre>
-          )}
-        </div>
-      )}
+            {rawOpen && (
+              <pre className="max-h-[260px] overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-border-subtle-01 bg-background px-3 py-2 text-label-micro leading-[18px] text-text-helper font-mono m-0">
+                {rawDetails}
+              </pre>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 };
