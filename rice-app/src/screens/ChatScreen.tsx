@@ -8,13 +8,13 @@ import { LearningPanel } from '../components/carbon/LearningPanel';
 import { ChatTurn } from '../components/carbon/ChatMessage';
 import { useResizable } from '../hooks/useResizable';
 import { useLearning } from '../lib/learning/LearningContext';
-import type { Skill, ThreadMessage, UserSignal } from '../lib/learningData';
+import type { ThreadMessage } from '../lib/learningData';
 import { defaultModelSettings } from '../lib/mockData';
 import { RUN_SKILL_EVENT, NEW_CHAT_EVENT, openCommandPalette } from '../lib/commandBridge';
 import { api } from '../lib/api';
 import { sseClient } from '../lib/sse';
 import type { ApprovalMode, PatchTrigger, PendingApproval, PlanUpdatedEventData, ToolApprovalRequiredData, SkillPatchProposedData, MemoryWrittenEventData, SSEEvent } from '../lib/types';
-import { Icon, Kbd, ResizeHandle, ConfirmDialog, Tooltip } from '../components/ui';
+import { Icon, Kbd, ResizeHandle, ConfirmDialog, Tooltip, Toggle } from '../components/ui';
 import type { IconName } from '../components/ui/Icon';
 import { FileViewerProvider } from '../lib/fileViewer/FileViewerProvider';
 import { useToast } from '../lib/toast/ToastContext';
@@ -460,16 +460,11 @@ const SkillsPopover: React.FC<{
             <div className="text-caption-01 font-medium text-text-primary">{t('skills.webSearch')}</div>
             <div className="truncate text-label-micro text-text-helper">{t('skills.webSearchHint')}</div>
           </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={webSearchEnabled}
+          <Toggle
+            checked={webSearchEnabled}
+            onChange={onWebSearchChange}
             aria-label={t('skills.webSearch')}
-            onClick={() => onWebSearchChange(!webSearchEnabled)}
-            className={`relative h-[18px] w-8 flex-shrink-0 rounded-full transition-colors ${webSearchEnabled ? 'bg-interactive' : 'bg-layer-03 ring-1 ring-inset ring-border-strong-01'}`}
-          >
-            <span className={`absolute top-0.5 h-3.5 w-3.5 rounded-full bg-white shadow-elevation-1 transition-[left] ${webSearchEnabled ? 'left-4' : 'left-0.5'}`} />
-          </button>
+          />
         </div>
         {empty && (
           <div className="flex flex-col items-center gap-1.5 px-3 py-6 text-center">
@@ -701,111 +696,205 @@ const ApprovalModePicker: React.FC<{
   );
 };
 
-/* ── 빈 채팅 스타터 화면 — 백지 대신 바로 눌러 보낼 수 있는 예시 카드 ──
- * 일반 프롬프트 3개 + (스킬을 등록해 뒀다면) 가장 많이 쓴 스킬 실행 카드 1개를
- * 섞어 보여준다. 클릭 즉시 전송되어 데모/온보딩 첫 인상에서 제품 정체성
- * (스킬로 반복 작업을 학습·자동화)을 바로 보여준다.
+/* ── 빈 채팅 스타터 화면 ──
+ * 새 대화에서는 사용자가 "무엇부터 봐야 하지?"라고 느끼지 않도록 질문 하나와
+ * 예시 두 개만 보여준다. 학습 기록·스킬·사용 횟수는 오른쪽 Learning panel과
+ * composer의 + 메뉴가 담당한다. 예시 클릭도 즉시 실행하지 않고 입력 초안만
+ * 채워, 사용자가 내용을 확인한 뒤 직접 전송할 수 있게 한다.
  */
 const ChatStarter: React.FC<{
-  skills: Skill[];
-  signals: UserSignal[];
   onPick: (text: string) => void;
-}> = ({ skills, signals, onPick }) => {
+}> = ({ onPick }) => {
   const { t } = useTranslation('chat');
+  const [companionPopping, setCompanionPopping] = useState(false);
 
-  const GENERIC_STARTERS: { icon: IconName; title: string; prompt: string }[] = [
-    { icon: 'flow',     title: t('starter.todoPriority'),  prompt: t('starter.todoPriorityPrompt') },
-    { icon: 'idea',     title: t('starter.brainstorm'),    prompt: t('starter.brainstormPrompt') },
-    { icon: 'document', title: t('starter.editText'),      prompt: t('starter.editTextPrompt') },
-  ];
+  type StarterSuggestion = {
+    icon: IconName;
+    title: string;
+    prompt: string;
+    accent: string;
+    accentBg: string;
+  };
 
-  const usableSkills = [...skills]
-    .filter((s) => s.enabled && s.command)
-    .sort((a, b) => b.uses - a.uses);
-  const topSkill = usableSkills[0];
-  // 프롬프트 카드에 들어간 1위를 빼고, 나머지를 낮은 밀도의 chip으로
-  const skillChips = usableSkills.slice(1, 5);
-  // "RICE가 기억하는 것" — 신뢰도 높은 신호 위주로 3개까지만
-  const rememberedSignals = [...signals].sort((a, b) => b.conf - a.conf).slice(0, 3);
+  const suggestions: Record<'morning' | 'lunch' | 'afternoon' | 'dinner' | 'afterWork' | 'lateNight' | 'ppt', StarterSuggestion> = {
+    morning: {
+      icon: 'calendar',
+      title: t('starter.morning'),
+      prompt: t('starter.morningPrompt'),
+      accent: 'text-blue-50',
+      accentBg: 'bg-blue-60/10',
+    },
+    lunch: {
+      icon: 'sparkle',
+      title: t('starter.lunch'),
+      prompt: t('starter.lunchPrompt'),
+      accent: 'text-orange-30',
+      accentBg: 'bg-orange-40/10',
+    },
+    afternoon: {
+      icon: 'idea',
+      title: t('starter.afternoon'),
+      prompt: t('starter.afternoonPrompt'),
+      accent: 'text-purple-50',
+      accentBg: 'bg-purple-60/10',
+    },
+    dinner: {
+      icon: 'sparkle',
+      title: t('starter.dinner'),
+      prompt: t('starter.dinnerPrompt'),
+      accent: 'text-orange-30',
+      accentBg: 'bg-orange-40/10',
+    },
+    afterWork: {
+      icon: 'growth',
+      title: t('starter.afterWork'),
+      prompt: t('starter.afterWorkPrompt'),
+      accent: 'text-teal-40',
+      accentBg: 'bg-teal-60/10',
+    },
+    lateNight: {
+      icon: 'idea',
+      title: t('starter.lateNight'),
+      prompt: t('starter.lateNightPrompt'),
+      accent: 'text-purple-40',
+      accentBg: 'bg-purple-60/10',
+    },
+    ppt: {
+      icon: 'document',
+      title: t('starter.ppt'),
+      prompt: t('starter.pptPrompt'),
+      accent: 'text-blue-50',
+      accentBg: 'bg-blue-60/10',
+    },
+  };
 
-  const cards = [
-    ...GENERIC_STARTERS,
-    ...(topSkill
-      ? [{ icon: 'skill' as IconName, title: t('starter.runSkill', { name: topSkill.name }), prompt: `/${topSkill.command}` }]
-      : []),
-  ];
+  const hour = new Date().getHours();
+  const STARTERS: StarterSuggestion[] =
+    hour < 5
+      ? [suggestions.lateNight, suggestions.ppt]
+      : hour < 11
+        ? [suggestions.morning, suggestions.ppt]
+        : hour < 14
+          ? [suggestions.lunch, suggestions.ppt]
+          : hour < 17
+            ? [suggestions.afternoon, suggestions.ppt]
+            : hour < 20
+              ? [suggestions.dinner, suggestions.afterWork]
+              : hour < 23
+                ? [suggestions.afterWork, suggestions.ppt]
+                : [suggestions.lateNight, suggestions.ppt];
+
+  const popCompanion = () => {
+    setCompanionPopping(false);
+    requestAnimationFrame(() => setCompanionPopping(true));
+  };
 
   return (
-    <div className="max-w-xl mx-auto pt-16 text-center">
-      <div
-        className="w-10 h-10 mx-auto mb-4 flex items-center justify-center rounded-xl"
-        style={{ background: 'var(--gradient-skill)' }}
+    <div className="mx-auto w-full max-w-[640px] pb-6 text-center">
+      <button
+        type="button"
+        onClick={popCompanion}
+        onAnimationEnd={() => setCompanionPopping(false)}
+        className={`starter-companion mx-auto mb-4 block h-14 w-16 outline-none ${companionPopping ? 'is-popping' : ''}`}
+        aria-label={t('starter.companionLabel')}
+        title={t('starter.companionLabel')}
       >
-        <Icon name="model" size={20} className="text-white" />
-      </div>
-      <div className="text-heading-04 font-light text-text-primary mb-2">{t('starter.greeting')}</div>
-      <div className="text-body-short-02 text-text-helper mb-7">
-        {t('starter.subtitle')}
-      </div>
+        <svg viewBox="0 0 64 56" className="h-full w-full overflow-visible" aria-hidden="true">
+          <defs>
+            <linearGradient id="starter-companion-gradient" x1="10" y1="8" x2="52" y2="46" gradientUnits="userSpaceOnUse">
+              <stop stopColor="#78a9ff" />
+              <stop offset="0.55" stopColor="#a56eff" />
+              <stop offset="1" stopColor="#3ddbd9" />
+            </linearGradient>
+          </defs>
+          <g className="starter-companion__burst" fill="url(#starter-companion-gradient)">
+            <circle cx="7" cy="27" r="2" />
+            <circle cx="14" cy="8" r="1.7" />
+            <circle cx="52" cy="11" r="1.8" />
+            <circle cx="58" cy="32" r="1.6" />
+            <circle cx="48" cy="49" r="1.5" />
+            <circle cx="15" cy="47" r="1.4" />
+          </g>
+          <g className="starter-companion__puff">
+            <path
+              d="M17.5 43.5c-6 0-10.8-4.5-10.8-10.1 0-4.9 3.6-9 8.5-9.9C17 16.2 23.4 11 31 11c8.2 0 14.9 6 15.6 13.8 5.2.7 9.2 5 9.2 10.1 0 5.8-5 10.5-11.2 10.5H17.5Z"
+              fill="url(#starter-companion-gradient)"
+              fillOpacity="0.11"
+              stroke="url(#starter-companion-gradient)"
+              strokeWidth="2.2"
+              strokeLinejoin="round"
+            />
+            <circle cx="26" cy="31" r="1.5" fill="currentColor" />
+            <circle cx="37.5" cy="31" r="1.5" fill="currentColor" />
+            <path d="M27.5 36c2.6 2 5.8 2 8.4 0" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+          </g>
+        </svg>
+      </button>
+      <h1 className="mb-8 text-heading-04 font-light text-text-primary">{t('starter.greeting')}</h1>
 
-      <div className="grid grid-cols-2 gap-2.5 text-left">
-        {cards.map((c, i) => (
+      <div className="grid grid-cols-1 gap-3 text-left sm:grid-cols-2">
+        {STARTERS.map((starter, index) => (
           <button
-            key={c.title}
-            onClick={() => onPick(c.prompt)}
-            className="group flex items-start gap-3 p-3.5 rounded-xl border border-border-subtle-01 bg-layer-01 hover:border-border-strong-01 transition-colors duration-150"
-            style={{ animation: `starterCardIn 220ms cubic-bezier(0.16, 1, 0.3, 1) both`, animationDelay: `${i * 30}ms` }}
+            key={starter.title}
+            type="button"
+            onClick={() => onPick(starter.prompt)}
+            aria-label={`${starter.title}: ${starter.prompt}`}
+            className="group flex h-[92px] flex-col items-start justify-between rounded-xl border border-border-subtle-01 bg-layer-01/35 p-4 transition-colors duration-150 hover:border-border-strong-01 hover:bg-layer-hover-01"
+            style={{ animation: 'starterCardIn 220ms cubic-bezier(0.16, 1, 0.3, 1) both', animationDelay: `${index * 35}ms` }}
           >
-            <span className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-icon-secondary bg-layer-02 border border-border-subtle-02 group-hover:text-icon-primary transition-colors">
-              <Icon name={c.icon} size={16} />
+            <span className={`flex h-7 w-7 items-center justify-center rounded-lg ${starter.accentBg} ${starter.accent}`}>
+              <Icon name={starter.icon} size={15} />
             </span>
-            <div className="min-w-0">
-              <div className="text-body-short-01 font-medium text-text-primary truncate">{c.title}</div>
-              <div className="text-caption-01 text-text-helper truncate">{c.prompt}</div>
-            </div>
+            <span className="text-body-short-01 font-medium text-text-primary">{starter.title}</span>
           </button>
         ))}
       </div>
 
-      {/* 최근 스킬 chip — 클릭 즉시 실행. 낮은 밀도, 색 없는 표면 */}
-      {skillChips.length > 0 && (
-        <div className="flex flex-wrap items-center justify-center gap-1.5 mt-5">
-          {skillChips.map((s) => (
-            <button
-              key={s.id}
-              onClick={() => onPick(`/${s.command}`)}
-              className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full border border-border-subtle-01 bg-transparent text-caption-01 font-mono text-text-secondary hover:text-text-primary hover:border-border-strong-01 transition-colors"
-            >
-              /{s.command}
-              <span className="text-text-helper font-sans">{t('starter.usageCount', { count: s.uses })}</span>
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* RICE가 기억하는 것 — 학습된(AI) 순간에만 쓰는 좌측 그라디언트 문법 */}
-      {rememberedSignals.length > 0 && (
-        <div className="mt-6 text-left border border-dashed border-border-subtle-01 rounded-xl px-4 py-3 bg-interactive/[0.04]">
-          <div className="flex items-center gap-2 mb-2">
-            <span className="text-caption-01 font-semibold uppercase tracking-wider text-text-secondary">
-              {t('starter.rememberedTitle')}
-            </span>
-            <span className="ai-label">
-              <span className="ai-label__text">AI</span>
-            </span>
-          </div>
-          <div className="flex flex-col gap-1.5">
-            {rememberedSignals.map((u) => (
-              <div key={u.id} className="border-l border-border-subtle-02 pl-2.5">
-                <span className="text-caption-01 text-text-helper">{u.label} · </span>
-                <span className="text-caption-02 text-text-secondary">{u.value}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       <style>{`
+        .starter-companion {
+          color: var(--cds-text-secondary);
+          -webkit-tap-highlight-color: transparent;
+        }
+        .starter-companion__puff {
+          transform-box: fill-box;
+          transform-origin: center;
+          transition: transform 240ms cubic-bezier(0.16, 1, 0.3, 1), filter 240ms ease;
+        }
+        .starter-companion__burst {
+          opacity: 0;
+          transform-box: fill-box;
+          transform-origin: center;
+          transform: scale(0.72) rotate(-8deg);
+          transition: opacity 180ms ease, transform 240ms cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .starter-companion:hover .starter-companion__puff,
+        .starter-companion:focus-visible .starter-companion__puff {
+          transform: scale(1.07) rotate(2deg);
+          filter: drop-shadow(0 4px 9px rgba(120, 169, 255, 0.16));
+        }
+        .starter-companion:hover .starter-companion__burst,
+        .starter-companion:focus-visible .starter-companion__burst {
+          opacity: 0.55;
+          transform: scale(0.9) rotate(0deg);
+        }
+        .starter-companion.is-popping .starter-companion__puff {
+          animation: starterCompanionPop 520ms cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .starter-companion.is-popping .starter-companion__burst {
+          animation: starterCompanionBurst 520ms cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        @keyframes starterCompanionPop {
+          0% { transform: scale(1) rotate(0deg); }
+          22% { transform: scale(0.82) rotate(-5deg); }
+          58% { transform: scale(1.18) rotate(5deg); }
+          78% { transform: scale(0.97) rotate(-1deg); }
+          100% { transform: scale(1) rotate(0deg); }
+        }
+        @keyframes starterCompanionBurst {
+          0%, 18% { opacity: 0; transform: scale(0.6) rotate(-12deg); }
+          55% { opacity: 0.9; transform: scale(1.16) rotate(8deg); }
+          100% { opacity: 0; transform: scale(1.35) rotate(14deg); }
+        }
         @keyframes starterCardIn {
           from { opacity: 0; transform: translateY(6px); }
           to { opacity: 1; transform: none; }
@@ -828,7 +917,7 @@ const ChatTaskProgress = () => (
 );
 
 function ChatScreen() {
-  const { skills, signals, jumpToSkill, setSkills, setDetails, panelScrollRef, refreshSuggestions } = useLearning();
+  const { jumpToSkill, setSkills, setDetails, panelScrollRef, refreshSuggestions } = useLearning();
   const toast = useToast();
   const { t } = useTranslation('chat');
 
@@ -1130,14 +1219,20 @@ function ChatScreen() {
       if (cancelled || !res.success) return;
       const list = ((res.data as RawSession[]) ?? []).map(toSession);
       setSessions(list);
-      if (list.length > 0) {
-        // (Re)connect recovery: open the most recent session, then re-paint any
-        // approval still parked on the server — covers an app reload / runtime
-        // reconnect that happened while a turn was awaiting an answer (§5.1).
-        void openLiveSession(list[0].id).then(() => {
-          if (!cancelled) void recoverPendingApprovals(list[0].id);
+      // On initial load always start at a blank New Chat so the user isn't
+      // dropped into someone else's (or their own previous) conversation.
+      // The only exception is a runtime reconnect that happened while a turn
+      // was actively streaming — in that case runningSessionIdRef still holds
+      // the session id and we restore it together with any parked approvals
+      // (§5.1).
+      const recovering = runningSessionIdRef.current;
+      if (recovering && list.some((s) => s.id === recovering)) {
+        void openLiveSession(recovering).then(() => {
+          if (!cancelled) void recoverPendingApprovals(recovering);
         });
-      } else newChat();
+      } else {
+        newChat();
+      }
     });
 
     return () => {
@@ -2257,9 +2352,14 @@ function ChatScreen() {
           {/* Thread */}
           <div className="relative flex-1 min-h-0">
             <div ref={scrollRef} onScroll={handleThreadScroll} className="h-full overflow-y-auto">
-              <div className="w-full max-w-[920px] mx-auto px-5 py-4">
+              <div className={`mx-auto w-full max-w-[920px] px-5 py-4 ${isEmpty ? 'flex min-h-full items-center' : ''}`}>
                 {isEmpty ? (
-                  <ChatStarter skills={skills} signals={signals} onPick={(text) => send(text)} />
+                  <ChatStarter
+                    onPick={(text) => {
+                      setDraft(text);
+                      requestAnimationFrame(() => composerRef.current?.focus());
+                    }}
+                  />
                 ) : (
                   turns.map((t) => (
                     <ChatTurn
