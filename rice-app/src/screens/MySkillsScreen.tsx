@@ -2462,11 +2462,9 @@ function MySkillsScreen() {
               >
                 <div
                   className={`mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border ${
-                    on && !showImpact
-                      ? 'border-blue-50 bg-blue-60/14 text-blue-30'
-                      : isInjected(skillStatus(s))
-                        ? 'border-blue-50/25 bg-blue-60/10 text-blue-40'
-                        : 'border-border-subtle-02 bg-layer-03 text-text-helper'
+                    isInjected(skillStatus(s))
+                      ? 'border-blue-50/25 bg-blue-60/10 text-blue-40'
+                      : 'border-border-subtle-02 bg-layer-03 text-text-helper'
                   }`}
                 >
                   <Icon name="skill" size={15} />
