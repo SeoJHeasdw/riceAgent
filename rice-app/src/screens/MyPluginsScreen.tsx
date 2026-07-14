@@ -135,7 +135,7 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
                 {t('myPlugins.tagPlugin')}
               </Tag>
               {plugin.builtin && (
-                <Tag type="teal" size="sm">
+                <Tag type="green" size="sm">
                   {t('myPlugins.tagBuiltin')}
                 </Tag>
               )}
@@ -435,15 +435,15 @@ function MyPluginsScreen() {
         style={{ width: railPanel.width }}
       >
         <div className="p-4">
-          <div className="domain-summary domain-summary--plugin rounded-xl p-4 text-white">
-            <div className="text-caption-01 text-white/70 mb-1">{t('myPlugins.summaryTitle')}</div>
-            <div className="text-heading-03 font-semibold text-white leading-none tabular-nums">
+          <div className="domain-summary domain-summary--plugin rounded-xl p-4">
+            <div className="text-caption-01 text-text-helper mb-1">{t('myPlugins.summaryTitle')}</div>
+            <div className="text-heading-03 font-semibold text-text-primary leading-none tabular-nums">
               {myPlugins.length}
               {t('myPlugins.summaryCountUnit') && (
-                <span className="text-body-short-01 font-normal text-white/70 ml-1">{t('myPlugins.summaryCountUnit')}</span>
+                <span className="text-body-short-01 font-normal text-text-helper ml-1">{t('myPlugins.summaryCountUnit')}</span>
               )}
             </div>
-            <div className="text-caption-01 text-white/80 mt-1.5 flex gap-3">
+            <div className="text-caption-01 text-text-secondary mt-1.5 flex gap-3">
               <span>{t('myPlugins.summaryActive', { count: active })}</span>
               {updateCount > 0 && <span>{t('myPlugins.summaryUpdate', { count: updateCount })}</span>}
             </div>

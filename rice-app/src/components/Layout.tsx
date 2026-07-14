@@ -49,17 +49,17 @@ export const Layout: React.FC<LayoutProps> = ({
             className="
               flex items-center justify-center w-6 h-6 rounded-md
               bg-gradient-to-br from-blue-60 to-purple-60
-              text-white font-mono font-bold text-caption-01
+              text-text-on-color font-mono font-bold text-caption-01
               select-none
             "
             aria-hidden="true"
           >
             R
           </div>
-          <span className="text-body-short-01 font-semibold text-white select-none">
+          <span className="text-body-short-01 font-semibold text-shell-text select-none">
             RICE
           </span>
-          <span className="text-caption-01 text-text-helper select-none">
+          <span className="text-caption-01 text-shell-muted select-none">
           Runtime Intelligence & Continuous Evolution
           </span>
         </header>

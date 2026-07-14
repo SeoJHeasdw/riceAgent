@@ -1380,7 +1380,7 @@ const AssistantBlock: React.FC<{
       )}
       {m.action && (
         <div className="mt-3">
-          <button className="inline-flex items-center gap-2 h-8 px-3 rounded-lg border border-white/30 bg-transparent text-text-primary text-body-short-01 hover:bg-white/5 hover:border-white/50 transition-colors">
+          <button className="inline-flex items-center gap-2 h-8 px-3 rounded-lg border border-border-strong-01 bg-transparent text-text-primary text-body-short-01 hover:bg-layer-hover-01 hover:border-border-strong-02 transition-colors">
             <Icon name={m.action.icon} size={15} />
             {m.action.label}
           </button>

@@ -52,8 +52,8 @@ const RailButton: React.FC<{
         transition-colors duration-150
         outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus
         ${isActive
-          ? 'bg-white/[0.09] text-white'
-          : 'text-shell-muted hover:bg-white/[0.06] hover:text-white'
+          ? 'bg-shell-active text-shell-text shadow-elevation-1'
+          : 'text-shell-muted hover:bg-shell-hover hover:text-shell-text'
         }
       `}
       aria-label={item.label}
@@ -104,7 +104,7 @@ export const IconRail: React.FC<IconRailProps> = ({ items, activeId, onNavigate,
             />
             {item.dividerAfter && (
               <div
-                className="w-6 h-px my-1 bg-white/10"
+                className="w-6 h-px my-1 bg-shell-divider"
                 role="separator"
                 aria-orientation="horizontal"
               />

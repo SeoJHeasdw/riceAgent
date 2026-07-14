@@ -86,7 +86,7 @@ export const PluginCard: React.FC<PluginCardProps> = ({
           <p className="text-caption-01 text-text-helper">{author}</p>
         </div>
         {builtin ? (
-          <Tag type="teal" size="sm">
+          <Tag type="green" size="sm">
             {t('myPlugins.tagBuiltin')}
           </Tag>
         ) : installed ? (
@@ -142,9 +142,9 @@ export const PluginCard: React.FC<PluginCardProps> = ({
         </div>
       )}
 
-      {/* Use Cases — pill 나열 대신 조용한 한 줄 텍스트 */}
+      {/* Use Cases — a quiet tinted strip keeps the examples readable in both themes. */}
       {useCases.length > 0 && (
-        <div className="relative text-caption-01 text-text-placeholder truncate mb-1">
+        <div className="relative mb-1 truncate rounded-md border border-purple-50/20 bg-purple-60/[0.055] px-2.5 py-1.5 text-caption-01 text-text-secondary">
           {useCases.slice(0, 3).join(' · ')}
         </div>
       )}

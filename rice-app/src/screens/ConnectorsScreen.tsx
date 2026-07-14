@@ -1251,18 +1251,18 @@ function ConnectorsScreen() {
         </div>
 
         <div className="p-4">
-          <div className="domain-summary domain-summary--connector rounded-xl p-4 text-white">
-            <div className="text-caption-01 text-white/70 mb-1">
+          <div className="domain-summary domain-summary--connector rounded-xl p-4">
+            <div className="text-caption-01 text-text-helper mb-1">
               {isLocal ? t('summary.runningMcpServers') : t('summary.connectedConnectors')}
             </div>
-            <div className="text-heading-03 font-semibold text-white leading-none tabular-nums">
+            <div className="text-heading-03 font-semibold text-text-primary leading-none tabular-nums">
               {connectedCount}
-              {t('summary.unit') && <span className="text-body-short-01 font-normal text-white/70 ml-1">{t('summary.unit')}</span>}
+              {t('summary.unit') && <span className="text-body-short-01 font-normal text-text-helper ml-1">{t('summary.unit')}</span>}
             </div>
             {(needsCount > 0 || updateCount > 0) && (
-              <div className="text-caption-01 text-white/80 mt-1.5 flex items-center gap-1.5">
+              <div className="text-caption-01 text-text-secondary mt-1.5 flex items-center gap-1.5">
                 {needsCount > 0 && <span>{needsCount} {isLocal ? t('summary.stopped') : t('summary.needsConnection')}</span>}
-                {needsCount > 0 && updateCount > 0 && <span className="text-white/40">·</span>}
+                {needsCount > 0 && updateCount > 0 && <span className="text-text-helper">·</span>}
                 {updateCount > 0 && <span>{updateCount} {t('summary.updates')}</span>}
               </div>
             )}

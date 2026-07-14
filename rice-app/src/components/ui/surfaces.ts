@@ -11,7 +11,7 @@
 
 /** 다이얼로그 뒤 어두운 backdrop — 클릭 시 닫힘은 호출부에서 핸들러로. */
 export const dialogBackdropCls =
-  'absolute inset-0 bg-black/50 backdrop-blur-sm animate-fade-in';
+  'absolute inset-0 bg-overlay backdrop-blur-sm animate-fade-in';
 
 /**
  * 다이얼로그 본체 표면.

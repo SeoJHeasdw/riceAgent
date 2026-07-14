@@ -24,7 +24,7 @@
     "font": "글꼴",
     "fontSystem": "시스템 기본",
     "fontMono": "고정폭",
-    "fontSans": "산세리프"
+    "fontSans": "고딕"
   },
   "apiRuntime": {
     "title": "API 및 런타임",

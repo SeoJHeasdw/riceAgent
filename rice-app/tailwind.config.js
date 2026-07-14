@@ -34,61 +34,64 @@ export default {
         },
         // Carbon palette shades used directly in components.
         // 임의값 유틸(text-[#...])은 금지 — 여기 이름 붙은 단계만 쓴다.
+        // Theme-aware palette aliases. Foreground steps become darker in the
+        // light theme while translucent backgrounds keep the same hue family.
         blue: {
-          '10': '#edf5ff',
-          '30': '#a6c8ff',
-          '40': '#78a9ff',
-          '50': '#4589ff',
-          '60': '#0f62fe',
-          '70': '#0043ce',
-          '80': '#002d9c',
-          '100': '#001141',
+          '10': 'rgb(var(--rice-blue-10-rgb) / <alpha-value>)',
+          '30': 'rgb(var(--rice-blue-30-rgb) / <alpha-value>)',
+          '40': 'rgb(var(--rice-blue-40-rgb) / <alpha-value>)',
+          '50': 'rgb(var(--rice-blue-50-rgb) / <alpha-value>)',
+          '60': 'rgb(var(--rice-blue-60-rgb) / <alpha-value>)',
+          '70': 'rgb(var(--rice-blue-70-rgb) / <alpha-value>)',
+          '80': 'rgb(var(--rice-blue-80-rgb) / <alpha-value>)',
+          '100': 'rgb(var(--rice-blue-100-rgb) / <alpha-value>)',
         },
         red: {
-          '30': '#ffb3b8',
-          '40': '#ff8389',
-          '50': '#fa4d56',
-          '60': '#da1e28',
-          '70': '#ba1b23',
-          '80': '#750e13',
+          '30': 'rgb(var(--rice-red-30-rgb) / <alpha-value>)',
+          '40': 'rgb(var(--rice-red-40-rgb) / <alpha-value>)',
+          '50': 'rgb(var(--rice-red-50-rgb) / <alpha-value>)',
+          '60': 'rgb(var(--rice-red-60-rgb) / <alpha-value>)',
+          '70': 'rgb(var(--rice-red-70-rgb) / <alpha-value>)',
+          '80': 'rgb(var(--rice-red-80-rgb) / <alpha-value>)',
         },
         green: {
-          '30': '#6fdc8c',
-          '40': '#42be65',
-          '50': '#24a148',
-          '80': '#044317',
+          '30': 'rgb(var(--rice-green-30-rgb) / <alpha-value>)',
+          '40': 'rgb(var(--rice-green-40-rgb) / <alpha-value>)',
+          '50': 'rgb(var(--rice-green-50-rgb) / <alpha-value>)',
+          '80': 'rgb(var(--rice-green-80-rgb) / <alpha-value>)',
         },
         yellow: {
-          '20': '#fddc69',
-          '30': '#f1c21b',
-          '40': '#d2a106',
-          '60': '#684e00',
-          '70': '#523c00',
+          '20': 'rgb(var(--rice-yellow-20-rgb) / <alpha-value>)',
+          '30': 'rgb(var(--rice-yellow-30-rgb) / <alpha-value>)',
+          '40': 'rgb(var(--rice-yellow-40-rgb) / <alpha-value>)',
+          '50': 'rgb(var(--rice-yellow-50-rgb) / <alpha-value>)',
+          '60': 'rgb(var(--rice-yellow-60-rgb) / <alpha-value>)',
+          '70': 'rgb(var(--rice-yellow-70-rgb) / <alpha-value>)',
         },
         orange: {
-          '30': '#ffb784',
-          '40': '#ff832b',
+          '30': 'rgb(var(--rice-orange-30-rgb) / <alpha-value>)',
+          '40': 'rgb(var(--rice-orange-40-rgb) / <alpha-value>)',
         },
         magenta: {
-          '50': '#ee5396',
+          '50': 'rgb(var(--rice-magenta-50-rgb) / <alpha-value>)',
         },
         gray: {
-          '70': '#525252',
+          '70': 'rgb(var(--rice-gray-70-rgb) / <alpha-value>)',
         },
         purple: {
-          '30': '#d4bbff',
-          '40': '#be95ff',
-          '50': '#a56eff',
-          '60': '#8a3ffc',
-          '70': '#6929c4',
-          '80': '#491d8b',
+          '30': 'rgb(var(--rice-purple-30-rgb) / <alpha-value>)',
+          '40': 'rgb(var(--rice-purple-40-rgb) / <alpha-value>)',
+          '50': 'rgb(var(--rice-purple-50-rgb) / <alpha-value>)',
+          '60': 'rgb(var(--rice-purple-60-rgb) / <alpha-value>)',
+          '70': 'rgb(var(--rice-purple-70-rgb) / <alpha-value>)',
+          '80': 'rgb(var(--rice-purple-80-rgb) / <alpha-value>)',
         },
         teal: {
-          '30': '#3ddbd9',
-          '40': '#08bdba',
-          '60': '#009d9a',
-          '70': '#005d5d',
-          '80': '#004144',
+          '30': 'rgb(var(--rice-teal-30-rgb) / <alpha-value>)',
+          '40': 'rgb(var(--rice-teal-40-rgb) / <alpha-value>)',
+          '60': 'rgb(var(--rice-teal-60-rgb) / <alpha-value>)',
+          '70': 'rgb(var(--rice-teal-70-rgb) / <alpha-value>)',
+          '80': 'rgb(var(--rice-teal-80-rgb) / <alpha-value>)',
         },
         // 상태(hover/active) 시맨틱 — globals.css 토큰과 동기
         'interactive-hover': 'var(--cds-interactive-hover)',
@@ -108,7 +111,11 @@ export default {
         shell: {
           DEFAULT: 'var(--rice-shell)',
           border: 'var(--rice-shell-border)',
+          text: 'var(--rice-shell-text)',
           muted: 'var(--rice-shell-muted)',
+          active: 'var(--rice-shell-active)',
+          hover: 'var(--rice-shell-hover)',
+          divider: 'var(--rice-shell-divider)',
         },
         // Domain accents (globals.css :root 정의와 동기)
         accent: {
@@ -210,13 +217,13 @@ export default {
         full: '9999px',
       },
       boxShadow: {
-        // Elevation scale tuned for dark surfaces:
-        // soft ambient shadow + 1px top inner highlight for edge definition.
+        // Theme-aware elevation scale: soft ambient shadow + a top inner
+        // highlight for edge definition.
         // 규율: 평면 카드에는 그림자 없음(border가 형태) — 그림자는 떠 있는
         // 표면(popover=2, modal/drawer/toast=3)에만 쓴다.
-        'elevation-1': '0 1px 2px rgba(0, 0, 0, 0.32), 0 1px 4px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.04)',
-        'elevation-2': '0 2px 4px rgba(0, 0, 0, 0.32), 0 4px 12px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.05)',
-        'elevation-3': '0 4px 8px rgba(0, 0, 0, 0.36), 0 8px 24px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.06)',
+        'elevation-1': 'var(--rice-elevation-1)',
+        'elevation-2': 'var(--rice-elevation-2)',
+        'elevation-3': 'var(--rice-elevation-3)',
       },
       fontSize: {
         // IBM Carbon type scale

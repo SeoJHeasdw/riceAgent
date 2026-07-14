@@ -599,7 +599,71 @@
      navy cast, so navigation remains a stable but unobtrusive frame. */
   --rice-shell: #101319;
   --rice-shell-border: rgba(177, 187, 201, 0.16);
+  --rice-shell-text: #f4f7fb;
   --rice-shell-muted: #939dac;
+  --rice-shell-active: rgba(255, 255, 255, 0.09);
+  --rice-shell-hover: rgba(255, 255, 255, 0.06);
+  --rice-shell-divider: rgba(255, 255, 255, 0.1);
+
+  /* Carbon palette aliases used by Tailwind. The light theme remaps the
+     foreground-oriented steps below without making components theme-aware. */
+  --rice-blue-10-rgb: 237 245 255;
+  --rice-blue-30-rgb: 166 200 255;
+  --rice-blue-40-rgb: 120 169 255;
+  --rice-blue-50-rgb: 69 137 255;
+  --rice-blue-60-rgb: 15 98 254;
+  --rice-blue-70-rgb: 0 67 206;
+  --rice-blue-80-rgb: 0 45 156;
+  --rice-blue-100-rgb: 0 17 65;
+  --rice-red-30-rgb: 255 179 184;
+  --rice-red-40-rgb: 255 131 137;
+  --rice-red-50-rgb: 250 77 86;
+  --rice-red-60-rgb: 218 30 40;
+  --rice-red-70-rgb: 186 27 35;
+  --rice-red-80-rgb: 117 14 19;
+  --rice-green-30-rgb: 111 220 140;
+  --rice-green-40-rgb: 66 190 101;
+  --rice-green-50-rgb: 36 161 72;
+  --rice-green-80-rgb: 4 67 23;
+  --rice-yellow-20-rgb: 253 220 105;
+  --rice-yellow-30-rgb: 241 194 27;
+  --rice-yellow-40-rgb: 210 161 6;
+  --rice-yellow-50-rgb: 178 134 0;
+  --rice-yellow-60-rgb: 104 78 0;
+  --rice-yellow-70-rgb: 82 60 0;
+  --rice-orange-30-rgb: 255 183 132;
+  --rice-orange-40-rgb: 255 131 43;
+  --rice-magenta-50-rgb: 238 83 150;
+  --rice-gray-70-rgb: 82 82 82;
+  --rice-purple-30-rgb: 212 187 255;
+  --rice-purple-40-rgb: 190 149 255;
+  --rice-purple-50-rgb: 165 110 255;
+  --rice-purple-60-rgb: 138 63 252;
+  --rice-purple-70-rgb: 105 41 196;
+  --rice-purple-80-rgb: 73 29 139;
+  --rice-teal-30-rgb: 61 219 217;
+  --rice-teal-40-rgb: 8 189 186;
+  --rice-teal-60-rgb: 0 157 154;
+  --rice-teal-70-rgb: 0 93 93;
+  --rice-teal-80-rgb: 0 65 68;
+
+  --rice-elevation-1: 0 1px 2px rgba(0, 0, 0, 0.32), 0 1px 4px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --rice-elevation-2: 0 2px 4px rgba(0, 0, 0, 0.32), 0 4px 12px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --rice-elevation-3: 0 4px 8px rgba(0, 0, 0, 0.36), 0 8px 24px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+
+  /* Status tags are intentionally semantic rather than fixed palette steps. */
+  --rice-tag-blue-bg: #002d9c;
+  --rice-tag-blue-text: #d9e8ff;
+  --rice-tag-green-bg: #146b35;
+  --rice-tag-green-text: #f1fff5;
+  --rice-tag-purple-bg: #491d8b;
+  --rice-tag-purple-text: #eadfff;
+  --rice-tag-teal-bg: #004144;
+  --rice-tag-teal-text: #d5fffd;
+  --rice-tag-red-bg: #750e13;
+  --rice-tag-red-text: #ffe0e2;
+  --rice-tag-yellow-bg: #684e00;
+  --rice-tag-yellow-text: #fff3bd;
 
   /* Product-domain accents. Main surfaces consume these as low-opacity light,
      while onboarding may use the same hues at cinematic intensity. */
@@ -652,8 +716,8 @@
   --font-sans: var(--font-mono);
 }
 
-/* Light workspace theme. The brand shell stays dark so navigation remains a
-   stable visual anchor while every content surface follows semantic tokens. */
+/* Light workspace theme. Navigation becomes a cool gray surface as well, so
+   the whole application changes mode instead of leaving a dark frame behind. */
 [data-theme='light'] {
   color-scheme: light;
   --cds-background: #f7f8fa;
@@ -695,6 +759,19 @@
   --cds-border-strong-03: #586577;
   --cds-border-inverse: #161a22;
   --cds-border-interactive: #0f62fe;
+  --cds-support-error: #da1e28;
+  --cds-support-success: #198038;
+  --cds-support-warning: #8e6a00;
+  --cds-support-info: #0f62fe;
+  --cds-support-error-rgb: 218 30 40;
+  --cds-support-success-rgb: 25 128 56;
+  --cds-support-warning-rgb: 142 106 0;
+  --cds-support-info-rgb: 15 98 254;
+  --cds-interactive: #0f62fe;
+  --cds-interactive-rgb: 15 98 254;
+  --cds-interactive-hover: #0353e9;
+  --cds-interactive-active: #002d9c;
+  --cds-focus: #0f62fe;
   --cds-link-primary: #0043ce;
   --cds-link-secondary: #002d9c;
   --cds-link-visited: #6929c4;
@@ -705,10 +782,79 @@
   --cds-border-strong-01-rgb: 174 183 195;
   --ai-aura: radial-gradient(circle at 0% 0%, rgba(69, 137, 255, 0.16), rgba(165, 110, 255, 0.08) 40%, transparent 72%);
   --ai-popover-bg: #ffffff;
+  --rice-shell: #f1f4f8;
+  --rice-shell-border: #d4dbe5;
+  --rice-shell-text: #172033;
+  --rice-shell-muted: #657187;
+  --rice-shell-active: #ffffff;
+  --rice-shell-hover: #e3e8ef;
+  --rice-shell-divider: #d4dbe5;
+  --rice-blue-30-rgb: 0 67 206;
+  --rice-blue-40-rgb: 15 98 254;
+  --rice-blue-50-rgb: 0 67 206;
+  --rice-red-30-rgb: 162 25 31;
+  --rice-red-40-rgb: 186 27 35;
+  --rice-green-30-rgb: 14 96 39;
+  --rice-green-40-rgb: 25 128 56;
+  --rice-orange-30-rgb: 138 56 0;
+  --rice-orange-40-rgb: 186 78 0;
+  --rice-magenta-50-rgb: 159 24 83;
+  --rice-purple-30-rgb: 105 41 196;
+  --rice-purple-40-rgb: 105 41 196;
+  --rice-purple-50-rgb: 105 41 196;
+  --rice-teal-30-rgb: 0 93 93;
+  --rice-teal-40-rgb: 0 125 121;
+  --rice-yellow-30-rgb: 104 78 0;
+  --rice-yellow-40-rgb: 104 78 0;
+  --rice-elevation-1: 0 1px 2px rgba(15, 23, 42, 0.1), 0 1px 4px rgba(15, 23, 42, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  --rice-elevation-2: 0 2px 5px rgba(15, 23, 42, 0.12), 0 6px 16px rgba(15, 23, 42, 0.09), inset 0 1px 0 rgba(255, 255, 255, 0.78);
+  --rice-elevation-3: 0 6px 12px rgba(15, 23, 42, 0.13), 0 16px 36px rgba(15, 23, 42, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.82);
+  --rice-tag-blue-bg: #e7f1ff;
+  --rice-tag-blue-text: #0043ce;
+  --rice-tag-green-bg: #198038;
+  --rice-tag-green-text: #f4fff7;
+  --rice-tag-purple-bg: #f0e7ff;
+  --rice-tag-purple-text: #6929c4;
+  --rice-tag-teal-bg: #ddf7f6;
+  --rice-tag-teal-text: #005d5d;
+  --rice-tag-red-bg: #fff1f1;
+  --rice-tag-red-text: #a2191f;
+  --rice-tag-yellow-bg: #fff4d6;
+  --rice-tag-yellow-text: #684e00;
   --diff-add-bg: #defbe6;
   --diff-add-text: #0e6027;
   --diff-remove-bg: #fff1f1;
   --diff-remove-text: #a2191f;
+}
+
+.rice-tag--blue {
+  color: var(--rice-tag-blue-text);
+  background: var(--rice-tag-blue-bg);
+}
+
+.rice-tag--green {
+  color: var(--rice-tag-green-text);
+  background: var(--rice-tag-green-bg);
+}
+
+.rice-tag--purple {
+  color: var(--rice-tag-purple-text);
+  background: var(--rice-tag-purple-bg);
+}
+
+.rice-tag--teal {
+  color: var(--rice-tag-teal-text);
+  background: var(--rice-tag-teal-bg);
+}
+
+.rice-tag--red {
+  color: var(--rice-tag-red-text);
+  background: var(--rice-tag-red-bg);
+}
+
+.rice-tag--yellow {
+  color: var(--rice-tag-yellow-text);
+  background: var(--rice-tag-yellow-bg);
 }
 
 /* Prevent text selection on UI elements */
@@ -796,6 +942,12 @@ button,
 .domain-summary__action[aria-pressed='true'] {
   background: rgb(var(--domain-accent) / 0.1);
   border-color: rgb(var(--domain-accent) / 0.24);
+}
+
+.domain-summary__chip {
+  color: var(--cds-text-primary);
+  border: 1px solid rgb(var(--domain-accent) / 0.18);
+  background: rgb(var(--domain-accent) / 0.1);
 }
 
 /* ── Cinematic onboarding model theme ─────────────────────────────────────

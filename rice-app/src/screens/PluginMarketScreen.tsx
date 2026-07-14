@@ -178,19 +178,19 @@ function PluginMarketScreen() {
       >
         {/* Installed Summary */}
         <div className="p-3">
-          <div className="domain-summary domain-summary--plugin rounded-xl p-4 text-white">
-            <div className="flex items-center gap-1.5 text-caption-01 text-white/70 mb-2">
+          <div className="domain-summary domain-summary--plugin rounded-xl p-4">
+            <div className="mb-2 flex items-center gap-1.5 text-caption-01 text-text-helper">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
                 <circle cx="12" cy="12" r="9" />
                 <circle cx="12" cy="12" r="3.5" />
               </svg>
               {t('railExpertLabel')}
             </div>
-            <div className="text-heading-03 font-semibold text-white leading-none tracking-tight tabular-nums">
+            <div className="text-heading-03 font-semibold text-text-primary leading-none tracking-tight tabular-nums">
               {installedCount}
-              <span className="text-body-short-01 font-normal text-white/70 ml-1.5">{t('railInstalledUnit')}</span>
+              <span className="text-body-short-01 font-normal text-text-helper ml-1.5">{t('railInstalledUnit')}</span>
             </div>
-            <div className="inline-flex items-center gap-1.5 mt-3 px-2 py-0.5 rounded-full bg-white/15 text-caption-01 text-white">
+            <div className="domain-summary__chip mt-3 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-caption-01">
               <span className="w-1.5 h-1.5 rounded-full bg-support-success" />
               {t('railActiveUnit', { count: activeCount })}
             </div>

@@ -1914,7 +1914,7 @@ const SkillDetailView: React.FC<{
                 </button>
               )}
               {builtin && (
-                <Tag type="teal" size="sm">
+                <Tag type="green" size="sm">
                   {t('mySkills.headerBuiltinTag')}
                 </Tag>
               )}
@@ -2355,15 +2355,15 @@ function MySkillsScreen() {
         style={{ width: listPanel.width }}
       >
         <div className="flex-shrink-0 border-b border-border-subtle-01 px-4 pt-5 pb-4">
-          <div className="domain-summary domain-summary--skill rounded-xl p-4 text-white">
-            <div className="mb-1 text-caption-01 text-white/70">{t('mySkills.libraryTitle')}</div>
-            <div className="text-heading-03 font-semibold leading-none text-white tabular-nums">
+          <div className="domain-summary domain-summary--skill rounded-xl p-4">
+            <div className="mb-1 text-caption-01 text-text-helper">{t('mySkills.libraryTitle')}</div>
+            <div className="text-heading-03 font-semibold leading-none text-text-primary tabular-nums">
               {skills.length}
               {t('mySkills.libraryUnit') && (
-                <span className="ml-1 text-body-short-01 font-normal text-white/70">{t('mySkills.libraryUnit')}</span>
+                <span className="ml-1 text-body-short-01 font-normal text-text-helper">{t('mySkills.libraryUnit')}</span>
               )}
             </div>
-            <div className="mt-1.5 flex gap-3 text-caption-01 text-white/80">
+            <div className="mt-1.5 flex gap-3 text-caption-01 text-text-secondary">
               <span>{t('mySkills.libraryActiveLabel', { count: active })}</span>
               <span>{t('mySkills.librarySharedLabel', { count: shared })}</span>
             </div>

@@ -1,7 +1,7 @@
 import React from 'react';
 
 /**
- * Tag component — Carbon g100 색상 + rounded-full pill 형태
+ * Tag component — theme-aware semantic colors + rounded-full pill 형태
  * - Status/category tags with color variants
  * - Multiple color variants: blue, green, purple, gray, teal, red, yellow
  */
@@ -29,15 +29,14 @@ export const Tag: React.FC<TagProps> = ({
 }) => {
   const baseStyles = 'inline-flex items-center gap-1.5 font-sans font-normal rounded-full whitespace-nowrap';
 
-  // Carbon g100 (dark) tag palette: dark backgrounds, light text
   const typeStyles = {
-    blue: 'bg-interactive-active text-blue-30',
-    green: 'bg-green-80 text-green-30',
-    purple: 'bg-purple-80 text-purple-30',
+    blue: 'rice-tag--blue',
+    green: 'rice-tag--green',
+    purple: 'rice-tag--purple',
     gray: 'bg-layer-02 text-text-secondary border border-border-subtle-02',
-    teal: 'bg-teal-80 text-teal-30',
-    red: 'bg-danger-active text-red-30',
-    yellow: 'bg-yellow-60 text-yellow-20',
+    teal: 'rice-tag--teal',
+    red: 'rice-tag--red',
+    yellow: 'rice-tag--yellow',
     outline: 'bg-transparent text-text-primary border border-border-strong-01',
   };
 
@@ -49,12 +48,7 @@ export const Tag: React.FC<TagProps> = ({
   return (
     <span className={`${baseStyles} ${typeStyles[type]} ${sizeStyles[size]} ${className}`} {...props}>
       {dot && (
-        <span
-          className="w-1.5 h-1.5 rounded-full"
-          style={{
-            backgroundColor: type === 'green' ? '#42be65' : type === 'blue' ? '#4589ff' : 'currentColor',
-          }}
-        />
+        <span className="h-1.5 w-1.5 rounded-full bg-current opacity-80" />
       )}
       {children}
     </span>
