@@ -7,7 +7,6 @@ import i18n from './i18n/index';
 // apiError.ts와 동일 패턴으로 unknown 경유 캐스트.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type TFnAny = (key: string, options?: Record<string, unknown>) => any;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const tAny: TFnAny = (i18n.t as unknown as TFnAny);
 
 /**
@@ -1247,7 +1246,6 @@ export const CONNECTOR_CATALOG: CatalogConnector[] = [
 // i18next apiError.ts 패턴과 동일하게 unknown 캐스트 래퍼를 사용한다.
 // 호출 측: `(tChat as unknown as TFnChat)` 혹은 `wrapT(tChat)` 헬퍼를 이용한다.
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type TFnChat = (key: string, opts?: Record<string, unknown>) => string;
 
 /**

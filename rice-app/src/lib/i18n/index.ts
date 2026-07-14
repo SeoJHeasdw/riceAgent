@@ -45,6 +45,7 @@ export const DEFAULT_NS = 'common';
 export const FALLBACK_LNG: Language = 'ko';
 
 export const LANGUAGE_STORAGE_KEY = 'rice.language';
+const LEGACY_SETTINGS_STORAGE_KEY = 'rice.settings';
 
 const resources = {
   ko: {
@@ -77,6 +78,17 @@ function detectInitialLanguage(): Language {
   try {
     const stored = localStorage.getItem(LANGUAGE_STORAGE_KEY);
     if (stored === 'ko' || stored === 'en') return stored;
+
+    // One-time compatibility fallback for users whose language predates
+    // rice.language. Once found, promote it to the canonical language store.
+    const legacySettings = localStorage.getItem(LEGACY_SETTINGS_STORAGE_KEY);
+    if (legacySettings) {
+      const legacyLanguage = (JSON.parse(legacySettings) as { language?: unknown }).language;
+      if (legacyLanguage === 'ko' || legacyLanguage === 'en') {
+        localStorage.setItem(LANGUAGE_STORAGE_KEY, legacyLanguage);
+        return legacyLanguage;
+      }
+    }
   } catch {
     // localStorage 접근 불가 시 브라우저 언어로 폴백
   }

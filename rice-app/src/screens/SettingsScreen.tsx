@@ -12,7 +12,6 @@ import { TOUR_DONE_KEY } from '../components/carbon/tour';
 
 interface AppSettings {
   theme: 'dark' | 'light';
-  language: 'en' | 'ko';
   font: 'system' | 'mono' | 'sans';
   watsonxApiKey: string;
   ollamaEndpoint: string;
@@ -32,7 +31,6 @@ type GlyphName = 'general' | 'privacy' | 'about' | 'sun' | 'moon';
 
 const DEFAULT_SETTINGS: AppSettings = {
   theme: 'dark',
-  language: 'en',
   font: 'system',
   watsonxApiKey: '',
   ollamaEndpoint: 'http://localhost:11434',
@@ -47,7 +45,13 @@ const STORAGE_KEY = 'rice.settings';
 function loadSettings(): AppSettings {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) return { ...DEFAULT_SETTINGS, ...JSON.parse(stored) };
+    if (stored) {
+      const storedSettings = JSON.parse(stored) as Record<string, unknown>;
+      // Language has its own canonical store (rice.language). Ignore the legacy
+      // rice.settings.language field so it cannot overwrite onboarding choices.
+      delete storedSettings.language;
+      return { ...DEFAULT_SETTINGS, ...storedSettings } as AppSettings;
+    }
   } catch {
     // Invalid or unavailable local storage falls back to safe defaults.
   }
@@ -198,10 +202,6 @@ function SettingsScreen({ open, onClose }: SettingsScreenProps) {
   useDialogA11y({ open, dialogRef, onClose, initialFocusRef });
 
   useEffect(() => {
-    if (settings.language !== language) setLanguage(settings.language);
-  }, [settings.language, language, setLanguage]);
-
-  useEffect(() => {
     applyAppearance({ font: settings.font, theme: settings.theme });
   }, [settings.font, settings.theme]);
 
@@ -237,7 +237,11 @@ function SettingsScreen({ open, onClose }: SettingsScreenProps) {
     const next = { ...settings, [key]: value };
     setSettings(next);
     persist(next);
-    if (key === 'language') setLanguage(value as AppSettings['language']);
+  };
+
+  const updateLanguage = (value: typeof language) => {
+    setLanguage(value);
+    showSaved();
   };
 
   const handleReset = async () => {
@@ -293,7 +297,7 @@ function SettingsScreen({ open, onClose }: SettingsScreenProps) {
     // ── localStorage 초기화 ────────────────────────────────────────────
     localStorage.removeItem(TOUR_DONE_KEY);
     setSettings(DEFAULT_SETTINGS);
-    setLanguage(DEFAULT_SETTINGS.language);
+    setLanguage('en');
     persist(DEFAULT_SETTINGS);
 
     // ── 인메모리 상태 리셋 + 온보딩 재트리거 ──────────────────────────
@@ -336,9 +340,9 @@ function SettingsScreen({ open, onClose }: SettingsScreenProps) {
           </SettingRow>
           <SettingRow title={t('appearance.language')}>
             <SegmentedControl
-              value={settings.language}
+              value={language}
               ariaLabel={t('appearance.language')}
-              onChange={(value) => update('language', value)}
+              onChange={updateLanguage}
               options={[
                 { value: 'en', label: 'English' },
                 { value: 'ko', label: '한국어' },
