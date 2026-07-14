@@ -58,11 +58,17 @@ type TSkills = TFunction<'skills'>;
 // 쓰는 "주입 여부"의 진실로 유지하고, UI에서는 여기 단일 status로만 투영한다.
 type SkillStatus = 'active' | 'stale' | 'archived' | 'inactive';
 
-const STATUS_TAG: Record<SkillStatus, 'gray' | 'yellow'> = {
-  active: 'gray', stale: 'yellow', archived: 'gray', inactive: 'gray',
+const STATUS_TAG: Record<SkillStatus, 'green' | 'yellow' | 'purple' | 'gray'> = {
+  active: 'green', stale: 'yellow', archived: 'purple', inactive: 'gray',
 };
 const STATUS_DOT: Record<SkillStatus, string> = {
-  active: 'bg-support-success', stale: 'bg-support-warning', archived: 'bg-icon-secondary', inactive: 'bg-icon-secondary',
+  active: 'bg-support-success', stale: 'bg-support-warning', archived: 'bg-purple-50', inactive: 'bg-icon-secondary',
+};
+const STATUS_CONTROL: Record<SkillStatus, string> = {
+  active: 'border-support-success/50 text-support-success',
+  stale: 'border-support-warning/50 text-support-warning',
+  archived: 'border-purple-50/50 text-purple-40',
+  inactive: 'border-border-strong-01 text-text-helper',
 };
 /** 생명주기 상태 (큐레이터 내부용, 미설정 = active) */
 const skillState = (s: Skill): NonNullable<Skill['state']> => s.state ?? 'active';
@@ -220,11 +226,7 @@ const StatusControl: React.FC<{
       <button
         onClick={() => setOpen((o) => !o)}
         title={statusReason(skill)}
-        className={`inline-flex items-center gap-1.5 text-caption-01 font-semibold border rounded-md px-2 py-1 transition-colors hover:bg-layer-hover-01 ${
-          st === 'stale'    ? 'border-support-warning/50 text-support-warning'
-          : st === 'active' ? 'border-support-success/50 text-support-success'
-          : 'border-border-strong-01 text-text-helper'
-        }`}
+        className={`inline-flex items-center gap-1.5 text-caption-01 font-semibold border rounded-md px-2 py-1 transition-colors hover:bg-layer-hover-01 ${STATUS_CONTROL[st]}`}
       >
         <span className={`w-1.5 h-1.5 rounded-full ${STATUS_DOT[st]}`} />
         {t(STATUS_LABEL_KEYS[st])}
