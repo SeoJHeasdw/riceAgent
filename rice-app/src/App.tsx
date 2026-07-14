@@ -217,13 +217,14 @@ function App() {
       void api.getSettings().then((res) => {
         if (!res.success) return;
         const data = res.data as {
-          provider?: { kind?: string; model?: string; base_url?: string; temperature?: number; configured?: boolean };
+          provider?: { kind?: string; model?: string; base_url?: string; temperature?: number; configured?: boolean; show_thinking?: boolean };
           registered_models?: RegisteredModel[];
         };
         const prov = data?.provider;
-        if (!prov || prov.configured) return;
+        if (!prov) return;
 
-        // configured: false → 온보딩 강제
+        // 온보딩 다시 보기에서도 현재 런타임 설정으로 시작하도록 configured
+        // 여부와 관계없이 App 레벨 draft를 먼저 복원한다.
         const registered = data?.registered_models ?? [];
         const restoredMode: 'saas' | 'local' = prov.kind === 'ollama' ? 'local' : 'saas';
         setModelMode(restoredMode);
@@ -233,7 +234,11 @@ function App() {
           registeredModels: registered,
           ...(prov.base_url ? { endpoint: prov.base_url } : {}),
           ...(prov.temperature !== undefined ? { temperature: prov.temperature } : {}),
+          ...(prov.show_thinking !== undefined ? { showThinking: prov.show_thinking } : {}),
         }));
+
+        // configured: false → 온보딩 강제
+        if (prov.configured) return;
         setLangSelectOpen(true);
       });
     });
@@ -252,9 +257,15 @@ function App() {
         temperature: settings.temperature,
         base_url: mode === 'local' ? settings.endpoint ?? null : null,
         configured: true,
+        show_thinking: settings.showThinking,
       },
       registered_models: settings.registeredModels,
     });
+    try {
+      localStorage.setItem('rice.chat.showThinking', String(settings.showThinking));
+    } catch {
+      // 런타임 저장이 기준이며 localStorage는 첫 렌더용 캐시일 뿐이다.
+    }
     setOnboardingOpen(false);
     // 투어를 아직 본 적 없으면 바로 시작
     if (!localStorage.getItem(TOUR_DONE_KEY)) {

@@ -69,6 +69,9 @@ class ApiClient {
    *  probe (App bootstrap) is async, so screens can't read `isEnabled` once at
    *  mount — they subscribe here to react when it flips on. */
   private enabledListeners = new Set<(enabled: boolean) => void>();
+  /** Runtime-confirmed settings updates. Model onboarding lives in App while
+   *  the active model UI lives in ChatScreen, so both consume this one result. */
+  private settingsListeners = new Set<(settings: unknown) => void>();
 
   constructor(baseUrl: string = 'http://localhost:8080') {
     this.baseUrl = baseUrl;
@@ -88,6 +91,12 @@ class ApiClient {
   onEnabledChange(cb: (enabled: boolean) => void): () => void {
     this.enabledListeners.add(cb);
     return () => this.enabledListeners.delete(cb);
+  }
+
+  /** Subscribe to settings successfully persisted by PUT /settings. */
+  onSettingsChange(cb: (settings: unknown) => void): () => void {
+    this.settingsListeners.add(cb);
+    return () => this.settingsListeners.delete(cb);
   }
 
   get isEnabled(): boolean {
@@ -465,8 +474,12 @@ class ApiClient {
   getSettings(): Promise<ApiResponse> {
     return this.get('/settings');
   }
-  updateSettings(settings: unknown): Promise<ApiResponse> {
-    return this.send('PUT', '/settings', settings);
+  async updateSettings(settings: unknown): Promise<ApiResponse> {
+    const response = await this.send('PUT', '/settings', settings);
+    if (response.success) {
+      this.settingsListeners.forEach((cb) => cb(response.data));
+    }
+    return response;
   }
 
   // ── artifacts / market install (CONTRACTS 1.3, 2.3) ────────────

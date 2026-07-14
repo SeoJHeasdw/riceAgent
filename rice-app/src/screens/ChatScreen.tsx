@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../lib/i18n';
 import { apiErrorMessage } from '../lib/i18n/apiError';
@@ -64,6 +64,18 @@ type ThreadStateUpdate = ThreadMessage[] | ((previous: ThreadMessage[]) => Threa
 
 type LiveTurnProgress = {
   sessionId: string;
+};
+
+type RuntimeModelSettings = {
+  provider?: {
+    kind?: string;
+    model?: string;
+    base_url?: string;
+    temperature?: number;
+    configured?: boolean;
+    show_thinking?: boolean;
+  };
+  registered_models?: RegisteredModel[];
 };
 
 // Human-readable, per-tool copy for the HITL approval card — derived client-side
@@ -1015,6 +1027,32 @@ function ChatScreen() {
     }
   });
 
+  // GET/PUT /settings 응답을 현재 채팅 UI에 적용한다. 최초 복원뿐 아니라
+  // App 레벨 온보딩이 저장한 결과도 같은 경로로 즉시 동기화한다.
+  const applyRuntimeModelSettings = useCallback((raw: unknown) => {
+    const data = raw as RuntimeModelSettings | undefined;
+    const prov = data?.provider;
+    if (!prov) return;
+
+    setModelMode(prov.kind === 'ollama' ? 'local' : 'saas');
+    if (prov.model) setCurrentModel(prov.model);
+    setModelSettings((prev) => ({
+      ...prev,
+      registeredModels: data?.registered_models ?? [],
+      ...(prov.base_url ? { endpoint: prov.base_url } : {}),
+      ...(prov.temperature !== undefined ? { temperature: prov.temperature } : {}),
+      ...(prov.show_thinking !== undefined ? { showThinking: prov.show_thinking } : {}),
+    }));
+
+    if (prov.show_thinking !== undefined) {
+      try {
+        window.localStorage.setItem('rice.chat.showThinking', String(prov.show_thinking));
+      } catch {
+        // 메모리 상태는 이번 앱 세션 동안 계속 적용된다.
+      }
+    }
+  }, []);
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
 
@@ -1106,6 +1144,11 @@ function ChatScreen() {
     return api.onEnabledChange(setConnected);
   }, []);
 
+  useEffect(
+    () => api.onSettingsChange(applyRuntimeModelSettings),
+    [applyRuntimeModelSettings],
+  );
+
   // Make the effective output location discoverable directly below the composer.
   // The native picker selects a new single sandbox root; the runtime applies it
   // atomically on restart so one in-flight turn never spans two folders.
@@ -1169,33 +1212,10 @@ function ChatScreen() {
     // 1) Restore model settings saved by PUT /settings, then health-check when local
     void api.getSettings().then(async (res) => {
       if (cancelled || !res.success) return;
-      const data = res.data as {
-        provider?: { kind?: string; model?: string; base_url?: string; temperature?: number; configured?: boolean; show_thinking?: boolean };
-        registered_models?: RegisteredModel[];
-      };
+      const data = res.data as RuntimeModelSettings;
       const prov = data?.provider;
-      // SaaS 등록 모델(키 포함)을 state.db에서 복원
-      const registered = data?.registered_models ?? [];
       if (prov) {
-        const restoredMode: 'saas' | 'local' = prov.kind === 'ollama' ? 'local' : 'saas';
-        setModelMode(restoredMode);
-        if (prov.model) setCurrentModel(prov.model);
-        setModelSettings((prev) => ({
-          ...prev,
-          registeredModels: registered,
-          ...(prov.base_url ? { endpoint: prov.base_url } : {}),
-          ...(prov.temperature !== undefined ? { temperature: prov.temperature } : {}),
-          // thinking 스트림 노출은 백엔드 config가 단일 권위 — 저장된 값으로 복원
-          // (없으면 이전 localStorage 시드 유지).
-          ...(prov.show_thinking !== undefined ? { showThinking: prov.show_thinking } : {}),
-        }));
-        if (prov.show_thinking !== undefined) {
-          try {
-            window.localStorage.setItem('rice.chat.showThinking', String(prov.show_thinking));
-          } catch {
-            // 메모리 상태는 이번 앱 세션 동안 계속 적용된다.
-          }
-        }
+        applyRuntimeModelSettings(data);
 
         // Local 모드일 때만: 설정된 모델이 실제 Ollama에 남아 있는지 확인
         if (prov.kind === 'ollama' && prov.model) {
