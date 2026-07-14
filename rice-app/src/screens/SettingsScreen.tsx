@@ -262,8 +262,8 @@ function SettingsScreen({ open, onClose }: SettingsScreenProps) {
         list.forEach((s) => deletions.push(api.deleteSession(s.id)));
       }
       if (skills.status === 'fulfilled' && skills.value.success) {
-        const list = skills.value.data as { id: string }[] | undefined ?? [];
-        list.forEach((s) => deletions.push(api.deleteSkill(s.id)));
+        const list = skills.value.data as { id: string; source?: string | null }[] | undefined ?? [];
+        list.filter((s) => s.source !== 'builtin').forEach((s) => deletions.push(api.deleteSkill(s.id)));
       }
       if (plugins.status === 'fulfilled' && plugins.value.success) {
         const list = plugins.value.data as { id: string; builtin?: boolean }[] | undefined ?? [];
