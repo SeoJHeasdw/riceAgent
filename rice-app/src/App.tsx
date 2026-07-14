@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { api } from './lib/api';
@@ -12,7 +12,8 @@ import { ToastProvider } from './lib/toast/ToastProvider';
 import { LanguageSelectDialog } from './components/carbon/LanguageSelectDialog';
 import { TourOverlay, TOUR_STEPS, TOUR_DONE_KEY } from './components/carbon/tour';
 import { CommandPalette } from './components/carbon/CommandPalette';
-import { REPLAY_ONBOARDING_EVENT, REPLAY_TOUR_EVENT } from './lib/tutorial';
+import { REPLAY_ONBOARDING_EVENT, REPLAY_TOUR_EVENT, RESET_ALL_DATA_EVENT } from './lib/tutorial';
+import { useLearning } from './lib/learning/LearningContext';
 import { defaultModelSettings } from './lib/mockData';
 import type { ModelSettings } from './components/carbon/ModelSettingsPanel';
 import type { RegisteredModel } from './components/carbon/ModelSettingsPanel';
@@ -36,9 +37,11 @@ const railItems = toRailItems();
 interface AppShellProps {
   tourActive: boolean;
   onTourDone: () => void;
+  onTriggerOnboarding: () => void;
+  onStopTour: () => void;
 }
 
-function AppShell({ tourActive, onTourDone }: AppShellProps) {
+function AppShell({ tourActive, onTourDone, onTriggerOnboarding, onStopTour }: AppShellProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const settingsOpen = location.pathname === '/settings';
@@ -65,6 +68,19 @@ function AppShell({ tourActive, onTourDone }: AppShellProps) {
     if (historyIndex > 0) navigate(-1);
     else navigate(backgroundPathRef.current, { replace: true });
   };
+
+  // 전체 데이터 삭제 이벤트 — LearningProvider 안에 있으므로 여기서 useLearning 사용 가능
+  const { resetAll } = useLearning();
+  const handleResetAllData = useCallback(() => {
+    resetAll();
+    onStopTour();
+    onTriggerOnboarding(); // 온보딩 첫 화면(언어 선택)부터 재시작
+  }, [resetAll, onStopTour, onTriggerOnboarding]);
+
+  useEffect(() => {
+    window.addEventListener(RESET_ALL_DATA_EVENT, handleResetAllData);
+    return () => window.removeEventListener(RESET_ALL_DATA_EVENT, handleResetAllData);
+  }, [handleResetAllData]);
 
   return (
     <>
@@ -269,7 +285,12 @@ function App() {
         <MarketplaceProvider>
           <ToastProvider>
             <BrowserRouter>
-              <AppShell tourActive={tourActive} onTourDone={handleTourDone} />
+              <AppShell
+                tourActive={tourActive}
+                onTourDone={handleTourDone}
+                onTriggerOnboarding={() => setLangSelectOpen(true)}
+                onStopTour={() => setTourActive(false)}
+              />
               <LanguageSelectDialog
                 open={langSelectOpen}
                 onConfirm={() => {

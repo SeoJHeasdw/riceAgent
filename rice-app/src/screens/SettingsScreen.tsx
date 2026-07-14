@@ -5,8 +5,10 @@ import { Button, Icon, Input, Toggle } from '../components/ui';
 import { dialogBackdropCls, dialogSurfaceCls } from '../components/ui/surfaces';
 import { useDialogA11y } from '../hooks/useDialogA11y';
 import { useI18n } from '../lib/i18n/I18nContext';
-import { replayOnboarding, replayTour } from '../lib/tutorial';
+import { replayOnboarding, replayTour, RESET_ALL_DATA_EVENT } from '../lib/tutorial';
 import { applyAppearance } from '../lib/appearance';
+import { api } from '../lib/api';
+import { TOUR_DONE_KEY } from '../components/carbon/tour';
 
 interface AppSettings {
   theme: 'dark' | 'light';
@@ -238,14 +240,64 @@ function SettingsScreen({ open, onClose }: SettingsScreenProps) {
     if (key === 'language') setLanguage(value as AppSettings['language']);
   };
 
-  const handleReset = () => {
-    // TODO: Replace this settings-only reset with the full local-data purge
-    // (conversations, learning history, skills, plugins, connectors) once the
-    // runtime deletion API is available.
+  const handleReset = async () => {
+    setResetConfirming(false);
+
+    // ── 런타임 데이터 삭제 (온라인일 때만) ──────────────────────────────
+    if (api.isEnabled) {
+      // 각 카테고리를 병렬 조회 후 개별 삭제 — 일부 실패해도 계속 진행
+      const [sessions, skills, plugins, memories, connectors, localConnectors] = await Promise.allSettled([
+        api.listSessions(),
+        api.getSkills(),
+        api.getPlugins(),
+        api.getMemories(),
+        api.getConnectors(),
+        api.getLocalConnectors(),
+      ]);
+
+      const deletions: Promise<unknown>[] = [];
+
+      if (sessions.status === 'fulfilled' && sessions.value.success) {
+        const list = sessions.value.data as { id: string }[] | undefined ?? [];
+        list.forEach((s) => deletions.push(api.deleteSession(s.id)));
+      }
+      if (skills.status === 'fulfilled' && skills.value.success) {
+        const list = skills.value.data as { id: string }[] | undefined ?? [];
+        list.forEach((s) => deletions.push(api.deleteSkill(s.id)));
+      }
+      if (plugins.status === 'fulfilled' && plugins.value.success) {
+        const list = plugins.value.data as { id: string; builtin?: boolean }[] | undefined ?? [];
+        list.filter((p) => !p.builtin).forEach((p) => deletions.push(api.deletePlugin(p.id)));
+      }
+      if (memories.status === 'fulfilled' && memories.value.success) {
+        type MemItem = { id: string };
+        const raw = memories.value.data as { memories?: MemItem[] } | MemItem[] | undefined;
+        const list: MemItem[] = Array.isArray(raw) ? raw : (raw?.memories ?? []);
+        list.forEach((m) => deletions.push(api.deleteMemory(m.id)));
+      }
+      if (connectors.status === 'fulfilled' && connectors.value.success) {
+        const list = connectors.value.data as { id: string }[] | undefined ?? [];
+        list.forEach((c) => deletions.push(api.deleteConnector(c.id)));
+      }
+      if (localConnectors.status === 'fulfilled' && localConnectors.value.success) {
+        const list = localConnectors.value.data as { name: string }[] | undefined ?? [];
+        list.forEach((c) => deletions.push(api.deleteLocalConnector(c.name)));
+      }
+
+      await Promise.allSettled(deletions);
+
+      // 런타임 설정 리셋 → 재시작 시 온보딩 재트리거
+      await api.updateSettings({ provider: { configured: false }, registered_models: [] });
+    }
+
+    // ── localStorage 초기화 ────────────────────────────────────────────
+    localStorage.removeItem(TOUR_DONE_KEY);
     setSettings(DEFAULT_SETTINGS);
     setLanguage(DEFAULT_SETTINGS.language);
     persist(DEFAULT_SETTINGS);
-    setResetConfirming(false);
+
+    // ── 인메모리 상태 리셋 + 온보딩 재트리거 ──────────────────────────
+    window.dispatchEvent(new CustomEvent(RESET_ALL_DATA_EVENT));
   };
 
   const launchTutorial = (action: () => void) => {

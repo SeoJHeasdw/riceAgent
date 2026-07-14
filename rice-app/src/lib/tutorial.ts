@@ -8,6 +8,8 @@
 
 export const REPLAY_ONBOARDING_EVENT = 'rice:replay-onboarding';
 export const REPLAY_TOUR_EVENT = 'rice:replay-tour';
+/** 모든 데이터 삭제 후 App이 온보딩을 재트리거하도록 알리는 이벤트. */
+export const RESET_ALL_DATA_EVENT = 'rice:reset-all-data';
 
 /** 최초 실행 온보딩(전체화면 다단계)을 다시 띄운다. */
 export const replayOnboarding = () => window.dispatchEvent(new CustomEvent(REPLAY_ONBOARDING_EVENT));

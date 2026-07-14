@@ -80,6 +80,8 @@ interface LearningContextValue {
 
   /** Scroll target for the learning panel (so chat can scroll it to top) */
   panelScrollRef: React.RefObject<HTMLDivElement | null>;
+  /** 모든 인메모리 학습 상태를 초기화한다 (전체 데이터 삭제 후 호출). */
+  resetAll: () => void;
 }
 
 const LearningCtx = createContext<LearningContextValue | null>(null);
@@ -455,6 +457,16 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return id;
   }, []);
 
+  const resetAll = useCallback(() => {
+    setSkills([]);
+    setSignals([]);
+    setInstalled([]);
+    setDetails({});
+    setMyPlugins([]);
+    setProposals([]);
+    setSuggestions([]);
+  }, []);
+
   // install(plugin) = 마켓 → 나의 플러그인 materialize. marketId 기준 멱등(중복 설치 방지).
   const installPluginFromMarket = useCallback((market: MarketPlugin, options?: { enabled?: boolean }): string => {
     const id = installedPluginId(market.id);
@@ -497,8 +509,9 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       highlightedSkill,
       jumpToSkill,
       panelScrollRef,
+      resetAll,
     }),
-    [hydrating, skills, signals, installed, details, myPlugins, proposals, suggestions, mirrorParkedProposal, dropParkedMirror, resolvedApprovals, refreshSuggestions, decideSuggestion, discoverNow, removeSignal, installSkillFromMarket, installPluginFromMarket, highlightedSkill, jumpToSkill],
+    [hydrating, skills, signals, installed, details, myPlugins, proposals, suggestions, mirrorParkedProposal, dropParkedMirror, resolvedApprovals, refreshSuggestions, decideSuggestion, discoverNow, removeSignal, installSkillFromMarket, installPluginFromMarket, highlightedSkill, jumpToSkill, resetAll],
   );
 
   return <LearningCtx.Provider value={value}>{children}</LearningCtx.Provider>;
