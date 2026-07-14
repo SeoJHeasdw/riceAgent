@@ -2135,7 +2135,8 @@ function MySkillsScreen() {
   const navigate = useNavigate();
   const { skills, setSkills, details, hydrating } = useLearning();
   const [filter, setFilter] = useState<Filter>('all');
-  const [sel, setSel] = useState<string | null>('s1');
+  // 초기 미선택 — effectiveSel(아래)이 목록 로드 시 첫 스킬로 자동 폴백한다.
+  const [sel, setSel] = useState<string | null>(null);
   // "학습 효과" (Learning Impact) panel swaps into the detail pane (LE-1: keep 7 screens)
   const [showImpact, setShowImpact] = useState(false);
   // cold→warm 정량 수치의 정본은 eval harness 산출물뿐이다(GET /eval/impact).

@@ -472,26 +472,6 @@ export type ThreadMessage =
       /** epoch ms — stamped when the answer first arrives (live) or restored from DB */
       sentAt?: number;
     }
-  | {
-      kind: 'skill';
-      title: string;
-      skill: string;
-      skillId: string;
-      ver: string;
-      desc: string;
-      meta: string;
-      /**
-       * 있으면 "스킬로 저장"이 실제로 이 스킬을 학습 store에 생성한다 (패널·My Skills에 즉시 등장).
-       * 없으면 이미 존재하는 스킬을 확정/재사용하는 것으로 처리.
-       */
-      save?: {
-        command: string;
-        summary: string;
-        rules?: string[];
-        steps?: SkillStep[];
-        permissions?: SkillPermission[];
-      };
-    }
   | { kind: 'memory'; text: string; facts: string[]; target?: { kind: 'skill'; id: string; label: string } }
   | {
       kind: 'approval';

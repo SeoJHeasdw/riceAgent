@@ -7,7 +7,7 @@ import {
   type SkillDetail,
   type UserSignal,
 } from '../learningData';
-import type { Skill as MarketSkill, Plugin as MarketPlugin, SkillSuggestion } from '../types';
+import type { Skill as MarketSkill, Plugin as MarketPlugin, SkillSuggestion, SkillPatchProposedData } from '../types';
 import {
   installedSkillId,
   marketSkillToOwned,
@@ -44,6 +44,14 @@ interface LearningContextValue {
 
   /** 영속 제안함 (Self-Improvement v3) — 타임아웃된 HITL 제안 + 발굴 산출물 */
   suggestions: SkillSuggestion[];
+  /** 라이브 파킹 제안을 제안함에 즉시 미러(안전망) — 발생 세션과 무관하게 즉시 보여
+   *  세션 이동 시 놓치지 않게 한다. 서버 타임아웃 이동(§9.2) 전에도 뜨며, approval_id로
+   *  파킹 결정에 라우팅된다. 서버 row가 나중에 같은 제안을 대표하면 병합이 대체한다. */
+  mirrorParkedProposal: (d: SkillPatchProposedData, sessionId: string) => void;
+  /** 채팅 카드에서 결정됨 → 제안함 미러만 제거(카드는 자체 approved/denied 상태 유지). */
+  dropParkedMirror: (approvalId: string) => void;
+  /** 제안함에서 결정된 파킹 approval_id 집합 — 채팅의 낡은 patch 카드를 걷어내는 데 쓴다. */
+  resolvedApprovals: Set<string>;
   /** 제안함 재조회 (GET /skills/suggestions) */
   refreshSuggestions: () => Promise<void>;
   /** 제안함 항목 승인/거부 → 런타임 적용 + 목록/스킬 동기화 */
@@ -182,6 +190,17 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [myPlugins, setMyPlugins] = useState<MyPlugin[]>([]);
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [suggestions, setSuggestions] = useState<SkillSuggestion[]>([]);
+  // 콜백(refresh/decide) 내부에서 최신 suggestions·해소집합을 deps 없이 읽기 위한 ref 미러.
+  // deps에 넣으면 콜백 → 컨텍스트 value → hydrate effect가 연쇄 재실행되므로 ref로 우회한다.
+  const suggestionsRef = useRef<SkillSuggestion[]>([]);
+  useEffect(() => { suggestionsRef.current = suggestions; }, [suggestions]);
+  const resolvedRef = useRef<Set<string>>(new Set());
+  // 제안함에서 결정된 파킹 approval_id — 렌더(ChatScreen의 낡은 카드 정리)용 상태 + 콜백용 ref.
+  const [resolvedApprovals, setResolvedApprovals] = useState<Set<string>>(new Set());
+  const markResolved = useCallback((approvalId: string) => {
+    resolvedRef.current.add(approvalId);
+    setResolvedApprovals(new Set(resolvedRef.current));
+  }, []);
   /** 런타임 첫 hydrate 진행 중 — 스크린이 스켈레톤 vs 빈상태를 구분하는 데 쓴다. */
   const [hydrating, setHydrating] = useState(true);
   const [highlightedSkill, setHighlightedSkill] = useState<string | null>(null);
@@ -211,7 +230,63 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const refreshSuggestions = useCallback(async () => {
     const res = await api.getSkillSuggestions();
-    if (res.success && res.data) setSuggestions(res.data);
+    if (!res.success || !res.data) return;
+    const server = res.data;
+    // 서버 영속 row가 같은 제안을 대표하면(타임아웃 이동, §9.2) 라이브 미러를 대체한다.
+    // 키 = skill_id + 버전쌍. 서버가 아직 모르고 결정도 안 된 미러만 보존한다.
+    const key = (s: SkillSuggestion) => `${s.skill_id}:${s.payload.from_version}:${s.payload.to_version}`;
+    const serverKeys = new Set(server.map(key));
+    setSuggestions((prev) => {
+      const keptMirrors = prev.filter(
+        (s) => s.approval_id && !serverKeys.has(key(s)) && !resolvedRef.current.has(s.approval_id),
+      );
+      return [...keptMirrors, ...server];
+    });
+  }, []);
+
+  // 라이브 파킹 제안을 제안함에 즉시 미러(안전망, Self-Improvement v3). 서버는
+  // 무응답 타임아웃/연결끊김 시에만 inbox로 옮기지만(§9.2), 세션을 옮기면 채팅 카드를
+  // 놓칠 수 있어 즉시 보이는 사본을 둔다. approval_id를 실어 결정은 파킹 엔드포인트로
+  // 라우팅하고, 서버 row가 나중에 같은 제안을 대표하면 refreshSuggestions 병합이 대체한다.
+  const mirrorParkedProposal = useCallback((d: SkillPatchProposedData, sessionId: string) => {
+    if (resolvedRef.current.has(d.approval_id)) return;
+    const fromV = d.from_version ?? 0;
+    const toV = d.to_version ?? fromV + 1;
+    setSuggestions((prev) => {
+      if (prev.some((s) => s.approval_id === d.approval_id)) return prev; // 중복 방지(멱등)
+      const mirror: SkillSuggestion = {
+        id: d.approval_id,
+        approval_id: d.approval_id,
+        created_at: new Date().toISOString(),
+        origin: d.trigger === 'T5' ? 'agent' : 'review',
+        kind: fromV === 0 ? 'create' : 'patch',
+        skill_id: d.skill_id,
+        payload: {
+          skill_id: d.skill_id,
+          changelog: d.changelog,
+          diff: d.diff,
+          trigger: d.trigger,
+          from_version: fromV,
+          to_version: toV,
+          proposed_body:
+            d.proposed_body ??
+            d.diff.lines.filter((l) => l.type !== 'remove').map((l) => l.text).join('\n'),
+          warnings: d.warnings,
+          session_id: sessionId,
+          derived_from_external: d.derived_from_external,
+          evidence_message_ids: d.evidence_message_ids,
+        },
+        status: 'pending',
+        decided_at: null,
+      };
+      return [mirror, ...prev];
+    });
+  }, []);
+
+  // 채팅 카드에서 결정됨 → 미러만 제거(카드는 자체 approved/denied 상태를 보여주므로
+  // 해소집합에는 넣지 않는다 — 그건 제안함 쪽 결정 때만 카드를 걷어내는 신호다).
+  const dropParkedMirror = useCallback((approvalId: string) => {
+    setSuggestions((prev) => prev.filter((s) => s.approval_id !== approvalId));
   }, []);
 
   // runtime API에서 스킬 목록·메모리 로드 (GET /skills, GET /memories).
@@ -322,13 +397,32 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // 스킬 목록을 재동기화해 MySkills/패널이 즉시 새 버전을 보여주게 한다.
   const decideSuggestion = useCallback(
     async (id: string, approved: boolean, editedBody?: string): Promise<boolean> => {
+      const target = suggestionsRef.current.find((s) => s.id === id);
+      // 라이브 파킹 미러(approval_id 보유)는 아직 서버 제안함 row가 아니다 — 파킹
+      // 엔드포인트(respondSkillPatch)로 결정하고, 낡은 채팅 카드가 걷히도록 해소집합에 넣는다.
+      if (target?.approval_id) {
+        const res = await api.respondSkillPatch(target.skill_id, {
+          approval_id: target.approval_id,
+          decision: approved ? 'approve' : 'reject',
+          edited_body: editedBody,
+        });
+        if (!res.success) {
+          // 파킹이 이미 타임아웃/해소됨 → 서버 row로 재동기화해 제대로 다시 결정하게 한다.
+          await refreshSuggestions();
+          return false;
+        }
+        markResolved(target.approval_id);
+        setSuggestions((prev) => prev.filter((s) => s.id !== id));
+        if (approved) void loadSkills();
+        return true;
+      }
       const res = await api.decideSkillSuggestion(id, approved, editedBody);
       if (!res.success) return false;
       setSuggestions((prev) => prev.filter((s) => s.id !== id));
       if (approved) void loadSkills();
       return true;
     },
-    [loadSkills],
+    [loadSkills, refreshSuggestions, markResolved],
   );
 
   // 크로스세션 발굴(수동 트리거) — LLM 1회 호출이라 느릴 수 있다(호출측이 로딩 표시).
@@ -391,6 +485,9 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       proposals,
       setProposals,
       suggestions,
+      mirrorParkedProposal,
+      dropParkedMirror,
+      resolvedApprovals,
       refreshSuggestions,
       decideSuggestion,
       discoverNow,
@@ -401,7 +498,7 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       jumpToSkill,
       panelScrollRef,
     }),
-    [hydrating, skills, signals, installed, details, myPlugins, proposals, suggestions, refreshSuggestions, decideSuggestion, discoverNow, removeSignal, installSkillFromMarket, installPluginFromMarket, highlightedSkill, jumpToSkill],
+    [hydrating, skills, signals, installed, details, myPlugins, proposals, suggestions, mirrorParkedProposal, dropParkedMirror, resolvedApprovals, refreshSuggestions, decideSuggestion, discoverNow, removeSignal, installSkillFromMarket, installPluginFromMarket, highlightedSkill, jumpToSkill],
   );
 
   return <LearningCtx.Provider value={value}>{children}</LearningCtx.Provider>;

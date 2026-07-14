@@ -287,7 +287,7 @@ patch로 표현되고(`from_version=0`), `skill_patch_proposed`가 diff 카드�
 ```
 
 거부 시: 변경 없음 + **ledger에 `rejected` 기록**(§9 — 반복 거부 쿨다운의 원천).
-**무응답(timeout, 기본 5분)은 2026-07-03부터 폐기가 아니라 제안함(suggestion inbox, §9)으로 이동**한다 — 무응답은 거부 의사표시가 아니라 자리 비움일 수 있다. 적용은 여전히 하지 않으므로(본문 불변) safe-default는 유지된다([RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md) 5.1). 턴 중단(abort)로 인한 cancelled는 그대로 폐기. ~~(향후) 동일 스킬에 대한 반복 거부 시 제안 빈도를 하향한다~~ → **구현 완료(2026-07-03)**: 쿨다운 창(`review_rejection_cooldown_hours`, 기본 24h) 안에서 `review_max_rejections`(기본 2)회 이상 거부된 스킬은 리뷰/발굴이 제안을 만들지 않고(사후 억제), 최근 거부 목록이 리뷰 프롬프트에 실려 LLM이 애초에 재제안을 피한다(사전 회피) — §9.
+**무응답(timeout, 기본 5분)은 2026-07-03부터 폐기가 아니라 제안함(suggestion inbox, §9)으로 이동**한다 — 무응답은 거부 의사표시가 아니라 자리 비움일 수 있다. 단 이 서버 이동은 5분 지연이 있어, 프론트는 파킹 즉시 제안함에 사본을 미러해 세션을 옮겨도 놓치지 않게 한다(안전망 — §9.2, 2026-07-14). 적용은 여전히 하지 않으므로(본문 불변) safe-default는 유지된다([RICE_RUNTIME_DESIGN.md](RICE_RUNTIME_DESIGN.md) 5.1). 턴 중단(abort)로 인한 cancelled는 그대로 폐기. ~~(향후) 동일 스킬에 대한 반복 거부 시 제안 빈도를 하향한다~~ → **구현 완료(2026-07-03)**: 쿨다운 창(`review_rejection_cooldown_hours`, 기본 24h) 안에서 `review_max_rejections`(기본 2)회 이상 거부된 스킬은 리뷰/발굴이 제안을 만들지 않고(사후 억제), 최근 거부 목록이 리뷰 프롬프트에 실려 LLM이 애초에 재제안을 피한다(사전 회피) — §9.
 
 #### 5.2.5 계약 변경 요약 (CONTRACTS 반영 필요)
 
@@ -477,7 +477,7 @@ v2까지의 루프는 "무엇을 배울까"는 잘 판단했지만 **"내 제안
 
 ### 9.2 skill_suggestions — 영속 제안함(inbox)
 
-파킹(스트림) 밖에서 살아남는 제안의 수신처. 두 유입원:
+파킹(스트림) 밖에서 살아남는 제안의 수신처. **서버가 영속하는** 유입원 둘:
 - **타임아웃 이동** (§5.2.4) — 무응답 제안은 폐기 대신 여기로.
 - **발굴(discovery)** (§9.3) — 애초에 파킹할 스트림이 없는 백그라운드 산출물.
 
@@ -488,6 +488,27 @@ archive → `decide_archive`로 수렴, 거부는 ledger에 기록되어 쿨다�
 위생: 같은 skill_id+kind의 pending 중복은 멱등 스킵, pending 총량 상한
 (`suggestion_pending_cap`, 기본 30). UI: LearningPanel "제안함" 섹션(실배선 —
 이전의 목업 proposals와 별개).
+
+**프론트 라이브 미러(안전망, 2026-07-14).** 위 둘은 서버가 채우는 영속 유입원이라
+파킹 제안은 서버 타임아웃(5분) 전까지 inbox에 없다 — 그동안 제안은 채팅 스트림의
+diff 카드에만 있어, 사용자가 세션을 옮기면 놓칠 수 있다. 그래서 **프론트는
+`skill_patch_proposed`를 받는 즉시 제안함에도 클라이언트 사본을 미러**한다(발생
+세션 무관). 서버 계약·`skill_suggestions` 테이블은 불변 — 미러는 순수 프론트
+표시/결정 레이어다:
+- 미러 항목만 `approval_id`를 실어(서버 row는 없음) 구분한다. 결정은 파킹
+  엔드포인트 `POST /skills/{id}/patch`로 라우팅하고, 서버 inbox row는 종전대로
+  `POST /skills/suggestions/{sid}/decision`.
+- 채팅 diff 카드 ↔ 제안함 미러는 서로 정리한다: 한쪽에서 결정하면 반대쪽을
+  제거/걷어낸다(이중 표시·이중 결정 방지).
+- 5분 뒤 서버가 타임아웃분을 실제 inbox row로 올리면, 프론트가 같은 키
+  (`skill_id`+버전쌍)로 미러를 서버 row로 대체한다(`GET /skills/suggestions` 병합).
+  이미 파킹이 만료된 미러를 결정하면 실패하고 재조회로 자가치유한다.
+- 재연결 복구(`GET /sessions/{id}/pending-approvals`)로 되살아난 아직-파킹
+  제안도 같은 방식으로 미러한다.
+
+seam: rice-app `LearningContext`(`mirrorParkedProposal`/`dropParkedMirror`/
+`resolvedApprovals`) + `ChatScreen`. 채팅 카드 **세션 격리 불변식**: 모든
+`handleSkillPatchProposed` 호출은 캡처된 sessionId를 넘긴다(폴백이면 세션 혼선 — learn 경로 버그였고 2026-07-14 수정).
 
 ### 9.3 크로스세션 발굴 (DiscoveryEngine)
 

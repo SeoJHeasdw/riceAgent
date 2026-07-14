@@ -126,6 +126,7 @@ export const TransparencyPanel: React.FC<TransparencyPanelProps> = ({ open, onCl
   }, [open, refresh]);
 
   const quarantined = useMemo(() => memories.filter((m) => m.status === 'quarantined'), [memories]);
+  const active = useMemo(() => memories.filter((m) => m.status !== 'quarantined'), [memories]);
   const activeCount = memories.length - quarantined.length;
 
   const latestRender: ContextRenderSummary | null = useMemo(() => {
@@ -257,6 +258,45 @@ export const TransparencyPanel: React.FC<TransparencyPanelProps> = ({ open, onCl
                       {t('transparency.deleteBtn')}
                     </button>
                   </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        {/* 2.5 저장된(활성) 메모리 — 매 턴 주입되는 사실·선호. 개별 삭제가 HITL 없는
+             학습 경로의 유일한 사후 통제(위생). LearningPanel의 "나에 대한 모델" 섹션을
+             플러그인 리스트로 교체하며 이 통제를 감사 표면으로 이관했다(2026-07-14). */}
+        <section>
+          <SectionTitle icon="bookmark" count={active.length}>
+            {t('transparency.sectionMemories')}
+          </SectionTitle>
+          {active.length === 0 ? (
+            <p className="text-body-short-01 text-text-helper">
+              {t('transparency.memoriesEmpty')}
+            </p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {active.map((m) => (
+                <li
+                  key={m.id}
+                  className="flex items-start gap-2 bg-layer-01 border border-border-subtle-01 rounded-md px-3 py-2"
+                >
+                  <Icon name="bookmark" className="w-4 h-4 text-icon-secondary mt-0.5 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 mb-0.5">
+                      <Tag size="sm">{m.kind === 'fact' ? t('transparency.memoryKindFact') : t('transparency.memoryKindPref')}</Tag>
+                    </div>
+                    <p className="text-body-short-01 text-text-primary break-words">{m.content}</p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={busyId === m.id}
+                    onClick={() => void dismissMemory(m.id)}
+                    className="text-caption-01 px-2 py-1 rounded text-text-secondary hover:bg-layer-hover-01 disabled:opacity-50 flex-shrink-0"
+                  >
+                    {t('transparency.deleteBtn')}
+                  </button>
                 </li>
               ))}
             </ul>

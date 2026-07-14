@@ -1272,69 +1272,6 @@ const PatchProposalCard: React.FC<{
   );
 };
 
-// ── skill proposal (human-in-the-loop save, LL-2) ────────────
-// the loop proposes a new skill; the user confirms before it is saved.
-const SkillProposalCard: React.FC<{
-  m: Extract<ThreadMessage, { kind: 'skill' }>;
-  onJumpSkill?: (id: string) => void;
-  /** actually persist the skill to the learning store */
-  onSave?: () => void;
-}> = ({ m, onJumpSkill, onSave }) => {
-  const [saved, setSaved] = useState<boolean | null>(null);
-  const { t } = useTranslation('chat');
-  return (
-    <div className="ai-tile p-4">
-      <div className="flex items-center gap-2 mb-1.5">
-        <Icon name="skill" size={14} className="text-icon-primary" />
-        <span className="font-semibold text-text-primary text-body-short-01">
-          {m.skill} {m.ver}
-        </span>
-        {saved !== false && (
-          <Tag type={saved === true ? 'green' : 'purple'} size="sm">
-            {saved === true ? t('message.skillSaved') : t('message.skillProposed')}
-          </Tag>
-        )}
-      </div>
-      <div className="text-body-short-01 font-semibold text-text-primary mb-1.5">
-        {saved === null ? t('message.skillSavePrompt') : m.title}
-      </div>
-      <p className="text-body-short-01 text-text-secondary mb-2.5">{m.desc}</p>
-      {saved === null ? (
-        <div className="flex items-center gap-2">
-          <span className="text-caption-01 text-text-helper">{m.meta}</span>
-          <div className="flex-1" />
-          <Button kind="ghost" size="sm" onClick={() => setSaved(false)}>
-            {t('message.skillUseOnce')}
-          </Button>
-          <Button
-            kind="primary"
-            size="sm"
-            icon={<Icon name="bookmark" size={14} />}
-            onClick={() => {
-              setSaved(true);
-              onSave?.();
-            }}
-          >
-            {t('message.skillSave')}
-          </Button>
-        </div>
-      ) : saved === true ? (
-        <div className="flex items-center gap-2.5">
-          <span className="inline-flex items-center gap-1.5 text-caption-01 text-support-success">
-            <Icon name="check-circle" size={13} /> {t('message.skillSavedStatus')}
-          </span>
-          <div className="flex-1" />
-          <Button kind="ghost" size="sm" icon={<Icon name="arrow-up-right" size={14} />} onClick={() => onJumpSkill?.(m.skillId)}>
-            {t('message.skillViewInPanel')}
-          </Button>
-        </div>
-      ) : (
-        <span className="text-caption-01 text-text-helper">{t('message.skillNotSaved')}</span>
-      )}
-    </div>
-  );
-};
-
 // ── user-bubble affordance (copy on hover, beside timestamp) ─
 const UserCopyButton: React.FC<{ text: string }> = ({ text }) => {
   const [copied, setCopied] = useState(false);
@@ -1369,7 +1306,6 @@ const AssistantBlock: React.FC<{
   onCorrect?: (text: string) => void;
   onJumpSkill?: (id: string) => void;
   onRegenerate?: () => void;
-  onSaveSkill?: (m: Extract<ThreadMessage, { kind: 'skill' }>) => void;
   onApprovePatch?: (m: Extract<ThreadMessage, { kind: 'patch' }>, editedBody?: string) => void;
   onRejectPatch?: (m: Extract<ThreadMessage, { kind: 'patch' }>) => void;
   onRespondApproval?: (m: Extract<ThreadMessage, { kind: 'approval' }>, decision: 'approve' | 'reject') => void;
@@ -1377,7 +1313,7 @@ const AssistantBlock: React.FC<{
   actionsCopyText?: string;
   /** epoch ms for the action bar timestamp */
   actionsSentAt?: number;
-}> = ({ m, onCorrect, onJumpSkill, onRegenerate, onSaveSkill, onApprovePatch, onRejectPatch, onRespondApproval, showActions, actionsCopyText, actionsSentAt }) => {
+}> = ({ m, onCorrect, onJumpSkill, onRegenerate, onApprovePatch, onRejectPatch, onRespondApproval, showActions, actionsCopyText, actionsSentAt }) => {
   const { openFile } = useFileViewer();
   if (m.kind === 'thinking') return <ThinkingBlock m={m} />;
   if (m.kind === 'toolrun') return <ToolCallCard m={m} onJumpSkill={onJumpSkill} />;
@@ -1389,18 +1325,6 @@ const AssistantBlock: React.FC<{
           <MessageActions onRegenerate={onRegenerate} onCorrect={onCorrect} copyText={actionsCopyText} sentAt={actionsSentAt} />
         )}
       </>
-    );
-  }
-
-  if (m.kind === 'skill') {
-    const skillMsg = m;
-    return (
-      <div className="my-1 max-w-[620px]">
-        <SkillProposalCard m={skillMsg} onJumpSkill={onJumpSkill} onSave={() => onSaveSkill?.(skillMsg)} />
-        {showActions && (
-          <MessageActions onRegenerate={onRegenerate} onCorrect={onCorrect} copyText={actionsCopyText} sentAt={actionsSentAt} />
-        )}
-      </div>
     );
   }
 
@@ -1476,7 +1400,6 @@ export interface ChatTurnProps {
   onCorrect?: (text: string) => void;
   onJumpSkill?: (id: string) => void;
   onRegenerate?: () => void;
-  onSaveSkill?: (m: Extract<ThreadMessage, { kind: 'skill' }>) => void;
   /** approve a skill-improvement (patch) proposal — bumps version, keeps history */
   onApprovePatch?: (m: Extract<ThreadMessage, { kind: 'patch' }>, editedBody?: string) => void;
   /** reject a patch proposal — resolves the server-side parking immediately */
@@ -1498,7 +1421,6 @@ export const ChatTurn: React.FC<ChatTurnProps> = ({
   onCorrect,
   onJumpSkill,
   onRegenerate,
-  onSaveSkill,
   onApprovePatch,
   onRejectPatch,
   onRespondApproval,
@@ -1553,7 +1475,6 @@ export const ChatTurn: React.FC<ChatTurnProps> = ({
                 onCorrect={onCorrect}
                 onJumpSkill={onJumpSkill}
                 onRegenerate={onRegenerate}
-                onSaveSkill={onSaveSkill}
                 onApprovePatch={onApprovePatch}
                 onRejectPatch={onRejectPatch}
                 onRespondApproval={onRespondApproval}

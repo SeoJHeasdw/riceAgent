@@ -917,7 +917,7 @@ const ChatTaskProgress = () => (
 );
 
 function ChatScreen() {
-  const { jumpToSkill, setSkills, setDetails, panelScrollRef, refreshSuggestions } = useLearning();
+  const { jumpToSkill, setSkills, setDetails, panelScrollRef, refreshSuggestions, mirrorParkedProposal, dropParkedMirror, resolvedApprovals } = useLearning();
   const toast = useToast();
   const { t } = useTranslation('chat');
 
@@ -1298,53 +1298,6 @@ function ChatScreen() {
     runLiveTurn(text);
   };
 
-  // chat "스킬로 저장" → actually register the skill in the learning store
-  // (so it appears in the learning panel and the My Skills screen immediately).
-  const saveSkillFromChat = (m: Extract<ThreadMessage, { kind: 'skill' }>) => {
-    setSkills((arr) => {
-      // already exists → count this as a reuse/confirmation, re-enable it
-      if (arr.some((s) => s.id === m.skillId)) {
-        return arr.map((s) => (s.id === m.skillId ? { ...s, enabled: true, uses: s.uses + 1, trend: 'trend_just_now' } : s));
-      }
-      const sv = m.save;
-      return [
-        ...arr,
-        { id: m.skillId, name: m.skill, ver: m.ver, uses: 0, trend: 'trend_new', enabled: true, command: sv?.command },
-      ];
-    });
-    // build a detail record for a newly-created skill from the save payload
-    if (m.save) {
-      const sv = m.save;
-      setDetails((d) =>
-        d[m.skillId]
-          ? d
-          : {
-              ...d,
-              [m.skillId]: {
-                summary: sv.summary,
-                createdFrom: 'created_from_chat',
-                lastUsed: 'last_used_just_now',
-                shared: false,
-                rules: (sv.rules ?? []).map((t2, i) => ({ id: `csr${Date.now()}-${i}`, text: t2, source: t('learning.sourceFromChat'), on: true })),
-                versions: [
-                  {
-                    ver: m.ver,
-                    when: 'last_used_just_now',
-                    note: t('learning.noteFromChat'),
-                    current: true,
-                    rules: (sv.rules ?? []).map((t2) => ({ text: t2, added: true })),
-                  },
-                ],
-                usage: [{ kind: 'chat', name: activeSession?.title ?? t('conversation'), icon: 'chat' }],
-                permissions: sv.permissions ?? [],
-                steps: sv.steps,
-              },
-            },
-      );
-    }
-    jumpToSkill(m.skillId);
-  };
-
   // approve a skill-improvement (patch) from chat → actually apply it to the
   // learning store: version++, keep the old version in history, reflect the
   // body change (steps/permissions). Mirrors LEARNING_LOOP 5.2.4 so that "쓸수록
@@ -1374,13 +1327,6 @@ function ChatScreen() {
             { ver: m.toVer, when: 'last_used_just_now', note, current: true, rules: m.newRules ?? [] },
             ...cur.versions.map((v) => ({ ...v, current: false })),
           ],
-          // reflect the body change (data source moved) in procedure + permissions
-          steps: cur.steps?.map((st) =>
-            st.tool === 'db2.query'
-              ? { ...st, tool: 'wxd.query', label: t('mock.wxdStepLabel'), desc: t('mock.wxdStepDesc') }
-              : st,
-          ),
-          permissions: cur.permissions.map((p) => (p.name === 'db2-prod.sales' ? { ...p, name: 'watsonx.data.sales' } : p)),
         },
       };
     });
@@ -1393,6 +1339,8 @@ function ChatScreen() {
         void refreshSuggestions();
       }
     });
+    // 채팅 카드에서 결정 → 제안함에 미러돼 있던 안전망 사본을 걷어낸다(이중 표시 방지).
+    dropParkedMirror(m.approvalId);
     jumpToSkill(m.skillId);
   };
 
@@ -1402,6 +1350,7 @@ function ChatScreen() {
   // 않으면 사용자가 거부한 제안이 제안함에 다시 나타나는 모순이 생긴다.
   const handleRejectPatch = (m: Extract<ThreadMessage, { kind: 'patch' }>) => {
     void api.respondSkillPatch(m.skillId, { approval_id: m.approvalId, decision: 'reject' });
+    dropParkedMirror(m.approvalId);
   };
 
   // tool-execution approval (HITL) → POST the decision back to the runtime,
@@ -1656,6 +1605,10 @@ function ChatScreen() {
     // POST /skills/{id}/patch 로 별도 전송 (pendingToThread 로직 재사용).
     const card = pendingToThread({ approval_id: d.approval_id, kind: 'skill_patch', payload: d });
     if (card) updateThreadFor(sessionId, (p) => [...p, card]);
+    // 안전망(Self-Improvement v3): 발생 세션과 무관하게 제안함에도 즉시 미러한다 —
+    // 사용자가 세션을 옮기면 채팅 카드를 놓칠 수 있어서다. 채팅 카드/제안함 어느
+    // 쪽에서 결정해도 서로 정리된다(dropParkedMirror ↔ resolvedApprovals).
+    mirrorParkedProposal(d, sessionId);
   };
 
   const handleSkillPatched = (d: { skill_id: string; version: number }) => {
@@ -1698,6 +1651,10 @@ function ChatScreen() {
                 shared: false,
                 rules: [],
                 versions: [{ ver: `v${d.version}`, when: 'last_used_just_now', note: t('learning.noteAutoCreated'), current: true }],
+                // 'idle' = 런타임 백드 표식. 없으면 SkillDetailView의 runtimeBacked가
+                // false로 굳어 loadRuntimeSkillDetail(설명·분석·버전 fetch)이 스킵되고,
+                // 재부팅(loadSkills→runtimeSkillToDetail이 'idle' 부여) 전까지 stub만 보인다.
+                historyStatus: 'idle',
                 usage: [{ kind: 'chat', name: activeSession?.title ?? t('conversation'), icon: 'chat' as const }],
                 permissions: [],
               },
@@ -1724,7 +1681,9 @@ function ChatScreen() {
           handleMemoryWritten(e.data as MemoryWrittenEventData);
         } else if (e.type === 'skill_patch_proposed') {
           proposed = true;
-          handleSkillPatchProposed(e.data as SkillPatchProposedData);
+          // 캡처한 sid(학습 대상 세션)를 넘긴다 — 기본 폴백(activeSessionIdRef)이면
+          // learn 스트림 중 A→B로 옮겼을 때 카드가 B에 그려지는 세션 혼선이 난다.
+          handleSkillPatchProposed(e.data as SkillPatchProposedData, sid);
         } else if (e.type === 'skill_patched') {
           handleSkillPatched(e.data as { skill_id: string; version: number });
         } else if (e.type === 'done' && !proposed) {
@@ -1848,6 +1807,9 @@ function ChatScreen() {
         finishAnswerStream(sessionId);
         finalizeThinking(sessionId);
         finishLiveTurn(sessionId, requestId);
+        // 턴 종료마다 제안함 재동기화 — 서버가 타임아웃/연결끊김으로 inbox에 옮긴
+        // 제안(§9.2)이 라이브 미러를 대체하고, 미결정 미러는 병합이 그대로 보존한다.
+        if (connected) void refreshSuggestions();
         const sid = sessionId;
         // First turn of a new session → ask the runtime to name it from the opening
         // exchange. Separate, non-blocking call (POST /title): it does NOT hold up
@@ -1986,6 +1948,14 @@ function ChatScreen() {
         .filter((mm): mm is ThreadMessage => mm !== null);
       return recovered.length ? [...prev, ...recovered] : prev;
     });
+    // 재연결/재시작로 복구된 아직-파킹 중인 스킬 제안도 제안함에 미러(안전망) — 다른
+    // 세션을 보고 있으면 복구된 카드를 놓칠 수 있다. mirrorParkedProposal은 approval_id로
+    // 멱등이라 중복/이미결정분은 건너뛴다. (payload에 top-level approval_id를 실어준다)
+    res.data
+      .filter((p) => p.kind === 'skill_patch')
+      .forEach((p) =>
+        mirrorParkedProposal({ ...(p.payload as SkillPatchProposedData), approval_id: p.approval_id }, sessionId),
+      );
   };
 
   // Sidebar selection: load from DB when connected, else the scripted demo thread.
@@ -2147,27 +2117,9 @@ function ChatScreen() {
         {
           kind: 'agent',
           text: t('mock.agentAnswer'),
-          usedSkill: { id: 's1', label: t('mock.usedSkillLabel'), ver: 'v3' },
         },
       ]);
     }, 1700);
-
-    // learned
-    setTimeout(() => {
-      setThread((p) => [
-        ...p,
-        {
-          kind: 'skill',
-          title: t('mock.skillTitle'),
-          skill: t('mock.skillName'),
-          skillId: 's1',
-          ver: 'v1',
-          desc: t('mock.skillDesc'),
-          meta: t('mock.skillMeta'),
-        },
-      ]);
-      setSkills((arr) => arr.map((s) => (s.id === 's1' ? { ...s, uses: s.uses + 1, trend: 'trend_just_now' } : s)));
-    }, 2300);
   };
 
   const newChat = () => {
@@ -2279,27 +2231,33 @@ function ChatScreen() {
   // the *last* agent message of each turn (no later agent before the next user
   // message), then push the bar below any trailing skill/memory tiles it produced
   // (e.g. "새 스킬을 학습했어요") so it sits at the very bottom.
+  // 제안함에서 결정된 파킹 제안의 낡은 채팅 카드는 렌더에서 걷어낸다(라이브 한정 —
+  // 리로드 시엔 해소된 제안이 pending-approvals에 없어 자연히 사라진다). 평소엔
+  // resolvedApprovals가 비어 원본 thread를 그대로 쓴다(제로 비용).
+  const renderThread = resolvedApprovals.size
+    ? thread.filter((m) => !(m.kind === 'patch' && resolvedApprovals.has(m.approvalId)))
+    : thread;
   const actionsCopyAt: Record<number, string> = {};
   // index → epoch ms of the agent message that owns the action bar
   const actionsTimeAt: Record<number, number> = {};
-  thread.forEach((m, i) => {
+  renderThread.forEach((m, i) => {
     if (m.kind !== 'agent') return;
     // skip intermediate narration: another agent message follows in this same turn
-    for (let j = i + 1; j < thread.length; j++) {
-      if (thread[j].kind === 'user') break;
-      if (thread[j].kind === 'agent') return;
+    for (let j = i + 1; j < renderThread.length; j++) {
+      if (renderThread[j].kind === 'user') break;
+      if (renderThread[j].kind === 'agent') return;
     }
     let end = i;
-    while (end + 1 < thread.length && (thread[end + 1].kind === 'skill' || thread[end + 1].kind === 'memory' || thread[end + 1].kind === 'patch' || thread[end + 1].kind === 'approval')) end++;
+    while (end + 1 < renderThread.length && (renderThread[end + 1].kind === 'memory' || renderThread[end + 1].kind === 'patch' || renderThread[end + 1].kind === 'approval')) end++;
     actionsCopyAt[end] = m.text;
     if (m.sentAt) actionsTimeAt[end] = m.sentAt;
   });
 
   // group consecutive non-user messages into one assistant turn; each user
   // message is its own turn. The turn then renders one "RICE" identity
-  // over all its blocks (thinking / tool-run / answer / skill / memory).
+  // over all its blocks (thinking / tool-run / answer / memory).
   const turns: { key: string; items: { m: ThreadMessage; index: number }[] }[] = [];
-  thread.forEach((m, i) => {
+  renderThread.forEach((m, i) => {
     const last = turns[turns.length - 1];
     if (m.kind !== 'user' && last && last.items[0].m.kind !== 'user') {
       last.items.push({ m, index: i });
@@ -2368,7 +2326,6 @@ function ChatScreen() {
                       onCorrect={handleCorrect}
                       onJumpSkill={jumpToSkill}
                       onRegenerate={regenerate}
-                      onSaveSkill={saveSkillFromChat}
                       onApprovePatch={handleApprovePatch}
                       onRejectPatch={handleRejectPatch}
                       onRespondApproval={handleToolApproval}

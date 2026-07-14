@@ -227,6 +227,9 @@ export interface SkillPatchProposedData {
  * 파킹 타임아웃/백그라운드 발굴처럼 스트림 밖에서 태어난 제안이 여기 산다. */
 export interface SkillSuggestion {
   id: string;
+  /** 클라이언트 전용 — 라이브 파킹 미러(안전망)에만 존재하고 서버 inbox row엔 없다.
+   *  존재하면 결정을 파킹 엔드포인트(respondSkillPatch, approval_id)로 라우팅한다. */
+  approval_id?: string;
   created_at: string;
   origin: 'review' | 'learn' | 'agent' | 'discovery' | 'consolidation' | 'timeout' | 'review_sweep' | 'disconnected';
   kind: 'create' | 'patch' | 'archive';
