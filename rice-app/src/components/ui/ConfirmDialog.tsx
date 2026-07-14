@@ -89,13 +89,14 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
 
         {/* actions — 같은 표면 위 우측 정렬. 취소는 텍스트 버튼, 확인만 채워 위계를 만든다 */}
         <div className="flex items-center justify-end gap-1.5 px-4 py-3">
-          <button
+          <Button
             ref={cancelRef}
+            kind="ghost"
+            size="xs"
             onClick={onClose}
-            className="h-8 px-3 rounded-lg text-body-short-01 font-medium text-text-secondary hover:text-text-primary hover:bg-layer-hover-01 transition-colors"
           >
             {cancelLabel ?? t('cancel')}
-          </button>
+          </Button>
           <Button
             kind={tone}
             size="xs"

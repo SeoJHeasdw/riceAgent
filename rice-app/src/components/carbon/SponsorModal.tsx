@@ -82,15 +82,15 @@ export const SponsorModal: React.FC<SponsorModalProps> = ({
           </div>
 
           {/* Amount selection — 세그먼트 그리드 (앱 공통 segmented control 문법) */}
-          <div className="grid grid-cols-4 gap-1 p-1 bg-field-01 border border-border-subtle-01 rounded-xl mb-5">
+          <div className="grid grid-cols-4 gap-0.5 p-0.5 bg-field-01 border border-border-subtle-01 rounded-lg mb-4">
             {presetAmounts.map((preset) => (
               <button
                 key={preset}
                 onClick={() => setAmount(preset)}
                 aria-pressed={amount === preset}
-                className={`py-2.5 text-center text-body-short-01 font-semibold font-mono rounded-lg transition-all duration-150 ${
+                className={`h-7 px-2 text-center text-caption-01 font-medium font-mono rounded-md transition-colors duration-150 ${
                   amount === preset
-                    ? 'bg-interactive text-white shadow-elevation-1'
+                    ? 'bg-interactive text-text-on-color'
                     : 'bg-transparent text-text-secondary hover:bg-layer-hover-01 hover:text-text-primary'
                 }`}
               >
@@ -102,7 +102,7 @@ export const SponsorModal: React.FC<SponsorModalProps> = ({
           {/* Sponsor button */}
           <Button
             kind="primary"
-            size="lg"
+            size="md"
             onClick={handleSponsor}
             className="w-full"
             icon={

@@ -210,18 +210,18 @@ export const ModelSettingsPanel: React.FC<ModelSettingsPanelProps> = ({
           <span className="mr-auto hidden items-center gap-1.5 text-caption-01 text-text-helper sm:flex">
             <Icon name="lock" size={12} /> {t('modelSettings.saveOnDevice')}
           </span>
-          <button
+          <Button
+            kind="ghost"
+            size="sm"
             onClick={requestClose}
-            className="h-8 px-3 rounded-lg text-body-short-01 font-medium text-text-secondary hover:text-text-primary hover:bg-layer-hover-01 transition-colors"
           >
             {t('modelSettings.cancel')}
-          </button>
+          </Button>
           <Button
             kind="primary"
             size="sm"
             onClick={handleSave}
             disabled={!draft.canSave}
-            className="px-5"
             icon={<Icon name="check" size={14} />}
             title={draft.canSave ? undefined : draft.mode === 'local' ? t('modelSettings.saveDisabledLocal') : t('modelSettings.saveDisabledSaas')}
           >

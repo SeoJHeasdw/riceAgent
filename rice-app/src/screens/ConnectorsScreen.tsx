@@ -648,12 +648,11 @@ const ConnectorDetailView: React.FC<{
                 </div>
               ) : (
                 <Button
-                  kind="ghost"
+                  kind="danger-ghost"
                   size="sm"
                   disabled={busy}
                   icon={<Icon name="trash" size={14} />}
                   onClick={() => setConfirmingRemove(true)}
-                  className="!text-red-60 hover:!bg-red-60/10"
                 >
                   {t('detail.btnRemove')}
                 </Button>
@@ -1227,7 +1226,7 @@ function ConnectorsScreen() {
       >
         {/* 구분: 원격 커넥터 / 로컬 MCP (개발자) */}
         <div className="px-4 pt-4">
-          <div className="grid grid-cols-2 gap-1 p-1 bg-field-01 border border-border-subtle-01 rounded-xl">
+          <div className="grid grid-cols-2 gap-0.5 p-0.5 bg-field-01 border border-border-subtle-01 rounded-lg">
             {([
               { id: 'remote' as const, label: t('kindTab.remote') },
               { id: 'local-mcp' as const, label: t('kindTab.localMcp') },
@@ -1238,10 +1237,10 @@ function ConnectorsScreen() {
                   key={opt.id}
                   onClick={() => setKind(opt.id)}
                   aria-pressed={active}
-                  className={`py-1.5 text-caption-01 font-semibold rounded-lg transition-all duration-150 ${
+                  className={`h-6 px-2 text-caption-01 font-medium rounded-md transition-colors duration-150 ${
                     active
-                      ? 'bg-interactive text-white shadow-elevation-1'
-                      : 'bg-transparent text-text-secondary hover:bg-layer-hover-01'
+                      ? 'bg-interactive text-text-on-color'
+                      : 'bg-transparent text-text-secondary hover:bg-layer-hover-01 hover:text-text-primary'
                   }`}
                 >
                   {opt.label}

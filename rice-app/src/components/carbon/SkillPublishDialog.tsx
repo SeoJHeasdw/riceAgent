@@ -123,7 +123,7 @@ export const SkillPublishDialog: React.FC<SkillPublishDialogProps> = ({ open, sk
           >
             {t('publish.cancelBtn')}
           </button>
-          <Button kind="primary" size="sm" className="!h-7" icon={<Icon name="share" size={14} />} onClick={onConfirm}>
+          <Button kind="primary" size="sm" icon={<Icon name="share" size={14} />} onClick={onConfirm}>
             {t('publish.confirmBtn')}
           </Button>
         </div>

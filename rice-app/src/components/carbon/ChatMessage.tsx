@@ -563,8 +563,7 @@ const MessageActions: React.FC<{
             <div className="flex-1" />
             <Button
               kind="ghost"
-              size="sm"
-              className="!h-9"
+              size="lg"
               onClick={() => {
                 setCorrecting(false);
                 setInputText('');
@@ -572,7 +571,7 @@ const MessageActions: React.FC<{
             >
               {t('message.cancel')}
             </Button>
-            <Button kind="primary" size="sm" className="!h-9" icon={<Icon name="send" size={14} />} onClick={submit}>
+            <Button kind="primary" size="lg" icon={<Icon name="send" size={14} />} onClick={submit}>
               {t('message.teach')}
             </Button>
           </div>

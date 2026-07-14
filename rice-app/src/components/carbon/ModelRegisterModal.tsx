@@ -184,7 +184,7 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
 
   const footer = (
     <div className="flex items-center justify-between w-full">
-      <Button kind="ghost" size="sm" onClick={onClose} disabled={test === 'testing'} className="!h-7">
+      <Button kind="ghost" size="sm" onClick={onClose} disabled={test === 'testing'}>
         {t('modelRegister.cancel')}
       </Button>
       <div className="flex items-center gap-2">
@@ -195,7 +195,6 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
           loading={test === 'testing'}
           disabled={!canTest}
           icon={test !== 'testing' ? <Icon name="connect" size={14} /> : undefined}
-          className="!h-7"
         >
           {test === 'testing'
             ? t('modelRegister.testingBtn')
@@ -205,8 +204,7 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
         </Button>
         {/* 등록은 테스트 통과(게이트) 후에만 활성화 — 비활성 시 hover 안내 */}
         <div className="relative group">
-          <Button kind="primary" size="sm" onClick={handleRegister} disabled={!canRegister} className="!h-7">
-            <Icon name="check" size={14} className="mr-1.5" />
+          <Button kind="primary" size="sm" onClick={handleRegister} disabled={!canRegister} icon={<Icon name="check" size={14} />}>
             {t('modelRegister.register')}
           </Button>
           {!canRegister && (

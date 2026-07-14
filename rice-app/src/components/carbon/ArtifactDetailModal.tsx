@@ -410,10 +410,10 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
                 </span>
               ) : (
                 <Button
-                  kind="secondary"
+                  kind="danger-ghost"
                   size="sm"
                   onClick={onUninstall}
-                  className="ml-auto border-support-error/35 bg-transparent text-text-error hover:bg-support-error/10 hover:border-support-error/70"
+                  className="ml-auto"
                   icon={<Icon name="trash" size={14} />}
                 >
                   {tPlugins('detail.uninstallBtn')}
@@ -430,7 +430,7 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
               <div className="flex-1" />
               {isSkill && onSponsor && (
                 <Button
-                  kind="tertiary"
+                  kind="secondary"
                   size="sm"
                   onClick={onSponsor}
                   icon={

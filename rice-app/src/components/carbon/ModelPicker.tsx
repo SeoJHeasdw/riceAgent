@@ -256,13 +256,14 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
           <div>
             <div className="flex items-center justify-between mb-2">
               <div className="text-label-01 text-text-secondary">{t('modelPicker.sectionModel')}</div>
-              <button
+              <Button
+                kind="ghost"
+                size="xs"
                 onClick={() => setRegisterModalOpen(true)}
-                className="flex items-center gap-1 text-caption-01 text-interactive hover:underline"
+                icon={<Icon name="add" size={12} />}
               >
-                <Icon name="add" size={12} />
                 {t('modelPicker.addModel')}
-              </button>
+              </Button>
             </div>
 
             {saasModels.length === 0 ? (
@@ -345,7 +346,7 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
               />
               <Button
                 kind="secondary"
-                size="sm"
+                size="md"
                 onClick={testConnection}
                 loading={connTest === 'testing'}
                 className="flex-shrink-0 !bg-layer-02 hover:!bg-layer-hover-02"
@@ -412,15 +413,16 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <div className="text-label-01 text-text-secondary">{t('modelPicker.installedModels', { count: ollamaModels.length })}</div>
-                  <button
+                  <Button
+                    kind="ghost"
+                    size="xs"
                     onClick={fetchOllamaModels}
                     disabled={ollamaFetching}
-                    className="flex items-center gap-1 text-caption-01 text-interactive hover:underline disabled:opacity-40"
                     title={t('modelPicker.titleRefresh')}
+                    icon={<Icon name="renew" size={12} className={ollamaFetching ? 'animate-spin' : ''} />}
                   >
-                    <Icon name="renew" size={12} className={ollamaFetching ? 'animate-spin' : ''} />
                     {t('modelPicker.btnRefresh')}
-                  </button>
+                  </Button>
                 </div>
                 <div className="flex flex-col gap-1.5">
                   {ollamaModels.map((m) => {

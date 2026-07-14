@@ -1,16 +1,17 @@
 import React from 'react';
 
 /**
- * Button component — Carbon color tokens with modernized shape
- * - Rounded corners, subtle elevation on primary/danger
- * - Multiple variants: primary, secondary, tertiary, ghost, danger
+ * Button component — compact application actions using Carbon color tokens
+ * - A transparent border is always reserved so variants never change size
+ * - Ghost actions are neutral; blue is reserved for primary/tertiary emphasis
+ * - Destructive secondary actions use danger-ghost instead of ad-hoc overrides
  * - Supports icons and disabled state
  */
 
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   /** Button variant */
-  kind?: 'primary' | 'secondary' | 'tertiary' | 'ghost' | 'danger';
-  /** Button size. 앱 표준은 'sm'(h-8) — md/lg는 히어로 CTA 등 예외적 표면에만. */
+  kind?: 'primary' | 'secondary' | 'tertiary' | 'ghost' | 'danger' | 'danger-ghost';
+  /** Button size. 앱 표준은 'sm'(h-7) — md/lg는 넓은 CTA 등 예외적 표면에만. */
   size?: 'xs' | 'sm' | 'md' | 'lg';
   /** Icon element to display before text */
   icon?: React.ReactNode;
@@ -36,21 +37,22 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     },
     ref
   ) => {
-    const baseStyles = 'inline-flex items-center justify-center gap-2 font-sans font-semibold transition-colors duration-150 rounded-lg border-none outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:opacity-50 disabled:cursor-not-allowed';
+    const baseStyles = 'inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border font-sans font-medium transition-colors duration-150 outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-50';
 
     const kindStyles = {
-      primary: 'bg-interactive text-text-on-color hover:bg-interactive-hover active:bg-interactive-active',
-      secondary: 'bg-layer-01 text-text-primary border border-border-strong-01 hover:bg-layer-hover-01 active:bg-layer-active-01',
-      tertiary: 'bg-transparent text-interactive border border-interactive hover:bg-layer-hover-01 active:bg-layer-active-01',
-      ghost: 'bg-transparent text-link-primary hover:bg-layer-hover-01 active:bg-layer-active-01',
-      danger: 'bg-support-error text-text-on-color hover:bg-danger-hover active:bg-danger-active',
+      primary: 'border-interactive bg-interactive text-text-on-color hover:border-interactive-hover hover:bg-interactive-hover active:border-interactive-active active:bg-interactive-active',
+      secondary: 'border-border-strong-01 bg-layer-01 text-text-primary hover:bg-layer-hover-01 active:bg-layer-active-01',
+      tertiary: 'border-interactive bg-transparent text-interactive hover:bg-interactive/10 active:bg-interactive/15',
+      ghost: 'border-transparent bg-transparent text-text-secondary hover:bg-layer-hover-01 hover:text-text-primary active:bg-layer-active-01',
+      danger: 'border-support-error bg-support-error text-text-on-color hover:border-danger-hover hover:bg-danger-hover active:border-danger-active active:bg-danger-active',
+      'danger-ghost': 'border-support-error/45 bg-transparent text-text-error hover:border-support-error/75 hover:bg-support-error/10 active:bg-support-error/15',
     };
 
     const sizeStyles = {
-      xs: 'h-7 px-2.5 text-caption-01',
-      sm: 'h-8 px-3 text-body-short-01',
-      md: 'h-10 px-4 text-body-short-02',
-      lg: 'h-12 px-5 text-body-short-02',
+      xs: 'h-6 px-2 text-caption-01',
+      sm: 'h-7 px-2.5 text-caption-01',
+      md: 'h-8 px-3 text-body-short-01',
+      lg: 'h-9 px-4 text-body-short-01',
     };
 
     const widthStyle = fullWidth ? 'w-full' : '';

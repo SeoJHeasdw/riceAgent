@@ -263,7 +263,7 @@ ${t('author.template.defaultStep3')}
   if (published) {
     const successFooter = (
       <div className="flex items-center justify-between w-full">
-        <Button kind="ghost" size="sm" onClick={onClose} className="!h-8">
+        <Button kind="ghost" size="sm" onClick={onClose}>
           {t('author.doneCloseBtn')}
         </Button>
         <Button
@@ -271,7 +271,6 @@ ${t('author.template.defaultStep3')}
           size="sm"
           icon={<Icon name="arrow-right" size={15} />}
           onClick={() => onViewInMarket?.(published)}
-          className="!h-8"
         >
           {t('author.doneViewBtn')}
         </Button>
@@ -305,7 +304,7 @@ ${t('author.template.defaultStep3')}
   const footer = (
     <div className="flex items-center justify-between w-full">
       {step === 0 ? (
-        <Button kind="ghost" size="sm" onClick={onClose} className="!h-8">
+        <Button kind="ghost" size="sm" onClick={onClose}>
           {t('author.cancelBtn')}
         </Button>
       ) : (
@@ -314,7 +313,6 @@ ${t('author.template.defaultStep3')}
           size="sm"
           icon={<Icon name="arrow-right" size={15} className="rotate-180" />}
           onClick={() => goStep(step - 1)}
-          className="!h-8"
         >
           {t('author.backBtn')}
         </Button>
@@ -327,7 +325,6 @@ ${t('author.template.defaultStep3')}
             size="sm"
             onClick={() => goStep(step + 1)}
             disabled={step === 0 ? !step0Valid : !step1Valid}
-            className="!h-8"
           >
             {t('author.nextBtn')}
             <Icon name="arrow-right" size={15} className="ml-1.5" />
@@ -339,7 +336,6 @@ ${t('author.template.defaultStep3')}
             onClick={handlePublish}
             disabled={!canPublish}
             icon={<Icon name="share" size={15} />}
-            className="!h-8"
           >
             {t('author.publishBtn')}
           </Button>

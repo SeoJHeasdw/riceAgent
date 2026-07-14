@@ -355,13 +355,14 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
           {plugin.builtin ? (
             <span className="text-caption-01 text-text-helper">{t('myPlugins.actionBuiltinNote')}</span>
           ) : (
-            <button
+            <Button
+              kind="danger-ghost"
+              size="sm"
               onClick={remove}
-              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-support-error/40 bg-transparent text-support-error text-body-short-01 font-semibold hover:bg-support-error/10 hover:border-support-error/70 transition-colors"
+              icon={<Icon name="trash" size={14} />}
             >
-              <Icon name="trash" size={15} />
               {t('myPlugins.actionRemove')}
-            </button>
+            </Button>
           )}
         </div>
       </div>
