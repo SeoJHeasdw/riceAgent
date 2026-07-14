@@ -1669,7 +1669,7 @@ button,
   pointer-events: none;
   background: radial-gradient(
     circle at var(--card-light-x) var(--card-light-y),
-    color-mix(in srgb, var(--capability-accent) 18%, transparent),
+    color-mix(in srgb, var(--capability-accent) 13%, transparent),
     transparent 48%
   );
   opacity: 0.9;

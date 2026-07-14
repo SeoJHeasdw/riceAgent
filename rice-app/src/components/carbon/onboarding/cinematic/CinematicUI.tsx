@@ -68,8 +68,8 @@ const useCapabilityCardResponse = (reducedMotion: boolean) => {
     frame.current = window.requestAnimationFrame(() => {
       const card = ref.current;
       if (!card) return;
-      card.style.setProperty('--card-tilt-x', `${((0.5 - y) * 4).toFixed(2)}deg`);
-      card.style.setProperty('--card-tilt-y', `${((x - 0.5) * 6).toFixed(2)}deg`);
+      card.style.setProperty('--card-tilt-x', `${((0.5 - y) * 1).toFixed(2)}deg`);
+      card.style.setProperty('--card-tilt-y', `${((x - 0.5) * 2).toFixed(2)}deg`);
       card.style.setProperty('--card-light-x', `${(x * 100).toFixed(1)}%`);
       card.style.setProperty('--card-light-y', `${(y * 100).toFixed(1)}%`);
       frame.current = null;
