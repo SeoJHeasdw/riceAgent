@@ -66,14 +66,15 @@
     "start": "Start"
   },
   "danger": {
-    "title": "Reset settings",
-    "description": "Return to the defaults whenever you need a fresh start",
-    "reset": "Reset all settings",
-    "resetDesc": "Restore every setting to its default value",
-    "resetButton": "Reset",
-    "resetConfirm": "Reset appearance, privacy, and runtime settings to their defaults?",
+    "title": "Danger zone",
+    "description": "Permanently remove all data stored by RICE",
+    "irreversible": "This action cannot be undone",
+    "reset": "Delete all RICE data",
+    "resetDesc": "Conversations, learning history, saved skills, plugins, connections, and app settings will all be deleted.",
+    "resetButton": "Delete all data",
+    "resetConfirm": "Are you absolutely sure? Every record will disappear immediately and cannot be recovered.",
     "cancel": "Cancel",
-    "confirmReset": "Reset settings"
+    "confirmReset": "Permanently delete all"
   },
 
   "modelPicker": {

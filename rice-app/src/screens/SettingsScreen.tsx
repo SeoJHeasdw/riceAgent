@@ -239,6 +239,9 @@ function SettingsScreen({ open, onClose }: SettingsScreenProps) {
   };
 
   const handleReset = () => {
+    // TODO: Replace this settings-only reset with the full local-data purge
+    // (conversations, learning history, skills, plugins, connectors) once the
+    // runtime deletion API is available.
     setSettings(DEFAULT_SETTINGS);
     setLanguage(DEFAULT_SETTINGS.language);
     persist(DEFAULT_SETTINGS);
@@ -429,30 +432,59 @@ function SettingsScreen({ open, onClose }: SettingsScreenProps) {
           </div>
         </SettingsGroup>
 
-        <SettingsGroup title={t('danger.title')} description={t('danger.description')}>
-          <div className="flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center">
-            <div className="min-w-0 flex-1">
-              <div className="text-body-short-01 text-text-primary">{t('danger.reset')}</div>
-              <div className="mt-0.5 text-caption-01 text-text-helper">
-                {resetConfirming ? t('danger.resetConfirm') : t('danger.resetDesc')}
+        <section className="space-y-2.5">
+          <div>
+            <h3 className="text-body-short-01 font-semibold text-text-error">{t('danger.title')}</h3>
+            <p className="mt-0.5 text-caption-01 text-text-helper">{t('danger.description')}</p>
+          </div>
+
+          <div className="overflow-hidden rounded-xl border border-support-error/45 bg-support-error/5">
+            <div className="flex items-start gap-3 border-b border-support-error/25 bg-support-error/10 px-4 py-3.5">
+              <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-support-error/15 text-red-40">
+                <Icon name="warning" size={17} />
+              </span>
+              <div className="min-w-0">
+                <div className="text-body-short-01 font-semibold text-text-error">{t('danger.irreversible')}</div>
+                <p className="mt-1 text-caption-01 leading-5 text-text-secondary">{t('danger.resetDesc')}</p>
               </div>
             </div>
-            {resetConfirming ? (
-              <div className="flex items-center justify-end gap-1.5">
-                <Button kind="ghost" size="sm" onClick={() => setResetConfirming(false)}>
-                  {t('danger.cancel')}
-                </Button>
-                <Button kind="danger" size="sm" onClick={handleReset}>
-                  {t('danger.confirmReset')}
-                </Button>
+
+            <div className={`flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center ${resetConfirming ? 'bg-support-error/10' : ''}`}>
+              <div className="min-w-0 flex-1">
+                <div className="text-body-short-01 font-semibold text-text-primary">{t('danger.reset')}</div>
+                {resetConfirming && (
+                  <div className="mt-1 text-caption-01 font-medium leading-5 text-text-error" role="alert">
+                    {t('danger.resetConfirm')}
+                  </div>
+                )}
               </div>
-            ) : (
-              <Button kind="danger-ghost" size="sm" onClick={() => setResetConfirming(true)}>
-                {t('danger.resetButton')}
-              </Button>
-            )}
+              {resetConfirming ? (
+                <div className="flex flex-wrap items-center justify-end gap-1.5">
+                  <Button kind="ghost" size="sm" onClick={() => setResetConfirming(false)}>
+                    {t('danger.cancel')}
+                  </Button>
+                  <Button
+                    kind="danger"
+                    size="sm"
+                    icon={<Icon name="trash" size={14} />}
+                    onClick={handleReset}
+                  >
+                    {t('danger.confirmReset')}
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  kind="danger"
+                  size="sm"
+                  icon={<Icon name="trash" size={14} />}
+                  onClick={() => setResetConfirming(true)}
+                >
+                  {t('danger.resetButton')}
+                </Button>
+              )}
+            </div>
           </div>
-        </SettingsGroup>
+        </section>
       </div>
     ),
   }[activeSection];
