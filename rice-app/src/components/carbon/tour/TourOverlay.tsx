@@ -427,7 +427,7 @@ export const TourOverlay: React.FC<TourOverlayProps> = ({
 
           {/* 카드 본체 — 온보딩과 동일한 Carbon 토큰 */}
           <div className="rice-tour-card relative overflow-hidden rounded-xl">
-            {/* RICE brand blue → purple */}
+            {/* Theme-matched solid accent */}
             <div className="rice-tour-accent h-[3px] w-full" />
 
             {/* 바디 */}
