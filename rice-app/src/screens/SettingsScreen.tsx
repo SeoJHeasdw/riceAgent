@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { Button, Icon, Input, Toggle } from '../components/ui';
+import { Button, CompanionCloudIcon, Icon, Input, Toggle } from '../components/ui';
 import { dialogBackdropCls, dialogSurfaceCls } from '../components/ui/surfaces';
 import { useDialogA11y } from '../hooks/useDialogA11y';
 import { useI18n } from '../lib/i18n/I18nContext';
@@ -449,8 +449,8 @@ function SettingsScreen({ open, onClose }: SettingsScreenProps) {
         <div className="gradient-brand relative overflow-hidden rounded-xl border border-white/10 p-5 text-white">
           <div className="absolute -right-8 -top-10 h-32 w-32 rounded-full bg-white/10 blur-2xl" aria-hidden="true" />
           <div className="relative flex items-center gap-4">
-            <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl border border-white/20 bg-white/15 font-mono text-heading-03 font-bold shadow-elevation-1">
-              R
+            <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl border border-white/20 bg-white/15 shadow-elevation-1">
+              <CompanionCloudIcon className="h-8 w-9 text-white" />
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
@@ -560,9 +560,7 @@ function SettingsScreen({ open, onClose }: SettingsScreenProps) {
       >
         <aside className="flex w-full flex-shrink-0 flex-col border-b border-border-subtle-01 bg-field-01 sm:w-[210px] sm:border-b-0 sm:border-r">
           <div className="flex h-[58px] items-center gap-2.5 border-b border-border-subtle-01 px-4 sm:h-[70px] sm:border-b-0">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-blue-60 to-purple-60 font-mono text-body-short-01 font-bold text-white shadow-elevation-1">
-              R
-            </div>
+            <CompanionCloudIcon className="h-7 w-8 flex-shrink-0 text-text-secondary" />
             <div className="min-w-0">
               <div className="text-body-short-01 font-semibold text-text-primary">RICE</div>
               <div className="text-label-micro text-text-helper">{t('about.beta')} · v0.1.0</div>
