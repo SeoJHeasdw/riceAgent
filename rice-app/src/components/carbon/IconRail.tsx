@@ -71,7 +71,7 @@ const RailButton: React.FC<{
         bg-layer-02 text-text-primary text-caption-01 font-medium
         whitespace-nowrap rounded-md border border-border-subtle-01 shadow-elevation-2
         opacity-0 pointer-events-none
-        group-hover:opacity-100 group-focus-within:opacity-100
+        group-hover:opacity-100 group-focus-visible:opacity-100
         transition-opacity duration-150 delay-75 z-50
       "
       role="tooltip"
