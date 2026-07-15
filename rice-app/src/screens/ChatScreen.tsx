@@ -75,8 +75,23 @@ type RawMessage = {
     tool_source?: string;
     plan?: PlanUpdatedEventData;
     synthetic?: string;
+    /** 도구 결과의 성패 정본 (runtime loop._tool_result_message) */
+    ok?: boolean;
   } | null;
 };
+
+// 도구 결과 메시지의 성패. 정본은 metadata.ok지만, 이 필드가 생기기 전에 저장된
+// 세션에는 없다 — 그땐 content의 "ERROR: " 접두사로 폴백한다(런타임
+// _render_tool_result의 실패 렌더 형식). 이 판정 없이 리로드하면 실패한 도구가
+// 성공 카드로 되살아난다.
+const TOOL_ERROR_PREFIX = 'ERROR: ';
+const isToolFailure = (m: RawMessage): boolean =>
+  typeof m.metadata?.ok === 'boolean' ? !m.metadata.ok : m.content.startsWith(TOOL_ERROR_PREFIX);
+
+// 실패 카드에 보일 에러 텍스트 — 모델용 렌더의 접두사를 벗겨 라이브 SSE가 쓰는
+// 원본 error 문자열(ev_tool_result.error)과 같은 모양으로 되돌린다.
+const toolErrorText = (content: string): string =>
+  content.startsWith(TOOL_ERROR_PREFIX) ? content.slice(TOOL_ERROR_PREFIX.length) : content;
 
 // Provider-compatible durable history retains the wrapper call the model emitted
 // (`tool_call({name, arguments})`). Live SSE instead exposes the resolved target
@@ -226,12 +241,17 @@ const toThread = (msgs: RawMessage[]): ThreadMessage[] => {
         out = upsertPlanBlock(out, m.metadata.plan);
         continue;
       }
-      // attach this result to its tool call card (by id, else the latest open one)
+      // attach this result to its tool call card (by id, else the latest open one).
+      // 성패까지 함께 확정한다 — 카드 상태의 권위는 이 결과 메시지다(라이브의
+      // tool_result 리듀서와 대칭). 호출 시점의 'done'은 결과가 붙기 전의 자리표시.
       const callId = m.metadata?.tool_call_id;
+      const failed = isToolFailure(m);
       for (let i = out.length - 1; i >= 0; i--) {
         const b = out[i];
         if (b.kind === 'toolcall' && (callId ? b.callId === callId : b.result == null && b.error == null)) {
-          out[i] = { ...b, result: m.content };
+          out[i] = failed
+            ? { ...b, status: 'error', error: toolErrorText(m.content), result: undefined }
+            : { ...b, status: 'done', result: m.content };
           break;
         }
       }

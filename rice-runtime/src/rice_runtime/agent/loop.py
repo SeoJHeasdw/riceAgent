@@ -157,6 +157,40 @@ def _render_tool_result(res: ToolResult) -> str:
     return f"ERROR: {res.error}"
 
 
+def _tool_result_message(
+    res: ToolResult,
+    *,
+    tool_name: str,
+    source: str,
+    extra: dict | None = None,
+) -> Message:
+    """role="tool" 히스토리 메시지를 만든다 — 모든 도구 결과의 단일 생성 지점.
+
+    성패의 정본은 `metadata["ok"]`다. content는 모델용 렌더(`_render_tool_result`)라
+    실패가 "ERROR: " 접두사로만 남는데, 그걸 클라이언트가 문자열 sniffing으로
+    되짚게 하면 안 된다 — 리로드가 실패한 도구 카드를 성공(완료)으로 그리던 버그의
+    원인이었다(2026-07-15 실측: chat_1.png의 create_presentation 1회차).
+
+    `tool_call_id`는 필수다: 없으면 컨텍스트 압축의 wire repair가 그 라운드를
+    통째로 떨군다. `tool_source`는 학습 리뷰가 외부 콘텐츠발 메모리를 격리할지
+    판단하는 근거이므로 호출자가 명시한다.
+    """
+    metadata: dict = {
+        "tool_call_id": res.tool_call_id,
+        "tool_source": source,
+        "tool_name": tool_name,
+        "ok": res.ok,
+    }
+    # 이미지 첨부(core.types 계약): metadata로 나르면 transcript JSON에 그대로
+    # 영속되고, provider 어댑터가 wire 이미지 블록으로 렌더한다 — base64는 텍스트
+    # 본문에 실리지 않는다.
+    if res.images:
+        metadata[IMAGES_METADATA_KEY] = list(res.images)
+    if extra:
+        metadata.update(extra)
+    return Message(role="tool", content=_render_tool_result(res), metadata=metadata)
+
+
 class AgentLoop:
     """Implements the #1 conversation loop. Stateless across turns: all per-turn
     state lives in locals + the injected `LoopResult`."""
@@ -378,7 +412,9 @@ class AgentLoop:
                             # thinking 이벤트를 클라이언트로 보내지 않는다. parts는
                             # 계속 모은다 — 아래 빈-답변 방어(도구만/침묵 라운드 판정)에
                             # 여전히 필요하기 때문. 억제는 방출 지점에서만 한다.
-                            if self._show_thinking:
+                            # reconcile 모드의 추론도 본문과 같이 버퍼만 한다 — 라운드가
+                            # 끝나야 재작성(억제)인지 작업 재개(방출)인지 판별된다.
+                            if self._show_thinking and reconcile_final_text is None:
                                 yield ev_thinking(chunk.text)
                         elif chunk.kind == "text" and chunk.text:
                             assistant_parts.append(chunk.text)
@@ -437,6 +473,11 @@ class AgentLoop:
                     c.tool_name not in (UPDATE_PLAN_SPEC.name, START_PLAN_SPEC.name) for c in pending_calls
                 )
                 if resumed_real_work:
+                    # 버퍼해 둔 추론 → 본문 순으로 흘려 라이브가 정상 라운드와 같은
+                    # 순서를 그리게 한 뒤 복귀한다.
+                    buffered_thinking = "".join(thinking_parts)
+                    if self._show_thinking and buffered_thinking:
+                        yield ev_thinking(buffered_thinking)
                     if assistant_text.strip():
                         yield ev_message(delta=assistant_text)
                     reconcile_final_text = None
@@ -448,7 +489,13 @@ class AgentLoop:
             # show_thinking=False면 트레이스를 히스토리에도 남기지 않는다 — 리로드
             # 시 assistant 메타데이터로도 클라이언트에 건너가지 않도록(백엔드가
             # 노출 여부의 단일 권위). 라이브 억제(위)와 짝을 이룬다.
-            thinking_text = "".join(thinking_parts) if self._show_thinking else ""
+            # 억제된 reconcile 라운드의 추론도 마찬가지로 남기지 않는다: 런타임이
+            # 주입한 STOP 넛지를 모델이 "사용자가 STOP을 지시했다"고 서술하는 내부
+            # 독백이라, 리로드에서 되살아나면 누른 적 없는 중단을 사용자 탓으로
+            # 돌리는 그림이 된다(2026-07-15 실측: chat_2.png).
+            thinking_text = (
+                "".join(thinking_parts) if self._show_thinking and not suppress_round_text else ""
+            )
             metadata: dict = {"thinking": thinking_text} if thinking_text else {}
             if suppress_round_text and assistant_text:
                 metadata["suppressed_text"] = assistant_text
@@ -545,11 +592,7 @@ class AgentLoop:
                         )
                         yield ev_tool_result(res)
                         messages.append(
-                            Message(
-                                role="tool",
-                                content=_render_tool_result(res),
-                                metadata={"tool_call_id": call.id, "tool_source": "builtin", "tool_name": call.tool_name},
-                            )
+                            _tool_result_message(res, tool_name=call.tool_name, source="builtin")
                         )
                         tool_calls_made += 1
                         continue
@@ -558,15 +601,11 @@ class AgentLoop:
                     res = ToolResult(call.id, ok=True, result={"ok": True, "plan": plan_state.plan.to_dict()})
                     yield ev_tool_result(res)
                     messages.append(
-                        Message(
-                            role="tool",
-                            content=_render_tool_result(res),
-                            metadata={
-                                "tool_call_id": call.id,
-                                "tool_source": "builtin",
-                                "tool_name": call.tool_name,
-                                "plan": plan_state.plan.to_dict(),
-                            },
+                        _tool_result_message(
+                            res,
+                            tool_name=call.tool_name,
+                            source="builtin",
+                            extra={"plan": plan_state.plan.to_dict()},
                         )
                     )
                     tool_calls_made += 1
@@ -586,15 +625,11 @@ class AgentLoop:
                     res = ToolResult(call.id, ok=True, result=payload)
                     yield ev_tool_result(res)
                     messages.append(
-                        Message(
-                            role="tool",
-                            content=_render_tool_result(res),
-                            metadata={
-                                "tool_call_id": call.id,
-                                "tool_source": "builtin",  # 내부 상태 갱신 — 외부 콘텐츠 아님
-                                "tool_name": call.tool_name,
-                                "plan": plan_state.plan.to_dict(),
-                            },
+                        _tool_result_message(
+                            res,
+                            tool_name=call.tool_name,
+                            source="builtin",  # 내부 상태 갱신 — 외부 콘텐츠 아님
+                            extra={"plan": plan_state.plan.to_dict()},
                         )
                     )
                     tool_calls_made += 1
@@ -614,7 +649,7 @@ class AgentLoop:
                     yield ev_tool_call(call)
                     yield ev_tool_result(res)
                     messages.append(
-                        Message(role="tool", content=_render_tool_result(res), metadata={"tool_call_id": call.id})
+                        _tool_result_message(res, tool_name=call.tool_name, source="builtin")
                     )
                     tool_calls_made += 1
                     continue
@@ -643,18 +678,8 @@ class AgentLoop:
                     # tool_source: 이 결과가 외부 콘텐츠(connector/plugin/bridge =
                     # Gmail·웹·원격 도구)에서 왔는지 표시한다. 학습 리뷰가 메모리를
                     # 격리할지 판단하는 근거(메모리 오염 방지).
-                    tool_metadata: dict = {
-                        "tool_call_id": call.id,
-                        "tool_source": req.spec.source,
-                        "tool_name": call.tool_name,
-                    }
-                    # 이미지 첨부(core.types 계약): metadata로 나르면 transcript
-                    # JSON에 그대로 영속되고, provider 어댑터가 wire 이미지 블록으로
-                    # 렌더한다 — base64는 텍스트 본문에 실리지 않는다.
-                    if res.images:
-                        tool_metadata[IMAGES_METADATA_KEY] = list(res.images)
                     messages.append(
-                        Message(role="tool", content=_render_tool_result(res), metadata=tool_metadata)
+                        _tool_result_message(res, tool_name=call.tool_name, source=req.spec.source)
                     )
                     tool_calls_made += 1
 

@@ -407,6 +407,71 @@ async def test_agent_loop_renders_managed_context_without_mutating_transcript():
     assert "x" * 1_000 in persisted_tool.content  # durable transcript remains full
 
 
+class _FailingToolProvider:
+    """1라운드에 실패할 도구 + 미지의 도구를 부르고, 2라운드에 답한다."""
+
+    name = "fake"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def capabilities(self):
+        return ProviderCapabilities(native_tool_calling=True)
+
+    async def stream(self, *, system, messages, tools=(), temperature=0.7, **_):
+        self.calls += 1
+        if self.calls == 1:
+            yield ProviderChunk(kind="tool_call", tool_call=ToolCall(tool_name="boom", arguments={}, id="c_boom"))
+            yield ProviderChunk(kind="tool_call", tool_call=ToolCall(tool_name="nope", arguments={}, id="c_nope"))
+            yield ProviderChunk(kind="done", stop_reason="tool_use")
+            return
+        yield ProviderChunk(kind="text", text="final")
+        yield ProviderChunk(kind="done", stop_reason="end_turn")
+
+
+@pytest.mark.asyncio
+async def test_tool_result_success_is_persisted_structurally_not_only_as_error_prefix():
+    """성패의 정본은 metadata["ok"]다 — content의 "ERROR: " 접두사를 클라이언트가
+    sniffing 하게 두면 리로드가 실패한 도구를 성공 카드로 그린다(2026-07-15 실측:
+    chat_1.png, create_presentation 1회차가 완료로 표시됨)."""
+
+    async def boom(args):
+        raise RuntimeError("invalid deck spec")
+
+    async def fine(args):
+        return {"path": "deck.pptx"}
+
+    dispatcher = ToolDispatcher(
+        connectors=_NoopService(),
+        plugins=_NoopService(),
+        approvals=ApprovalRegistry(),
+        approval_timeout_s=1,
+        builtins={"boom": boom, "fine": fine},
+    )
+    ctx = TurnContext(
+        session_id="s1",
+        system_prompt="sys",
+        history=(Message(role="user", content="go"),),
+        tools=(_spec("boom"), _spec("fine")),
+        max_iterations=3,
+    )
+    result = LoopResult()
+    _ = [
+        e
+        async for e in AgentLoop(provider=_FailingToolProvider(), dispatcher=dispatcher).run(
+            ctx, "s1", result, asyncio.Event()
+        )
+    ]
+
+    by_id = {m.metadata["tool_call_id"]: m for m in result.history if m.role == "tool"}
+    # 디스패치 실패
+    assert by_id["c_boom"].metadata["ok"] is False
+    assert by_id["c_boom"].content.startswith("ERROR: ")
+    # 미지의 도구도 같은 계약을 따른다(예전엔 tool_call_id 외 메타데이터가 없었다)
+    assert by_id["c_nope"].metadata["ok"] is False
+    assert by_id["c_nope"].metadata["tool_name"] == "nope"
+
+
 class _TextProvider:
     name = "fake"
 

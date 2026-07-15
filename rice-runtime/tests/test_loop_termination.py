@@ -15,6 +15,8 @@
      계획은 런타임이 강제 종결
   7. reconcile 넛지에 실제 도구 호출 재개 → 억제했던 서사를 방출하고 정상 복귀,
      이후의 진짜 최종 답이 최종
+  8. reconcile 넛지에 추론을 남김 → 억제 라운드의 추론은 라이브·리로드 양쪽에서
+     보이지 않는다(런타임이 주입한 STOP을 사용자 탓으로 서술하는 독백 차단)
 
 새 방어 장치를 추가할 때는 반드시 여기에 상호작용 시나리오를 추가할 것 —
 "장치 하나가 더해질 때마다 종료 증명을 다시 한다"가 이 파일의 계약이다.
@@ -295,6 +297,52 @@ async def test_reconciled_answer_is_not_regenerated():
     assert all(s["status"] == "done" for s in plan_events[-1].data["steps"])
 
 
+class _ReconcileThinksAloud(_PlanAnswerBase):
+    """넛지에 순종하되(update_plan) 그 전에 추론을 남긴다 — 소형 모델이 런타임의
+    합성 STOP 넛지를 "사용자가 STOP을 지시했다"고 서술하는 실측 행동."""
+
+    async def _after_nudge(self):
+        yield ProviderChunk(kind="thinking", text="사용자가 STOP 지시를 내렸습니다. 계획을 정리합니다.")
+        yield ProviderChunk(
+            kind="tool_call",
+            tool_call=ToolCall(
+                tool_name="update_plan",
+                arguments={
+                    "updates": [
+                        {"step_id": "s1", "status": "done"},
+                        {"step_id": "s2", "status": "done"},
+                    ]
+                },
+                id=f"c{self.calls}",
+            ),
+        )
+        yield ProviderChunk(kind="done", stop_reason="tool_use")
+
+
+@pytest.mark.asyncio
+async def test_reconcile_thinking_is_suppressed_live_and_on_reload():
+    """억제된 reconcile 라운드의 추론은 사용자에게도 히스토리에도 남지 않는다 —
+    런타임이 주입한 STOP을 사용자 탓으로 돌리는 독백이 답변 뒤에 붙던 버그
+    (2026-07-15 실측: chat_2.png)."""
+    provider = _ReconcileThinksAloud()
+    result = LoopResult()
+    events = [
+        ev
+        async for ev in AgentLoop(provider=provider, dispatcher=_dispatcher()).run(
+            _ctx(), "s1", result, asyncio.Event()
+        )
+    ]
+
+    assert provider.calls == 3
+    assert result.final_message == "the answer"
+    # 확정된 답 뒤로 thinking 이벤트가 새 나가지 않는다
+    thinking_events = [ev for ev in events if ev.type.value == "thinking"]
+    assert all("STOP" not in ev.data.get("text", "") for ev in thinking_events)
+    # 리로드도 같은 그림: 억제 라운드의 추론은 metadata에도 없다
+    last_assistant = [m for m in result.history if m.role == "assistant"][-1]
+    assert "thinking" not in last_assistant.metadata
+
+
 class _ReconcileRewritesAnswer(_PlanAnswerBase):
     """최악 행동: 넛지에 계획 정리 대신 답을 다시 써버린다."""
 
@@ -336,6 +384,7 @@ class _ReconcileResumesRealWork(_PlanAnswerBase):
 
     async def _after_nudge(self):
         if self.calls == 3:
+            yield ProviderChunk(kind="thinking", text="work remains")
             yield ProviderChunk(kind="text", text="continuing")
             yield ProviderChunk(
                 kind="tool_call",
@@ -367,5 +416,9 @@ async def test_reconcile_resumed_work_flushes_narration_and_ends_normally():
     assert "".join(ev.data.get("delta", "") for ev in msg_events) == "the answercontinuingreal final"
     # 확정 content는 두 번: 넛지 시점(조기 답) + 정상 종료(진짜 답)
     assert [ev.data["content"] for ev in msg_events if "content" in ev.data] == ["the answer", "real final"]
+    # 작업이 재개된 라운드의 추론은 버퍼에서 풀려 방출된다(억제는 재작성 라운드만)
+    assert "work remains" in "".join(
+        ev.data.get("text", "") for ev in events if ev.type.value == "thinking"
+    )
     plan_events = [ev for ev in events if ev.type.value == "plan_updated"]
     assert plan_events[-1].data["status"] == "completed"

@@ -129,6 +129,17 @@ Electron main process
 > UI는 대응 tool message의 `metadata.tool_source="bridge"`를 근거로 표시만 요청
 > 대상으로 unwrap한다.
 >
+> **도구 결과 성패의 정본 계약 (2026-07-15)**: 라이브 SSE `tool_result`의 `ok`와
+> 짝을 이루는 리로드 축은 tool message의 **`metadata.ok`**다. tool message의
+> `content`는 **모델용 렌더**라 실패가 `"ERROR: "` 접두사로만 남는데, 리로드 UI가
+> 그걸 문자열로 되짚게 하면 안 된다 — `metadata.ok`가 없던 동안 리로드는 모든 도구
+> 카드를 성공(완료)으로 그렸다(2026-07-15 실측: chat_1.png, 실패한
+> `create_presentation` 1회차가 완료로 표시). 런타임은 모든 tool message를
+> `loop._tool_result_message` 한 곳에서 만들어 `tool_call_id`·`tool_source`·
+> `tool_name`·`ok`를 항상 싣는다. **이 필드 이전에 저장된 세션에는 `ok`가 없다** —
+> 클라이언트는 `ok`가 boolean일 때만 정본으로 쓰고, 없으면 `"ERROR: "` 접두사
+> 폴백으로 하위호환한다.
+>
 > ~~`skill_created`(skill_id, title, version)~~ — **2026-07-02 제거.** 스킬 생성은 이제 `skill_patch_proposed`(`from_version=0`)로 표현되며, 패치와 동일한 HITL 승인 게이트를 거친다. 따라서 승인 없이 즉시 저장한 뒤 `skill_created`로 통지하던 이전 경로는 제거됐다. `POST /sessions/{id}/learning-review`·`/learn`(아래)도 위 표의 9종과 동일한 이벤트 어휘만 방출한다.
 >
 > 제어 이벤트(별도, 각자 고유 `approval_id` 포함 — 정지/재개·timeout·재연결 처리는 1.2, 메커니즘은 RUNTIME_DESIGN 5.1): `tool_approval_required`(approval_id, tool_name, arguments) — 위험 tool 실행 전 발행 → 앱이 `POST /sessions/{id}/tool-approval`(approval_id 포함)로 응답. `skill_patch_proposed`(approval_id, skill_id, changelog, diff, trigger, from_version?, to_version?, **proposed_body?**, **warnings?**, **derived_from_external?**, **evidence_message_ids?**) — 스킬 개선/생성 제안 발행 → 앱이 diff 카드 표시 후 `POST /skills/{id}/patch`(approval_id 포함)로 응답 (LEARNING_LOOP 5.2). **`proposed_body`/`warnings`는 2026-07-02 추가**: 이전엔 제안의 실제 전체 본문이 SSE payload에 실리지 않아 프론트가 `diff.lines`를 필터링해 재구성했는데(edge case에서 미묘하게 어긋날 위험), 이제 서버가 준 원문을 그대로 쓸 수 있다. `warnings`는 §8 가드(시크릿 스크러빙)가 뭔가 마스킹했을 때의 경고 문자열 배열. **`derived_from_external`/`evidence_message_ids`(2026-07-08 문서 반영)**: 제안이 외부 콘텐츠 섞인 턴에서 나왔는지와 그 근거 tool 메시지 id — 메모리 격리(§6.7)와 같은 판정 축을 스킬 제안에도 노출한다.
