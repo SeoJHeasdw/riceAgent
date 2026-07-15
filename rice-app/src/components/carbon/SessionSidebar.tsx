@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Icon } from '../ui';
+import { Icon, OverflowMenu } from '../ui';
 
 /**
  * SessionSidebar - Collapsible sidebar for session history
@@ -20,6 +20,7 @@ export interface SessionSidebarProps {
   activeSessionId: string;
   onSelectSession: (id: string) => void;
   onNewSession: () => void;
+  onRenameSession: (id: string, title: string) => Promise<boolean>;
   onDeleteSession: (id: string) => void;
   isOpen: boolean;
   /** Panel width in px (drag-resizable from parent) */
@@ -76,6 +77,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   activeSessionId,
   onSelectSession,
   onNewSession,
+  onRenameSession,
   onDeleteSession,
   isOpen,
   width = 264,
@@ -86,7 +88,9 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const { t } = useTranslation('chat');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
-  const [hoveredSession, setHoveredSession] = useState<string | null>(null);
+  const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
+  const skipRenameCommit = useRef(false);
 
   const closeSearch = () => {
     setSearchOpen(false);
@@ -99,6 +103,26 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   );
 
   const groupedSessions = groupSessions(filteredSessions);
+
+  const beginRename = (session: Session) => {
+    skipRenameCommit.current = false;
+    setRenamingSessionId(session.id);
+    setRenameDraft(session.title);
+  };
+
+  const cancelRename = () => {
+    skipRenameCommit.current = true;
+    setRenamingSessionId(null);
+    setRenameDraft('');
+  };
+
+  const commitRename = async (session: Session) => {
+    const title = renameDraft.trim();
+    setRenamingSessionId(null);
+    setRenameDraft('');
+    if (!title || title === session.title) return;
+    await onRenameSession(session.id, title);
+  };
 
   return (
     <div
@@ -183,46 +207,86 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                   {t(`sessionSidebar.${group.key}`)}
                 </div>
                 {/* 컴팩트 한 줄 행 — 시점은 그룹 헤더가 말해주므로 행에는 제목만 */}
-                <div className="space-y-px">
+                <div className="space-y-0">
                   {group.items.map((session) => {
                     const isActive = session.id === activeSessionId;
+                    const isRenaming = renamingSessionId === session.id;
                     return (
                       <div
                         key={session.id}
-                        className="relative"
-                        onMouseEnter={() => setHoveredSession(session.id)}
-                        onMouseLeave={() => setHoveredSession(null)}
+                        className="group relative focus-within:z-30"
                       >
-                        <button
-                          onClick={() => onSelectSession(session.id)}
-                          title={session.title}
-                          className={`flex items-center w-full min-w-0 h-6 px-2 text-left cursor-pointer border-l-2 rounded-lg transition-colors ${
-                            isActive
-                              ? 'border-l-interactive bg-layer-selected-01'
-                              : 'border-l-transparent bg-transparent hover:bg-layer-hover-01'
-                          }`}
-                        >
-                          <span
-                            className={`block flex-1 min-w-0 text-body-short-01 truncate ${
-                              hoveredSession === session.id ? 'pr-6' : ''
-                            } ${isActive ? 'text-text-primary font-medium' : 'text-text-secondary'}`}
-                          >
-                            {session.title}
-                          </span>
-                        </button>
-
-                        {/* Delete button on hover (incl. the active session) */}
-                        {hoveredSession === session.id && (
+                        {isRenaming ? (
+                          <div className="flex h-6 items-center px-3 pr-2">
+                            <input
+                              type="text"
+                              autoFocus
+                              maxLength={100}
+                              value={renameDraft}
+                              onFocus={(event) => event.currentTarget.select()}
+                              onChange={(event) => setRenameDraft(event.target.value)}
+                              onBlur={() => {
+                                if (skipRenameCommit.current) {
+                                  skipRenameCommit.current = false;
+                                  return;
+                                }
+                                void commitRename(session);
+                              }}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                                  event.preventDefault();
+                                  event.currentTarget.blur();
+                                } else if (event.key === 'Escape') {
+                                  event.preventDefault();
+                                  cancelRename();
+                                }
+                              }}
+                              aria-label={t('sessionSidebar.renameInputLabel')}
+                              className="h-5 min-w-0 flex-1 border-0 border-b border-border-subtle-02 bg-transparent px-0.5 text-body-short-01 text-text-primary outline-none transition-colors focus:border-border-strong-01"
+                            />
+                          </div>
+                        ) : (
                           <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onDeleteSession(session.id);
-                            }}
-                            className="absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded-md text-icon-secondary hover:bg-layer-hover-02 hover:text-support-error transition-colors"
-                            title={t('sessionSidebar.deleteSession')}
+                            onClick={() => onSelectSession(session.id)}
+                            title={session.title}
+                           className={`flex h-6 w-full min-w-0 cursor-pointer items-center rounded-md border-l-2 px-3 pr-8 text-left transition-colors ${
+                             isActive
+                               ? 'session-sidebar-row-active'
+                               : 'border-l-transparent bg-transparent hover:bg-layer-hover-01'
+                           }`}
                           >
-                            <Icon name="trash" size={13} />
+                            <span className={`block min-w-0 flex-1 truncate text-body-short-01 ${
+                             isActive ? 'font-medium text-text-primary' : 'text-text-secondary'
+                           }`}>
+                              {session.title}
+                            </span>
                           </button>
+                        )}
+
+                        {!isRenaming && (
+                          <div className={`absolute right-0 top-1/2 -translate-y-1/2 transition-opacity ${
+                            isActive
+                              ? 'pointer-events-auto opacity-100'
+                              : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100'
+                          }`}>
+                            <OverflowMenu
+                              variant="compact"
+                              label={t('sessionSidebar.moreActions', { title: session.title })}
+                              items={[
+                                {
+                                  label: t('sessionSidebar.renameSession'),
+                                  icon: 'edit',
+                                  onClick: () => beginRename(session),
+                                },
+                                {
+                                  label: t('sessionSidebar.deleteSession'),
+                                  icon: 'trash',
+                                  tone: 'danger',
+                                  onClick: () => onDeleteSession(session.id),
+                                },
+                              ]}
+                            />
+                          </div>
                         )}
                       </div>
                     );

@@ -63,6 +63,31 @@ def test_session_manager_is_transcript():
     c.shutdown()
 
 
+@pytest.mark.asyncio
+async def test_session_rename_route_persists_trimmed_title():
+    from rice_runtime.core.errors import NotFoundError, ValidationError
+    from rice_runtime.server.routes.messages import SessionRenameIn, rename_session
+
+    paths = RicePaths.from_env(tempfile.mkdtemp(prefix="rice-rename-test-"))
+    c = build_container(RuntimeArgs(), paths=paths)
+    session = c.sessions.create(model="echo")
+
+    result = await rename_session(session.id, SessionRenameIn(title="  My project  "), c)
+    assert result["data"]["title"] == "My project"
+    assert c.sessions.get(session.id).title == "My project"
+    assert next(s for s in c.sessions.list() if s.id == session.id).title == "My project"
+
+    with pytest.raises(ValidationError):
+        await rename_session(session.id, SessionRenameIn(title="   "), c)
+    with pytest.raises(NotFoundError):
+        await rename_session("sess_missing", SessionRenameIn(title="Name"), c)
+    c.shutdown()
+
+    reopened = build_container(RuntimeArgs(), paths=paths)
+    assert reopened.sessions.get(session.id).title == "My project"
+    reopened.shutdown()
+
+
 class _ToolThenAnswer:
     """Fake provider: request a tool once, then answer (drives the tool path)."""
 
@@ -143,6 +168,27 @@ async def test_titler_names_untitled_session_once():
     assert titles["s1"] == "Quarterly Sales Summary"
     # already titled → no second model call, no relabel
     assert await titler.maybe_title("s1", history) is None
+
+
+@pytest.mark.asyncio
+async def test_manual_rename_wins_while_generated_title_is_in_flight():
+    titles: dict[str, str] = {}
+
+    class _RenameDuringGeneration(_TitleProvider):
+        async def stream(self, *, system, messages, tools=(), temperature=0.7, **_):
+            titles["s1"] = "My manual title"
+            yield ProviderChunk(kind="text", text="Generated title")
+            yield ProviderChunk(kind="done", stop_reason="end_turn")
+
+    titler = SessionTitler(
+        resolve_provider=lambda: _RenameDuringGeneration(),
+        get_title=titles.get,
+        set_title=lambda sid, title: titles.__setitem__(sid, title),
+    )
+    history = (Message(role="user", content="Summarise this"),)
+
+    assert await titler.maybe_title("s1", history) is None
+    assert titles["s1"] == "My manual title"
 
 
 @pytest.mark.asyncio

@@ -77,6 +77,18 @@
   }
 }
 
+/* Session selection keeps its cool blue signal in dark mode, while the light
+   workspace uses a quieter neutral surface and edge. */
+.session-sidebar-row-active {
+  border-left-color: var(--cds-border-interactive);
+  background: var(--cds-layer-selected-01);
+}
+
+[data-theme='light'] .session-sidebar-row-active {
+  border-left-color: var(--cds-border-strong-02);
+  background: var(--cds-layer-02);
+}
+
 /* Utility styles */
 @layer utilities {
   /* Text utilities */

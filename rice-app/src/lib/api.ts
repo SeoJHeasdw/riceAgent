@@ -165,6 +165,10 @@ class ApiClient {
   getSession(id: string): Promise<ApiResponse> {
     return this.get(`/sessions/${id}`);
   }
+  /** Persist a user-defined session title. */
+  renameSession(id: string, title: string): Promise<ApiResponse<{ id: string; title: string }>> {
+    return this.send('PATCH', `/sessions/${id}`, { title });
+  }
   /** delete a session and its messages (history sidebar) */
   deleteSession(id: string): Promise<ApiResponse> {
     return this.send('DELETE', `/sessions/${id}`);

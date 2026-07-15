@@ -716,9 +716,36 @@ const ApprovalModePicker: React.FC<{
  */
 const ChatStarter: React.FC<{
   onPick: (text: string) => void;
-}> = ({ onPick }) => {
+  active: boolean;
+}> = ({ onPick, active }) => {
   const { t } = useTranslation('chat');
   const [companionPopping, setCompanionPopping] = useState(false);
+  const companionPopFrame = useRef<number | null>(null);
+
+  const popCompanion = useCallback(() => {
+    if (companionPopFrame.current !== null) {
+      window.cancelAnimationFrame(companionPopFrame.current);
+    }
+    setCompanionPopping(false);
+    companionPopFrame.current = window.requestAnimationFrame(() => {
+      setCompanionPopping(true);
+      companionPopFrame.current = null;
+    });
+  }, []);
+
+  // ChatScreen은 다른 화면에서도 스트림 보존을 위해 mount 상태로 숨겨진다.
+  // 따라서 mount가 아니라 실제 Chat route 진입을 기준으로 한 번 재생한다.
+  useEffect(() => {
+    if (active) popCompanion();
+    else setCompanionPopping(false);
+
+    return () => {
+      if (companionPopFrame.current !== null) {
+        window.cancelAnimationFrame(companionPopFrame.current);
+        companionPopFrame.current = null;
+      }
+    };
+  }, [active, popCompanion]);
 
   type StarterSuggestion = {
     icon: IconName;
@@ -796,18 +823,13 @@ const ChatStarter: React.FC<{
                 ? [suggestions.afterWork, suggestions.ppt]
                 : [suggestions.lateNight, suggestions.ppt];
 
-  const popCompanion = () => {
-    setCompanionPopping(false);
-    requestAnimationFrame(() => setCompanionPopping(true));
-  };
-
   return (
     <div className="mx-auto w-full max-w-[640px] pb-6 text-center">
       <button
         type="button"
         onClick={popCompanion}
         onAnimationEnd={() => setCompanionPopping(false)}
-        className={`starter-companion mx-auto mb-4 block h-14 w-16 outline-none ${companionPopping ? 'is-popping' : ''}`}
+        className={`starter-companion mx-auto mb-4 block h-16 w-[72px] outline-none ${companionPopping ? 'is-popping' : ''}`}
         aria-label={t('starter.companionLabel')}
         title={t('starter.companionLabel')}
       >
@@ -899,7 +921,7 @@ const ChatTaskProgress = () => (
   </div>
 );
 
-function ChatScreen() {
+function ChatScreen({ active = true }: { active?: boolean }) {
   const { jumpToSkill, setSkills, setDetails, panelScrollRef, refreshSuggestions, mirrorParkedProposal, dropParkedMirror, resolvedApprovals } = useLearning();
   const toast = useToast();
   const { t } = useTranslation('chat');
@@ -1976,6 +1998,28 @@ function ChatScreen() {
     }
   };
 
+  const renameSession = async (id: string, title: string): Promise<boolean> => {
+    const nextTitle = title.trim();
+    if (!nextTitle) return false;
+    if (connected) {
+      const res = await api.renameSession(id, nextTitle);
+      if (!res.success) {
+        toast.notify({
+          message: t('sessionSidebar.renameFailed', { error: apiErrorMessage(res) }),
+          variant: 'error',
+        });
+        return false;
+      }
+    }
+    // A manual name is authoritative; don't spend a later post-turn request on
+    // generating an AI title for this session.
+    needsTitleRefresh.current.delete(id);
+    setSessions((previous) => previous.map((session) => (
+      session.id === id ? { ...session, title: nextTitle } : session
+    )));
+    return true;
+  };
+
   // Delete: confirm first (ConfirmDialog), then remove server-side + locally.
   const requestDeleteSession = (id: string) => {
     const s = sessions.find((x) => x.id === id);
@@ -2281,6 +2325,7 @@ function ChatScreen() {
           activeSessionId={activeSessionId}
           onSelectSession={handleSelectSession}
           onNewSession={newChat}
+          onRenameSession={renameSession}
           onDeleteSession={requestDeleteSession}
           isOpen={sessionSidebarOpen}
           width={sessionPanel.width}
@@ -2307,10 +2352,11 @@ function ChatScreen() {
               sessionSidebarOpen ? 'pl-4' : isElectron ? 'pl-[100px]' : 'pl-[76px]'
             }`}
           >
-            <span className="text-body-short-01 font-semibold text-text-primary truncate">
-              {isEmpty ? t('headerEmpty') : activeSession?.title || t('conversation')}
-            </span>
-
+            {!isEmpty && (
+              <span className="truncate text-body-short-01 font-semibold text-text-primary">
+                {activeSession?.title || t('conversation')}
+              </span>
+            )}
           </div>
 
           {/* Thread */}
@@ -2319,6 +2365,7 @@ function ChatScreen() {
               <div className={`mx-auto w-full max-w-[920px] px-5 py-4 ${isEmpty ? 'flex min-h-full items-center' : ''}`}>
                 {isEmpty ? (
                   <ChatStarter
+                    active={active}
                     onPick={(text) => {
                       setDraft(text);
                       requestAnimationFrame(() => composerRef.current?.focus());

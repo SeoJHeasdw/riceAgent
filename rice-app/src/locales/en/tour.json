@@ -9,11 +9,11 @@
   "steps": {
     "learning-loop": {
       "title": "Learning loop",
-      "body": "The more you chat, the more your work patterns collect here. See what RICE has learned and which skills were auto-generated at a glance."
+      "body": "The more you chat, the more your work patterns are captured here. See what RICE has learned and which skills were auto-generated at a glance."
     },
     "chat-input": {
       "title": "Chat input",
-      "body": "Send messages to the agent here. Type / to instantly pull up saved skills — attachments are supported too."
+      "body": "Send messages to the agent here. Type / to pull up your saved skills instantly — attachments are supported too."
     },
     "model-settings": {
       "title": "Model settings",
@@ -37,7 +37,7 @@
     },
     "plugins-market": {
       "title": "Plugin Market",
-      "body": "Browse plugins that package domain expertise. Add specialists for areas like legal, data analysis, and workflow automation."
+      "body": "Browse plugins that bring domain expertise. Add specialists for areas like legal, data analysis, and workflow automation."
     },
     "settings": {
       "title": "Settings",
@@ -45,7 +45,7 @@
     },
     "screen-myskills-overview": {
       "title": "Skill information",
-      "body": "See the skill's purpose, usage count, and last-used date at a glance. This is the starting point for identifying the skill you are viewing."
+      "body": "See the skill's purpose, usage count, and last-used date at a glance. Start here to get a quick read on what this skill does."
     },
     "screen-myskills-overview-tab": {
       "title": "Overview",
@@ -57,7 +57,7 @@
     },
     "screen-myskills-manage": {
       "title": "Skill management",
-      "body": "Three tools are available in this menu.\n① Learning Impact — measure how much a skill improves results\n② Skill Cleanup — disable or archive rarely-used skills\n③ AI Merge — detect overlapping skills and propose consolidations"
+      "body": "Three tools are available in this menu.\n① Learning Impact — see how much a skill has improved your results\n② Skill Cleanup — disable or archive rarely-used skills\n③ AI Merge — detect overlapping skills and propose consolidations"
     },
     "screen-myskills-files": {
       "title": "File browser",
@@ -89,7 +89,7 @@
     },
     "screen-connectors-tool-groups": {
       "title": "Tool categories",
-      "body": "After connecting, MCP tools are grouped by nature: read-only tools (get, list, search…) and write/execute/delete tools. Set permissions per group or per individual tool."
+      "body": "After connecting, MCP tools are grouped by nature: read-only tools (get, list, search…) and write/execute/delete tools. Grant permissions by group or fine-tune them per tool."
     },
     "screen-connectors-permissions": {
       "title": "Tool permissions",

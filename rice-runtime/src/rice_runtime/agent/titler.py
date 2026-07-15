@@ -69,6 +69,10 @@ class SessionTitler(ISessionTitler):
             return None
         if not title:
             return None
+        # The user may manually rename the session while this model call is in
+        # flight. Re-check after awaiting so a late generated title never wins.
+        if self._get_title(session_id):
+            return None
         self._set_title(session_id, title)
         return title
 

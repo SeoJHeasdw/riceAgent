@@ -129,7 +129,7 @@ function AppShell({ tourActive, screenToursSuspended, onTourDone, onTriggerOnboa
             SSE handlers own the in-progress turn renderer; unmounting it used to
             discard every incremental event even though the runtime kept working. */}
         <div className={isChatRoute ? 'flex flex-1 min-h-0 animate-fade-in' : 'hidden'}>
-          <ChatScreen />
+          <ChatScreen active={isChatRoute} />
         </div>
 
         {!isChatRoute && (

@@ -36,7 +36,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from ...agent.effect_surfacing import surface_learning_effect
-from ...core.errors import ConflictError, NotFoundError
+from ...core.errors import ConflictError, NotFoundError, ValidationError
 from ...core.types import ApprovalResponse, SSEEvent, ev_done, ev_error
 from ..composition_root import Container
 from ..sse.emitter import to_sse_stream
@@ -75,6 +75,10 @@ class LearnIn(BaseModel):
     instruction: str = ""
 
 
+class SessionRenameIn(BaseModel):
+    title: str
+
+
 @router.post("/sessions")
 async def create_session(c: Container = Depends(get_container)):
     info = c.sessions.create(model=c.config.provider.model)
@@ -92,6 +96,21 @@ async def get_session(session_id: str, c: Container = Depends(get_container)):
     if info is None:
         raise NotFoundError(f"session {session_id} not found")
     return {"success": True, "data": info.__dict__}
+
+
+@router.patch("/sessions/{session_id}")
+async def rename_session(
+    session_id: str, body: SessionRenameIn, c: Container = Depends(get_container)
+):
+    if c.sessions.get(session_id) is None:
+        raise NotFoundError(f"session {session_id} not found")
+    title = body.title.strip()
+    if not title:
+        raise ValidationError("session title must not be empty")
+    if len(title) > 100:
+        raise ValidationError("session title must be 100 characters or fewer")
+    c.sessions.set_title(session_id, title)
+    return {"success": True, "data": {"id": session_id, "title": title}}
 
 
 @router.delete("/sessions/{session_id}")
