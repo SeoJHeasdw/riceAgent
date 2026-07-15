@@ -8,7 +8,7 @@ import { useI18n } from '../lib/i18n/I18nContext';
 import { replayOnboarding, replayTour, RESET_ALL_DATA_EVENT } from '../lib/tutorial';
 import { applyAppearance } from '../lib/appearance';
 import { api } from '../lib/api';
-import { TOUR_DONE_KEY } from '../components/carbon/tour';
+import { TOUR_DONE_KEY, SCREEN_TOUR_KEYS } from '../components/carbon/tour';
 
 interface AppSettings {
   theme: 'dark' | 'light';
@@ -296,6 +296,10 @@ function SettingsScreen({ open, onClose }: SettingsScreenProps) {
 
     // ── localStorage 초기화 ────────────────────────────────────────────
     localStorage.removeItem(TOUR_DONE_KEY);
+    // 화면별 투어 완료 키도 초기화 — 이후 각 화면 방문 시 다시 볼 수 있게
+    for (const key of Object.values(SCREEN_TOUR_KEYS)) {
+      localStorage.removeItem(key);
+    }
     setSettings(DEFAULT_SETTINGS);
     setLanguage('en');
     persist(DEFAULT_SETTINGS);

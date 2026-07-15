@@ -12,6 +12,8 @@ export interface Tab {
   label: string;
   content?: React.ReactNode;
   disabled?: boolean;
+  /** data-tour 속성값 — 투어 타겟으로 사용할 때 */
+  dataTour?: string;
 }
 
 export interface TabsProps {
@@ -93,6 +95,7 @@ export const Tabs: React.FC<TabsProps> = ({
               aria-controls={`${baseId}-panel-${tab.id}`}
               tabIndex={isActive ? 0 : -1}
               disabled={isDisabled}
+              data-tour={tab.dataTour}
               onClick={() => handleTabClick(tab.id, isDisabled)}
               onKeyDown={(event) => {
                 if (event.key === 'ArrowRight') {

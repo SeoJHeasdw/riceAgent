@@ -42,6 +42,58 @@
     "settings": {
       "title": "설정",
       "body": "모델 연결·앱 환경을 언제든 다시 설정할 수 있어요. 온보딩이 끝나도 여기서 AI 모델을 바꾸거나 추가할 수 있습니다."
+    },
+    "screen-myskills-overview": {
+      "title": "스킬 정보",
+      "body": "스킬의 목적, 사용 횟수와 최근 사용 시점을 한눈에 확인해요. 어떤 스킬을 보고 있는지 파악하는 시작점입니다."
+    },
+    "screen-myskills-overview-tab": {
+      "title": "개요",
+      "body": "스킬의 실행 단계와 사용하는 도구를 확인해요. 이 스킬이 실제 작업을 어떤 순서로 처리하는지 빠르게 이해할 수 있습니다."
+    },
+    "screen-myskills-insights": {
+      "title": "인사이트",
+      "body": "실제 사용 기록, 성공·실패 신호, 마찰 지점, 라우팅 문제와 AI 분석을 확인해요. 스킬을 더 잘 활용하기 위한 데이터를 제공합니다."
+    },
+    "screen-myskills-manage": {
+      "title": "스킬 관리",
+      "body": "세 가지 기능을 제공해요.\n① 학습 효과: 스킬 사용 전후의 이득과 개선 효과 확인\n② 스킬 정리: 잘 사용하지 않는 스킬을 비활성화하거나 정리\n③ AI 통합: 비슷하거나 중복된 스킬을 AI가 분석해 합치도록 제안"
+    },
+    "screen-myskills-files": {
+      "title": "파일 구성",
+      "body": "스킬의 실제 파일 구조와 Markdown 원문을 확인해요. SKILL.md 등 파일을 직접 살펴보고 내용을 이해할 수 있습니다."
+    },
+    "screen-myskills-ai-edit": {
+      "title": "AI로 수정",
+      "body": "자연어 채팅으로 스킬 변경을 요청하세요. AI가 제안한 변경 내용을 검토하고 적용하거나 거부할 수 있습니다. RICE가 기본으로 제공하는 내장 스킬은 AI로 수정할 수 없어요."
+    },
+    "screen-myplugins-skills": {
+      "title": "스킬 목록",
+      "body": "플러그인이 제공하는 실행 가능한 스킬 목록이에요. 채팅에서 / 명령어나 자동 라우팅으로 바로 사용할 수 있습니다."
+    },
+    "screen-myplugins-knowledge": {
+      "title": "지식 자산",
+      "body": "플러그인이 참조하는 문서, 데이터, 가이드 등의 지식 자산이에요. 에이전트가 이 정보를 바탕으로 더 정확하게 응답합니다."
+    },
+    "screen-myplugins-permissions": {
+      "title": "권한 (커넥터)",
+      "body": "플러그인 실행에 필요한 커넥터를 확인해요. 연결 여부와 필요한 외부 서비스 접근 범위를 확인하고 관리합니다."
+    },
+    "screen-connectors-kinds": {
+      "title": "원격 / 로컬 구분",
+      "body": "원격 탭에는 Gmail 등 RICE가 기본 지원하는 외부 서비스 연결과 사용자가 직접 추가하는 Custom Connector가 있어요. 로컬 탭에는 사용자 PC에서 실행하거나 등록한 Local MCP 서버가 있습니다."
+    },
+    "screen-connectors-add": {
+      "title": "커넥터 추가",
+      "body": "기본 지원 커넥터를 검색해서 추가하거나, Custom Connector를 직접 등록할 수 있어요. 로컬 탭에서는 Local MCP 서버를 등록합니다."
+    },
+    "screen-connectors-tool-groups": {
+      "title": "도구 분류",
+      "body": "연결 후 제공되는 MCP 도구는 성격에 따라 읽기 도구와 쓰기·실행·삭제 도구로 구분돼요. 각 그룹별로 권한을 한 번에 설정할 수 있습니다."
+    },
+    "screen-connectors-permissions": {
+      "title": "도구 권한",
+      "body": "도구별로 세 가지 권한을 설정할 수 있어요. ① 항상 허용: HITL 없이 즉시 실행 ② 승인 필요: 실행 전 사용자 확인 ③ 차단: 에이전트에게 해당 도구를 주입하지 않음"
     }
   }
 }

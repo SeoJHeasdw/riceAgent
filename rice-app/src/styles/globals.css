@@ -706,6 +706,20 @@
   --gradient-plugin: linear-gradient(135deg, #491d8b, #6929c4); /* purple-80 → purple-70 */
   --gradient-connector: linear-gradient(135deg, #005d5d, #009d9a); /* teal-70 → teal-50 */
   --gradient-brand: linear-gradient(135deg, #0043ce, #6929c4); /* blue-70 → purple-70 */
+
+  /* In-app tour — RICE의 blue→purple 브랜드 문법을 쓰되, 작업 화면보다 한
+     단계 위에 떠 있는 코치마크답게 dim·surface·spotlight를 별도 토큰으로 둔다. */
+  --rice-tour-dim: rgba(8, 10, 24, 0.68);
+  --rice-tour-surface: #202328;
+  --rice-tour-surface-border: rgba(137, 151, 255, 0.28);
+  --rice-tour-surface-aura:
+    radial-gradient(circle at 4% 0%, rgba(69, 137, 255, 0.13), transparent 38%),
+    radial-gradient(circle at 96% 0%, rgba(165, 110, 255, 0.1), transparent 34%);
+  --rice-tour-arrow-border: #68738a;
+  --rice-tour-ring: #8178ff;
+  --rice-tour-highlight: rgba(111, 104, 255, 0.06);
+  --rice-tour-accent: #8178ff;
+  --rice-tour-primary-shadow: 0 5px 16px rgba(52, 61, 190, 0.3);
 }
 
 [data-font='sans'] {
@@ -825,6 +839,44 @@
   --diff-add-text: #0e6027;
   --diff-remove-bg: #fff1f1;
   --diff-remove-text: #a2191f;
+  --rice-tour-dim: rgba(30, 36, 62, 0.4);
+  --rice-tour-surface: #ffffff;
+  --rice-tour-surface-border: rgba(79, 70, 229, 0.24);
+  --rice-tour-surface-aura:
+    radial-gradient(circle at 4% 0%, rgba(15, 98, 254, 0.08), transparent 40%),
+    radial-gradient(circle at 96% 0%, rgba(105, 41, 196, 0.065), transparent 36%);
+  --rice-tour-arrow-border: #a5afbd;
+  --rice-tour-ring: #5b52df;
+  --rice-tour-highlight: rgba(79, 70, 229, 0.045);
+  --rice-tour-accent: #5b52df;
+  --rice-tour-primary-shadow: 0 5px 14px rgba(52, 61, 190, 0.2);
+}
+
+/* Tour chrome uses theme tokens instead of hardcoded dark fills. Keeping these
+   styles together makes the SVG arrow, card edge, and brand CTA read as one
+   surface in both appearance modes. */
+.rice-tour-card {
+  border: 1px solid var(--rice-tour-surface-border);
+  background: var(--rice-tour-surface-aura), var(--rice-tour-surface);
+  box-shadow: var(--rice-elevation-3);
+}
+
+.rice-tour-accent,
+.rice-tour-step,
+.rice-tour-primary {
+  background: var(--gradient-brand);
+}
+
+.rice-tour-step {
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12), 0 3px 10px rgba(52, 61, 190, 0.24);
+}
+
+.rice-tour-primary {
+  box-shadow: var(--rice-tour-primary-shadow);
+}
+
+.rice-tour-primary:hover {
+  filter: saturate(1.08) brightness(1.08);
 }
 
 .rice-tag--blue {

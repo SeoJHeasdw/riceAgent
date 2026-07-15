@@ -197,14 +197,15 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
         <div>
           <div className="flex items-center border-b border-border-subtle-01 mb-3.5">
             {([
-              ['skills',      t('myPlugins.tabSkills',      { count: plugin.skills.length })],
-              ['knowledge',   t('myPlugins.tabKnowledge',   { count: plugin.knowledge.length })],
-              ['permissions', t('myPlugins.tabPermissions', { count: plugin.permissions.length })],
-            ] as const).map(([id, label]) => {
+              ['skills',      t('myPlugins.tabSkills',      { count: plugin.skills.length }),      'myplugins-tab-skills'],
+              ['knowledge',   t('myPlugins.tabKnowledge',   { count: plugin.knowledge.length }),   'myplugins-tab-knowledge'],
+              ['permissions', t('myPlugins.tabPermissions', { count: plugin.permissions.length }), 'myplugins-tab-permissions'],
+            ] as const).map(([id, label, tourTarget]) => {
               const on = tab === id;
               return (
                 <button
                   key={id}
+                  data-tour={tourTarget}
                   onClick={() => setTab(id)}
                   className={`relative px-3.5 py-2.5 text-body-short-01 transition-colors ${
                     on ? 'text-text-primary font-semibold' : 'text-text-secondary hover:text-text-primary'

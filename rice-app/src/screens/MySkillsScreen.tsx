@@ -329,6 +329,7 @@ const LibraryManageMenu: React.FC<{
       <button
         ref={triggerRef}
         type="button"
+        data-tour="myskills-manage-btn"
         onClick={() => setOpen((value) => !value)}
         aria-label={t('mySkills.manageAriaLabel')}
         aria-haspopup="menu"
@@ -1056,7 +1057,7 @@ const downloadSkillBundle = (skill: Skill, detail: SkillDetail) => {
 
 // 소스 보기 런처 — AI 수정(primary)의 보조 액션이므로 같은 높이의 secondary를 쓴다.
 // 아이콘만 남기면 의미 발견성이 떨어져 파일 수와 텍스트는 유지한다.
-const SourceLauncher: React.FC<{ skill: Skill; detail: SkillDetail; onOpen: () => void }> = ({ skill, detail, onOpen }) => {
+const SourceLauncher: React.FC<{ skill: Skill; detail: SkillDetail; onOpen: () => void; dataTour?: string }> = ({ skill, detail, onOpen, dataTour }) => {
   const { t } = useTranslation('skills');
   const { files } = ownedSkillFiles(skill, detail);
   const readOnly = isBuiltinSkill(skill);
@@ -1065,6 +1066,7 @@ const SourceLauncher: React.FC<{ skill: Skill; detail: SkillDetail; onOpen: () =
       kind="secondary"
       size="sm"
       onClick={onOpen}
+      data-tour={dataTour}
       title={readOnly ? t('mySkills.sourceLauncherReadOnlyTitle') : t('mySkills.sourceLauncherTitle')}
       className="group"
       icon={<Icon name="folder" size={14} className="text-icon-secondary group-hover:text-icon-primary" />}
@@ -1888,7 +1890,7 @@ const SkillDetailView: React.FC<{
   return (
     <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
       {/* header */}
-      <div className="flex-shrink-0 px-7 pt-6 pb-5 border-b border-border-subtle-01">
+      <div data-tour="myskills-detail-header" className="flex-shrink-0 px-7 pt-6 pb-5 border-b border-border-subtle-01">
         <div className="flex items-start gap-3.5">
           <div className={`w-11 h-11 flex-shrink-0 flex items-center justify-center rounded-lg border ${
             isInjected(skillStatus(skill))
@@ -1963,7 +1965,7 @@ const SkillDetailView: React.FC<{
             </div>
             {builtin && <ProvenanceStrip skill={skill} detail={detail} onOpenMarket={() => navigate('/skills')} />}
           </div>
-          <div className="flex flex-shrink-0 items-center gap-2">
+          <div data-tour="myskills-detail-actions" className="flex flex-shrink-0 items-center gap-2">
             {!builtin && (
               <Button
                 kind="primary"
@@ -1975,7 +1977,7 @@ const SkillDetailView: React.FC<{
                 {t('mySkills.headerAiEditBtn')}
               </Button>
             )}
-            <SourceLauncher skill={skill} detail={detail} onOpen={() => setWorkspaceOpen(true)} />
+            <SourceLauncher skill={skill} detail={detail} onOpen={() => setWorkspaceOpen(true)} dataTour="myskills-source-launcher" />
             <OverflowMenu
               align="right"
               direction="down"
@@ -2007,6 +2009,7 @@ const SkillDetailView: React.FC<{
           {
             id: 'overview',
             label: t('mySkills.tabOverview'),
+            dataTour: 'myskills-tab-overview',
             content: (
               <SkillOverviewPanel
                 skill={skill}
@@ -2020,6 +2023,7 @@ const SkillDetailView: React.FC<{
           {
             id: 'insights',
             label: t('mySkills.tabInsights'),
+            dataTour: 'myskills-tab-insights',
             content: (
               <div className="mx-auto flex w-full max-w-[1120px] flex-col gap-7">
                 <SkillTelemetryPanel skill={skill} detail={detail} />

@@ -762,9 +762,9 @@ const ConnectorDetailView: React.FC<{
         </div>
 
         {/* tool permissions — 도구는 제공자가 정의하고, 사용자는 "언제 호출할지"만 정한다 */}
-        <div>
+        <div data-tour="connectors-detail-tools">
           <SectionLabel>{t('detail.sectionTools', { count: c.scopes.length })}</SectionLabel>
-          <p className="text-caption-01 text-text-helper -mt-1 mb-3 leading-relaxed">
+          <p data-tour="connectors-detail-perm-control" className="text-caption-01 text-text-helper -mt-1 mb-3 leading-relaxed">
             {isMcp ? t('detail.toolsDesc_local') : t('detail.toolsDesc_remote', { provider: c.provider })}{' '}
             <span className="status-chip status-chip--allow">{t('detail.permAllowFull')}</span>{' '}
             <span className="status-chip status-chip--ask">{t('detail.permApprovalFull')}</span>{' '}
@@ -1226,7 +1226,7 @@ function ConnectorsScreen() {
       >
         {/* 구분: 원격 커넥터 / 로컬 MCP (개발자) */}
         <div className="px-4 pt-4">
-          <div className="grid grid-cols-2 gap-0.5 p-0.5 bg-field-01 border border-border-subtle-01 rounded-lg">
+          <div data-tour="connectors-kind-tabs" className="grid grid-cols-2 gap-0.5 p-0.5 bg-field-01 border border-border-subtle-01 rounded-lg">
             {([
               { id: 'remote' as const, label: t('kindTab.remote') },
               { id: 'local-mcp' as const, label: t('kindTab.localMcp') },
@@ -1322,7 +1322,7 @@ function ConnectorsScreen() {
         className="flex-shrink-0 bg-background border-r border-border-subtle-01 overflow-y-auto min-w-0"
         style={{ width: listPanel.width }}
       >
-        <div className="px-5 pt-5 pb-3 flex items-center gap-2">
+        <div data-tour="connectors-list-header" className="px-5 pt-5 pb-3 flex items-center gap-2">
           <h1 className="text-heading-03 font-semibold text-text-primary">{isLocal ? t('localMcp') : t('title')}</h1>
           {isLocal && (
             <Tag type="gray" size="sm">

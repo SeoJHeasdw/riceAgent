@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TourStep } from './tourSteps';
 
@@ -16,6 +16,9 @@ export interface TourOverlayProps {
   currentPath: string;
   onNavigate: (path: string) => void;
   onDone: () => void;
+  /** Missing global-nav targets use a centered explanation. Data-backed screen
+   * tours wait invisibly until their stable target has mounted. */
+  missingTargetBehavior?: 'center' | 'wait';
 }
 
 interface Rect { top: number; left: number; width: number; height: number; }
@@ -35,12 +38,8 @@ const GAP = 16;        // 타겟 엣지 ↔ 말풍선 엣지 간격
 const ARROW_H = 10;    // SVG 화살표 높이
 const ARROW_W = 18;    // SVG 화살표 너비
 const VP_PAD = 12;     // 뷰포트 최소 여백
-
-// ── 말풍선 꼬리(세모) 색상 · 여기서 바꾸면 됨 ─────────────────────────────
-// 카드 본체는 #262626(layer-01)라 어두운 dim 위에서 잘 안 보인다 → 더 밝게 띄운다.
-// 더 밝게/어둡게: ARROW_FILL 숫자를 올리거나(예 #555) 내리면(예 #303030) 된다.
-const ARROW_FILL = '#4a4a4a';   // 세모 채움색
-const ARROW_STROKE = '#8d8d8d'; // 세모 테두리색(밝을수록 윤곽이 또렷)
+const BUBBLE_ESTIMATED_H = 220;
+const EXIT_MS = 180;
 
 // 부드러운 감속(오버슈트 없음) — 미끄러짐·모핑용
 const EASE_GLIDE = 'cubic-bezier(0.22, 1, 0.36, 1)';
@@ -65,56 +64,74 @@ function calcBubblePos(
   placement: TourStep['placement'],
   vpW: number,
   vpH: number,
+  bubbleHeight: number,
 ): BubblePos {
   const cx = rect.left + rect.width / 2;
   const cy = rect.top + rect.height / 2;
 
-  const mk = (
-    top: number,
-    left: number,
-    arrowSide: BubblePos['arrowSide'],
-    arrowCenter: number,
-  ): BubblePos => ({ top, left, arrowSide, arrowCenter });
+  type Candidate = Omit<BubblePos, 'arrowCenter'>;
+  const effectiveHeight = Math.min(Math.max(bubbleHeight, 1), Math.max(1, vpH - VP_PAD * 2));
+  const candidates: Record<TourStep['placement'], Candidate> = {
+    right: { top: cy - effectiveHeight / 2, left: rect.left + rect.width + GAP, arrowSide: 'left' },
+    left: { top: cy - effectiveHeight / 2, left: rect.left - BUBBLE_W - GAP, arrowSide: 'right' },
+    top: { top: rect.top - GAP - effectiveHeight, left: cx - BUBBLE_W / 2, arrowSide: 'bottom' },
+    bottom: { top: rect.top + rect.height + GAP, left: cx - BUBBLE_W / 2, arrowSide: 'top' },
+  };
+  const opposite: Record<TourStep['placement'], TourStep['placement']> = {
+    right: 'left', left: 'right', top: 'bottom', bottom: 'top',
+  };
+  const fits = (candidate: Candidate) =>
+    candidate.left >= VP_PAD
+    && candidate.left + BUBBLE_W <= vpW - VP_PAD
+    && candidate.top >= VP_PAD
+    && candidate.top + effectiveHeight <= vpH - VP_PAD;
 
-  const right = (): BubblePos => {
-    const rawTop = cy - 90;
-    const top = clamp(rawTop, VP_PAD, vpH - 220);
-    const left = rect.left + rect.width + GAP;
-    return mk(top, left, 'left', clamp(cy - top, ARROW_W, 180 - ARROW_W));
-  };
-  const left = (): BubblePos => {
-    const rawTop = cy - 90;
-    const top = clamp(rawTop, VP_PAD, vpH - 220);
-    const left = rect.left - BUBBLE_W - GAP;
-    return mk(top, left, 'right', clamp(cy - top, ARROW_W, 180 - ARROW_W));
-  };
-  const top = (): BubblePos => {
-    const rawLeft = cx - BUBBLE_W / 2;
-    const l = clamp(rawLeft, VP_PAD, vpW - BUBBLE_W - VP_PAD);
-    const t = rect.top - GAP - 200;
-    return mk(t, l, 'bottom', clamp(cx - l, ARROW_W, BUBBLE_W - ARROW_W));
-  };
-  const bottom = (): BubblePos => {
-    const rawLeft = cx - BUBBLE_W / 2;
-    const l = clamp(rawLeft, VP_PAD, vpW - BUBBLE_W - VP_PAD);
-    const t = rect.top + rect.height + GAP;
-    return mk(t, l, 'top', clamp(cx - l, ARROW_W, BUBBLE_W - ARROW_W));
-  };
+  const preferred = candidates[placement];
+  const alternate = candidates[opposite[placement]];
+  const raw = fits(preferred) ? preferred : fits(alternate) ? alternate : preferred;
+  const left = clamp(raw.left, VP_PAD, Math.max(VP_PAD, vpW - BUBBLE_W - VP_PAD));
+  const top = clamp(raw.top, VP_PAD, Math.max(VP_PAD, vpH - effectiveHeight - VP_PAD));
+  const arrowCenter = raw.arrowSide === 'left' || raw.arrowSide === 'right'
+    ? clamp(cy - top, ARROW_W, Math.max(ARROW_W, effectiveHeight - ARROW_W))
+    : clamp(cx - left, ARROW_W, BUBBLE_W - ARROW_W);
+  return { top, left, arrowSide: raw.arrowSide, arrowCenter };
+}
 
-  const fns = { right, left, top, bottom };
-  const pos = fns[placement]();
+/** Intersect an element with the viewport and any clipping/scroll ancestors.
+ * getBoundingClientRect alone includes the invisible part of an element inside
+ * overflow containers, which made edge targets produce clipped highlight rings. */
+function visibleTargetRect(el: Element): Rect | null {
+  const source = el.getBoundingClientRect();
+  let left = Math.max(0, source.left);
+  let top = Math.max(0, source.top);
+  let right = Math.min(window.innerWidth, source.right);
+  let bottom = Math.min(window.innerHeight, source.bottom);
 
-  // 뷰포트 밖이면 반대방향 폴백
-  if (placement === 'right' && pos.left + BUBBLE_W > vpW - VP_PAD) return left();
-  if (placement === 'left' && pos.left < VP_PAD) return right();
-  if (placement === 'top' && pos.top < VP_PAD) return bottom();
-  if (placement === 'bottom' && pos.top + 220 > vpH - VP_PAD) return top();
-  return pos;
+  let parent = el.parentElement;
+  while (parent && parent !== document.body) {
+    const style = window.getComputedStyle(parent);
+    const clipsX = /(auto|scroll|hidden|clip)/.test(style.overflowX);
+    const clipsY = /(auto|scroll|hidden|clip)/.test(style.overflowY);
+    if (clipsX || clipsY) {
+      const bounds = parent.getBoundingClientRect();
+      if (clipsX) {
+        left = Math.max(left, bounds.left);
+        right = Math.min(right, bounds.right);
+      }
+      if (clipsY) {
+        top = Math.max(top, bounds.top);
+        bottom = Math.min(bottom, bounds.bottom);
+      }
+    }
+    parent = parent.parentElement;
+  }
+
+  if (right <= left || bottom <= top) return null;
+  return { top, left, width: right - left, height: bottom - top };
 }
 
 /* ── Dim + 하이라이트 마스크 (구멍·링이 타겟 사이를 부드럽게 모핑) ─────────── */
-const RING = '#4589ff'; // 온보딩 액센트 블루 — 차분한 하이라이트
-const DimMask: React.FC<{ rect: Rect | null }> = ({ rect }) => {
+const DimMask: React.FC<{ rect: Rect | null; maskId: string; visible: boolean }> = ({ rect, maskId, visible }) => {
   const vpW = window.innerWidth;
   const vpH = window.innerHeight;
   const PAD = 7;
@@ -122,17 +139,34 @@ const DimMask: React.FC<{ rect: Rect | null }> = ({ rect }) => {
   // SVG geometry(x/y/width/height/rx)는 Chromium에서 CSS transition으로 모핑된다.
   const morph = { transition: `x ${480}ms ${EASE_GLIDE}, y ${480}ms ${EASE_GLIDE}, width ${480}ms ${EASE_GLIDE}, height ${480}ms ${EASE_GLIDE}` };
 
+  const geometry = (extra: number, edge: number) => {
+    if (!rect) return null;
+    const left = clamp(rect.left - PAD - extra, edge, Math.max(edge, vpW - edge));
+    const top = clamp(rect.top - PAD - extra, edge, Math.max(edge, vpH - edge));
+    const right = clamp(rect.left + rect.width + PAD + extra, edge, Math.max(edge, vpW - edge));
+    const bottom = clamp(rect.top + rect.height + PAD + extra, edge, Math.max(edge, vpH - edge));
+    return { x: left, y: top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
+  };
+  const hole = geometry(0, 0);
+  const innerRing = geometry(0, 1);
+  // The glow has a 4px centered stroke, so keep its geometry 3px inside the
+  // viewport. This preserves the complete line at the screen's outer edges.
+  const outerRing = geometry(3, 3);
+
   return (
-    <svg className="fixed inset-0 pointer-events-none" width={vpW} height={vpH} style={{ zIndex: 9000 }} aria-hidden>
+    <svg
+      className="fixed inset-0 pointer-events-none"
+      width={vpW}
+      height={vpH}
+      style={{ zIndex: 9000, opacity: visible ? 1 : 0, transition: `opacity ${EXIT_MS}ms ${EASE_IN}` }}
+      aria-hidden
+    >
       <defs>
-        <mask id="tour-cutout">
+        <mask id={maskId}>
           <rect width={vpW} height={vpH} fill="white" />
-          {rect && (
+          {hole && (
             <rect
-              x={rect.left - PAD}
-              y={rect.top - PAD}
-              width={rect.width + PAD * 2}
-              height={rect.height + PAD * 2}
+              {...hole}
               rx={R} ry={R}
               fill="black"
               style={morph}
@@ -142,34 +176,34 @@ const DimMask: React.FC<{ rect: Rect | null }> = ({ rect }) => {
       </defs>
 
       {/* 배경 dim — 차분한 슬레이트, 살짝 옅게 */}
-      <rect width={vpW} height={vpH} fill="rgba(15, 23, 42, 0.55)" mask="url(#tour-cutout)" />
+      <rect
+        width={vpW}
+        height={vpH}
+        mask={`url(#${maskId})`}
+        style={{ fill: 'var(--rice-tour-dim)' }}
+      />
 
       {/* 타겟 하이라이트 */}
-      {rect && (
+      {innerRing && outerRing && (
         <>
           <rect
-            x={rect.left - PAD - 3}
-            y={rect.top - PAD - 3}
-            width={rect.width + (PAD + 3) * 2}
-            height={rect.height + (PAD + 3) * 2}
+            {...outerRing}
             rx={R + 3} ry={R + 3}
             fill="none"
-            stroke={RING}
             strokeOpacity={0.18}
             strokeWidth="4"
-            style={morph}
+            style={{ ...morph, stroke: 'var(--rice-tour-ring)' }}
           />
           <rect
-            x={rect.left - PAD}
-            y={rect.top - PAD}
-            width={rect.width + PAD * 2}
-            height={rect.height + PAD * 2}
+            {...innerRing}
             rx={R} ry={R}
-            fill="rgba(255,255,255,0.03)"
-            stroke={RING}
             strokeOpacity={0.8}
             strokeWidth="1.5"
-            style={morph}
+            style={{
+              ...morph,
+              fill: 'var(--rice-tour-highlight)',
+              stroke: 'var(--rice-tour-ring)',
+            }}
           />
         </>
       )}
@@ -182,8 +216,8 @@ const BubbleArrow: React.FC<{ side: BubblePos['arrowSide']; center: number }> = 
   // NOTE: var()는 SVG presentation attribute(fill="...")에서는 무효 → 검게 폴백된다.
   // 반드시 CSS(style)로 줘야 토큰이 해석되어 카드(layer-01)와 같은 색이 된다.
   const pathStyle: React.CSSProperties = {
-    fill: ARROW_FILL,
-    stroke: ARROW_STROKE,
+    fill: 'var(--rice-tour-surface)',
+    stroke: 'var(--rice-tour-arrow-border)',
     strokeWidth: 1,
     strokeLinejoin: 'round',
   };
@@ -227,7 +261,13 @@ const BubbleArrow: React.FC<{ side: BubblePos['arrowSide']; center: number }> = 
 };
 
 /* ── 메인 컴포넌트 ──────────────────────────────────────────────────────── */
-export const TourOverlay: React.FC<TourOverlayProps> = ({ steps, currentPath, onNavigate, onDone }) => {
+export const TourOverlay: React.FC<TourOverlayProps> = ({
+  steps,
+  currentPath,
+  onNavigate,
+  onDone,
+  missingTargetBehavior = 'center',
+}) => {
   const { t } = useTranslation('tour');
   // 스텝 텍스트는 id 기반 동적 키(steps.<id>.title|body)라 넓힌 t 로 조회한다.
   const tt = t as unknown as (key: string, options?: Record<string, unknown>) => string;
@@ -236,20 +276,35 @@ export const TourOverlay: React.FC<TourOverlayProps> = ({ steps, currentPath, on
   const [bubblePos, setBubblePos] = useState<BubblePos | null>(null);
   const [shown, setShown] = useState(false);   // 첫 등장 페이드/스케일
   const [leaving, setLeaving] = useState(false); // 종료 페이드아웃
+  const [bubbleHeight, setBubbleHeight] = useState(BUBBLE_ESTIMATED_H);
   const roRef = useRef<ResizeObserver | null>(null);
+  const bubbleRef = useRef<HTMLDivElement | null>(null);
+  const doneRef = useRef(false);
+  const maskId = `tour-cutout-${useId().replace(/:/g, '')}`;
   const step = steps[index];
   const isLast = index === steps.length - 1;
 
   const measureTarget = useCallback(() => {
     if (!step) return;
     const el = document.querySelector(`[data-tour="${step.target}"]`);
-    // 타겟을 못 찾으면(예: 접힌 패널) dim에 갇히지 않도록 중앙 폴백으로 띄운다.
-    if (!el) { setTargetRect(null); setBubblePos(centeredBubblePos(window.innerWidth, window.innerHeight)); return; }
-    const r = el.getBoundingClientRect();
-    const rect: Rect = { top: r.top, left: r.left, width: r.width, height: r.height };
+    // 데이터가 아직 로드되지 않은 화면별 투어는 아무 레이어도 띄우지 않고
+    // 기다린다. 전역 네비게이션 투어는 기존 중앙 설명 폴백을 유지한다.
+    if (!el) {
+      setTargetRect(null);
+      setBubblePos(missingTargetBehavior === 'center'
+        ? centeredBubblePos(window.innerWidth, window.innerHeight)
+        : null);
+      return;
+    }
+    const rect = visibleTargetRect(el);
+    if (!rect) {
+      setTargetRect(null);
+      setBubblePos(null);
+      return;
+    }
     setTargetRect(rect);
-    setBubblePos(calcBubblePos(rect, step.placement, window.innerWidth, window.innerHeight));
-  }, [step]);
+    setBubblePos(calcBubblePos(rect, step.placement, window.innerWidth, window.innerHeight, bubbleHeight));
+  }, [bubbleHeight, missingTargetBehavior, step]);
 
   // 단계/경로 변화 시: 필요하면 먼저 네비게이트, 아니면 다음 프레임에 측정.
   // (숨기지 않는다 → 위치가 바뀌면 스포트라이트·말풍선이 그대로 미끄러진다)
@@ -259,6 +314,7 @@ export const TourOverlay: React.FC<TourOverlayProps> = ({ steps, currentPath, on
       onNavigate(step.navigateTo);
       return;
     }
+    document.querySelector(`[data-tour="${step.target}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     const raf = requestAnimationFrame(measureTarget);
     const t = setTimeout(measureTarget, 160); // 라우트 페인트 후 늦은 레이아웃 보정
     return () => { cancelAnimationFrame(raf); clearTimeout(t); };
@@ -281,27 +337,51 @@ export const TourOverlay: React.FC<TourOverlayProps> = ({ steps, currentPath, on
     return () => roRef.current?.disconnect();
   }, [measureTarget]);
 
+  // Fixed/full-height app shells often do not resize documentElement when
+  // async data mounts. Observe DOM changes so a waiting screen tour appears as
+  // soon as its target exists.
+  useEffect(() => {
+    if (missingTargetBehavior !== 'wait') return;
+    const observer = new MutationObserver(measureTarget);
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [measureTarget, missingTargetBehavior]);
+
+  useLayoutEffect(() => {
+    const bubble = bubbleRef.current;
+    if (!bubble) return;
+    const updateHeight = () => setBubbleHeight(bubble.getBoundingClientRect().height || BUBBLE_ESTIMATED_H);
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(bubble);
+    return () => observer.disconnect();
+  }, [bubblePos, index]);
+
   useEffect(() => {
     window.addEventListener('resize', measureTarget);
     return () => window.removeEventListener('resize', measureTarget);
   }, [measureTarget]);
 
+  const triggerDone = useCallback(() => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    setLeaving(true);
+    // Do not cancel this tiny timer on unmount: once the blocking layer has
+    // released pointer events, a fast route change must still persist the tour
+    // that the user just dismissed.
+    window.setTimeout(onDone, EXIT_MS);
+  }, [onDone]);
+
   useEffect(() => {
     const h = (e: KeyboardEvent) => { if (e.key === 'Escape') triggerDone(); };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [triggerDone]);
 
-  if (!step) return null;
+  if (!step || (missingTargetBehavior === 'wait' && !bubblePos)) return null;
 
   const stepTitle = tt(`steps.${step.id}.title`);
   const stepBody = tt(`steps.${step.id}.body`);
-
-  const triggerDone = () => {
-    setLeaving(true);
-    setTimeout(onDone, 200);
-  };
 
   const goNext = () => {
     if (isLast) { triggerDone(); return; }
@@ -313,14 +393,20 @@ export const TourOverlay: React.FC<TourOverlayProps> = ({ steps, currentPath, on
   return (
     <>
       {/* ── dim + 하이라이트 ── */}
-      <DimMask rect={targetRect} />
+      <DimMask rect={targetRect} maskId={maskId} visible={!leaving} />
 
       {/* ── 배경 클릭 차단 (말풍선 외 클릭 시 종료) ── */}
-      <div className="fixed inset-0" style={{ zIndex: 9001 }} onClick={triggerDone} aria-hidden />
+      <div
+        className="fixed inset-0"
+        style={{ zIndex: 9001, pointerEvents: leaving ? 'none' : 'auto' }}
+        onClick={triggerDone}
+        aria-hidden
+      />
 
       {/* ── 말풍선 ── */}
       {bubblePos && (
         <div
+          ref={bubbleRef}
           role="dialog"
           aria-modal="false"
           aria-label={t('ui.stepAria', { step: index + 1, title: stepTitle })}
@@ -340,9 +426,9 @@ export const TourOverlay: React.FC<TourOverlayProps> = ({ steps, currentPath, on
           {!bubblePos.centered && <BubbleArrow side={bubblePos.arrowSide} center={bubblePos.arrowCenter} />}
 
           {/* 카드 본체 — 온보딩과 동일한 Carbon 토큰 */}
-          <div className="relative rounded-xl overflow-hidden bg-layer-01 border border-border-subtle-01 shadow-elevation-3">
-            {/* 상단 액센트 (단색, 차분) */}
-            <div className="h-[3px] w-full bg-interactive" />
+          <div className="rice-tour-card relative overflow-hidden rounded-xl">
+            {/* RICE brand blue → purple */}
+            <div className="rice-tour-accent h-[3px] w-full" />
 
             {/* 바디 */}
             <div className="relative px-5 pt-4 pb-4">
@@ -360,14 +446,14 @@ export const TourOverlay: React.FC<TourOverlayProps> = ({ steps, currentPath, on
               {/* 단계별 텍스트만 크로스페이드 (key=index) */}
               <div key={index} style={{ animation: `tourBodyIn 300ms ${EASE_IN}` }}>
                 <div className="flex items-center gap-2 mb-2.5 pr-7">
-                  <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-interactive text-white text-label-micro font-bold tabular-nums flex-shrink-0">
+                  <span className="rice-tour-step inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-label-micro font-bold tabular-nums text-white">
                     {index + 1}
                   </span>
                   <span className="text-body-short-01 font-semibold leading-tight text-text-primary">
                     {stepTitle}
                   </span>
                 </div>
-                <p className="text-body-short-01 leading-[1.65] text-text-secondary">
+                <p className="whitespace-pre-line text-body-short-01 leading-[1.65] text-text-secondary">
                   {stepBody}
                 </p>
               </div>
@@ -384,7 +470,7 @@ export const TourOverlay: React.FC<TourOverlayProps> = ({ steps, currentPath, on
                     style={{
                       width: i === index ? 18 : 5,
                       height: 5,
-                      background: 'var(--cds-interactive)',
+                      background: 'var(--rice-tour-accent)',
                       opacity: i === index ? 1 : i < index ? 0.45 : 0.18,
                       transition: `width 320ms ${EASE_GLIDE}, opacity 220ms ease`,
                     }}
@@ -402,7 +488,7 @@ export const TourOverlay: React.FC<TourOverlayProps> = ({ steps, currentPath, on
                 </button>
                 <button
                   onClick={goNext}
-                  className="flex items-center gap-1.5 text-caption-01 font-semibold px-4 py-1.5 rounded-lg bg-interactive text-white hover:bg-interactive-hover transition-colors"
+                  className="rice-tour-primary flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-caption-01 font-semibold text-white transition-[filter,box-shadow]"
                 >
                   {isLast ? t('ui.start') : t('ui.next')}
                   {!isLast && (

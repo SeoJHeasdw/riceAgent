@@ -10,7 +10,17 @@ import { LearningProvider } from './lib/learning/LearningContext';
 import { MarketplaceProvider } from './lib/marketplace/MarketplaceContext';
 import { ToastProvider } from './lib/toast/ToastProvider';
 import { LanguageSelectDialog } from './components/carbon/LanguageSelectDialog';
-import { TourOverlay, TOUR_STEPS, TOUR_DONE_KEY } from './components/carbon/tour';
+import {
+  TourOverlay,
+  TOUR_STEPS,
+  TOUR_DONE_KEY,
+  SCREEN_TOUR_KEYS,
+  MY_SKILLS_TOUR_STEPS,
+  MY_PLUGINS_TOUR_STEPS,
+  CONNECTORS_TOUR_STEPS,
+  screenTourIdForPath,
+  useScreenTour,
+} from './components/carbon/tour';
 import { CommandPalette } from './components/carbon/CommandPalette';
 import { REPLAY_ONBOARDING_EVENT, REPLAY_TOUR_EVENT, RESET_ALL_DATA_EVENT } from './lib/tutorial';
 import { useLearning } from './lib/learning/LearningContext';
@@ -36,15 +46,24 @@ const railItems = toRailItems();
 
 interface AppShellProps {
   tourActive: boolean;
+  screenToursSuspended: boolean;
   onTourDone: () => void;
   onTriggerOnboarding: () => void;
   onStopTour: () => void;
 }
 
-function AppShell({ tourActive, onTourDone, onTriggerOnboarding, onStopTour }: AppShellProps) {
+/** 화면 경로(콘텐츠 pathname) → 해당 화면 투어 step 배열 */
+const SCREEN_TOUR_STEPS_MAP = {
+  mySkills:   MY_SKILLS_TOUR_STEPS,
+  myPlugins:  MY_PLUGINS_TOUR_STEPS,
+  connectors: CONNECTORS_TOUR_STEPS,
+} as const;
+
+function AppShell({ tourActive, screenToursSuspended, onTourDone, onTriggerOnboarding, onStopTour }: AppShellProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const settingsOpen = location.pathname === '/settings';
+  const { isDone, markDone, resetAll: resetScreenTours } = useScreenTour();
 
   // Settings is a destination in the URL, but visually it is an overlay. Keep
   // the last workspace route mounted beneath it so opening preferences never
@@ -69,13 +88,29 @@ function AppShell({ tourActive, onTourDone, onTriggerOnboarding, onStopTour }: A
     else navigate(backgroundPathRef.current, { replace: true });
   };
 
+  // ── 화면별 단발성 투어 ────────────────────────────────────────────────────
+  // 전역 투어 실행 중에는 절대 동시에 뜨지 않는다(전역 투어 우선).
+  // 경로 기준으로 해당 화면의 완료 키가 없는 첫 방문에만 표시.
+  const screenTourId = screenTourIdForPath(contentPathname);
+  const screenTourActive = !tourActive
+    && !screenToursSuspended
+    && !settingsOpen
+    && screenTourId !== null
+    && !isDone(screenTourId);
+  const activeScreenTourSteps = screenTourId ? SCREEN_TOUR_STEPS_MAP[screenTourId] : null;
+
+  const handleScreenTourDone = useCallback(() => {
+    if (screenTourId) markDone(screenTourId);
+  }, [screenTourId, markDone]);
+
   // 전체 데이터 삭제 이벤트 — LearningProvider 안에 있으므로 여기서 useLearning 사용 가능
   const { resetAll } = useLearning();
   const handleResetAllData = useCallback(() => {
     resetAll();
+    resetScreenTours(); // 화면별 투어 완료 키도 초기화
     onStopTour();
     onTriggerOnboarding(); // 온보딩 첫 화면(언어 선택)부터 재시작
-  }, [resetAll, onStopTour, onTriggerOnboarding]);
+  }, [resetAll, resetScreenTours, onStopTour, onTriggerOnboarding]);
 
   useEffect(() => {
     window.addEventListener(RESET_ALL_DATA_EVENT, handleResetAllData);
@@ -118,12 +153,25 @@ function AppShell({ tourActive, onTourDone, onTriggerOnboarding, onStopTour }: A
 
       <CommandPalette />
 
+      {/* 전역 투어 — 전역 투어는 항상 우선 */}
       {tourActive && (
         <TourOverlay
           steps={TOUR_STEPS}
           currentPath={location.pathname}
           onNavigate={(path) => navigate(path)}
           onDone={onTourDone}
+        />
+      )}
+
+      {/* 화면별 단발성 투어 — 전역 투어가 없을 때만 표시 */}
+      {screenTourActive && activeScreenTourSteps && (
+        <TourOverlay
+          key={`screen-tour-${screenTourId}`}
+          steps={activeScreenTourSteps}
+          currentPath={location.pathname}
+          onNavigate={(path) => navigate(path)}
+          onDone={handleScreenTourDone}
+          missingTargetBehavior="wait"
         />
       )}
     </>
@@ -279,9 +327,18 @@ function App() {
   };
 
   // 설정 화면에서 "다시 보기"를 누르면 온보딩/투어를 재실행한다(tutorial.ts 브리지).
+  // 투어 다시 보기 시 화면별 완료 키도 제거해 각 화면 재방문 시 다시 볼 수 있게 한다.
   useEffect(() => {
     const onReplayOnboarding = () => setLangSelectOpen(true);
-    const onReplayTour = () => setTourActive(true);
+    const onReplayTour = () => {
+      // 화면별 투어 완료 키 초기화 (SCREEN_TOUR_KEYS 직접 참조)
+      try {
+        for (const key of Object.values(SCREEN_TOUR_KEYS)) {
+          localStorage.removeItem(key);
+        }
+      } catch { /* ignore */ }
+      setTourActive(true);
+    };
     window.addEventListener(REPLAY_ONBOARDING_EVENT, onReplayOnboarding);
     window.addEventListener(REPLAY_TOUR_EVENT, onReplayTour);
     return () => {
@@ -298,6 +355,7 @@ function App() {
             <BrowserRouter>
               <AppShell
                 tourActive={tourActive}
+                screenToursSuspended={langSelectOpen || onboardingOpen}
                 onTourDone={handleTourDone}
                 onTriggerOnboarding={() => setLangSelectOpen(true)}
                 onStopTour={() => setTourActive(false)}

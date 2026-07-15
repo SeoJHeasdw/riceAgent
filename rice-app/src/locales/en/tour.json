@@ -42,6 +42,58 @@
     "settings": {
       "title": "Settings",
       "body": "Reconfigure model connections and app preferences anytime. Even after onboarding, you can change or add AI models here."
+    },
+    "screen-myskills-overview": {
+      "title": "Skill information",
+      "body": "See the skill's purpose, usage count, and last-used date at a glance. This is the starting point for identifying the skill you are viewing."
+    },
+    "screen-myskills-overview-tab": {
+      "title": "Overview",
+      "body": "Review the skill's execution steps and the tools it uses. This shows how the skill carries out its work from start to finish."
+    },
+    "screen-myskills-insights": {
+      "title": "Insights",
+      "body": "Dive into real usage history, success and failure signals, friction points, routing issues, and AI analysis — the data that helps you improve each skill."
+    },
+    "screen-myskills-manage": {
+      "title": "Skill management",
+      "body": "Three tools are available in this menu.\n① Learning Impact — measure how much a skill improves results\n② Skill Cleanup — disable or archive rarely-used skills\n③ AI Merge — detect overlapping skills and propose consolidations"
+    },
+    "screen-myskills-files": {
+      "title": "File browser",
+      "body": "Browse the actual file structure of a skill, including the raw Markdown source in SKILL.md. Useful for understanding and auditing exactly what the skill does."
+    },
+    "screen-myskills-ai-edit": {
+      "title": "Edit with AI",
+      "body": "Request skill changes in plain language. Review the AI's proposed diff, then apply or reject it. Built-in skills provided by RICE cannot be edited with AI."
+    },
+    "screen-myplugins-skills": {
+      "title": "Skills",
+      "body": "The executable skills this plugin provides. Each can be called with a / command in chat or used automatically via routing."
+    },
+    "screen-myplugins-knowledge": {
+      "title": "Knowledge",
+      "body": "Documents, data, and guides that the plugin references. The agent draws on this knowledge to answer more accurately."
+    },
+    "screen-myplugins-permissions": {
+      "title": "Permissions (Connectors)",
+      "body": "The connectors this plugin needs to run. Check which external services are required and whether they are already connected."
+    },
+    "screen-connectors-kinds": {
+      "title": "Remote vs. local",
+      "body": "Remote: built-in services like Gmail, plus any Custom Connector you add via OAuth. Local: MCP servers running on your machine, registered and called on demand."
+    },
+    "screen-connectors-add": {
+      "title": "Adding connectors",
+      "body": "Browse the built-in catalog to add a supported service, or paste a Custom Connector URL to register any OAuth-enabled MCP server. Use the Local tab to register a local MCP server."
+    },
+    "screen-connectors-tool-groups": {
+      "title": "Tool categories",
+      "body": "After connecting, MCP tools are grouped by nature: read-only tools (get, list, search…) and write/execute/delete tools. Set permissions per group or per individual tool."
+    },
+    "screen-connectors-permissions": {
+      "title": "Tool permissions",
+      "body": "Three levels for every tool: ① Always allow — runs without HITL ② Approval required — the agent asks before executing ③ Blocked — the tool is never injected into the agent's context."
     }
   }
 }
