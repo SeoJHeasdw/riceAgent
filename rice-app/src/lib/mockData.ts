@@ -7,9 +7,12 @@ import { ModelSettings } from '../components/carbon/ModelSettingsPanel';
  * ./learningData.)
  */
 
-// Default model settings (used until the runtime restores saved settings)
+// Default model settings (used until the runtime restores saved settings).
+// temperature: 백엔드 ProviderConfig 기본(0.5)과 일치 — 도구 인자 JSON 정확도와
+// 안정성의 균형. 구조화 생성/편집 전용 호출은 이 값과 무관하게 런타임이 0.1로
+// 고정한다. 창작 요청만 사용자가 올린다.
 export const defaultModelSettings: ModelSettings = {
-  temperature: 0.7,
+  temperature: 0.5,
   registeredModels: [],
   endpoint: 'http://localhost:11434',
   userModelingEnabled: true,

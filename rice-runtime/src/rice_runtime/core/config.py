@@ -43,7 +43,15 @@ class ProviderConfig:
 
     kind: str = "claude"  # "claude" (SaaS) | "ollama" (on-prem) | "echo" (skeleton)
     model: str = "claude-sonnet-4-6"
-    temperature: float = 0.7
+    # 메인 ReAct 루프의 기본 온도. 0.7은 도구 인자(PPT deck spec 같은 깊은 JSON)
+    # 생성에서 불필요한 변동성을 키운다 — 재시도 편차·괄호/인용부호 실수의 온상.
+    # RICE의 자기개선은 온도의 무작위성이 아니라 스킬·메모리·도구 피드백에서
+    # 나오므로 기본을 낮춰도 제품 정체성은 그대로다. 0.5는 도구 정확도와 (로컬
+    # thinking 모델의 저온 반복 루프를 피하는) 안정성의 균형점이다(2026-07-15).
+    # 창작이 명시적으로 필요한 요청은 사용자가 설정에서 올릴 수 있다. 참고:
+    # 구조화 JSON 생성/편집 전용 호출은 이 값과 **무관하게** 0.1로 고정된다
+    # (prompts/skill_edit.py·analysis.py — 사용자 온도와 독립).
+    temperature: float = 0.5
     base_url: str | None = None  # Ollama only
     # Per-generation OUTPUT cap for the main agent loop (Claude `max_tokens` /
     # Ollama `num_predict`). Without this the providers fall back to their own

@@ -29,6 +29,7 @@ import json
 import logging
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable
+from dataclasses import replace
 from typing import Protocol, cast
 
 from ..connector.interfaces import IConnectorService
@@ -46,6 +47,7 @@ from ..core.types import (
     split_image_attachments,
 )
 from ..execution.interfaces import IPluginLoader
+from .arg_preflight import preflight_arguments
 from .interfaces import IApprovalGate, TurnView
 
 log = logging.getLogger("rice.agent.dispatch")
@@ -259,6 +261,26 @@ class ToolDispatcher:
         exact policy/approval path. Control events (notably approval requests)
         remain public, so suppressing the envelope never bypasses HITL.
         """
+        # ── argument preflight (step-1 hardening, 2026-07-15) ─────────────────
+        # 승인/실행 **전에** 소형 모델의 인자 실수를 교정하거나 정확한 오류로
+        # 되돌린다: 배열/객체 인자를 JSON 문자열로 감싼 경우(관찰된 PPT `slides`
+        # 실패) json.loads로 salvage 하고, 복구 불가면 승인창을 띄우지 않고 모델에게
+        # 정밀 오류를 돌려 정보 있는 재시도를 유도한다. spec.parameters(도구가 이미
+        # 선언한 스키마)만으로 판단한다 — 모든 도구 공통, 새 모델 호출 없음.
+        coerced_args, arg_error = preflight_arguments(spec, call.arguments)
+        if arg_error is not None:
+            # 잘못된 호출도 트레이스엔 남긴다(call↔result 짝 유지) — 단 승인은 건너뛴다.
+            if emit_envelope:
+                yield ev_tool_call(self._public_call(call, spec))
+            res = ToolResult(call.id, ok=False, error=arg_error)
+            self._results[call.id] = res
+            if emit_envelope:
+                yield ev_tool_result(res)
+            return
+        if coerced_args is not call.arguments:
+            # salvage됨 — 교정본으로 교체해 이후 표시·승인·실행이 일관되게 본다.
+            call = replace(call, arguments=coerced_args)
+
         if emit_envelope:
             yield ev_tool_call(self._public_call(call, spec))
 

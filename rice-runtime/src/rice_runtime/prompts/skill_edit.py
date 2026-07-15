@@ -19,9 +19,14 @@ import json
 
 from ..core.types import Message
 
-# 편집은 요약(0.1)보다 약간의 표현 여지가 필요하지만 여전히 낮게 — 지시 밖의
-# 창작을 억제한다.
-SKILL_EDIT_TEMPERATURE = 0.2
+# 구조화 JSON 생성/편집 정책(2026-07-15): 기계가 소비할 structured 출력을 만드는
+# 전용 호출은 사용자 설정 temperature와 **무관하게** 0.1로 고정한다 — 이 계열은
+# 창의성이 아니라 문법·구조 정확성이 전부다(analysis.py 와 동일 원칙). 스킬 편집은
+# response_schema + think=False 로 이미 constrained decoding 을 타므로 0.1이
+# 표현력을 해치지 않고 지시 밖 재작성만 더 확실히 억제한다.
+# ⚠️ 이 상수를 provider.temperature 로 바꾸지 말 것 — 사용자 온도와의 독립이
+#    정책의 핵심이다(설정이 0.7이어도 편집 호출은 0.1로 나가야 한다).
+SKILL_EDIT_TEMPERATURE = 0.1
 
 # 출력 토큰 예산의 바닥/천장 — 파일 전체를 다시 쓰므로 입력 크기에 비례해야 한다
 # (한국어는 자당 ~1토큰까지 갈 수 있어 8k 고정이면 큰 파일에서 JSON 이 잘린다).
