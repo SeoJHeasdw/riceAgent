@@ -336,7 +336,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                 {modelMode === 'local' ? t('sessionSidebar.modelLocal') : t('sessionSidebar.modelSaas')}
               </div>
             </div>
-            <Icon name="settings" size={15} className="text-icon-secondary flex-shrink-0" />
           </button>
         )}
       </div>

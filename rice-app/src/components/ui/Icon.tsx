@@ -69,7 +69,7 @@ const PATHS: Record<IconName, React.ReactNode> = {
   user: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>,
   skill: <><circle cx="6" cy="9" r="2.4" /><circle cx="18" cy="15" r="2.4" /><path d="M8.3 9h5.4M10.3 15h5.4" /><path d="M13.7 9 16 12M10.3 15 8 12" /></>,
   growth: <><path d="M3 17l6-6 4 4 7-7" /><path d="M17 8h4v4" /></>,
-  overflow: <><circle cx="12" cy="5" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="12" cy="19" r="1.6" /></>,
+  overflow: <><circle cx="12" cy="5" r="1.1" /><circle cx="12" cy="12" r="1.1" /><circle cx="12" cy="19" r="1.1" /></>,
   edit: <><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" /></>,
   close: <><path d="M18 6 6 18M6 6l12 12" /></>,
   trash: <><path d="M3 6h18" /><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /></>,

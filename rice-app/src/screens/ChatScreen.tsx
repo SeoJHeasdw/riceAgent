@@ -39,6 +39,17 @@ const providerKind = (provider?: string): 'claude' | 'openai' | 'watsonx' => {
   }
 };
 
+// 첫 응답이 끝나기 전 보여 주는 임시 대화 제목은 단어 중간에서 끊지 않는다.
+// 예: "... PPT 구성으로" → "... PPT…"
+const provisionalSessionTitle = (prompt: string, maxLength = 40): string => {
+  const normalized = prompt.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= maxLength) return normalized;
+
+  const candidate = normalized.slice(0, maxLength);
+  const lastSpace = candidate.lastIndexOf(' ');
+  return `${lastSpace > 0 ? candidate.slice(0, lastSpace) : candidate}…`;
+};
+
 /**
  * ChatScreen - Claude-Desktop-style chat with the learning-loop surface:
  * multi-step tool-call cards, the memory-written indicator, clickable
@@ -1952,7 +1963,7 @@ function ChatScreen({ active = true }: { active?: boolean }) {
         // Show the new chat in the sidebar IMMEDIATELY (ChatGPT-style) with a
         // truncated first-message label instead of waiting for the turn to end.
         // The real LLM title (POST /title) replaces this once the first turn ends.
-        const provisional = q.replace(/\s+/g, ' ').trim().slice(0, 40) || t('untitledConversation');
+        const provisional = provisionalSessionTitle(q) || t('untitledConversation');
         setSessions((prev) => [{ id, title: provisional, timestamp: new Date(), messageCount: 0 }, ...prev]);
       } else {
         finalizeThinking(originSessionId);
