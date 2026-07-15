@@ -446,11 +446,13 @@ function SettingsScreen({ open, onClose }: SettingsScreenProps) {
     ),
     about: (
       <div className="space-y-6">
-        <div className="gradient-brand relative overflow-hidden rounded-xl border border-white/10 p-5 text-white">
+        <div className="gradient-brand relative overflow-hidden rounded-xl border border-white/15 p-5 text-white shadow-elevation-1">
+          <div className="absolute inset-0 bg-black/[0.08]" aria-hidden="true" />
           <div className="absolute -right-8 -top-10 h-32 w-32 rounded-full bg-white/10 blur-2xl" aria-hidden="true" />
+          <div className="absolute inset-x-0 bottom-0 h-px bg-white/10" aria-hidden="true" />
           <div className="relative flex items-center gap-4">
-            <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl border border-white/20 bg-white/15 shadow-elevation-1">
-              <CompanionCloudIcon className="h-8 w-9 text-white" />
+            <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl border border-white/20 bg-white/10 shadow-elevation-1">
+              <CompanionCloudIcon className="h-7 w-8 text-white" />
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
@@ -559,7 +561,7 @@ function SettingsScreen({ open, onClose }: SettingsScreenProps) {
         className={`relative flex h-[min(700px,calc(100vh-32px))] min-h-0 w-[min(920px,calc(100vw-32px))] flex-col overflow-hidden sm:flex-row ${dialogSurfaceCls}`}
       >
         <aside className="flex w-full flex-shrink-0 flex-col border-b border-border-subtle-01 bg-field-01 sm:w-[210px] sm:border-b-0 sm:border-r">
-          <div className="flex h-[58px] items-center gap-2.5 border-b border-border-subtle-01 px-4 sm:h-[70px] sm:border-b-0">
+          <div className="flex h-[58px] items-center gap-2.5 border-b border-border-subtle-01 px-4 sm:h-[70px]">
             <CompanionCloudIcon className="h-7 w-8 flex-shrink-0 text-text-secondary" />
             <div className="min-w-0">
               <div className="text-body-short-01 font-semibold text-text-primary">RICE</div>
@@ -567,7 +569,7 @@ function SettingsScreen({ open, onClose }: SettingsScreenProps) {
             </div>
           </div>
 
-          <nav className="flex gap-1 overflow-x-auto p-2 sm:flex-col sm:overflow-visible sm:p-3" aria-label={t('title')}>
+          <nav className="flex gap-1 overflow-x-auto p-2 sm:flex-col sm:overflow-visible sm:p-3 sm:pt-4" aria-label={t('title')}>
             {sections.map((section, index) => {
               const active = section.id === activeSection;
               return (
@@ -580,20 +582,20 @@ function SettingsScreen({ open, onClose }: SettingsScreenProps) {
                     setResetConfirming(false);
                   }}
                   aria-current={active ? 'page' : undefined}
-                  className={`relative flex min-w-max items-center gap-2.5 rounded-lg px-3 py-2 text-left transition-colors sm:min-w-0 ${
+                  className={`relative flex min-w-max items-center gap-2.5 rounded-lg border px-3 py-2 text-left transition-colors duration-150 sm:min-w-0 ${
                     active
-                      ? 'bg-layer-selected-01 text-text-primary'
-                      : 'text-text-secondary hover:bg-layer-hover-01 hover:text-text-primary'
+                      ? 'border-blue-50/15 bg-layer-selected-01 text-text-primary'
+                      : 'border-transparent text-text-secondary hover:bg-layer-hover-01 hover:text-text-primary'
                   }`}
                 >
-                  <span className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg ${active ? 'bg-interactive/12 text-blue-40' : 'text-icon-secondary'}`}>
+                  <span className={`flex h-7 w-7 flex-shrink-0 items-center justify-center ${active ? 'text-blue-40' : 'text-icon-secondary'}`}>
                     <Glyph name={section.icon} size={15} />
                   </span>
                   <span className="min-w-0">
                     <span className="block text-body-short-01 font-medium">{section.title}</span>
                     <span className="hidden truncate text-label-micro text-text-helper sm:block">{section.description}</span>
                   </span>
-                  {active && <span className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-interactive" aria-hidden="true" />}
+                  {active && <span className="absolute inset-y-2.5 left-0 w-0.5 rounded-full bg-interactive" aria-hidden="true" />}
                 </button>
               );
             })}
