@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation, Trans } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button, Icon, Tag, ResizeHandle, Toggle } from '../components/ui';
 import { ConnectorRequiredModal } from '../components/carbon/ConnectorRequiredModal';
 import { useResizable } from '../hooks/useResizable';
@@ -384,10 +384,19 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
 
 function MyPluginsScreen() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { t } = useTranslation('plugins');
   const { myPlugins, hydrating } = useLearning();
   const [filter, setFilter] = useState<Filter>('all');
-  const [sel, setSel] = useState<string | null>(myPlugins[0]?.id ?? null);
+  const [sel, setSel] = useState<string | null>(() => searchParams.get('id') ?? myPlugins[0]?.id ?? null);
+
+  // URL ?id= 파라미터로 진입 시 초기 선택 후 파라미터 제거 (URL 정리).
+  useEffect(() => {
+    if (searchParams.has('id')) {
+      setSearchParams((p) => { p.delete('id'); return p; }, { replace: true });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Resizable left rail
   const railPanel = useResizable({

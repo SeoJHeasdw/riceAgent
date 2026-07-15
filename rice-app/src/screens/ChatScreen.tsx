@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import i18n from '../lib/i18n';
 import { apiErrorMessage } from '../lib/i18n/apiError';
@@ -958,6 +959,7 @@ const ChatTaskProgress = () => (
 
 function ChatScreen({ active = true }: { active?: boolean }) {
   const { jumpToSkill, setSkills, setDetails, panelScrollRef, refreshSuggestions, mirrorParkedProposal, dropParkedMirror, resolvedApprovals } = useLearning();
+  const navigate = useNavigate();
   const toast = useToast();
   const { t } = useTranslation('chat');
 
@@ -2727,7 +2729,7 @@ function ChatScreen({ active = true }: { active?: boolean }) {
                 value={learningPanel.width} min={learningPanel.min} max={learningPanel.max} onResizeBy={learningPanel.resizeBy}
                 aria-label="Resize learning loop panel"
               />
-              <LearningPanel width={learningPanel.width} onOpenConversation={openConversation} />
+              <LearningPanel width={learningPanel.width} onOpenConversation={openConversation} onNavigate={navigate} />
             </div>
           )}
         </div>

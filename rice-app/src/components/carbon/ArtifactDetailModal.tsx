@@ -91,7 +91,7 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className={`relative ${isSkill ? 'w-[820px]' : 'w-[680px]'} max-w-full max-h-[82vh] bg-layer-01 border border-border-subtle-01 rounded-xl z-[61] shadow-elevation-3 animate-scale-in overflow-hidden flex flex-col`}
+        className={`relative ${isSkill ? 'w-[840px]' : 'w-[680px]'} max-w-full max-h-[82vh] bg-layer-01 border border-border-subtle-01 rounded-xl z-[61] shadow-elevation-3 animate-scale-in overflow-hidden flex flex-col`}
       >
         <span
           aria-hidden="true"

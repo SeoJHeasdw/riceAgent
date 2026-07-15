@@ -22,6 +22,8 @@ export interface LearningPanelProps {
   width?: number;
   /** open the conversation (and scroll to the message) a proposal's evidence came from */
   onOpenConversation?: (conversationId: string, messageIndex?: number) => void;
+  /** navigate to another route (e.g. /my-skills?id=xxx) */
+  onNavigate?: (path: string) => void;
 }
 
 // small overflow menu
@@ -254,7 +256,7 @@ const SuggestionCard: React.FC<{
   );
 };
 
-export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpenConversation }) => {
+export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpenConversation, onNavigate }) => {
   const { t } = useTranslation('chat');
   const {
     skills,
@@ -486,9 +488,9 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpe
               return (
                 <div
                   key={p.id}
-                  className={`group/skill flex h-[36px] items-center gap-2 border border-transparent bg-layer-01 pl-2.5 pr-1 rounded-lg transition-colors hover:border-border-subtle-01 hover:bg-layer-hover-01 ${p.enabled ? '' : 'opacity-50'}`}
+                  className="group/skill flex h-[36px] items-center gap-2 border border-transparent bg-layer-01 pl-2.5 pr-1 rounded-lg transition-colors hover:border-border-subtle-01 hover:bg-layer-hover-01"
                 >
-                  <div className="flex flex-1 min-w-0 items-center gap-1.5">
+                  <div className={`flex flex-1 min-w-0 items-center gap-1.5 ${p.enabled ? '' : 'opacity-50'}`}>
                     <span className="flex-shrink-0">
                       <Icon name={p.icon} size={13} className="text-icon-secondary opacity-90" />
                     </span>
@@ -513,6 +515,15 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpe
                         label: p.enabled ? t('learning.skillMenuDisable') : t('learning.skillMenuEnable'),
                         onClick: togglePlugin,
                       },
+                      ...(onNavigate
+                        ? [
+                            {
+                              icon: 'arrow-up-right' as IconName,
+                              label: t('learning.goToPlugin'),
+                              onClick: () => onNavigate(`/my-plugins?id=${encodeURIComponent(p.id)}`),
+                            },
+                          ]
+                        : []),
                       ...(builtin
                         ? []
                         : [
@@ -562,11 +573,11 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpe
                   ref={(el) => {
                     skillRefs.current[s.id] = el;
                   }}
-                  className={`group/skill flex h-[36px] items-center gap-2 border border-transparent bg-layer-01 pl-2.5 pr-1 rounded-lg transition-colors hover:border-border-subtle-01 hover:bg-layer-hover-01 ${s.enabled ? '' : 'opacity-50'} ${
+                  className={`group/skill flex h-[36px] items-center gap-2 border border-transparent bg-layer-01 pl-2.5 pr-1 rounded-lg transition-colors hover:border-border-subtle-01 hover:bg-layer-hover-01 ${
                     hot ? 'ia-skill-hot outline outline-2 outline-blue-50 -outline-offset-1' : ''
                   }`}
                 >
-                  <div className="flex flex-1 min-w-0 items-center gap-1.5">
+                  <div className={`flex flex-1 min-w-0 items-center gap-1.5 ${s.enabled ? '' : 'opacity-50'}`}>
                     {builtin && (
                       <span title={t('learning.skillBuiltinTitle')} className="flex-shrink-0">
                         <Icon name="sparkle" size={11} className="text-teal-40 opacity-80" />
@@ -591,6 +602,15 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpe
                         label: s.enabled ? t('learning.skillMenuDisable') : t('learning.skillMenuEnable'),
                         onClick: toggleSkill,
                       },
+                      ...(onNavigate
+                        ? [
+                            {
+                              icon: 'arrow-up-right' as IconName,
+                              label: t('learning.goToSkill'),
+                              onClick: () => onNavigate(`/my-skills?id=${encodeURIComponent(s.id)}`),
+                            },
+                          ]
+                        : []),
                       ...(builtin
                         ? []
                         : [

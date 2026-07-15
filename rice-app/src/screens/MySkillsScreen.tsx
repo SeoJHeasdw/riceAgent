@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation, Trans } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { Button, Icon, Tag, ResizeHandle, Toggle, ConfirmDialog, OverflowMenu, Tabs } from '../components/ui';
@@ -2137,10 +2137,12 @@ function MySkillsScreen() {
   const { t } = useTranslation('skills');
   const tChat = wrapT(useTranslation('chat').t);
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { skills, setSkills, details, hydrating } = useLearning();
   const [filter, setFilter] = useState<Filter>('all');
   // 초기 미선택 — effectiveSel(아래)이 목록 로드 시 첫 스킬로 자동 폴백한다.
-  const [sel, setSel] = useState<string | null>(null);
+  // URL ?id= 가 있으면 그 스킬을 먼저 선택하고 파라미터를 지운다.
+  const [sel, setSel] = useState<string | null>(() => searchParams.get('id'));
   // "학습 효과" (Learning Impact) panel swaps into the detail pane (LE-1: keep 7 screens)
   const [showImpact, setShowImpact] = useState(false);
   // cold→warm 정량 수치의 정본은 eval harness 산출물뿐이다(GET /eval/impact).
@@ -2148,6 +2150,14 @@ function MySkillsScreen() {
   // 일반 사용 데이터로 성공률을 지어내지 않는 분리 원칙.
   const [impact, setImpact] = useState<ImpactReport | null>(null);
   const [impactLoaded, setImpactLoaded] = useState(false);
+  // URL ?id= 파라미터로 진입 시 초기 선택 후 파라미터 제거 (URL 정리).
+  useEffect(() => {
+    if (searchParams.has('id')) {
+      setSearchParams((p) => { p.delete('id'); return p; }, { replace: true });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     if (!showImpact || impactLoaded) return;
     void api.getImpactReport().then((res) => {
