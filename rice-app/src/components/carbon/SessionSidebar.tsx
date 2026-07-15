@@ -90,6 +90,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const [searchOpen, setSearchOpen] = useState(false);
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
+  const [listScrolled, setListScrolled] = useState(false);
   const skipRenameCommit = useRef(false);
 
   const closeSearch = () => {
@@ -144,7 +145,11 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
         {/* Quick actions — 목록과 같은 문법의 한 줄 진입점(대형 버튼·입력박스 대신).
             검색 행은 클릭 시 같은 자리에서 입력으로 변신한다 (레이아웃 점프 없음). */}
-        <div className="px-2 pt-1 pb-1.5 flex flex-col gap-0.5 flex-shrink-0">
+        <div
+          className={`relative z-10 px-2 pt-1 pb-1.5 flex flex-col gap-0.5 flex-shrink-0 bg-layer-01 transition-shadow duration-200 ${
+            listScrolled ? 'shadow-[0_8px_12px_-14px_rgba(0,0,0,0.8)]' : ''
+          }`}
+        >
           <button
             onClick={onNewSession}
             className="group flex items-center w-full gap-2.5 h-9 px-2.5 rounded-lg text-body-short-01 font-medium text-text-primary hover:bg-layer-hover-01 transition-colors"
@@ -195,20 +200,24 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         </div>
 
         {/* Session list */}
-        <div className="flex-1 overflow-y-auto overflow-x-hidden px-2 py-1">
-          {groupedSessions.length === 0 ? (
-            <div className="px-4 py-8 text-center text-body-short-01 text-text-helper">
-              {searchQuery ? t('sessionSidebar.emptySearch') : t('sessionSidebar.emptyDefault')}
-            </div>
-          ) : (
-            groupedSessions.map((group) => (
-              <div key={group.key} className="mb-1.5">
-                <div className="text-caption-01 font-medium text-text-helper px-2 pt-2 pb-0.5">
-                  {t(`sessionSidebar.${group.key}`)}
-                </div>
-                {/* 컴팩트 한 줄 행 — 시점은 그룹 헤더가 말해주므로 행에는 제목만 */}
-                <div className="space-y-0">
-                  {group.items.map((session) => {
+        <div className="relative flex-1 min-h-0">
+          <div
+            onScroll={(event) => setListScrolled(event.currentTarget.scrollTop > 2)}
+            className="h-full overflow-y-auto overflow-x-hidden px-2 py-1"
+          >
+            {groupedSessions.length === 0 ? (
+              <div className="px-4 py-8 text-center text-body-short-01 text-text-helper">
+                {searchQuery ? t('sessionSidebar.emptySearch') : t('sessionSidebar.emptyDefault')}
+              </div>
+            ) : (
+              groupedSessions.map((group) => (
+                <div key={group.key} className="mb-1.5">
+                  <div className="text-caption-01 font-medium text-text-helper px-2 pt-2 pb-0.5">
+                    {t(`sessionSidebar.${group.key}`)}
+                  </div>
+                  {/* 컴팩트 한 줄 행 — 시점은 그룹 헤더가 말해주므로 행에는 제목만 */}
+                  <div className="space-y-0">
+                    {group.items.map((session) => {
                     const isActive = session.id === activeSessionId;
                     const isRenaming = renamingSessionId === session.id;
                     return (
@@ -290,11 +299,20 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                         )}
                       </div>
                     );
-                  })}
+                    })}
+                  </div>
                 </div>
-              </div>
-            ))
-          )}
+              ))
+            )}
+          </div>
+
+          {/* 스크롤된 첫 행이 고정 퀵 액션 아래로 자연스럽게 사라지도록 하는 fade. */}
+          <div
+            aria-hidden="true"
+            className={`pointer-events-none absolute inset-x-0 top-0 z-10 h-4 bg-gradient-to-b from-layer-01 via-layer-01/85 to-transparent transition-opacity duration-200 ${
+              listScrolled ? 'opacity-100' : 'opacity-0'
+            }`}
+          />
         </div>
 
         {/* Model footer */}

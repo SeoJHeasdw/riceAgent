@@ -2744,16 +2744,20 @@ function ChatScreen({ active = true }: { active?: boolean }) {
           className="absolute top-0 left-0 z-30 flex h-11 items-center gap-0.5 electron-drag"
           style={{ paddingLeft: isElectron ? 30 : 8 }}
         >
-          <button
-            type="button"
-            onClick={() => setSessionSidebarOpen((o) => !o)}
-            className="electron-no-drag flex h-6 w-6 items-center justify-center rounded-md text-icon-secondary hover:bg-layer-hover-01 hover:text-icon-primary transition-colors"
-            aria-label={sessionSidebarOpen ? t('sessionSidebarClose') : t('sessionSidebarOpen')}
-            title={sessionSidebarOpen ? t('sessionSidebarClose') : t('sessionSidebarOpen')}
+          <Tooltip
+            label={sessionSidebarOpen ? t('sessionSidebarClose') : t('sessionSidebarOpen')}
+            side="bottom-start"
           >
-            <Icon name="sidebar" size={17} />
-          </button> 
-          <Tooltip label={t('quickLaunch')}>
+            <button
+              type="button"
+              onClick={() => setSessionSidebarOpen((o) => !o)}
+              className="electron-no-drag flex h-6 w-6 items-center justify-center rounded-md text-icon-secondary hover:bg-layer-hover-01 hover:text-icon-primary transition-colors"
+              aria-label={sessionSidebarOpen ? t('sessionSidebarClose') : t('sessionSidebarOpen')}
+            >
+              <Icon name="sidebar" size={17} />
+            </button>
+          </Tooltip>
+          <Tooltip label={t('quickLaunch')} side="bottom">
             <button
               type="button"
               onClick={openCommandPalette}
@@ -2767,7 +2771,10 @@ function ChatScreen({ active = true }: { active?: boolean }) {
 
         {/* 패널의 기능(renew)이 아니라 레이아웃 열기/닫기임을 모양으로 명시한다. */}
         <div className="absolute top-0 right-0 z-30 flex h-11 items-center pr-2 electron-drag">
-          <Tooltip label={learningPanelOpen ? t('learningPanelClose') : t('learningPanelOpen')}>
+          <Tooltip
+            label={learningPanelOpen ? t('learningPanelClose') : t('learningPanelOpen')}
+            side="bottom-end"
+          >
             <button
               type="button"
               onClick={() => setLearningPanelOpen((open) => !open)}
