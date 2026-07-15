@@ -153,6 +153,7 @@ class TestReviewGate:
         gate.should_review("s1", tool_calls_made=0, final_message="ok")  # turn 1
         gate.should_review("s1", tool_calls_made=0, final_message="ok")  # turn 2
         gate.mark_reviewed("s1")  # 실제로 리뷰를 실행했다고 가정 → 카운터 리셋
+        assert "s1" not in gate._turns_since_review
         # 리셋됐으므로 turn 1로 다시 시작 — nudge_turns=3에 도달하려면 2번 더 필요.
         assert gate.should_review("s1", tool_calls_made=0, final_message="ok") is False  # turn 1
         assert gate.should_review("s1", tool_calls_made=0, final_message="ok") is False  # turn 2

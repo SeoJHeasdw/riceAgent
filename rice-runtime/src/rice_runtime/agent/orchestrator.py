@@ -497,10 +497,10 @@ class Orchestrator:
         return session_id in self._active
 
     async def abort_and_drain(self, session_id: str, timeout_s: float = 10.0) -> bool:
-        """진행 중 턴을 abort 하고 실제로 **끝날 때까지** 기다린다 (DELETE /sessions 용).
+        """진행 중 턴을 abort 하고 `timeout_s`까지 bounded wait한다(DELETE /sessions 용).
 
         abort 플래그만 세우고 바로 지우면 턴 후반의 append/observe 가 삭제된
-        세션에 쓰다 FK 오류로 죽는다 — drain 이 끝난 뒤에야 mutation 이 안전하다.
+        세션에 쓰다 FK 오류로 죽는다 — 정상 drain이면 그 꼬리 쓰기를 먼저 끝낸다.
         반환: True = 턴 없음/정상 종료, False = timeout 내 안 끝남(호출자는
         진행하되 턴 꼬리의 실패 이벤트를 감수한다 — 로그로 남긴다)."""
         done = self._active.get(session_id)
@@ -540,9 +540,10 @@ class Orchestrator:
     # ── IAgent.release_session ───────────────────────────────────────────────
     def release_session(self, session_id: str) -> None:
         """세션 행 삭제 후 런타임 잔여물 정리(DELETE /sessions 라우트가 호출) —
-        동결 렌더 스냅샷이 죽은 세션의 트랜스크립트 사본을 LRU 축출 때까지
-        들고 있지 않게 한다."""
+        동결 렌더 스냅샷과 learning 세션 상태가 우연한 축출이나 프로세스
+        재시작 때까지 죽은 세션을 들고 있지 않게 한다."""
         self._render_states.pop(session_id, None)
+        self._learning.release_session(session_id)
 
     # ── builtin tool catalog (override/extend in composition root) ───────────
     def _builtin_specs(self):

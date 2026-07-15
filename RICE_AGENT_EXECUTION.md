@@ -536,6 +536,15 @@ bridge-only 폴딩은 폐기):
 - 접혀도 실제 도구의 승인/차단 정책은 재귀 디스패치로 그대로 적용된다(노출
   방식과 실행 정책은 별개의 방어선). `tool_search` 자체도 같은 사다리로 랭킹된
   최대 12개 결과(`score` 필드 포함)를 반환하도록 함께 개편됐다.
+- **`tool_call` bridge의 공개 실행 단위는 하나다**: abort 없이 결과까지 도달한
+  wrapper는 live SSE에서 wrapper의 outer `tool_call_id`를 유지한 채 요청 대상
+  이름·인자의 `tool_call` 1회와 같은 id의 `tool_result` 1회로 보인다. 내부
+  `:bridged` 호출·결과 envelope는 흘리지 않지만, 대상 도구의
+  `tool_approval_required`는 대상 이름·인자로 그대로 전달한다. 반면
+  provider-compatible durable history에는 모델이 실제로 낸
+  `tool_call({name, arguments})` wrapper를 보존한다. 리로드 UI는 대응 tool message의
+  `metadata.tool_source == "bridge"`를 근거로 표시만 요청 대상으로 unwrap한다(실제
+  이름이 `tool_call`인 connector/plugin과 구분).
 
 ### 5.3 디스패치와 HITL 승인
 
@@ -564,6 +573,9 @@ propose_skill)이 `parallel_safe=False`를 선언하며, connector/plugin 도구
 필드로 직렬성을 선언할 수 있다. 구 이름 목록에는 edit_file이 빠져 있었다 —
 도구가 늘 때마다 스케줄러가 함께 늘어야 하는 숨은 결합이 그 버그의 원인.
 `requires_approval`과 인자 `wait_for_previous:true`는 여전히 직렬을 강제한다.
+스케줄러는 접힌 대상의 `parallel_safe`를 wrapper만 보고는 알 수 없으므로 실행
+bridge인 `tool_call` 자체를 `parallel_safe=False`로 선언해 보수적으로 직렬화한다.
+직접 노출된 대상 도구의 병렬성 판정은 기존 선언을 그대로 따른다.
 
 ### 5.5 이미지 첨부 계약 — 멀티모달 provider seam (2026-07-10)
 

@@ -57,7 +57,31 @@ type RawMessage = {
   ts?: number;
   // plan: plan-and-execute 스냅샷 (plan_updated와 같은 형태) — 계획 생성 시 첫
   // 어시스턴트 메시지에, 이후 갱신마다 update_plan tool 메시지에 실린다.
-  metadata?: { thinking?: string; tool_call_id?: string; plan?: PlanUpdatedEventData; synthetic?: string } | null;
+  metadata?: {
+    thinking?: string;
+    tool_call_id?: string;
+    tool_source?: string;
+    plan?: PlanUpdatedEventData;
+    synthetic?: string;
+  } | null;
+};
+
+// Provider-compatible durable history retains the wrapper call the model emitted
+// (`tool_call({name, arguments})`). Live SSE instead exposes the resolved target
+// with the same outer id. Apply that same presentation-only unwrap on reload so
+// both paths render one card for the actual action without rewriting provider
+// history into a call to a folded (and therefore unadvertised) tool.
+const unwrapBridgeToolCall = (call: RawToolCall): RawToolCall => {
+  if (call.tool_name !== 'tool_call') return call;
+  const name = call.arguments?.name;
+  if (typeof name !== 'string' || !name) return call;
+  const nested = call.arguments?.arguments;
+  if (nested != null && (typeof nested !== 'object' || Array.isArray(nested))) return call;
+  return {
+    ...call,
+    tool_name: name,
+    arguments: (nested ?? {}) as Record<string, unknown>,
+  };
 };
 
 type ThreadStateUpdate = ThreadMessage[] | ((previous: ThreadMessage[]) => ThreadMessage[]);
@@ -146,6 +170,15 @@ const upsertPlanBlock = (blocks: ThreadMessage[], d: PlanUpdatedEventData): Thre
 // answer (assistant `content`).
 const toThread = (msgs: RawMessage[]): ThreadMessage[] => {
   let out: ThreadMessage[] = [];
+  // Only calls whose persisted result says source="bridge" are wrappers. A real
+  // connector/plugin is allowed to be named `tool_call`; unwrapping by name alone
+  // would make that card change shape after reload.
+  const bridgeCallIds = new Set(
+    msgs
+      .filter((m) => m.role === 'tool' && m.metadata?.tool_source === 'bridge')
+      .map((m) => m.metadata?.tool_call_id)
+      .filter((id): id is string => typeof id === 'string'),
+  );
   for (const m of msgs) {
     if (m.role === 'user') {
       // 루프가 주입한 합성 메시지(빈 응답 넛지 등)는 사용자가 친 말이 아니다 — 숨긴다.
@@ -154,7 +187,9 @@ const toThread = (msgs: RawMessage[]): ThreadMessage[] => {
       if (m.metadata?.thinking) out.push({ kind: 'thinking', duration: '', text: m.metadata.thinking, streaming: false });
       if (m.metadata?.plan) out = upsertPlanBlock(out, m.metadata.plan);
       // update_plan·start_plan의 화면 표면은 계획 카드다 — 별도 도구 카드는 노이즈.
-      const realCalls = (m.tool_calls ?? []).filter(
+      const realCalls = (m.tool_calls ?? []).map((tc) => (
+        bridgeCallIds.has(tc.id) ? unwrapBridgeToolCall(tc) : tc
+      )).filter(
         (tc) => tc.tool_name !== 'update_plan' && tc.tool_name !== 'start_plan',
       );
       // 본문 + 도구 호출이 같이 있으면 그 본문은 행동의 preamble(rationale) — 첫

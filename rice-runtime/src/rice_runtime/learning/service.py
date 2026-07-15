@@ -338,6 +338,19 @@ class LearningService(ILearningService):
         return skills
 
     # ── turn-critical ─────────────────────────────────────────────────────────
+    def release_session(self, session_id: str) -> None:
+        """Delete one session's in-memory learning state.
+
+        The four maps here and ReviewGate's counter are session-owned. The
+        plugin registry (`_extra_skills`) deliberately is not: it is the current
+        enabled-plugin snapshot used by every session's on-demand skill tools.
+        """
+        self._staged.pop(session_id, None)
+        self._viewed_skills.pop(session_id, None)
+        self._sticky_skills.pop(session_id, None)
+        self._last_query.pop(session_id, None)
+        self._review_gate.release_session(session_id)
+
     def prefetch(
         self,
         session_id: str,

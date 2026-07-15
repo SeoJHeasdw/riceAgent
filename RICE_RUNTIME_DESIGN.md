@@ -99,8 +99,8 @@
 Gemini CLI Scheduler의 상태 머신 전체를 옮기지는 않는다. RICE는 이미 `ToolDispatcher`가 tool lookup, connector/plugin routing, permission, HITL parking을 담당하므로, Scheduler는 다음 조율만 맡는다.
 
 - 한 assistant tool-use round 안에서 **독립적이고 승인 불필요한 tool call**은 병렬 batch로 실행한다.
-- `requires_approval`, `wait_for_previous=true`, `terminal`, `write_file`, `propose_skill` 같은 순서/효과가 중요한 tool은 순차 실행한다.
-- SSE `tool_call`/`tool_result` 이벤트는 실행 중 그대로 흘려보내고, LLM history에는 원래 tool call 순서대로 result를 붙인다.
+- `requires_approval`, `wait_for_previous=true`, `terminal`, `write_file`, `propose_skill` 같은 순서/효과가 중요한 tool은 순차 실행한다. `tool_call` bridge는 스케줄러가 접힌 대상의 `parallel_safe`를 볼 수 없으므로 wrapper 자체를 보수적으로 순차 실행한다.
+- 일반 도구의 SSE `tool_call`/`tool_result`는 실행 중 그대로 흘린다. 단, `tool_call` bridge는 하나의 논리 실행으로 정규화해 내부 `:bridged` envelope를 숨기고, abort 없이 결과까지 도달하면 outer id를 공유하는 요청 대상 이름·인자의 call/result 한 쌍만 공개한다(승인 제어 이벤트는 전달). provider용 LLM history에는 모델이 낸 wrapper를 보존하고 원래 tool call 순서대로 result를 붙인다. 상세 계약은 [RICE_AGENT_EXECUTION.md](RICE_AGENT_EXECUTION.md) §5.2와 [SSE event schema](rice-runtime/contracts/sse-events.schema.json)가 정본이다.
 - abort 신호가 오면 대기/실행 중인 batch를 취소하고 safe error result를 남긴다.
 
 ### 2.4 Sub-agent Delegation

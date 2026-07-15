@@ -117,14 +117,13 @@ async def rename_session(
 async def delete_session(session_id: str, c: Container = Depends(get_container)):
     if c.sessions.get(session_id) is None:
         raise NotFoundError(f"session {session_id} not found")
-    # 스트리밍 중 삭제 방어: 진행 중 턴을 abort 하고 실제 종료까지 drain 한 뒤에
-    # 지운다 — 안 그러면 턴 후반의 transcript.append/observe 가 삭제된 행에 쓰다
-    # FK 오류로 죽는다(orchestrator.abort_and_drain docstring 참고).
+    # 스트리밍 중 삭제 방어: 진행 중 턴에 abort를 요청하고 bounded drain을 먼저
+    # 기다린다. 정상 drain이면 턴 꼬리의 transcript.append/observe가 끝난 뒤 지우며,
+    # timeout이면 실패를 로그로 남긴 뒤 삭제를 계속한다.
     await c.agent.abort_and_drain(session_id)
     c.sessions.delete(session_id)
-    # 세션 행이 사라진 뒤 오케스트레이터의 세션 스코프 런타임 메모리(동결 렌더
-    # 스냅샷)도 함께 걷는다 — LRU 축출을 기다리며 죽은 트랜스크립트 사본을
-    # 들고 있을 이유가 없다.
+    # 세션 행이 사라진 뒤 agent/learning이 소유한 세션 스코프 인메모리 상태
+    # (동결 렌더 스냅샷, 학습 transient state)도 함께 걷는다.
     c.agent.release_session(session_id)
     return {"success": True}
 

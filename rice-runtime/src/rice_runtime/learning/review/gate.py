@@ -61,5 +61,11 @@ class ReviewGate:
         )
 
     def mark_reviewed(self, session_id: str) -> None:
-        """실제로 review()를 실행했을 때 호출 — 세션의 턴 카운터를 0으로 리셋한다."""
-        self._turns_since_review[session_id] = 0
+        """실제로 review()를 실행했을 때 호출 — 세션의 턴 카운터를 초기화한다."""
+        # Absent and zero are behaviorally identical to should_review(), while
+        # removing the entry avoids retaining fully reviewed one-off sessions.
+        self._turns_since_review.pop(session_id, None)
+
+    def release_session(self, session_id: str) -> None:
+        """Drop one deleted session's counter. Idempotent for missing sessions."""
+        self._turns_since_review.pop(session_id, None)

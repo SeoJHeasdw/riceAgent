@@ -26,7 +26,7 @@ import pytest
 from rice_runtime.core.config import LearningConfig
 from rice_runtime.core.paths import RicePaths
 from rice_runtime.core.storage.sqlite import Database
-from rice_runtime.core.types import TurnOutcome
+from rice_runtime.core.types import InjectedSkill, TurnOutcome
 from rice_runtime.learning.interfaces import MemoryWritten, PatchProposal
 from rice_runtime.learning.memory.store import MemoryStore
 from rice_runtime.learning.service import LearningService
@@ -76,6 +76,50 @@ def _old_skill(name: str, state: str, days_ago: int) -> SkillData:
         name=name, version=1, description="old skill", state=state,
         body="body", tags=[], source=None, created_at=ts, updated_at=ts,
     )
+
+
+# ── session lifecycle cleanup ────────────────────────────────────────────────
+
+def test_release_session_drops_only_session_owned_learning_state():
+    """삭제된 세션의 5개 in-memory 엔트리(서비스 4 + ReviewGate 1)만
+    정리한다. 다른 세션과 세션 비종속 plugin 스킬 레지스트리는 보존되며,
+    중복 호출은 안전해야 한다.
+    """
+    svc = _service(_fresh_paths())
+    target = "sess-delete"
+    other = "sess-keep"
+
+    for session_id in (target, other):
+        svc._staged[session_id] = []
+        svc._viewed_skills[session_id] = {f"viewed-{session_id}"}
+        svc._sticky_skills[session_id] = {f"sticky-{session_id}": 2}
+        svc._last_query[session_id] = f"query-{session_id}"
+        svc._review_gate.should_review(
+            session_id, tool_calls_made=0, final_message="ordinary response"
+        )
+
+    plugin_skill = InjectedSkill(
+        skill_id="plugin-skill",
+        name="plugin-skill",
+        version=1,
+        body="# Plugin skill",
+        source="plugin",
+    )
+    svc._extra_skills = {plugin_skill.name: plugin_skill}
+
+    svc.release_session(target)
+    svc.release_session(target)  # idempotency regression guard
+
+    for state in (
+        svc._staged,
+        svc._viewed_skills,
+        svc._sticky_skills,
+        svc._last_query,
+        svc._review_gate._turns_since_review,
+    ):
+        assert target not in state
+        assert other in state
+    assert svc._extra_skills == {plugin_skill.name: plugin_skill}
 
 
 # ── build_diff 테스트 (순수 로직) ────────────────────────────────────────────

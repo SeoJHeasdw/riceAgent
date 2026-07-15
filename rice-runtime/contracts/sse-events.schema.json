@@ -69,13 +69,14 @@
     },
     "tool_call": {
       "allOf": [{ "$ref": "#/$defs/event" }],
+      "description": "A public tool execution start. For a valid-shaped `tool_call({name, arguments})` bridge, this projects the requested target name and arguments while retaining the wrapper's outer `tool_call_id`. The internal `:bridged` call/result envelope is never emitted. A malformed wrapper retains its wrapper presentation and, if dispatch reaches a result without turn abort, fails once under the outer id.",
       "properties": {
         "type": { "const": "tool_call" },
         "data": {
           "type": "object",
           "required": ["tool_call_id", "tool_name", "arguments"],
           "properties": {
-            "tool_call_id": { "type": "string" },
+            "tool_call_id": { "type": "string", "description": "Public correlation id. A folded bridge execution retains its wrapper's outer id." },
             "tool_name": { "type": "string" },
             "arguments": { "type": "object" }
           }
@@ -84,13 +85,14 @@
     },
     "tool_result": {
       "allOf": [{ "$ref": "#/$defs/event" }],
+      "description": "A public result for a tool execution. When a folded bridge dispatch reaches a result without turn abort, it emits exactly one result using the same outer `tool_call_id` as its projected public call; an approval-required target may emit `tool_approval_required` between the call and this result without exposing the inner envelope.",
       "properties": {
         "type": { "const": "tool_result" },
         "data": {
           "type": "object",
           "required": ["tool_call_id", "ok"],
           "properties": {
-            "tool_call_id": { "type": "string" },
+            "tool_call_id": { "type": "string", "description": "Matches the public call id, including the wrapper's outer id for a folded bridge execution." },
             "ok": { "type": "boolean" },
             "result": {},
             "error": { "type": ["string", "null"] }

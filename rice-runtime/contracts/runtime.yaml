@@ -92,11 +92,27 @@ paths:
         "200": { $ref: "#/components/responses/Ok" }
         "404": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
+    delete:
+      tags: [sessions]
+      summary: Delete a session
+      description: >
+        Request abort for any in-flight turn and wait for its bounded drain,
+        delete the persisted session and its messages, then release per-session
+        render and learning transient state. Global registries such as the
+        enabled plugin-skill snapshot are retained.
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "404": { $ref: "#/components/responses/Error" }
 
   /sessions/{id}/messages:
     get:
       tags: [sessions]
       summary: Paginated history
+      description: >
+        Provider-compatible history retains a folded execution as the original
+        tool_call({name, arguments}) wrapper. Its matching tool message carries
+        metadata.tool_source=bridge so clients can unwrap only its presentation.
       parameters:
         - { $ref: "#/components/parameters/Id" }
         - { name: cursor, in: query, schema: { type: string } }

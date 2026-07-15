@@ -44,7 +44,8 @@ class ISessionStore(Protocol):
         ...
 
     def delete(self, session_id: str) -> None:
-        """Remove a session and its messages (history sidebar delete)."""
+        """Remove persisted session/message rows only. The DELETE route owns
+        abort/drain and the subsequent IAgent.release_session lifecycle cleanup."""
         ...
 
     def delete_after_message(self, session_id: str, message_id: str) -> None:

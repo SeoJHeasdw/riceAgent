@@ -126,15 +126,15 @@ class IAgent(Protocol):
         ...
 
     async def abort_and_drain(self, session_id: str, timeout_s: float = 10.0) -> bool:
-        """Abort the in-flight turn AND wait until it actually finishes (bounded by
-        `timeout_s`). Session deletion calls this first so the turn's tail writes
-        land before the rows disappear. True = no turn/drained; False = timed out."""
+        """Abort the in-flight turn and wait up to `timeout_s` for it to finish.
+        Session deletion calls this first, then proceeds after either a drain or
+        timeout. True = no turn/drained; False = timed out."""
         ...
 
     def release_session(self, session_id: str) -> None:
-        """Drop per-session runtime memory (render state 등) after the session's
-        rows are deleted — 삭제된 세션의 동결 렌더 스냅샷이 LRU에서 밀려날 때까지
-        남아있지 않게 하는 위생 훅. idempotent, 존재하지 않는 세션이면 no-op."""
+        """Drop the orchestrator's per-session render state and learning-owned
+        transient state after persisted rows are deleted. Idempotent; a missing
+        session is a no-op."""
         ...
 
 

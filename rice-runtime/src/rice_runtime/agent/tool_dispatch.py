@@ -140,6 +140,10 @@ _TOOL_CALL_SPEC = ToolSpec(
     },
     source="bridge",
     requires_approval=False,
+    # The scheduler only sees this wrapper spec, not the folded target spec.
+    # Conservatively serialize bridge executions so a folded destructive tool
+    # cannot become parallel merely because the bridge itself is read-only.
+    parallel_safe=False,
 )
 BRIDGE_TOOL_SPECS: tuple[ToolSpec, ...] = (_TOOL_SEARCH_SPEC, _TOOL_DESCRIBE_SPEC, _TOOL_CALL_SPEC)
 
@@ -237,7 +241,26 @@ class ToolDispatcher:
         )
 
     async def dispatch(self, session_id: str, call: ToolCall, spec: ToolSpec) -> AsyncIterator[SSEEvent]:
-        yield ev_tool_call(call)
+        async for event in self._dispatch(session_id, call, spec, emit_envelope=True):
+            yield event
+
+    async def _dispatch(
+        self,
+        session_id: str,
+        call: ToolCall,
+        spec: ToolSpec,
+        *,
+        emit_envelope: bool,
+    ) -> AsyncIterator[SSEEvent]:
+        """Execute one call, optionally suppressing its public call/result envelope.
+
+        ``tool_call`` uses the suppressed form for its folded target: the wrapper
+        owns the single public call id while the target still runs through this
+        exact policy/approval path. Control events (notably approval requests)
+        remain public, so suppressing the envelope never bypasses HITL.
+        """
+        if emit_envelope:
+            yield ev_tool_call(self._public_call(call, spec))
 
         # ── policy gate (RUNTIME_DESIGN §5.1 + 도구별 권한) ───────────────────
         # 기본 정책: requires_approval 이면 승인, 아니면 허용. connector 도구는 사용자가
@@ -258,7 +281,8 @@ class ToolDispatcher:
             # 차단된 도구는 승인도 묻지 않고 즉시 거부(호출 자체를 막음).
             res = ToolResult(call.id, ok=False, error="tool blocked by policy (사용자가 차단한 도구)")
             self._results[call.id] = res
-            yield ev_tool_result(res)
+            if emit_envelope:
+                yield ev_tool_result(res)
             return
 
         needs_approval = policy == "approval" and (
@@ -277,13 +301,14 @@ class ToolDispatcher:
                 # safe default: do NOT run; surface a skipped result to the loop.
                 res = ToolResult(call.id, ok=False, error=f"tool skipped ({response.decision})")
                 self._results[call.id] = res
-                yield ev_tool_result(res)
+                if emit_envelope:
+                    yield ev_tool_result(res)
                 return
 
         # bridge 는 자체 async-generator 위임(tool_call 이 재귀적으로 dispatch 를 다시 도는
         # 경로가 있어 try/except 아래의 단순 res=await 패턴에 안 맞는다) — 별도 분기.
         if spec.source == "bridge":
-            async for ev in self._dispatch_bridge(session_id, call):
+            async for ev in self._dispatch_bridge(session_id, call, emit_result=emit_envelope):
                 yield ev
             return
 
@@ -328,13 +353,40 @@ class ToolDispatcher:
                 res = ToolResult(res.tool_call_id, ok=res.ok, result=cleaned, images=images)
 
         self._results[call.id] = res
-        yield ev_tool_result(res)
+        if emit_envelope:
+            yield ev_tool_result(res)
 
     async def result_for(self, call: ToolCall) -> ToolResult:
         return self._results.get(call.id, ToolResult(call.id, ok=False, error="no result"))
 
+    def _public_call(self, call: ToolCall, spec: ToolSpec) -> ToolCall:
+        """Resolve a folded execution for display without changing its public id.
+
+        Provider history must retain the wrapper call (the provider actually
+        emitted ``tool_call``), but the live trace should describe the action the
+        user is approving and observing. The frontend applies the same unwrap to
+        persisted wrapper calls when rebuilding a thread.
+        """
+        if spec.source != "bridge" or call.tool_name != _TOOL_CALL_SPEC.name:
+            return call
+        raw_name = call.arguments.get("name")
+        if not isinstance(raw_name, str) or not raw_name:
+            return call
+        name = raw_name
+        raw_arguments = call.arguments.get("arguments")
+        if raw_arguments is not None and not isinstance(raw_arguments, dict):
+            return call
+        inner_arguments = raw_arguments or {}
+        return ToolCall(tool_name=name, arguments=inner_arguments, id=call.id)
+
     # ── progressive disclosure bridges (tool_search / tool_describe / tool_call) ──
-    async def _dispatch_bridge(self, session_id: str, call: ToolCall) -> AsyncIterator[SSEEvent]:
+    async def _dispatch_bridge(
+        self,
+        session_id: str,
+        call: ToolCall,
+        *,
+        emit_result: bool,
+    ) -> AsyncIterator[SSEEvent]:
         """tool_search/tool_describe 는 접힌 카탈로그를 읽기만 하는 순수 조회(승인 불필요 —
         위 gate 를 이미 통과했다). tool_call 은 실제 도구를 **재귀적으로 다시 dispatch**해서
         그 도구 자신의 승인/차단 정책을 그대로 적용한다(이 브릿지가 정책을 우회하지 않음 —
@@ -378,14 +430,25 @@ class ToolDispatcher:
                 )
             )
         elif call.tool_name == "tool_call":
-            name = str(call.arguments.get("name", ""))
-            target = self._folded_catalog.get(name)
-            if target is None:
-                res = ToolResult(call.id, ok=False, error=f"unknown tool: {name}")
+            raw_name = call.arguments.get("name")
+            raw_arguments = call.arguments.get("arguments")
+            if not isinstance(raw_name, str) or not raw_name:
+                res = ToolResult(call.id, ok=False, error="tool_call name must be a non-empty string")
+            elif raw_arguments is not None and not isinstance(raw_arguments, dict):
+                res = ToolResult(call.id, ok=False, error="tool_call arguments must be an object")
+            elif (target := self._folded_catalog.get(raw_name)) is None:
+                res = ToolResult(call.id, ok=False, error=f"unknown tool: {raw_name}")
             else:
-                inner_arguments = call.arguments.get("arguments") or {}
+                name = raw_name
+                inner_arguments = raw_arguments or {}
                 inner_call = ToolCall(tool_name=name, arguments=inner_arguments, id=f"{call.id}:bridged")
-                async for ev in self.dispatch(session_id, inner_call, target):
+                # The wrapper already emitted the one public call event using the
+                # outer id. Run the target through the same dispatcher while
+                # suppressing only its call/result envelope; approval events are
+                # intentionally forwarded unchanged.
+                async for ev in self._dispatch(
+                    session_id, inner_call, target, emit_envelope=False
+                ):
                     yield ev
                 inner_res = await self.result_for(inner_call)
                 # 이미지 첨부도 함께 전파 — 접힌 도구가 vision류여도 계약 유지.
@@ -397,4 +460,5 @@ class ToolDispatcher:
             res = ToolResult(call.id, ok=False, error=f"unknown bridge tool: {call.tool_name}")
 
         self._results[call.id] = res
-        yield ev_tool_result(res)
+        if emit_result:
+            yield ev_tool_result(res)

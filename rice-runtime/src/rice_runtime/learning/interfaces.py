@@ -5,22 +5,26 @@ This is *the* boundary that lets the learning loop (memory #3, skill #4, curator
 retrieval backend — without the agent or server knowing (RUNTIME_DESIGN §3,
 "upgrade seam"). The agent loop sees only this Protocol.
 
-Two surfaces:
-  1. TURN-CRITICAL (called by the orchestrator every turn):
+Three surfaces:
+  1. AGENT-OWNED:
+     Per-turn:
        prefetch(...)  → context to inject before the LLM call
        observe(...)   → *cheap, synchronous* effects (skill use++, staged T5 proposals)
+     On an approved proposal:
        apply_patch(...) → commit a patch once HITL approval is decided
+     On DELETE /sessions/{id} teardown:
+       release_session(...) → drop session-scoped in-memory learning state
      Note the **approval dance is NOT here**: learning *proposes*; the orchestrator
      owns the `IApprovalGate` + SSE stream and calls `apply_patch` with the verdict.
      This keeps learning free of transport/HITL concerns (single responsibility).
 
-  1b. POST-TURN, LLM-BACKED (called by the separate `/learning-review`/`/learn`
+  2. POST-TURN, LLM-BACKED (called by the separate `/learning-review`/`/learn`
       routes — NEVER inline in the turn's own SSE stream, same reason titling
       moved to its own endpoint: an LLM call here must not delay `done`):
        review(...) → gated, LLM-authored skill/memory proposals
        learn(...)  → same engine, always-on (explicit user "save this as a skill")
 
-  2. MANAGEMENT (called by `routes/skills.py`, `routes/...` for the UI):
+  3. MANAGEMENT (called by `routes/skills.py`, `routes/...` for the UI):
        list/get skills, curate, set_state, history, rollback, list_memories.
 
 **FROZEN.** Implementations (`learning/loop.py`, `skill/`, `memory/`, `curator/`)
@@ -201,6 +205,12 @@ class ILearningService(Protocol):
         `skill_token_budget` — 이 턴의 모델 창에서 역산한 전문 주입 토큰 상한
         (orchestrator가 프로파일·num_ctx 기반으로 계산). config 기본 예산을 더
         좁게만 클램프한다; None이면 config 예산 그대로."""
+        ...
+
+    def release_session(self, session_id: str) -> None:
+        """Drop every session-scoped in-memory learning state entry after a
+        session is deleted. Idempotent; a missing session is a no-op. Global
+        registries such as the enabled plugin-skill snapshot are retained."""
         ...
 
     def search_skills(self, query: str, limit: int = 8) -> list[dict]:

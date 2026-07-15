@@ -105,6 +105,14 @@ async def test_delete_session_drains_active_turn():
         task = asyncio.create_task(consume())
         await asyncio.sleep(0.1)  # 턴이 스트리밍 중인 상태 확보
         assert c.agent.is_active(s.id)
+        # prefetch가 생성한 상태에 나머지 learning 세션 상태도 추가해
+        # DELETE의 orchestrator lifecycle 훅이 모두 정리하는지 검증한다.
+        c.learning._staged[s.id] = []
+        c.learning._viewed_skills[s.id] = {"viewed"}
+        c.learning._sticky_skills[s.id] = {"sticky": 2}
+        c.learning._review_gate.should_review(
+            s.id, tool_calls_made=0, final_message="ordinary response"
+        )
 
         await asyncio.wait_for(delete_session(s.id, c), timeout=5)
         # drain 이 끝났고(활성 아님), 세션·메시지가 실제로 사라졌다.
@@ -114,6 +122,14 @@ async def test_delete_session_drains_active_turn():
         # 세션 스코프 렌더 상태(동결 스냅샷)도 함께 걷혔다 — 죽은 세션의
         # 트랜스크립트 사본이 LRU 축출까지 잔류하지 않는다.
         assert s.id not in c.agent._render_states
+        for state in (
+            c.learning._staged,
+            c.learning._viewed_skills,
+            c.learning._sticky_skills,
+            c.learning._last_query,
+            c.learning._review_gate._turns_since_review,
+        ):
+            assert s.id not in state
         await asyncio.wait_for(task, timeout=5)  # 소비자도 오류 없이 종료(done 수신)
         assert events and events[-1].type.value == "done"
     finally:

@@ -1,6 +1,6 @@
 # RICE Contracts (레포 간 계약)
 
-> 작성일: 2026-06-12 (개정: 2026-07-08 — 소스 드리프트 동기화, §6.7·§6.8 참고) · 상태: **확정 (결정 완료)**
+> 작성일: 2026-06-12 (개정: 2026-07-15 — H-2 bridge SSE·H-4 session lifecycle 정합화) · 상태: **확정 (결정 완료)**
 > 범위: app↔runtime 로컬 API + 마켓 artifact 스펙 + platform API(개요)
 > 해소 대상(전건 확정): [RICE_REPO_STRATEGY.md](RICE_REPO_STRATEGY.md) 9장 #2, #4 (+#5 일부)
 
@@ -50,7 +50,7 @@ Electron main process
 | **POST** | **`/sessions/{id}/learning-review`** | **게이트된 LLM 스킬/메모리 리뷰(post-turn, 논블로킹) → SSE 스트림(메인 턴과 동일 이벤트 어휘) — LEARNING_LOOP §4. body: `{tool_calls_made}`. 게이트 미통과 시 즉시 `done`만.** |
 | **POST** | **`/sessions/{id}/learn`** | **명시적 "이 대화를 스킬로 저장" — 게이트 없이 항상 시도 → SSE 스트림 — LEARNING_LOOP §5.3. body: `{instruction?}`.** |
 | POST | `/sessions/{id}/abort` | 생성 중단 |
-| **DELETE** | **`/sessions/{id}`** | **세션 삭제(abort-and-drain 후 제거) — 이미 구현돼 있었으나 문서 누락이었음(2026-07-08 반영)** |
+| **DELETE** | **`/sessions/{id}`** | **세션 삭제: 진행 중 턴에 abort 요청 + bounded drain 대기 → 영속 세션/메시지 제거 → 세션 소유 agent/learning 인메모리 상태 해제. 전역 plugin-skill snapshot은 유지** |
 | POST | `/sessions/{id}/tool-approval` | tool 실행 승인 응답 (`tool_approval_required` 이벤트에 대응, `approval_id` 포함) |
 | GET | `/sessions/{id}/pending-approvals` | 대기 중 승인 목록 (SSE 재연결 복구 — RUNTIME_DESIGN 5.1) |
 | GET | `/sessions/{id}/messages?cursor=` | 과거 메시지 페이지네이션 (히스토리 로드) |
@@ -119,6 +119,16 @@ Electron main process
 8. `done` - 응답 완료
 9. `error` - 오류 발생 (error_code, message)
 
+> **`tool_call` bridge 표현 계약**: abort 없이 결과까지 도달한 bridge 실행은 public
+> SSE에서 wrapper의 outer `tool_call_id`를 유지한 요청 대상 이름·인자의 `tool_call`
+> 1회와 같은 id의 `tool_result` 1회로 표현한다. 내부 `:bridged` id와 call/result
+> envelope는 공개하지 않으며, 대상이 승인을 요구하면 `tool_approval_required`만
+> 대상 이름·인자로 두 envelope 사이에 전달한다. malformed wrapper도 dispatch가
+> 계속되면 outer id의 단일 실패 결과로 끝난다. Provider-compatible durable
+> history는 모델이 낸 `tool_call({name, arguments})` wrapper를 보존하고, 리로드
+> UI는 대응 tool message의 `metadata.tool_source="bridge"`를 근거로 표시만 요청
+> 대상으로 unwrap한다.
+>
 > ~~`skill_created`(skill_id, title, version)~~ — **2026-07-02 제거.** 스킬 생성은 이제 `skill_patch_proposed`(`from_version=0`)로 표현되며, 패치와 동일한 HITL 승인 게이트를 거친다. 따라서 승인 없이 즉시 저장한 뒤 `skill_created`로 통지하던 이전 경로는 제거됐다. `POST /sessions/{id}/learning-review`·`/learn`(아래)도 위 표의 9종과 동일한 이벤트 어휘만 방출한다.
 >
 > 제어 이벤트(별도, 각자 고유 `approval_id` 포함 — 정지/재개·timeout·재연결 처리는 1.2, 메커니즘은 RUNTIME_DESIGN 5.1): `tool_approval_required`(approval_id, tool_name, arguments) — 위험 tool 실행 전 발행 → 앱이 `POST /sessions/{id}/tool-approval`(approval_id 포함)로 응답. `skill_patch_proposed`(approval_id, skill_id, changelog, diff, trigger, from_version?, to_version?, **proposed_body?**, **warnings?**, **derived_from_external?**, **evidence_message_ids?**) — 스킬 개선/생성 제안 발행 → 앱이 diff 카드 표시 후 `POST /skills/{id}/patch`(approval_id 포함)로 응답 (LEARNING_LOOP 5.2). **`proposed_body`/`warnings`는 2026-07-02 추가**: 이전엔 제안의 실제 전체 본문이 SSE payload에 실리지 않아 프론트가 `diff.lines`를 필터링해 재구성했는데(edge case에서 미묘하게 어긋날 위험), 이제 서버가 준 원문을 그대로 쓸 수 있다. `warnings`는 §8 가드(시크릿 스크러빙)가 뭔가 마스킹했을 때의 경고 문자열 배열. **`derived_from_external`/`evidence_message_ids`(2026-07-08 문서 반영)**: 제안이 외부 콘텐츠 섞인 턴에서 나왔는지와 그 근거 tool 메시지 id — 메모리 격리(§6.7)와 같은 판정 축을 스킬 제안에도 노출한다.

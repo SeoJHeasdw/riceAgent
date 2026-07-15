@@ -48,6 +48,11 @@ class TestFoldToolsForBudget:
         """브릿지 자체는 항상 승인 없이 통과 — 실제 승인은 재귀 dispatch 된 실도구가 결정."""
         assert all(t.requires_approval is False for t in BRIDGE_TOOL_SPECS)
 
+    def test_tool_call_bridge_is_conservatively_serialized(self):
+        """스케줄러가 숨은 target의 parallel_safe를 못 보므로 실행 bridge는 직렬화한다."""
+        assert BRIDGE_TOOL_SPECS[2].name == "tool_call"
+        assert BRIDGE_TOOL_SPECS[2].parallel_safe is False
+
     def test_budget_constant_matches_design_doc(self):
         """RICE_LEARNING_LOOP_DESIGN.md §7 표의 MCP 도구 예산(~15K) — 회귀 방지용 고정."""
         assert _TOOL_BUDGET_TOKENS == 15_000
@@ -120,7 +125,7 @@ class TestBridgeDispatch:
             arguments={"name": "gmail_search_threads", "arguments": {"q": "invoice"}},
             id="c1",
         )
-        _ = [ev async for ev in disp.dispatch("sess", call, BRIDGE_TOOL_SPECS[2])]
+        events = [ev async for ev in disp.dispatch("sess", call, BRIDGE_TOOL_SPECS[2])]
         res = await disp.result_for(call)
         assert res.ok is True and res.result == {"echoed": True}
         approvals.request.assert_not_called()
@@ -128,6 +133,16 @@ class TestBridgeDispatch:
         inner_call = connectors.invoke.call_args.args[0]
         assert inner_call.tool_name == "gmail_search_threads"
         assert inner_call.arguments == {"q": "invoice"}
+        assert [(ev.type, ev.data["tool_call_id"]) for ev in events] == [
+            ("tool_call", "c1"),
+            ("tool_result", "c1"),
+        ]
+        assert events[0].data == {
+            "tool_call_id": "c1",
+            "tool_name": "gmail_search_threads",
+            "arguments": {"q": "invoice"},
+        }
+        assert all(":bridged" not in str(ev.data) for ev in events)
 
     @pytest.mark.asyncio
     async def test_tool_call_does_not_bypass_approval_policy(self):
@@ -142,7 +157,46 @@ class TestBridgeDispatch:
         assert res.ok is True
         approvals.request.assert_awaited_once()  # 실제 승인 절차를 거쳤다
         connectors.invoke.assert_awaited_once()
-        assert any(getattr(ev, "type", None) == "tool_approval_required" for ev in events)
+        assert [ev.type for ev in events] == [
+            "tool_call",
+            "tool_approval_required",
+            "tool_result",
+        ]
+        assert events[0].data == {
+            "tool_call_id": "c2",
+            "tool_name": "gmail_send",
+            "arguments": {"to": "x@y.com"},
+        }
+        assert events[1].data["tool_name"] == "gmail_send"
+        assert events[1].data["arguments"] == {"to": "x@y.com"}
+        assert events[2].data["tool_call_id"] == "c2"
+        assert all(":bridged" not in str(ev.data) for ev in events)
+
+    @pytest.mark.asyncio
+    async def test_tool_call_rejected_approval_emits_one_outer_result(self):
+        folded = [_spec("gmail_send", requires_approval=True)]
+        disp, connectors, approvals = self._dispatcher(
+            folded=folded, permission="approval", approve=False
+        )
+        call = ToolCall(
+            tool_name="tool_call",
+            arguments={"name": "gmail_send", "arguments": {"to": "x@y.com"}},
+            id="c2-reject",
+        )
+
+        events = [ev async for ev in disp.dispatch("sess", call, BRIDGE_TOOL_SPECS[2])]
+        res = await disp.result_for(call)
+
+        assert res.ok is False and "reject" in (res.error or "")
+        approvals.request.assert_awaited_once()
+        connectors.invoke.assert_not_called()
+        assert [ev.type for ev in events] == [
+            "tool_call",
+            "tool_approval_required",
+            "tool_result",
+        ]
+        assert events[-1].data["tool_call_id"] == "c2-reject"
+        assert all(":bridged" not in str(ev.data) for ev in events)
 
     @pytest.mark.asyncio
     async def test_tool_call_does_not_bypass_block_policy(self):
@@ -151,17 +205,55 @@ class TestBridgeDispatch:
         call = ToolCall(
             tool_name="tool_call", arguments={"name": "gmail_delete_all", "arguments": {}}, id="c3",
         )
-        _ = [ev async for ev in disp.dispatch("sess", call, BRIDGE_TOOL_SPECS[2])]
+        events = [ev async for ev in disp.dispatch("sess", call, BRIDGE_TOOL_SPECS[2])]
         res = await disp.result_for(call)
         assert res.ok is False and "block" in (res.error or "").lower()
         connectors.invoke.assert_not_called()
         approvals.request.assert_not_called()
+        assert [ev.type for ev in events] == ["tool_call", "tool_result"]
+        assert events[0].data["tool_call_id"] == "c3"
+        assert events[0].data["tool_name"] == "gmail_delete_all"
+        assert events[1].data["tool_call_id"] == "c3"
+        assert all(":bridged" not in str(ev.data) for ev in events)
 
     @pytest.mark.asyncio
     async def test_tool_call_unknown_name_errors_without_touching_connectors(self):
         disp, connectors, _ = self._dispatcher(folded=[])
         call = ToolCall(tool_name="tool_call", arguments={"name": "ghost", "arguments": {}}, id="c4")
-        _ = [ev async for ev in disp.dispatch("sess", call, BRIDGE_TOOL_SPECS[2])]
+        events = [ev async for ev in disp.dispatch("sess", call, BRIDGE_TOOL_SPECS[2])]
         res = await disp.result_for(call)
         assert res.ok is False and "ghost" in (res.error or "")
         connectors.invoke.assert_not_called()
+        # Unknown targets still use the same presentation shape as persisted
+        # bridge calls: one attempted target card, paired to one outer result.
+        assert [ev.type for ev in events] == ["tool_call", "tool_result"]
+        assert events[0].data == {
+            "tool_call_id": "c4",
+            "tool_name": "ghost",
+            "arguments": {},
+        }
+        assert events[1].data["tool_call_id"] == "c4"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("arguments", "error"),
+        [
+            ({"name": 123, "arguments": {}}, "name must be"),
+            ({"name": "gmail_send", "arguments": []}, "arguments must be"),
+        ],
+    )
+    async def test_tool_call_rejects_malformed_bridge_arguments(self, arguments, error):
+        folded = [_spec("gmail_send", requires_approval=False)]
+        disp, connectors, approvals = self._dispatcher(folded=folded)
+        call = ToolCall(tool_name="tool_call", arguments=arguments, id="bad-bridge")
+
+        events = [ev async for ev in disp.dispatch("sess", call, BRIDGE_TOOL_SPECS[2])]
+        res = await disp.result_for(call)
+
+        assert res.ok is False and error in (res.error or "")
+        connectors.invoke.assert_not_called()
+        approvals.request.assert_not_called()
+        assert [ev.type for ev in events] == ["tool_call", "tool_result"]
+        assert events[0].data["tool_call_id"] == "bad-bridge"
+        assert events[0].data["tool_name"] == "tool_call"
+        assert events[1].data["tool_call_id"] == "bad-bridge"
