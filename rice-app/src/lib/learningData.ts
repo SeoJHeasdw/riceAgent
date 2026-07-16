@@ -510,7 +510,7 @@ export type ThreadMessage =
       newRules?: SkillVersionRule[];
       /** 적용 후 사용처에 남길 한 줄 (선택) */
       note?: string;
-      /** Phase D 가드 경고 (예: "AWS access key 자동 마스킹됨") — 비어있으면 표시 안 함 */
+      /** Phase D 가드 경고 코드 (예: "masked:AWS access key" — learningWarnings.ts가 로케일 문장으로 푼다) — 비어있으면 표시 안 함 */
       warnings?: string[];
     }
   | {
@@ -1349,6 +1349,26 @@ export function renderVersionNote(note: string, t: TFnChat, noteParams?: Record<
     case 'noteInstalled':    return t('learning.noteInstalled', noteParams ?? {});
     default:                 return note; // 동적 changelog 또는 레거시 자유 문자열
   }
+}
+
+// 런타임은 changelog 폴백 문장을 합성하지 않는다(learning/proposals.py) — LLM이
+// 생략하면 빈 문자열로 오고, 표시 폴백은 여기서 로케일로 결정한다. 코드 도입 전에
+// 저장된 한글 폴백 문장(레거시)도 같은 키로 흡수한다.
+const LEGACY_CHANGELOG_NEW = '신규 스킬 제안';
+const LEGACY_CHANGELOG_IMPROVEMENT = '개선 제안';
+const LEGACY_CHANGELOG_CONSOLIDATION = 'curator 통합 제안';
+
+/** PatchProposal.changelog → 표시 문자열. isNew는 from_version === 0. */
+export function renderChangelog(changelog: string | undefined, isNew: boolean, t: TFnChat): string {
+  const text = (changelog ?? '').trim();
+  if (!text) return isNew ? t('learning.changelogNewSkill') : t('learning.changelogImprovement');
+  if (text === LEGACY_CHANGELOG_NEW) return t('learning.changelogNewSkill');
+  if (text.startsWith(`${LEGACY_CHANGELOG_NEW} · `)) {
+    return `${t('learning.changelogNewSkill')} · ${text.slice(LEGACY_CHANGELOG_NEW.length + 3)}`;
+  }
+  if (text === LEGACY_CHANGELOG_IMPROVEMENT) return t('learning.changelogImprovement');
+  if (text === LEGACY_CHANGELOG_CONSOLIDATION) return t('learning.changelogConsolidation');
+  return text;
 }
 
 // Made with Bob

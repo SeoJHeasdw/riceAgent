@@ -23,6 +23,7 @@ from ...core.errors import NotFoundError
 from ...core.types import ToolCall
 from ...prompts.curator import build_curator_messages, build_curator_tool_specs
 from ..interfaces import ArchiveProposal, PatchProposal
+from ..proposals import MASKED_WARNING_PREFIX
 from ..skill import guard as skill_guard
 from ..skill.patch import build_diff
 from ..skill.store import SkillStore
@@ -132,7 +133,8 @@ class ConsolidationEngine:
         umbrella_id = str(args.get("umbrella_id") or "").strip()
         is_new = bool(args.get("is_new"))
         body = str(args.get("umbrella_body") or "")
-        changelog = str(args.get("changelog") or "curator 통합 제안")[:_MAX_CHANGELOG_CHARS]
+        # 폴백 문장을 합성하지 않는다 — 비면 빈 채로 두고 표시 폴백은 프론트 몫.
+        changelog = str(args.get("changelog") or "").strip()[:_MAX_CHANGELOG_CHARS]
         absorbed_ids = [
             str(sid).strip()
             for sid in (args.get("absorbed_skill_ids") or ())
@@ -146,7 +148,7 @@ class ConsolidationEngine:
             log.warning("consolidation engine: umbrella body too large for %r, dropped", umbrella_id)
             return []
         body, warnings = skill_guard.scrub_secrets(body)
-        warning_tuple = tuple(f"{label} 자동 마스킹됨" for label in warnings)
+        warning_tuple = tuple(f"{MASKED_WARNING_PREFIX}{label}" for label in warnings)
 
         umbrella_proposal: PatchProposal | None = None
         if is_new and umbrella_id not in candidate_ids:

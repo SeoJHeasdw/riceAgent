@@ -3,9 +3,10 @@ import { useTranslation } from 'react-i18next';
 import { Icon, Tag } from '../ui';
 import type { IconName } from '../ui/Icon';
 import { useLearning } from '../../lib/learning/LearningContext';
-import { type Proposal, type ProposalKind } from '../../lib/learningData';
+import { renderChangelog, wrapT, type Proposal, type ProposalKind } from '../../lib/learningData';
 import type { SkillSuggestion } from '../../lib/types';
 import { api } from '../../lib/api';
+import { localizeLearningWarning } from '../../lib/learningWarnings';
 import { TransparencyPanel } from './TransparencyPanel';
 
 /**
@@ -215,7 +216,9 @@ const SuggestionCard: React.FC<{
             <span className="text-caption-01 text-text-helper font-mono flex-shrink-0">{versionText}</span>
           </div>
           <div className="text-caption-01 text-text-helper mt-1 leading-snug">
-            {s.kind === 'archive' ? s.payload.reason ?? s.payload.changelog : s.payload.changelog}
+            {s.kind === 'archive'
+              ? s.payload.reason ?? s.payload.changelog
+              : renderChangelog(s.payload.changelog, s.payload.from_version === 0, wrapT(t))}
           </div>
           <div className="flex items-center gap-2 mt-1.5 text-caption-01 text-text-helper">
             <span className="inline-flex items-center gap-1">
@@ -230,7 +233,10 @@ const SuggestionCard: React.FC<{
             )}
             {(s.payload.warnings?.length ?? 0) > 0 && (
               <span className="inline-flex items-center gap-1 text-support-warning">
-                <Icon name="warning" size={11} /> {t('learning.suggestionWarnMasked')}
+                <Icon name="warning" size={11} />{' '}
+                {s.payload.warnings
+                  ?.map((warning) => localizeLearningWarning(warning, t))
+                  .join(' · ')}
               </span>
             )}
           </div>

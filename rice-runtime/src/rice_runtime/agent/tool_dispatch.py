@@ -301,7 +301,7 @@ class ToolDispatcher:
 
         if policy == "block":
             # 차단된 도구는 승인도 묻지 않고 즉시 거부(호출 자체를 막음).
-            res = ToolResult(call.id, ok=False, error="tool blocked by policy (사용자가 차단한 도구)")
+            res = ToolResult(call.id, ok=False, error="tool blocked by policy (the user has blocked this tool)")
             self._results[call.id] = res
             if emit_envelope:
                 yield ev_tool_result(res)

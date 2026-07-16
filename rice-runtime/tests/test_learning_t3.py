@@ -421,7 +421,9 @@ class TestUserProfile:
         svc = LearningService(db, LearningConfig(), paths)
         MemoryStore(db).add("preference", "I prefer verbose and detailed answers")
         result = svc.prefetch("sess1", "hello")
-        assert "verbose" in result.system_prompt_additions.lower() or "자세" in result.system_prompt_additions
+        # 스타일 가이드는 영어 정본(profile.py _STYLE_KEYWORDS) — "verbose" 선호는
+        # "The user prefers detailed explanations."로 렌더된다.
+        assert "detailed" in result.system_prompt_additions.lower()
 
 
 # ── 수용 기준 종합 end-to-end ─────────────────────────────────────────────────

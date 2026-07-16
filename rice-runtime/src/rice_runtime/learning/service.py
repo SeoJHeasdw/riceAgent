@@ -1097,12 +1097,13 @@ class LearningService(ILearningService):
         queue = self._staged.setdefault(session_id, [])
         if len(queue) >= 3:
             # 카드 스팸 방어 — 한 턴에 제안 3개면 이미 과하다.
-            return {"status": "dropped", "message": "이 턴에 이미 3개의 제안이 대기 중입니다. 답변을 마치세요."}
+            # 도구 결과 message는 모델용 영어 정본 — 모델이 대화 언어로 재서술한다.
+            return {"status": "dropped", "message": "Three proposals are already staged this turn. Finish your answer."}
 
         if self._builtin_skills.is_builtin(name.strip()):
             return {
                 "status": "dropped",
-                "message": f"'{name}'은(는) 빌트인 스킬이라 수정/재정의할 수 없습니다. 다른 이름으로 새 스킬을 제안하세요.",
+                "message": f"'{name}' is a built-in skill and cannot be modified or redefined. Propose a new skill under a different name.",
             }
 
         proposal: PatchProposal | None
@@ -1111,7 +1112,7 @@ class LearningService(ILearningService):
         except NotFoundError:
             current = None
         except Exception:
-            return {"status": "dropped", "message": f"스킬 이름이 유효하지 않습니다: {name!r}"}
+            return {"status": "dropped", "message": f"Invalid skill name: {name!r}"}
 
         if current is None:
             proposal = make_create_proposal(
@@ -1127,12 +1128,13 @@ class LearningService(ILearningService):
             if (current.source or "").startswith("plugin:"):
                 return {
                     "status": "dropped",
-                    "message": f"'{name}'은(는) 플러그인 제공 스킬이라 학습 루프가 수정할 수 없습니다. 다른 이름으로 새 스킬을 제안하세요.",
+                    "message": f"'{name}' is a plugin-provided skill and the learning loop cannot modify it. Propose a new skill under a different name.",
                 }
             proposal = make_patch_proposal(
                 current=current,
                 new_body=body,
-                changelog=changelog or "대화 중 에이전트 발의 개선",
+                # 폴백 문장을 합성하지 않는다 — 비면 빈 채로 두고 표시 폴백은 프론트 몫.
+                changelog=changelog,
                 trigger="T5",
                 max_body_chars=self._config.skill_max_body_chars,
                 # propose_skill 의 description/tags 인자는 기존 스킬에선 "변경
@@ -1144,7 +1146,7 @@ class LearningService(ILearningService):
         if proposal is None:
             return {
                 "status": "dropped",
-                "message": "제안이 성립하지 않습니다 (빈 본문, 크기 초과, 이름 규약 위반, 또는 기존 본문과 동일).",
+                "message": "The proposal is not valid (empty body, size limit exceeded, name-convention violation, or identical to the current body).",
             }
 
         # ── 승격 검증 harness: 성립한 제안만 검증한다(정책 검사 — 이름 규약·
@@ -1170,8 +1172,8 @@ class LearningService(ILearningService):
             return {
                 "status": "rejected",
                 "message": (
-                    f"검증 실패로 제안이 거부되었습니다: {report.failure_text()} "
-                    "— 본문을 고쳐 다시 propose_skill을 호출하세요."
+                    f"Proposal rejected by verification: {report.failure_text()} "
+                    "— fix the body and call propose_skill again."
                 ),
             }
         # 검증 warn은 차단이 아니라 표시 — 승인 카드의 warnings로 병합해 사용자가
@@ -1187,12 +1189,17 @@ class LearningService(ILearningService):
             trigger="T5",
             detail={"changelog": proposal.changelog},
         )
-        action = "생성" if proposal.from_version == 0 else f"v{proposal.from_version}→v{proposal.to_version} 개선"
+        action = (
+            "creation"
+            if proposal.from_version == 0
+            else f"v{proposal.from_version}→v{proposal.to_version} improvement"
+        )
         return {
             "status": "staged",
             "message": (
-                f"스킬 '{proposal.skill_id}' {action} 제안이 준비되었습니다. 답변이 끝나면 "
-                "사용자에게 승인 카드가 표시됩니다 — 답변에서 제안했다고 언급하세요. 저장 여부는 사용자가 결정합니다."
+                f"Skill '{proposal.skill_id}' {action} proposal is staged. The user will see "
+                "an approval card after your answer — mention the proposal in your answer. "
+                "Whether it is saved is the user's decision."
             ),
         }
 

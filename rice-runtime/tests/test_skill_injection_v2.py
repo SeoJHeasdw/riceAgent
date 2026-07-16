@@ -237,7 +237,8 @@ class TestMetadataPatch:
         )
         assert p is not None
         assert p.new_description and p.new_tags
-        assert any("설명 변경" in w for w in p.warnings)
+        # warnings는 i18n용 "코드:값" 형태(proposals.py) — 문장 렌더링은 프론트 몫.
+        assert any(w.startswith("description_change:") for w in p.warnings)
 
     def test_apply_patch_applies_metadata(self):
         new_version = self._svc.apply_patch(

@@ -70,68 +70,70 @@ def validate_content_size(body: str, max_chars: int = DEFAULT_MAX_BODY_CHARS) ->
         )
 
 
-# (정규식, 라벨) — 학습 안전 스캐너(scan_risks). 라벨은 승인 카드에 그대로 보이는
-# 사용자용 문구다. 보수적으로: 정상 스킬("cron 등록 절차", "DB 마이그레이션")을
-# 플래그하지 않도록, 명백히 수상한 조합만 잡는다.
+# (정규식, 라벨 코드) — 학습 안전 스캐너(scan_risks). 라벨은 안정 코드(snake_case)로,
+# 로케일 문장은 프론트(learningWarnings.ts)가 결정한다 — 런타임의 자연어 합성 금지.
+# 보수적으로: 정상 스킬("cron 등록 절차", "DB 마이그레이션")을 플래그하지 않도록,
+# 명백히 수상한 조합만 잡는다.
 _RISK_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     # ── prompt injection: 이후 매 턴 시스템 프롬프트에 주입될 본문이 모델의
     #    기존 지시를 무력화하려는 패턴 ─────────────────────────────────────────
     (
         re.compile(r"(?i)(ignore|disregard|forget)\s+(all\s+|any\s+)?(previous|prior|above|earlier|your)\s+(instructions?|rules?|prompts?|guidelines?)"),
-        "지시 무력화 시도 (prompt injection)",
+        "prompt_injection",
     ),
     (
         re.compile(r"(?i)(이전|위의?|기존)\s*(지시|명령|규칙|프롬프트)\s*(를|은|을)?\s*(무시|잊)"),
-        "지시 무력화 시도 (prompt injection)",
+        "prompt_injection",
     ),
     (
         re.compile(r"(?i)you\s+are\s+no\s+longer|new\s+system\s+prompt|override\s+(the\s+)?system"),
-        "시스템 프롬프트 탈취 시도",
+        "system_prompt_override",
     ),
     (
         re.compile(r"(?i)do\s+not\s+(tell|inform|show|reveal\s+this\s+to)\s+the\s+user|사용자에게\s*(알리지|보여주지|말하지)\s*마"),
-        "사용자 은닉 지시 (hidden instruction)",
+        "hidden_instruction",
     ),
     # ── credential exfiltration: 키/토큰을 외부로 보내는 절차 ────────────────
     (
         re.compile(r"(?i)(curl|wget|fetch|requests?\.(post|get)|httpx)[^\n]{0,120}(api[_-]?key|token|secret|password|credential)"),
-        "자격증명 외부 전송 절차 (exfiltration)",
+        "credential_exfiltration",
     ),
     (
         re.compile(r"(?i)(send|upload|post|전송|업로드)[^\n]{0,60}(api[_-]?key|secret|credential|자격증명|비밀번호)"),
-        "자격증명 외부 전송 절차 (exfiltration)",
+        "credential_exfiltration",
     ),
     # ── destructive shell: 복구 불가능한 파괴 명령 ───────────────────────────
     (
         re.compile(r"rm\s+(-[a-zA-Z]*r[a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*r)[a-zA-Z]*\s+(/|~|\$HOME)(\s|$|/\*)"),
-        "파괴적 셸 명령 (rm -rf 루트/홈)",
+        "destructive_shell_rm",
     ),
-    (re.compile(r"(?i)\bmkfs(\.\w+)?\s"), "파괴적 셸 명령 (디스크 포맷)"),
-    (re.compile(r"\bdd\s+[^\n]*of=/dev/"), "파괴적 셸 명령 (디바이스 덮어쓰기)"),
-    (re.compile(r":\(\)\s*\{\s*:\|:&\s*\}\s*;"), "포크밤"),
+    (re.compile(r"(?i)\bmkfs(\.\w+)?\s"), "destructive_shell_mkfs"),
+    (re.compile(r"\bdd\s+[^\n]*of=/dev/"), "destructive_shell_dd"),
+    (re.compile(r":\(\)\s*\{\s*:\|:&\s*\}\s*;"), "fork_bomb"),
     # ── remote-exec / persistence / backdoor ─────────────────────────────────
     (
         re.compile(r"(?i)(curl|wget)\s+[^\n|]{0,160}\|\s*(sudo\s+)?(ba)?sh"),
-        "원격 스크립트 즉시 실행 (curl | sh)",
+        "remote_script_execution",
     ),
-    (re.compile(r"(?i)\bnc\s+(-[a-zA-Z]*l|.*\s-l\b)"), "네트워크 리스너 개설 (nc -l)"),
-    (re.compile(r"/dev/tcp/"), "리버스 셸 패턴 (/dev/tcp)"),
-    (re.compile(r"(?i)bash\s+-i\s+>&"), "리버스 셸 패턴"),
-    (re.compile(r"(?i)>>\s*[^\n]*authorized_keys"), "SSH 키 영속화 (authorized_keys 추가)"),
+    (re.compile(r"(?i)\bnc\s+(-[a-zA-Z]*l|.*\s-l\b)"), "network_listener"),
+    (re.compile(r"/dev/tcp/"), "reverse_shell"),
+    (re.compile(r"(?i)bash\s+-i\s+>&"), "reverse_shell"),
+    (re.compile(r"(?i)>>\s*[^\n]*authorized_keys"), "ssh_key_persistence"),
     # ── hidden content: 사람 눈에 안 보이는 지시를 심는 통로 ─────────────────
     (
         re.compile("[\\u200b-\\u200f\\u2060-\\u2064\\ufeff]"),
-        "숨김 문자(zero-width) 포함",
+        "hidden_characters",
     ),
 )
 
 
 def scan_risks(body: str) -> list[str]:
-    """학습 본문(스킬/메모리)에서 위험 신호를 찾아 사용자용 라벨 목록을 반환한다.
+    """학습 본문(스킬/메모리)에서 위험 신호를 찾아 라벨 코드 목록을 반환한다.
 
-    치환하지 않는다 — 스킬 경로는 라벨을 PatchProposal.warnings에 실어 승인 카드에
-    "위험 플래그"로 표시하고(판단은 사용자), memory 경로는 라벨이 하나라도 있으면
-    저장을 거부한다(HITL이 없으므로 fail-closed). 반환: 중복 제거, 발견 순서 유지.
+    치환하지 않는다 — 스킬 경로는 코드를 PatchProposal.warnings에 실어 승인 카드에
+    위험 플래그로 표시하고(로케일 문장은 프론트 몫, 판단은 사용자), memory 경로는
+    코드가 하나라도 있으면 저장을 거부한다(HITL이 없으므로 fail-closed).
+    반환: 중복 제거, 발견 순서 유지.
     """
     found: list[str] = []
     seen: set[str] = set()

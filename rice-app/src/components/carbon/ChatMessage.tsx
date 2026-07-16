@@ -5,6 +5,7 @@ import { Button, CompanionCloudIcon, Icon, Tag } from '../ui';
 import { connectorIdForScope, type ThreadMessage, type ToolCall, type SkillRef, type EditDiffRow } from '../../lib/learningData';
 import type { PlanStepData } from '../../lib/types';
 import { useFileViewer } from '../../lib/fileViewer/FileViewerContext';
+import { localizeLearningWarning } from '../../lib/learningWarnings';
 import { Markdown } from './Markdown';
 
 // A workspace-file-looking inline code chip (e.g. `hello.txt`, `./src/a.ts`) →
@@ -1186,7 +1187,9 @@ const PatchProposalCard: React.FC<{
         {!!m.warnings?.length && (
           <div className="mt-3 flex items-start gap-1.5 px-2.5 py-1.5 rounded-md bg-support-warning bg-opacity-10 border border-support-warning border-opacity-30">
             <Icon name="warning" size={13} className="text-support-warning mt-0.5 flex-shrink-0" />
-            <p className="text-caption-01 text-text-secondary">{m.warnings.join(' · ')}</p>
+            <p className="text-caption-01 text-text-secondary">
+              {m.warnings.map((warning) => localizeLearningWarning(warning, t)).join(' · ')}
+            </p>
           </div>
         )}
         </div>

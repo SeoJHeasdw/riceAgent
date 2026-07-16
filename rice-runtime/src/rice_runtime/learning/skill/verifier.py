@@ -45,9 +45,10 @@ __all__ = ["Finding", "VerificationReport", "verify_candidate", "tool_call_refs"
 
 @dataclass(frozen=True)
 class Finding:
-    check: str  # kebab-case 검사 슬러그 (ledger detail/텔레메트리용)
+    check: str  # kebab-case 검사 슬러그 (ledger detail/텔레메트리 + 카드 warning 코드)
     severity: str  # "fail" | "warn"
-    message: str  # 사용자·모델 겸용 문구 — 카드/도구결과/에러에 그대로 실린다
+    message: str  # 모델/로그용 영어 정본 — 도구 결과·ValidationError·ledger에 실린다
+    param: str = ""  # 카드 warning 코드의 보간 값(도구명/유사 스킬명/퍼센트 등)
 
 
 @dataclass(frozen=True)
@@ -68,9 +69,14 @@ class VerificationReport:
         return " / ".join(f.message for f in self.findings if f.severity == "fail")
 
     def warning_lines(self) -> tuple[str, ...]:
-        """승인 카드의 warnings 채널에 병합할 문구들 — 새 SSE 필드가 아니라 기존
-        PatchProposal.warnings를 재사용한다(프론트 카드가 이미 렌더한다)."""
-        return tuple(f"검증 경고: {f.message}" for f in self.findings if f.severity == "warn")
+        """승인 카드의 warnings 채널에 병합할 항목들 — "verify:<check>[:<param>]"
+        코드로 싣는다(로케일 문장은 프론트 learningWarnings.ts 몫). 새 SSE 필드가
+        아니라 기존 PatchProposal.warnings를 재사용한다(프론트 카드가 이미 렌더한다)."""
+        return tuple(
+            f"verify:{f.check}:{f.param}" if f.param else f"verify:{f.check}"
+            for f in self.findings
+            if f.severity == "warn"
+        )
 
     def to_detail(self) -> dict:
         """ledger `verifier_rejected` 이벤트의 detail 직렬화."""
@@ -152,27 +158,27 @@ def verify_candidate(
 
     # ── static lint: 객관적 무결성 (fail) ────────────────────────────────
     if len(stripped) < _MIN_BODY_CHARS:
-        findings.append(Finding("empty-body", "fail", "본문이 사실상 비어 있습니다 — 절차 단계를 담아주세요."))
+        findings.append(Finding("empty-body", "fail", "the body is essentially empty — include the procedure steps"))
     if body.count("```") % 2 != 0:
         findings.append(
-            Finding("unbalanced-fence", "fail", "코드 펜스(```)가 닫히지 않았습니다 — 본문이 중간에 잘렸을 가능성이 높습니다.")
+            Finding("unbalanced-fence", "fail", "a code fence (```) is not closed — the body was likely truncated mid-write")
         )
     if _FM_IN_BODY.search(body):
         findings.append(
-            Finding("frontmatter-in-body", "fail", "본문이 SKILL.md frontmatter(---/name:)로 시작합니다 — body에는 절차 본문만 넣으세요.")
+            Finding("frontmatter-in-body", "fail", "the body starts with SKILL.md frontmatter (---/name:) — put only the procedure text in the body")
         )
 
     # ── static lint: 품질 신호 (warn) ────────────────────────────────────
     if _MIN_BODY_CHARS <= len(stripped) < _SHORT_BODY_CHARS:
-        findings.append(Finding("thin-body", "warn", "본문이 매우 짧습니다 — 재사용 가능한 절차라기엔 빈약합니다."))
+        findings.append(Finding("thin-body", "warn", "the body is very short — too thin to be a reusable procedure"))
     if stripped and not _STEP_LINE.search(body):
         findings.append(
-            Finding("no-steps", "warn", "번호/불릿 단계가 없습니다 — 스킬은 선언적 사실이 아니라 절차(method)여야 합니다. 사실은 메모리에 맡기세요.")
+            Finding("no-steps", "warn", "no numbered/bulleted steps — a skill must be a procedure (method), not declarative facts; facts belong in memory")
         )
     if stripped.endswith(_DANGLING_ENDINGS):
-        findings.append(Finding("dangling-ending", "warn", "본문이 문장 중간에서 끝난 것으로 보입니다 — 마지막 단계를 완성하세요."))
+        findings.append(Finding("dangling-ending", "warn", "the body appears to end mid-sentence — finish the last step"))
     if _PLACEHOLDER.search(body):
-        findings.append(Finding("placeholder", "warn", "TODO/TBD/플레이스홀더가 남아 있습니다 — 실제 값·단계로 채워주세요."))
+        findings.append(Finding("placeholder", "warn", "TODO/TBD/placeholders remain — fill them in with real values and steps"))
 
     # ── mocked dry-run lite: 참조 도구 실재 검사 (warn — 카탈로그는 동적이다:
     #    지금 없는 커넥터가 나중에 연결될 수 있으므로 차단하지 않고 표시한다) ──
@@ -180,7 +186,12 @@ def verify_candidate(
         for ref in tool_call_refs(body):
             if ("_" in ref or "." in ref) and ref not in known_tool_names:
                 findings.append(
-                    Finding("unknown-tool", "warn", f"본문이 호출을 지시하는 도구 `{ref}` 가 현재 카탈로그에 없습니다 — 이름 오타이거나 존재하지 않는 도구일 수 있습니다.")
+                    Finding(
+                        "unknown-tool",
+                        "warn",
+                        f"the body instructs calling tool `{ref}`, which is not in the current catalog — possibly a typo or a nonexistent tool",
+                        param=ref,
+                    )
                 )
 
     is_creation = current_body is None
@@ -188,21 +199,32 @@ def verify_candidate(
         # ── trigger eval: 발견가능성 — 인덱스 한 줄이 유일한 발견 경로다 ──
         if len(description.strip()) < _MIN_DESCRIPTION_CHARS:
             findings.append(
-                Finding("no-description", "warn", "설명이 없거나 너무 짧습니다 — 스킬 인덱스에서 발견되지 못해 사실상 죽은 스킬이 됩니다.")
+                Finding("no-description", "warn", "the description is missing or too short — the skill cannot be discovered in the index and is effectively dead")
             )
         # ── near-duplicate: 기존 스킬의 재발명 신호 ────────────────────────
         for other in existing_names:
             if other != name and _name_jaccard(name, other) >= _NEAR_DUP_JACCARD:
                 findings.append(
-                    Finding("near-duplicate", "warn", f"기존 스킬 '{other}'와(과) 이름이 유사합니다 — 새 스킬 대신 그 스킬의 patch를 고려하세요.")
+                    Finding(
+                        "near-duplicate",
+                        "warn",
+                        f"the name is similar to existing skill '{other}' — consider patching that skill instead of creating a new one",
+                        param=other,
+                    )
                 )
                 break
     else:
         # ── regression eval: patch의 과도 삭제 ─────────────────────────────
         base = len(current_body.strip())
         if base >= _PATCH_SHRINK_MIN_BASE and len(stripped) < base * _PATCH_SHRINK_RATIO:
+            pct = 100 - int(len(stripped) / base * 100)
             findings.append(
-                Finding("patch-shrink", "warn", f"이 patch는 기존 본문의 {100 - int(len(stripped) / base * 100)}%를 삭제합니다 — 의도한 축약인지 확인하세요.")
+                Finding(
+                    "patch-shrink",
+                    "warn",
+                    f"this patch deletes {pct}% of the existing body — confirm the reduction is intentional",
+                    param=str(pct),
+                )
             )
 
     return VerificationReport(findings=tuple(findings))

@@ -24,10 +24,20 @@ from .skill.store import SkillData
 log = logging.getLogger("rice.learning.proposals")
 
 _MAX_CHANGELOG_CHARS = 200
+EXTERNAL_CONTENT_REVIEW_WARNING = "external_content_review"
+# 매개변수가 있는 warning은 "코드:값" 형태로 싣는다 — 로케일 문장으로 푸는 것은
+# 프론트(learningWarnings.ts)의 몫. 런타임이 자연어를 합성하면 UI 언어와 어긋난다.
+MASKED_WARNING_PREFIX = "masked:"
+RISK_FLAG_WARNING_PREFIX = "risk_flag:"
+DESCRIPTION_CHANGE_WARNING_PREFIX = "description_change:"
+TAGS_CHANGE_WARNING_PREFIX = "tags_change:"
 
 
-def _clean_changelog(text: str, fallback: str) -> str:
-    return (text.strip() or fallback)[:_MAX_CHANGELOG_CHARS]
+def _clean_changelog(text: str) -> str:
+    """LLM이 준 changelog 정리 — 폴백 문장을 합성하지 않는다(사용자용 텍스트
+    하드코딩 금지). 비면 빈 문자열 그대로 두고, 표시 폴백은 프론트
+    (learningData.ts renderChangelog)가 로케일로 결정한다."""
+    return text.strip()[:_MAX_CHANGELOG_CHARS]
 
 
 def _build_warnings(
@@ -38,9 +48,9 @@ def _build_warnings(
     스킬은 HITL이 있으므로 카드에 보여주고 사용자가 판단한다."""
     warnings: list[str] = []
     if derived_from_external:
-        warnings.append("외부 콘텐츠(도구 결과)가 포함된 대화에서 생성됨 — 본문을 특히 주의 깊게 확인하세요")
-    warnings.extend(f"{label} 자동 마스킹됨" for label in scrubbed_labels)
-    warnings.extend(f"위험 플래그: {label}" for label in skill_guard.scan_risks(body))
+        warnings.append(EXTERNAL_CONTENT_REVIEW_WARNING)
+    warnings.extend(f"{MASKED_WARNING_PREFIX}{label}" for label in scrubbed_labels)
+    warnings.extend(f"{RISK_FLAG_WARNING_PREFIX}{label}" for label in skill_guard.scan_risks(body))
     return tuple(warnings)
 
 
@@ -73,9 +83,7 @@ def make_create_proposal(
     body, scrubbed = skill_guard.scrub_secrets(body)
     return PatchProposal(
         skill_id=name,
-        changelog=_clean_changelog(
-            changelog or "", f"신규 스킬 제안 · {description}" if description else "신규 스킬 제안"
-        ),
+        changelog=_clean_changelog(changelog or ""),
         diff=build_diff("", body),
         trigger=trigger,
         proposed_body=body,
@@ -143,12 +151,12 @@ def make_patch_proposal(
         return None
     warnings = list(_build_warnings(new_body, scrubbed, derived_from_external))
     if desc_change is not None:
-        warnings.append(f"설명 변경 포함: “{desc_change}”")
+        warnings.append(f"{DESCRIPTION_CHANGE_WARNING_PREFIX}{desc_change}")
     if tags_change is not None:
-        warnings.append(f"태그 변경 포함: {', '.join(tags_change)}")
+        warnings.append(f"{TAGS_CHANGE_WARNING_PREFIX}{', '.join(tags_change)}")
     return PatchProposal(
         skill_id=current.name,
-        changelog=_clean_changelog(changelog, "개선 제안"),
+        changelog=_clean_changelog(changelog),
         diff=diff,
         trigger=trigger,
         proposed_body=new_body,

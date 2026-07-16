@@ -9,7 +9,7 @@ import { LearningPanel } from '../components/carbon/LearningPanel';
 import { ChatTurn } from '../components/carbon/ChatMessage';
 import { useResizable } from '../hooks/useResizable';
 import { useLearning } from '../lib/learning/LearningContext';
-import type { ThreadMessage } from '../lib/learningData';
+import { renderChangelog, type ThreadMessage } from '../lib/learningData';
 import { defaultModelSettings } from '../lib/mockData';
 import { RUN_SKILL_EVENT, NEW_CHAT_EVENT, openCommandPalette } from '../lib/commandBridge';
 import { api } from '../lib/api';
@@ -299,7 +299,11 @@ const pendingToThread = (p: PendingApproval): ThreadMessage | null => {
     // falsy로 오판)를 쓰면 안 된다 — undefined만 "값 없음"으로 취급한다.
     fromVer: isNew ? t('chat:patch.newVersion') : d.from_version !== undefined ? `v${d.from_version}` : t('chat:patch.currentVersion'),
     toVer: d.to_version !== undefined ? `v${d.to_version}` : t('chat:patch.improvedVersion'),
-    changelog: d.changelog,
+    // 런타임은 changelog 폴백을 합성하지 않는다(빈 문자열로 온다) — 카드의 다른
+    // 라벨(fromVer 등)과 같게 빌드 시점 로케일로 폴백을 채운다. 동적 키라 wide-cast.
+    changelog: renderChangelog(d.changelog, isNew, (key, opts) =>
+      (t as unknown as (k: string, o?: Record<string, unknown>) => string)(`chat:${key}`, opts),
+    ),
     trigger: d.trigger,
     triggerLabel: getTriggerLabels()[d.trigger] ?? d.trigger,
     diff: d.diff.lines.map((l) => ({ t: l.type === 'context' ? 'ctx' : l.type, text: l.text })),

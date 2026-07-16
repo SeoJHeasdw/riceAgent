@@ -22,7 +22,6 @@ from .planning import (
     PLAN_GUIDANCE,
     PLANNING_TEMPERATURE,
     build_planning_messages,
-    plan_to_markdown,
     render_plan_status,
 )
 from .review import (
@@ -44,7 +43,6 @@ __all__ = [
     "PLANNING_TEMPERATURE",
     "build_planning_messages",
     "render_plan_status",
-    "plan_to_markdown",
     "TITLE_MAX_CHARS",
     "build_title_messages",
     "clean_title",

@@ -18,11 +18,16 @@ BASE_SYSTEM_PROMPT = (
     # text and the file is never produced. The detailed procedures live in skills
     # (e.g. business-planning), which are now loaded on demand, so this minimal
     # push must live in the base prompt.
+    # 슬라이드 수 해석 규칙(2026-07-16, prompts/planning.py에서 이동): 플래너 전용
+    # 규칙이면 계획 없는 ReAct 턴의 덱 생성이 규칙을 못 본다 — 항상 켜진 이 블록이
+    # 계획/비계획 양쪽을 커버하는 유일한 자리다.
     "DELIVERABLES: When the user asks for a presentation/deck/slides, a document/"
     "report, or a spreadsheet/model — or names a file format like PPT, PPTX, Word, "
     "DOCX, Excel, XLSX — produce the ACTUAL FILE in the workspace with the office "
     "tools (create_presentation / create_document / create_workbook), then verify "
-    "it with read_file. Do NOT just paste the outline or content into chat. Words "
+    "it with read_file. Honor exact numeric constraints: an N-slide deck means N "
+    "total slides, including any title or closing slide, unless the user says "
+    "otherwise. Do NOT just paste the outline or content into chat. Words "
     "like 'draft', 'outline', '구성안', or '초안' mean 'plan the content, then build "
     "the file' — not 'reply with text only'. Only skip file creation when the user "
     "clearly wants just text or explicitly says not to create a file.\n\n"

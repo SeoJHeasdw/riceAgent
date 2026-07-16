@@ -19,9 +19,6 @@ Plan-and-execute × ReAct (RICE_AGENT_EXECUTION.md §3)의 프롬프트 절반�
                              매 호출 전체 상태를 다시 싣되(스냅샷 프롬프팅),
                              마지막 메시지 위치라 recency 주목도가 가장 높고
                              프리픽스 캐시는 tail 재계산만으로 유지된다.
-  plan_to_markdown         — transcript에 남는 계획 생성 메시지 본문(다음 턴의
-                             플래너/모델이 이전 계획을 문맥으로 보게 된다).
-
 프롬프트는 영어, 내용(goal/step 제목)은 대화 언어를 따르게 지시한다 — 제목 생성
 (title.py)과 같은 원칙: 언어 설정을 배선하지 않고 모델이 대화에서 읽는다.
 """
@@ -41,13 +38,21 @@ PLANNING_TEMPERATURE = 0.2
 # delegate_subagent fan-out 조건문(→ 실행 단계 관심사), propose_skill 마지막-단계
 # 규칙(→ render_plan_block의 nudge_skill_capture와 중복) — 을 제거했다. 판단 규칙
 # 하나하나가 소형 모델에겐 되새김질할 체크리스트 항목이다: 계획에 필요한 것만 남긴다.
+# 2026-07-16 후속: (1) 슬라이드 수 해석 규칙(N장 = 제목 포함 총 N장)은 도메인 규칙이라
+# base 프롬프트 DELIVERABLES(system.py)로 이동 — 계획 없는 ReAct 턴의 덱 생성도 같은
+# 규칙을 봐야 한다. 플래너에는 범용 한 줄(수치 제약 보존)만 남긴다. (2) plan_needed:
+# false 분기에 "도구 호출 1회 + 결과 표시 = 단일 액션" 한 줄 추가 — delivery 스텝
+# 규칙이 모든 요청에 공짜 2번째 스텝을 주어 단순 요청까지 계획으로 승격되던 것 교정.
+# "산출물 하나"가 아니라 "도구 호출 1회" 기준인 이유: 덱/문서 생성은 산출물은 하나지만
+# 도구 호출이 여러 번(생성→검증→전달)이라 계획 대상이 맞다 — 그 경계를 지킨다.
 _PLANNER_SYSTEM = """You are the planning stage of RICE, a personal agent. \
 Decide whether the user's latest request needs a multi-step plan, and if so, write one.
 
 Output a single JSON object, one of:
 
 {"plan_needed": false}
-  — for conversation, quick questions, or anything doable in a single action.
+  — for conversation, quick questions, or anything doable in a single action. \
+One tool call plus showing its result is still a single action, not a plan.
 
 {"plan_needed": true, "goal": "...", "steps": [{"title": "...", "detail": "..."}, ...]}
   — for tasks with several distinct actions that build on each other \
@@ -57,6 +62,7 @@ Rules:
 - goal: one sentence stating the user's intent, in the user's language. Step titles too.
 - steps: 2 to %(max_steps)d, ordered by dependency. Each step is one verifiable unit of work.
 - detail: which tool(s) the step uses and what it produces.
+- Preserve exact numeric constraints from the request.
 - Include the delivery/verification step (save it, send it, show it) — not just production."""
 
 
@@ -212,13 +218,4 @@ def render_plan_status(
             "call propose_skill NOW to capture it (numbered steps, exact commands/tools), "
             "then give the user your final answer summarizing what was done."
         )
-    return "\n".join(lines)
-
-
-def plan_to_markdown(plan: TurnPlan) -> str:
-    """transcript에 남는 계획 생성 메시지 본문 — 다음 턴/리로드에서 사람이 읽고,
-    프로바이더 히스토리로도 실려 모델이 자기 계획을 문맥으로 본다."""
-    lines = [f"**계획 수립** — {plan.goal}", ""]
-    for s in plan.steps:
-        lines.append(f"{s.id}. {s.title}" + (f" — {s.detail}" if s.detail else ""))
     return "\n".join(lines)

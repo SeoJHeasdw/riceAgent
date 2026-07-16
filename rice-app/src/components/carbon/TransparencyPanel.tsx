@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Icon, Modal, Tag } from '../ui';
 import type { IconName } from '../ui/Icon';
 import { api } from '../../lib/api';
+import { localizeRiskLabel } from '../../lib/learningWarnings';
 import type { LearningEvent, RuntimeMemory } from '../../lib/types';
 
 /**
@@ -321,7 +322,7 @@ export const TransparencyPanel: React.FC<TransparencyPanelProps> = ({ open, onCl
                     <div className="flex flex-wrap gap-1 mt-1">
                       {risks.map((r, i) => (
                         <span key={i} className="text-label-micro text-text-error bg-text-error/10 rounded px-1.5 py-0.5">
-                          {r}
+                          {localizeRiskLabel(r, t)}
                         </span>
                       ))}
                     </div>

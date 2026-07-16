@@ -21,19 +21,23 @@ from __future__ import annotations
 from ..memory.store import MemoryStore
 
 
-# 스타일 선호 키워드 매핑 (preference content에서 감지)
-_STYLE_KEYWORDS: dict[str, str] = {
-    "concise": "사용자는 간결한 답변을 선호합니다.",
-    "verbose": "사용자는 자세한 설명을 선호합니다.",
-    "detailed": "사용자는 자세한 설명을 선호합니다.",
-    "technical": "사용자는 기술적이고 전문적인 설명을 선호합니다.",
-    "simple": "사용자는 단순하고 이해하기 쉬운 설명을 선호합니다.",
-    "korean": "사용자는 한국어로 응답받기를 선호합니다.",
-    "english": "사용자는 영어로 응답받기를 선호합니다.",
-    "간결": "사용자는 간결한 답변을 선호합니다.",
-    "자세": "사용자는 자세한 설명을 선호합니다.",
-    "기술적": "사용자는 기술적이고 전문적인 설명을 선호합니다.",
-}
+# Style preferences become model-facing system-prompt text. Keep the generated
+# guidance in neutral English so a style preference cannot accidentally switch
+# the response language. Put negative/specific phrases before their substrings:
+# otherwise "non-technical" incorrectly matches "technical".
+_STYLE_KEYWORDS: tuple[tuple[str, str], ...] = (
+    ("non-technical", "The user prefers simple, non-technical explanations."),
+    ("concise", "The user prefers concise responses."),
+    ("verbose", "The user prefers detailed explanations."),
+    ("detailed", "The user prefers detailed explanations."),
+    ("technical", "The user prefers technical, professional explanations."),
+    ("simple", "The user prefers simple, easy-to-understand explanations."),
+    ("korean", "The user prefers responses in Korean."),
+    ("english", "The user prefers responses in English."),
+    ("간결", "The user prefers concise responses."),
+    ("자세", "The user prefers detailed explanations."),
+    ("기술적", "The user prefers technical, professional explanations."),
+)
 
 
 class UserProfile:
@@ -67,7 +71,7 @@ class UserProfile:
         for pref in preferences:
             content_lower = pref.content.lower()
             matched = False
-            for keyword, guide_text in _STYLE_KEYWORDS.items():
+            for keyword, guide_text in _STYLE_KEYWORDS:
                 if keyword in content_lower and guide_text not in seen_styles:
                     lines.append(f"- {guide_text}")
                     seen_styles.add(guide_text)

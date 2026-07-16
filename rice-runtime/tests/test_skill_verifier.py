@@ -83,7 +83,8 @@ class TestVerifyCandidate:
         )
         assert not report.failed
         assert {"no-steps", "placeholder", "dangling-ending", "no-description"} <= _checks(report)
-        assert all(line.startswith("검증 경고:") for line in report.warning_lines())
+        # 카드 warnings는 "verify:<check>[:<param>]" 코드 — 로케일 문장은 프론트 몫.
+        assert all(line.startswith("verify:") for line in report.warning_lines())
 
     def test_unknown_tool_reference_warns_with_catalog(self):
         """'호출하라'고 지시된 도구가 카탈로그에 없으면 fabrication 신호 — warn
@@ -144,7 +145,7 @@ class TestStageProposalHarness:
         svc = _service()
         res = svc.stage_proposal("s1", name="broken-sk", body="1. run:\n```bash\necho", description="d" * 10)
         assert res["status"] == "rejected"
-        assert "다시 propose_skill" in res["message"]  # 같은 턴 재제안 유도
+        assert "propose_skill again" in res["message"]  # 같은 턴 재제안 유도
         assert svc._staged.get("s1", []) == []  # 큐에 닿지 않았다
         # quarantine: ledger에 findings와 함께 영속
         events = svc.learning_events()
@@ -191,7 +192,7 @@ class TestScreenProposals:
         assert proposal is not None
         kept = svc._screen_proposals([proposal], origin="learn")
         assert len(kept) == 1
-        assert any(w.startswith("검증 경고:") for w in kept[0].warnings)
+        assert any(w.startswith("verify:") for w in kept[0].warnings)
 
 
 # ── integration ③ 최종 관문: 어떤 경로든 fail 본문은 디스크에 닿지 못한다 ──────

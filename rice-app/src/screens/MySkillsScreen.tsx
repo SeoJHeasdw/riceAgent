@@ -13,7 +13,7 @@ import { SkillPublishDialog } from '../components/carbon/SkillPublishDialog';
 import { SkillEditDrawer, type EditPatch } from '../components/carbon/SkillEditDrawer';
 import { Markdown } from '../components/carbon/Markdown';
 import { apiErrorMessage } from '../lib/i18n/apiError';
-import { IMPACT_REPORT, runtimeAnalysisToSkillAnalysis, renderTrend, renderCreatedFrom, renderLastUsed, renderVersionWhen, renderVersionNote, wrapT } from '../lib/learningData';
+import { IMPACT_REPORT, runtimeAnalysisToSkillAnalysis, renderTrend, renderCreatedFrom, renderLastUsed, renderVersionWhen, renderVersionNote, renderChangelog, wrapT } from '../lib/learningData';
 import { ownedSkillFiles, ownedToMarketSkill, publishedMarketId } from '../lib/skillBridge';
 import { languageFromPath } from '../lib/skillFiles';
 import { api } from '../lib/api';
@@ -2450,7 +2450,7 @@ function MySkillsScreen() {
                       </Tag>
                     </div>
                     <p className="text-caption-01 text-text-secondary mb-2 line-clamp-2">
-                      {p.kind === 'patch' ? p.changelog : p.reason}
+                      {p.kind === 'patch' ? renderChangelog(p.changelog, p.from_version === 0, tChat) : p.reason}
                     </p>
                     <div className="flex items-center justify-end gap-1.5">
                       <Button kind="ghost" size="sm" onClick={() => void decideProposal(p, false)}>
