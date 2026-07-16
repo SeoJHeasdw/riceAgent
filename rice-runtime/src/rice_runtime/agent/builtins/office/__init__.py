@@ -28,6 +28,8 @@ there is no sandbox/package-install failure mode on end-user machines.
 
 from __future__ import annotations
 
+import json
+
 from ....core.paths import RicePaths
 from ....core.types import ToolSpec
 from ...tool_dispatch import BuiltinTool
@@ -211,6 +213,21 @@ def _apply_deck_operations(slides: list, operations: list) -> list[str]:
             raise ValueError(f"operations[{i}] must be an object")
         action = str(op.get("action") or "").strip().lower()
 
+        def slide_of() -> dict:
+            slide = op.get("slide")
+            if isinstance(slide, str):
+                # sLLM이 슬라이드 객체를 JSON 문자열로 감싸는 습관(arg_preflight와
+                # 같은 실패 계열의 중첩 변형) — 디코드되면 그대로 쓴다.
+                try:
+                    decoded = json.loads(slide.strip())
+                except (json.JSONDecodeError, ValueError):
+                    decoded = None
+                if isinstance(decoded, dict):
+                    return decoded
+            if not isinstance(slide, dict):
+                raise ValueError(f"operations[{i}].slide object is required for {action}")
+            return slide
+
         def index_of(key: str = "index", *, upper: int | None = None) -> int:
             raw = op.get(key)
             if not isinstance(raw, (int, float)):
@@ -222,16 +239,12 @@ def _apply_deck_operations(slides: list, operations: list) -> list[str]:
             return idx
 
         if action == "replace":
-            slide = op.get("slide")
-            if not isinstance(slide, dict):
-                raise ValueError(f"operations[{i}].slide object is required for replace")
+            slide = slide_of()
             idx = index_of()
             slides[idx - 1] = slide
             applied.append(f"replace slide {idx}")
         elif action == "insert":
-            slide = op.get("slide")
-            if not isinstance(slide, dict):
-                raise ValueError(f"operations[{i}].slide object is required for insert")
+            slide = slide_of()
             raw_at = op.get("index")
             at = int(raw_at) if isinstance(raw_at, (int, float)) else len(slides) + 1
             if not 1 <= at <= len(slides) + 1:

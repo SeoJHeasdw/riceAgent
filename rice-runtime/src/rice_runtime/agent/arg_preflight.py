@@ -13,9 +13,16 @@
   - 디코드에 실패하거나 타입이 안 맞으면 **승인을 띄우지 않고** 모델에게 정확한
     오류(어떤 인자가 왜 틀렸는지 + 올바른 형태)를 되돌린다 → 정보 있는 재시도.
 
-의도적으로 얕다(최상위 인자만, 깊은 스키마 검증 없음). 깊은 레이아웃/필드 구조
-강제는 step-2(제약 디코딩용 response_schema)의 몫이다 — 여기서는 관찰된 실패
-(문자열로 감싼 최상위 배열/객체)만, 새 모델 호출 없이, 모든 도구에 대해 잡는다.
+의도적으로 얕다(깊은 스키마 검증 없음). 깊은 레이아웃/필드 구조 강제는
+step-2(제약 디코딩용 response_schema)의 몫이다 — 여기서는 관찰된 실패(문자열로
+감싼 배열/객체)만, 새 모델 호출 없이, 모든 도구에 대해 잡는다.
+
+같은 습관의 한 단계 깊은 변형도 잡는다: 배열 인자 자체는 네이티브인데 **원소
+하나하나가 JSON 문자열**인 경우(`slides: ["{...}", "{...}"]`). 선언된
+items 스키마가 문자열을 허용하지 않을 때만, 디코드가 declared type으로 성공하는
+원소를 교체한다. 원소 레벨은 **salvage-only — 절대 거절하지 않는다**: 빌더들이
+원소 단위 fault-tolerance(placeholder/salvage 렌더)를 이미 갖추고 있으므로,
+원소 하나가 깨졌다고 호출 전체를 되돌리면 오히려 퇴행이다.
 
 Fail-soft: parameters가 없거나 형태가 이상하면 아무것도 하지 않는다(no-op) —
 preflight가 정상 호출을 막는 일은 절대 없어야 한다.
@@ -85,6 +92,34 @@ def _reject(name: str, expected: str, reason: str) -> str:
     )
 
 
+def _salvage_items(value: list, schema: dict) -> list | None:
+    """배열 인자의 원소 레벨 salvage: 문자열 원소가 items의 declared type
+    (array/object)으로 디코드되면 교체한 새 리스트를, 바뀐 게 없으면 None을
+    돌려준다. 디코드 실패/타입 불일치 원소는 그대로 둔다(거절 없음 — 빌더의
+    원소 단위 fault-tolerance 몫). items가 문자열을 허용하면 건드리지 않는다."""
+    items = schema.get("items")
+    if not isinstance(items, dict):
+        return None
+    expected = _coercion_target(items)
+    if expected is None:
+        return None
+    out: list | None = None
+    for i, el in enumerate(value):
+        if not isinstance(el, str):
+            continue
+        try:
+            parsed = json.loads(el.strip())
+        except (json.JSONDecodeError, ValueError):
+            continue
+        matched = isinstance(parsed, list) if expected == "array" else isinstance(parsed, dict)
+        if not matched:
+            continue
+        if out is None:
+            out = list(value)  # 첫 교정 때만 사본 — 원본 배열은 불변
+        out[i] = parsed
+    return out
+
+
 def preflight_arguments(spec: ToolSpec, arguments: Any) -> tuple[Any, str | None]:
     """(coerced_arguments, error)를 돌려준다.
 
@@ -105,11 +140,19 @@ def preflight_arguments(spec: ToolSpec, arguments: Any) -> tuple[Any, str | None
 
     coerced: dict[str, Any] | None = None
     for name, value in arguments.items():
-        if not isinstance(value, str):
-            continue  # 이미 네이티브 타입 — 관찰된 실패는 "문자열로 감쌌다"뿐
         schema = props.get(name)
         if not isinstance(schema, dict):
             continue
+        if isinstance(value, list):
+            # 배열 자체는 네이티브 — 원소가 JSON 문자열로 감싸인 변형만 salvage.
+            salvaged = _salvage_items(value, schema)
+            if salvaged is not None:
+                if coerced is None:
+                    coerced = dict(arguments)
+                coerced[name] = salvaged
+            continue
+        if not isinstance(value, str):
+            continue  # 그 외 네이티브 타입 — 관찰된 실패는 "문자열로 감쌌다"뿐
         expected = _coercion_target(schema)
         if expected is None:
             continue  # 스칼라/문자열허용/미지 스키마 — 대상 아님
@@ -124,6 +167,9 @@ def preflight_arguments(spec: ToolSpec, arguments: Any) -> tuple[Any, str | None
             return arguments, _reject(
                 name, expected, f"the received string parsed to a JSON {_json_typename(parsed)}."
             )
+        if isinstance(parsed, list):
+            # 최상위 salvage로 얻은 배열에도 같은 원소 레벨 교정을 적용한다.
+            parsed = _salvage_items(parsed, schema) or parsed
         if coerced is None:
             coerced = dict(arguments)  # 첫 교정 때만 얕은 사본
         coerced[name] = parsed

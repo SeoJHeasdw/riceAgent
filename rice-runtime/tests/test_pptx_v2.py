@@ -246,6 +246,7 @@ async def test_edit_presentation_validates_operations(tmp_path):
     for bad_ops, msg in [
         ([{"action": "remove", "index": 9}], "out of range"),
         ([{"action": "replace", "index": 1}], "slide object is required"),
+        ([{"action": "replace", "index": 1, "slide": "{not json"}], "slide object is required"),
         ([{"action": "explode", "index": 1}], "must be replace/insert/remove/move"),
         ([], "non-empty"),
     ]:
@@ -253,6 +254,26 @@ async def test_edit_presentation_validates_operations(tmp_path):
             await handlers["edit_presentation"]({"path": "d.pptx", "operations": bad_ops})
     # 실패한 편집은 파일을 건드리지 않는다
     assert (paths.workspace / "d.pptx").read_bytes() == original
+
+
+async def test_edit_salvages_stringified_slide_object(tmp_path):
+    # sLLM이 op.slide를 JSON 문자열로 감싼 경우(arg_preflight가 잡는 실패 계열의
+    # 중첩 변형) — 디코드해 그대로 적용하고, 임베디드 스펙에도 dict로 남는다.
+    paths, handlers = await _office_handlers(tmp_path)
+    await handlers["create_presentation"]({
+        "path": "d.pptx", "slides": [{"layout": "title", "title": "One"}],
+    })
+
+    out = await handlers["edit_presentation"]({
+        "path": "d.pptx",
+        "operations": [
+            {"action": "insert", "slide": '{"layout": "quote", "quote": "wrapped"}'},
+        ],
+    })
+
+    assert out["operations_applied"] == ["insert at 2"]
+    embedded = read_embedded_spec((paths.workspace / "d.pptx").read_bytes())
+    assert embedded["slides"][1] == {"layout": "quote", "quote": "wrapped"}
 
 
 async def test_edit_preserves_images_via_reload(tmp_path):

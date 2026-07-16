@@ -107,3 +107,65 @@ def test_multiple_params_reports_first_failure_only() -> None:
     out, err = preflight_arguments(spec, {"a": "[broken", "b": "[1]"})
     assert err is not None
     assert "`a`" in err  # 한 번에 하나씩 — 첫 불복구 인자만
+
+
+# ── 원소 레벨 salvage: 네이티브 배열 안의 JSON-문자열 원소 ─────────────────────
+
+
+def test_stringified_elements_in_native_array_are_salvaged() -> None:
+    args = {"path": "a.pptx", "slides": ['{"layout": "title"}', {"layout": "closing"}]}
+    out, err = preflight_arguments(PPT, args)
+    assert err is None
+    assert out["slides"] == [{"layout": "title"}, {"layout": "closing"}]
+    assert args["slides"][0] == '{"layout": "title"}'  # 원본 배열 불변
+
+
+def test_stringified_elements_inside_salvaged_array() -> None:
+    # 최상위와 원소가 동시에 감싸인 이중 변형: slides="[\"{...}\"]"
+    args = {"path": "a.pptx", "slides": '["{\\"layout\\": \\"title\\"}"]'}
+    out, err = preflight_arguments(PPT, args)
+    assert err is None
+    assert out["slides"] == [{"layout": "title"}]
+
+
+def test_undecodable_element_left_alone_never_rejected() -> None:
+    # 원소 레벨은 salvage-only — 빌더의 원소 단위 fault-tolerance가 처리한다.
+    args = {"path": "a.pptx", "slides": ["{broken json", {"layout": "title"}]}
+    out, err = preflight_arguments(PPT, args)
+    assert err is None
+    assert out is args  # 바뀐 게 없으면 identity 보존
+
+
+def test_prose_string_element_left_alone() -> None:
+    # create_document의 blocks는 bare 문자열(문단)이 유효 — JSON 객체로 디코드되지
+    # 않는 문자열 원소는 절대 건드리지 않는다.
+    doc = _spec({"blocks": {"type": "array", "items": {"type": "object"}}})
+    args = {"blocks": ["Plain paragraph text.", {"type": "heading", "text": "T"}]}
+    out, err = preflight_arguments(doc, args)
+    assert err is None
+    assert out is args
+
+
+def test_element_decoding_to_wrong_type_left_alone() -> None:
+    # "[1, 2]"는 유효 JSON이나 items가 object → 교체하지 않는다(문자열 유지).
+    args = {"path": "a.pptx", "slides": ["[1, 2]", {"layout": "title"}]}
+    out, err = preflight_arguments(PPT, args)
+    assert err is None
+    assert out is args
+
+
+def test_string_allowing_items_never_coerced() -> None:
+    # items가 문자열을 허용하는 배열(예: 태그 목록)은 원소를 절대 디코드하지 않는다.
+    spec = _spec({"tags": {"type": "array", "items": {"type": ["object", "string"]}}})
+    args = {"tags": ['{"looks": "like json"}']}
+    out, err = preflight_arguments(spec, args)
+    assert err is None
+    assert out is args
+
+
+def test_items_without_schema_left_alone() -> None:
+    spec = _spec({"xs": {"type": "array"}})  # items 미선언 → 대상 아님
+    args = {"xs": ['{"a": 1}']}
+    out, err = preflight_arguments(spec, args)
+    assert err is None
+    assert out is args
