@@ -1532,24 +1532,32 @@ function ConnectorsScreen() {
         className="flex-shrink-0 bg-background border-r border-border-subtle-01 overflow-y-auto min-w-0"
         style={{ width: listPanel.width }}
       >
-        <div data-tour="connectors-list-header" className="px-5 pt-5 pb-3 flex items-center gap-2">
-          <h1 className="text-heading-03 font-semibold text-text-primary">{isLocal ? t('localMcp') : t('title')}</h1>
-          {isLocal && (
-            <Tag type="gray" size="sm">
-              {t('developerTag')}
-            </Tag>
-          )}
-          <div className="flex-1" />
-          {isLocal ? (
-            <button
-              onClick={() => setMcpModalOpen(true)}
-              className="inline-flex items-center gap-1 text-caption-01 text-link-primary hover:underline"
-            >
-              <Icon name="add" size={13} /> {t('list.addServer')}
-            </button>
-          ) : (
-            <AddConnectorMenu onBrowse={() => setDirectoryOpen(true)} onCustom={() => setCustomModalOpen(true)} />
-          )}
+        <div
+          data-tour="connectors-list-header"
+          className="px-5 pt-5 pb-3 flex flex-wrap items-center gap-x-2 gap-y-2"
+        >
+          <div className="flex items-center gap-2 min-w-0 whitespace-nowrap">
+            <h1 className="text-heading-03 font-semibold text-text-primary whitespace-nowrap">
+              {isLocal ? t('localMcp') : t('title')}
+            </h1>
+            {isLocal && (
+              <Tag type="gray" size="sm" className="flex-shrink-0">
+                {t('developerTag')}
+              </Tag>
+            )}
+          </div>
+          <div className="ml-auto flex-shrink-0">
+            {isLocal ? (
+              <button
+                onClick={() => setMcpModalOpen(true)}
+                className="inline-flex items-center gap-1 whitespace-nowrap text-caption-01 text-link-primary hover:underline"
+              >
+                <Icon name="add" size={13} /> {t('list.addServer')}
+              </button>
+            ) : (
+              <AddConnectorMenu onBrowse={() => setDirectoryOpen(true)} onCustom={() => setCustomModalOpen(true)} />
+            )}
+          </div>
         </div>
         {list.map((c) => {
           const on = c.id === effectiveSel;

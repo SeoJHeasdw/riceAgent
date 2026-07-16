@@ -63,7 +63,7 @@
     "tipRemote": "Connectors are the gateway for agents to access external accounts and data. Only allow what you need."
   },
   "list": {
-    "addServer": "Register server",
+    "addServer": "Add",
     "add": "Add",
     "browse": "Browse",
     "addCustom": "Add custom",
