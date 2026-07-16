@@ -34,6 +34,8 @@ export interface ToastApi {
     tone?: ProgressTone;
     /** 생략하면 indeterminate(진척률 없음) 바로 표시. */
     progress?: number;
+    /** 진행 중 X 버튼을 눌렀을 때 실제 작업도 취소한다. */
+    onCancel?: () => void;
   }) => ProgressHandle;
 }
 

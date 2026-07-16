@@ -119,10 +119,10 @@ class ApiClient {
     return h;
   }
 
-  private async get<T>(endpoint: string): Promise<ApiResponse<T>> {
+  private async get<T>(endpoint: string, signal?: AbortSignal): Promise<ApiResponse<T>> {
     if (!this.enabled) return { success: false, error: 'runtime offline' };
     try {
-      const response = await fetch(`${this.baseUrl}${endpoint}`, { headers: this.headers() });
+      const response = await fetch(`${this.baseUrl}${endpoint}`, { headers: this.headers(), signal });
       return await response.json();
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
@@ -370,15 +370,19 @@ class ApiClient {
   }
 
   // ── connectors (CONTRACTS 4) ───────────────────────────────────
-  getConnectors(): Promise<ApiResponse> {
-    return this.get('/connectors');
+  getConnectors(signal?: AbortSignal): Promise<ApiResponse> {
+    return this.get('/connectors', signal);
   }
   getConnector(id: string): Promise<ApiResponse> {
     return this.get(`/connectors/${id}`);
   }
   /** start OAuth for a new connector (returns an auth URL the app opens) */
-  connectConnector(connectorType: string): Promise<ApiResponse<{ oauth_url: string }>> {
+  connectConnector(connectorType: string): Promise<ApiResponse<{ oauth_url: string; connector_id: string }>> {
     return this.send('POST', '/connectors', { connector_type: connectorType });
+  }
+  /** stop polling a system-browser OAuth attempt and invalidate its pending state */
+  cancelConnectorOAuth(id: string): Promise<ApiResponse<{ cancelled: boolean }>> {
+    return this.send('POST', `/connectors/${id}/oauth/cancel`);
   }
   deleteConnector(id: string): Promise<ApiResponse> {
     return this.send('DELETE', `/connectors/${id}`);
@@ -388,6 +392,10 @@ class ApiClient {
     id: string,
   ): Promise<ApiResponse<{ count: number; tools: { name: string; requires_approval?: boolean }[] }>> {
     return this.send('POST', `/connectors/${id}/tools/resync`);
+  }
+  /** execute a safe read-only MCP tool to verify OAuth + remote execution, not just tools/list */
+  verifyConnector(id: string): Promise<ApiResponse<{ ok: boolean; code?: string; error?: string }>> {
+    return this.send('POST', `/connectors/${id}/verify`);
   }
   /** detect remote tool-catalog changes without applying (sets a pending update) */
   checkConnectorUpdates(

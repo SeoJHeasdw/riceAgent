@@ -304,12 +304,25 @@ class ConnectorService(IConnectorService):
                     error=f"connector {connector_id} needs reconnection (no valid credentials)",
                 )
             client = self._client_for(connector_id, connector_type)
-            return await client.call_tool(
+            result = await client.call_tool(
                 tool_name=call.tool_name,
                 arguments=call.arguments,
                 access_token=access_token,
                 call_id=call.id,
             )
+            if not result.ok and result.error:
+                code, detail = self._diagnose_mcp_failure(connector_type, result.error)
+                descriptor = resolve_descriptor(self._custom, connector_type)
+                # 타입별 read-only probe 자체가 거부되면 단일 리소스 권한 문제가 아니라
+                # connector 전체 설정 문제다. connected 오탐을 끊고 UI에 복구 경로를 남긴다.
+                if (
+                    code
+                    and descriptor is not None
+                    and call.tool_name == descriptor.health_check_tool
+                ):
+                    self._mark_error(connector_id, code=code, detail=detail)
+                return ToolResult(call.id, ok=False, error=detail)
+            return result
         except Exception as exc:  # noqa: BLE001
             log.warning("connector invoke failed: %s", exc)
             return ToolResult(call.id, ok=False, error=str(exc))
@@ -522,7 +535,7 @@ class ConnectorService(IConnectorService):
         return self._manager.begin_connect(connector_type)
 
     async def complete_oauth(self, *, code: str, state: str) -> ConnectorInfo:
-        """OAuth callback: state 검증 → 토큰 교환 → 키체인 저장 → status='connected'.
+        """OAuth callback: state 검증 → 토큰 교환 → 실제 MCP 검증 → status 확정.
 
         연결 직후 원격 MCP 도구 카탈로그를 한 번 받아 DB 에 저장한다(sync_tools).
         """
@@ -531,7 +544,89 @@ class ConnectorService(IConnectorService):
             await self.sync_tools(info.id)
         except Exception as exc:  # noqa: BLE001 — 도구 동기화 실패가 연결을 막지 않는다
             log.warning("tool sync after connect failed: %s", exc)
-        return info
+        # tools/list는 Google MCP service가 비활성화돼도 공개 schema를 반환한다. 따라서
+        # "도구를 가져왔다"를 연결 성공으로 보지 말고, 안전한 read-only 도구를 한 번 실제
+        # 실행해 OAuth + Cloud service + Workspace 권한을 함께 검증한다.
+        try:
+            await self.verify_connector(info.id)
+        except Exception as exc:  # noqa: BLE001 — 검증 crash가 OAuth 성공 자체를 400으로 둔갑시키면 안 된다
+            log.warning("connector verify after connect failed: %s", exc)
+        return self.get_connector(info.id) or info
+
+    async def cancel_oauth(self, connector_id: str) -> bool:
+        """시스템 브라우저 OAuth 대기를 사용자가 취소했을 때 pending state를 폐기한다."""
+        return self._manager.cancel_oauth(connector_id)
+
+    async def reject_oauth(self, *, state: str, error: str) -> ConnectorInfo | None:
+        """OAuth provider의 error callback을 polling이 관찰 가능한 terminal 상태로 만든다."""
+        return self._manager.reject_oauth(state=state, error=error)
+
+    async def verify_connector(self, connector_id: str) -> dict:
+        """실제 read-only MCP 호출로 connector가 실행 가능한지 검증한다.
+
+        정적 Google connector는 descriptor.health_check_tool을 사용한다. 커스텀/아직 probe가
+        없는 타입은 tools/list까지만 확인한다. 반환값은 관리 API와 진단 스크립트에서 쓴다.
+        """
+        row = self._db.query_one(
+            "SELECT connector_type FROM connectors WHERE id=?", (connector_id,)
+        )
+        if row is None:
+            raise NotFoundError(f"connector {connector_id} not found")
+        connector_type = row["connector_type"]
+        descriptor = resolve_descriptor(self._custom, connector_type)
+        if descriptor is None:
+            self._mark_error(
+                connector_id,
+                code="connectors.descriptor_missing",
+                detail=f"No connector descriptor is registered for {connector_type!r}.",
+            )
+            return {"ok": False, "code": "connectors.descriptor_missing"}
+
+        access_token = await self._access_token(connector_id, connector_type)
+        if access_token is None:
+            info = self.get_connector(connector_id)
+            return {
+                "ok": False,
+                "code": info.error_code if info else "connectors.oauth_credentials_invalid",
+                "error": info.error_detail if info else "No valid OAuth credential.",
+            }
+
+        client = self._client_for(connector_id, connector_type)
+        if not descriptor.health_check_tool:
+            try:
+                await client.list_tools(access_token)
+            except Exception as exc:  # noqa: BLE001
+                detail = f"Remote MCP connection check failed: {exc}"
+                self._mark_error(connector_id, code="connectors.mcp_unreachable", detail=detail)
+                return {"ok": False, "code": "connectors.mcp_unreachable", "error": detail}
+            self._mark_verified(connector_id)
+            return {"ok": True}
+
+        try:
+            result = await client.call_tool(
+                descriptor.health_check_tool,
+                dict(descriptor.health_check_arguments),
+                access_token,
+                f"health-{connector_id}",
+            )
+        except Exception as exc:  # noqa: BLE001
+            # HTTP 4xx 는 예외 문자열에 서버 본문이 실려 온다(client._rpc) —
+            # JSON-RPC 오류와 같은 분류기로 복구 가능한 원인인지 판별한다.
+            code, detail = self._diagnose_mcp_failure(connector_type, str(exc))
+            if code is None:
+                code = "connectors.mcp_unreachable"
+                detail = f"Remote MCP execution check failed: {exc}"
+            self._mark_error(connector_id, code=code, detail=detail)
+            return {"ok": False, "code": code, "error": detail}
+
+        if not result.ok:
+            code, detail = self._diagnose_mcp_failure(connector_type, result.error or "unknown MCP error")
+            code = code or "connectors.mcp_tool_failed"
+            self._mark_error(connector_id, code=code, detail=detail)
+            return {"ok": False, "code": code, "error": detail}
+
+        self._mark_verified(connector_id)
+        return {"ok": True}
 
     async def delete(self, connector_id: str) -> None:
         """connector 레코드 삭제 + 키체인 항목 정리 (카탈로그는 cascade 삭제).
@@ -614,7 +709,21 @@ class ConnectorService(IConnectorService):
         if client is None:
             descriptor = resolve_descriptor(self._custom, connector_type)
             endpoint = descriptor.resolved_mcp_endpoint() if descriptor else ""
-            client = RemoteMcpClient(endpoint)
+            extra_headers: dict[str, str] | None = None
+            # Google MCP 서버는 tools/call 의 IAM(mcp.tools.call)·과금 귀속에
+            # x-goog-user-project 를 요구한다(공식 클라이언트 설정과 동일). 헤더가
+            # 없으면 tools/list 만 되고 실행은 403 이 난다.
+            if descriptor is not None and descriptor.mcp_service_name:
+                flow = self._flows.get(connector_type)
+                project = flow.quota_project if flow is not None else None
+                if project:
+                    extra_headers = {"x-goog-user-project": project}
+                # 403 진단 시 사용자 콘솔에서 헤더 유무를 확정할 수 있어야 한다.
+                log.info(
+                    "mcp client %s (%s): x-goog-user-project=%s",
+                    connector_id, connector_type, project or "(none — header omitted)",
+                )
+            client = RemoteMcpClient(endpoint, extra_headers=extra_headers)
             client.set_owner(connector_id)
             self._clients[connector_id] = client
         return client
@@ -622,7 +731,8 @@ class ConnectorService(IConnectorService):
     async def _fetch_remote_tools(self, connector_id: str) -> list[ToolSpec] | None:
         """connector 의 원격 MCP `tools/list` 결과. 연결/토큰/네트워크 실패 시 None."""
         row = self._db.query_one(
-            "SELECT connector_type FROM connectors WHERE id=? AND status='connected'",
+            "SELECT connector_type FROM connectors WHERE id=? "
+            "AND status IN ('connected','verifying')",
             (connector_id,),
         )
         if row is None:
@@ -641,16 +751,21 @@ class ConnectorService(IConnectorService):
     async def _access_token(self, connector_id: str, connector_type: str) -> str | None:
         """유효한 access_token 을 반환한다. 만료 임박 시 refresh (§9.3).
 
-        갱신 성공 시 error→connected 로 자가치유하고, 갱신/자격증명 실패 시 status='error'
-        로 표시한 뒤 None 을 반환한다(UI 가 "재연결 필요"를 노출) — #4 토큰 만료 UX.
+        OAuth 자격증명 오류만 갱신 성공 시 error→connected 로 자가치유한다. MCP service
+        설정 오류는 토큰이 유효하다는 이유로 지우지 않는다. 갱신/자격증명 실패 시
+        status='error'로 표시한 뒤 None을 반환한다 — #4 토큰 만료 UX.
         """
         credential = self._keychain.load(connector_id)
         if credential is None:
-            self._mark_error(connector_id)
+            self._mark_error(
+                connector_id,
+                code="connectors.oauth_credentials_missing",
+                detail="OAuth credentials are missing. Reconnect this connector.",
+            )
             return None
 
         if not credential.is_expired():
-            self._mark_healthy(connector_id)
+            self._mark_credentials_healthy(connector_id)
             return credential.access_token
 
         # 만료 → refresh 는 connector 별로 직렬화한다. 락 안에서 키체인을 다시 읽어
@@ -659,26 +774,42 @@ class ConnectorService(IConnectorService):
         async with lock:
             credential = self._keychain.load(connector_id)
             if credential is None:
-                self._mark_error(connector_id)
+                self._mark_error(
+                    connector_id,
+                    code="connectors.oauth_credentials_missing",
+                    detail="OAuth credentials are missing. Reconnect this connector.",
+                )
                 return None
             if not credential.is_expired():
-                self._mark_healthy(connector_id)
+                self._mark_credentials_healthy(connector_id)
                 return credential.access_token
 
             if not credential.refresh_token:
                 log.warning("connector %s token expired and no refresh_token", connector_id)
-                self._mark_error(connector_id)
+                self._mark_error(
+                    connector_id,
+                    code="connectors.oauth_refresh_token_missing",
+                    detail="The OAuth access token expired and no refresh token is available. Reconnect this connector.",
+                )
                 return None
 
             flow = self._flows.get(connector_type)
             if flow is None:
-                self._mark_error(connector_id)
+                self._mark_error(
+                    connector_id,
+                    code="connectors.oauth_flow_missing",
+                    detail=f"No OAuth flow is registered for {connector_type!r}.",
+                )
                 return None
             try:
                 refreshed = await flow.refresh_access_token(credential.refresh_token)
             except Exception as exc:  # noqa: BLE001
                 log.warning("token refresh failed for %s: %s", connector_id, exc)
-                self._mark_error(connector_id)
+                self._mark_error(
+                    connector_id,
+                    code="connectors.oauth_refresh_failed",
+                    detail=f"OAuth token refresh failed. Reconnect this connector. ({exc})",
+                )
                 return None
             # rotation 서버가 새 refresh_token 을 내려줬으면 함께 교체한다 — 이전 것은
             # 서버가 무효화했을 수 있어 그대로 두면 다음 갱신부터 실패한다.
@@ -693,20 +824,83 @@ class ConnectorService(IConnectorService):
                 expires_in=refreshed.expires_in,
                 refresh_token=rotated,
             )
-            self._mark_healthy(connector_id)
+            # DB의 만료 메타도 실제 키체인과 함께 갱신한다. 기존 구현은 최초 OAuth
+            # token_expires_at만 남겨 UI/사후 분석에서 계속 만료된 것처럼 보였다.
+            from datetime import datetime, timedelta, timezone
+            expires_at = datetime.now(timezone.utc) + timedelta(seconds=refreshed.expires_in)
+            self._db.execute(
+                "UPDATE connector_credentials SET token_expires_at=? WHERE connector_id=?",
+                (expires_at.strftime("%Y-%m-%dT%H:%M:%SZ"), connector_id),
+            )
+            self._mark_credentials_healthy(connector_id)
             return refreshed.access_token
 
-    def _mark_error(self, connector_id: str) -> None:
+    def _mark_error(self, connector_id: str, *, code: str, detail: str) -> None:
         self._db.execute(
-            "UPDATE connectors SET status='error' WHERE id=? AND status='connected'",
-            (connector_id,),
+            "UPDATE connectors SET status='error', error_code=?, error_detail=? WHERE id=?",
+            (code, detail, connector_id),
         )
 
-    def _mark_healthy(self, connector_id: str) -> None:
+    def _mark_credentials_healthy(self, connector_id: str) -> None:
+        """OAuth 계열 오류만 자가치유한다. MCP service/IAM 오류는 verify가 지운다."""
         self._db.execute(
-            "UPDATE connectors SET status='connected', last_verified_at=? WHERE id=? AND status='error'",
+            "UPDATE connectors SET status='connected', last_verified_at=?, "
+            "error_code=NULL, error_detail=NULL WHERE id=? AND status='error' "
+            "AND (error_code IS NULL OR error_code LIKE 'connectors.oauth_%')",
             (now_iso(), connector_id),
         )
+
+    def _mark_verified(self, connector_id: str) -> None:
+        """실제 MCP 실행 성공 후에만 모든 오류를 지우고 connected로 확정한다."""
+        self._db.execute(
+            "UPDATE connectors SET status='connected', last_verified_at=?, "
+            "error_code=NULL, error_detail=NULL WHERE id=?",
+            (now_iso(), connector_id),
+        )
+
+    def _diagnose_mcp_failure(self, connector_type: str, raw_error: str) -> tuple[str | None, str]:
+        """원격 MCP의 축약 오류를 사용자가 복구 가능한 설명으로 바꾼다.
+
+        Google MCP(mcp_service_name 보유) 타입 한정. 분류 불가면 (None, 원문) —
+        호출자가 원문을 그대로 노출한다. server said 꼬리는 콘솔 없이 UI만 보는
+        사용자를 위한 원문 증거다.
+        """
+        descriptor = resolve_descriptor(self._custom, connector_type)
+        if descriptor is None or not descriptor.mcp_service_name:
+            return None, raw_error
+        service = descriptor.mcp_service_name
+        lowered = raw_error.lower()
+        evidence = f" (server said: {raw_error[:200]})"
+        if "service_disabled" in lowered or "has not been used in project" in lowered:
+            detail = (
+                f"The remote MCP service is disabled. Enable {service} in the OAuth client's "
+                f"Google Cloud project, wait a few minutes, then verify again.{evidence}"
+            )
+            return "connectors.mcp_service_disabled", detail
+        if "access_token_scope_insufficient" in lowered or "insufficient authentication scopes" in lowered:
+            detail = (
+                "The OAuth token is missing a scope this tool requires. Reconnect the connector "
+                f"and approve every requested permission.{evidence}"
+            )
+            return "connectors.mcp_scope_insufficient", detail
+        if "permission" in lowered and ("denied" in lowered or "does not have" in lowered):
+            # 실사례(gemini-cli discussion #26017) 기준 최다 원인은 Workspace Developer
+            # Preview 미등록 — IAM(roles/mcp.toolUser)보다 앞에 안내한다.
+            detail = (
+                "OAuth completed, but the remote MCP server denied tool execution (mcp.tools.call). "
+                "Most commonly the Google account is not enrolled in the Google Workspace Developer "
+                "Preview Program (https://developers.google.com/workspace/preview). Also grant the "
+                "'MCP Tool User' role (roles/mcp.toolUser) on the Google Cloud project that owns the "
+                f"OAuth client and keep {service} enabled — IAM changes can take a few minutes to "
+                "propagate. Then verify again; reconnecting is not required. Tool discovery can "
+                f"succeed even while execution is denied.{evidence}"
+            )
+            return "connectors.mcp_service_permission_denied", detail
+        if "unauthenticated" in lowered or "invalid authentication credentials" in lowered:
+            detail = f"The remote MCP server rejected the OAuth credential. Reconnect this connector.{evidence}"
+            # connectors.oauth_ 접두 → 토큰 refresh 성공 시 _mark_credentials_healthy 가 자가치유.
+            return "connectors.oauth_unauthenticated", detail
+        return None, raw_error
 
     # ── catalog persistence ─────────────────────────────────────────────────────
     def _store_active(self, connector_id: str, specs: list[ToolSpec]) -> None:

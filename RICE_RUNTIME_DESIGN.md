@@ -317,8 +317,24 @@ Python 런타임은 **PyInstaller 단일 바이너리**로 배포한다 (아래 
 4. Credential 저장 (OS 키체인)
    → access_token, refresh_token, expires_at
    
-5. Connector 상태 업데이트 → "connected"
+5. Connector 상태 업데이트 → "verifying"
+   → tools/list 동기화 + 안전한 read-only 도구 1회 실제 호출(health probe)
+   
+6. probe 성공 → "connected" / 실패 → "error" + error_code/error_detail 영속화
+   → POST /connectors/{id}/verify 로 재연결 없이 재검증 가능
 ```
+
+**실행 검증이 필요한 이유(2026-07-16)**: Google MCP 서버(gmailmcp 등)는 `tools/list`가
+IAM 없이 성공하지만 `tools/call`은 (a) 프로젝트에 `mcp.tools.call` 권한
+(`roles/mcp.toolUser`), (b) `x-goog-user-project` 헤더(quota project — client_secret
+JSON의 project_id 또는 client_id 숫자 접두에서 파생해 런타임이 자동 주입),
+(c) Workspace Developer Preview 접근을 추가로 요구한다. 그래서 "도구 목록을
+받아왔다"는 연결 성공의 증거가 아니며, health probe(gmail=list_labels,
+calendar=list_calendars)가 통과해야 connected로 확정한다. 진단 코드
+(`connectors.mcp_service_permission_denied` / `mcp_service_disabled` /
+`mcp_scope_insufficient` 등)는 migration 0015의 error_code/error_detail 컬럼에
+저장되고 UI가 복구 안내로 변환한다. OAuth 동의화면이 테스트(미게시) 단계인 것
+자체는 차단 사유가 아니다(테스트 사용자 허용).
 
 ### 9.3 Credential 저장
 

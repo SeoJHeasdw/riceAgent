@@ -2,7 +2,6 @@
   "title": "コネクター",
   "localMcp": "ローカルMCP",
   "developerTag": "開発者",
-
   "meta": {
     "fallbackSummary": "{{type}}コネクター",
     "justNow": "たった今",
@@ -16,27 +15,34 @@
       "category": "メール",
       "connectedSummary": "接続後、エージェントはリモートMCPサーバーが提供するメールツールを使用できます。",
       "connectableSummary": "接続するとブラウザでGoogleサインインが開き、メールの検索・読み取り・送信が可能になります。",
-      "examples": ["受信トレイの重要なメールを要約", "この内容で返信の下書きを作成"]
+      "examples": [
+        "受信トレイの重要なメールを要約",
+        "この内容で返信の下書きを作成"
+      ]
     },
     "calendar": {
       "category": "カレンダー",
       "connectedSummary": "接続後、エージェントはリモートMCPサーバーが提供するカレンダーツールを使用できます。",
       "connectableSummary": "接続するとブラウザでGoogleサインインが開き、イベントの照会・作成・返答が可能になります。",
-      "examples": ["今日の予定は？", "明日の午後3時にチームミーティングを予約"]
+      "examples": [
+        "今日の予定は？",
+        "明日の午後3時にチームミーティングを予約"
+      ]
     },
     "drive": {
       "category": "ストレージ",
       "connectedSummary": "接続後、エージェントはリモートMCPサーバーが提供するDriveツールを使用できます。",
       "connectableSummary": "接続するとブラウザでGoogleサインインが開き、ファイルの検索・読み取り・作成が可能になります。",
-      "examples": ["最近編集したドキュメントを探す", "この内容で新しいドキュメントを作成"]
+      "examples": [
+        "最近編集したドキュメントを探す",
+        "この内容で新しいドキュメントを作成"
+      ]
     }
   },
-
   "kindTab": {
     "remote": "リモート",
     "localMcp": "ローカルMCP"
   },
-
   "summary": {
     "connectedConnectors": "接続済みコネクター",
     "runningMcpServers": "稼働中のMCPサーバー",
@@ -45,7 +51,6 @@
     "needsConnection": "接続が必要",
     "updates": "アップデート"
   },
-
   "filter": {
     "label": "フィルター",
     "all": "すべて",
@@ -53,12 +58,10 @@
     "needsConnection": "接続が必要",
     "hasUpdate": "アップデートあり"
   },
-
   "rail": {
     "tipLocal": "ローカルMCPサーバーはコンピューターで直接コードを実行します。信頼できるソースのサーバーのみ登録してください。",
     "tipRemote": "コネクターはエージェントが外部サービスやデータにアクセスするための橋渡しです。必要なものだけ許可してください。"
   },
-
   "list": {
     "addServer": "サーバーを登録",
     "add": "追加",
@@ -72,14 +75,28 @@
     "statusConnected": "接続済み",
     "statusStopped": "停止中",
     "statusNeedsConnection": "接続が必要",
+    "statusAwaitingApproval": "承認待ち",
+    "statusReconnectNeeded": "再接続が必要",
+    "statusCheckNeeded": "要確認",
     "updateBadge": "アップデート"
   },
-
   "detail": {
     "noSelection": "コネクターを選択してください。",
     "tagConnected": "接続済み",
     "tagNeedsConnection": "接続が必要",
     "tagReconnectNeeded": "再接続が必要",
+    "tagAwaitingApproval": "承認待ち",
+    "tagCheckNeeded": "要確認",
+    "connectionCheckFailed": "ツールをまだ使用できません",
+    "mcpServicePermissionDenied": "ログインは完了しましたが、Googleがまだこのアプリのツール使用を許可していません。利用が承認されたら「再確認」を押すだけで使えます — 再接続は不要です。",
+    "mcpServiceDisabled": "Google側でこのサービスがまだ有効になっていません。準備ができたら「再確認」を押してください。",
+    "mcpScopeInsufficient": "必要な権限がすべて承認されていません。「再接続」を押して、求められる権限をすべて許可してください。",
+    "errorGenericSummary": "接続の確認中に問題が発生しました。しばらくしてから「再確認」を押してください。",
+    "showTechInfo": "技術情報を表示",
+    "hideTechInfo": "技術情報を隠す",
+    "openSetupGuide": "設定ガイドを開く",
+    "btnVerifyAgain": "再確認",
+    "btnVerifying": "確認中…",
     "btnRemove": "削除",
     "btnCancel": "キャンセル",
     "btnConfirmRemove": "削除",
@@ -145,7 +162,6 @@
     "usedByDesc": "このコネクターのツールを呼び出すスキル、プラグイン、オートメーション。",
     "usedByEmpty": "このコネクターを使用するスキルやプラグインはまだありません。"
   },
-
   "catalog": {
     "category": {
       "dev": "開発",
@@ -159,13 +175,16 @@
       "customerSupport": "カスタマーサポート"
     }
   },
-
   "toast": {
     "connectStart": "接続を開始中",
     "browserLoginWaiting": "ブラウザのログイン待ち",
+    "browserLoginCancelHint": "{{name}} · ブラウザを閉じた場合はXでキャンセル",
+    "loginCancelled": "ブラウザでのログインをキャンセルしました。",
     "loginTimeout": "ログインがタイムアウトしました。もう一度試してください。",
     "connectSuccess": "{{name}}に接続しました",
     "connectFail": "{{name}}の接続を開始できませんでした。",
+    "verifySuccess": "{{name}}のリモートツール実行を確認しました。",
+    "verifyFail": "ツールはまだ使用できません。コネクタ画面で詳細をご確認ください。",
     "disconnectFail": "{{name}}の切断に失敗しました。",
     "resyncFail": "ツール一覧を更新できませんでした。",
     "refreshLocalFail": "ローカルMCPサーバーを更新できませんでした。",
@@ -174,13 +193,11 @@
     "permSaveFail": "権限の変更を保存できませんでした。",
     "customConnectFail": "接続を開始できませんでした。入力内容を確認してもう一度試してください。"
   },
-
   "badge": {
     "popular": "人気",
     "new": "新着",
     "recommended": "おすすめ"
   },
-
   "directory": {
     "title": "コネクターを探す",
     "searchPlaceholder": "コネクターを検索…",
@@ -195,7 +212,6 @@
     "comingSoonDisabled": "MVP ではまだ利用できません — MCPサーバーのURLをお持ちの場合は「カスタムを追加」を使用してください",
     "addAriaLabel": "{{name}}を追加"
   },
-
   "required": {
     "title": "有効化する前に接続が必要",
     "later": "後で",
@@ -208,7 +224,6 @@
     "fallbackConnectorName": "必要なコネクター",
     "hint": "接続は権限スコープを確認後にコネクター画面から完了します。閉じてもプラグインはインストール済みのままです。"
   },
-
   "custom": {
     "title": "カスタムコネクターを追加",
     "cancel": "キャンセル",
@@ -238,7 +253,6 @@
     "securityNote_strong": "OSキーチェーンにのみ保存されます",
     "securityNote_post": "。「追加して接続」をクリックするとシステムブラウザでログイン画面が開きます。"
   },
-
   "marketplaceHeader": {
     "searchAriaLabel": "{{title}}を検索",
     "searchPlaceholder": "検索",
@@ -246,7 +260,6 @@
     "sortAriaLabel": "並び替え",
     "tagFilterAriaLabel": "タグフィルター"
   },
-
   "mcpRegister": {
     "modalTitle": "ローカルMCPサーバーを登録",
     "cancel": "キャンセル",
@@ -274,14 +287,24 @@
     "registerSummaryAllFail": "登録に失敗しました。アイテムごとのエラーを確認してください。",
     "registerSummaryPartial": "{{success}}/{{total}}件のみ登録されました — 残りのアイテムを確認してください。"
   },
-
   "loopStages": {
-    "exp": { "label": "経験", "desc": "チャットとタスクからパターンを観察" },
-    "gen": { "label": "スキル作成", "desc": "繰り返しを再利用可能なスキルに変換" },
-    "use": { "label": "使用と改善", "desc": "使うたびにルールが強化される" },
-    "model": { "label": "ユーザーモデル", "desc": "セッションをまたいで記憶" }
+    "exp": {
+      "label": "経験",
+      "desc": "チャットとタスクからパターンを観察"
+    },
+    "gen": {
+      "label": "スキル作成",
+      "desc": "繰り返しを再利用可能なスキルに変換"
+    },
+    "use": {
+      "label": "使用と改善",
+      "desc": "使うたびにルールが強化される"
+    },
+    "model": {
+      "label": "ユーザーモデル",
+      "desc": "セッションをまたいで記憶"
+    }
   },
-
   "fixture": {
     "lastSync": {
       "justNow": "たった今",
@@ -308,11 +331,23 @@
         "INSERT、UPDATE、DELETEステートメントを実行。"
       ],
       "usedBy": [
-        { "kind": "skill", "name": "四半期売上サマリー" },
-        { "kind": "skill", "name": "Db2スキーマチェック" },
-        { "kind": "plugin", "name": "Db2エキスパート" }
+        {
+          "kind": "skill",
+          "name": "四半期売上サマリー"
+        },
+        {
+          "kind": "skill",
+          "name": "Db2スキーマチェック"
+        },
+        {
+          "kind": "plugin",
+          "name": "Db2エキスパート"
+        }
       ],
-      "examples": ["売上テーブルのスキーマを確認", "2026年Q1の売上サマリーを作成"]
+      "examples": [
+        "売上テーブルのスキーマを確認",
+        "2026年Q1の売上サマリーを作成"
+      ]
     },
     "slack": {
       "category": "メッセージング",
@@ -327,9 +362,14 @@
         "チャンネルにファイルをアップロード。"
       ],
       "usedBy": [
-        { "kind": "automation", "name": "週次売上レポート → Slack" }
+        {
+          "kind": "automation",
+          "name": "週次売上レポート → Slack"
+        }
       ],
-      "examples": ["今週のサマリーを#sales-reportチャンネルに送信"]
+      "examples": [
+        "今週のサマリーを#sales-reportチャンネルに送信"
+      ]
     },
     "outlook": {
       "category": "メール & カレンダー",
@@ -343,9 +383,14 @@
         "カレンダーイベントを作成。"
       ],
       "usedBy": [
-        { "kind": "conversation", "name": "役員レポートメールの下書き" }
+        {
+          "kind": "conversation",
+          "name": "役員レポートメールの下書き"
+        }
       ],
-      "examples": ["このサマリーから役員レポートのメールを下書き"]
+      "examples": [
+        "このサマリーから役員レポートのメールを下書き"
+      ]
     },
     "jira": {
       "category": "課題管理",
@@ -359,9 +404,14 @@
         "課題のステータスを遷移。"
       ],
       "usedBy": [
-        { "kind": "skill", "name": "ミーティングアクションアイテムの抽出" }
+        {
+          "kind": "skill",
+          "name": "ミーティングアクションアイテムの抽出"
+        }
       ],
-      "examples": ["このスプリントのレトロスペクティブを要約"]
+      "examples": [
+        "このスプリントのレトロスペクティブを要約"
+      ]
     },
     "gdrive": {
       "category": "ストレージ",
@@ -374,7 +424,9 @@
         "既存のファイルを編集。"
       ],
       "usedBy": [],
-      "examples": ["このフォルダーのドキュメントを要約"]
+      "examples": [
+        "このフォルダーのドキュメントを要約"
+      ]
     },
     "orchestrate": {
       "category": "オートメーション",
@@ -386,51 +438,124 @@
         "ワークフロースケジュールを登録または変更。"
       ],
       "usedBy": [
-        { "kind": "automation", "name": "四半期売上サマリー · 毎週月曜08:00" }
+        {
+          "kind": "automation",
+          "name": "四半期売上サマリー · 毎週月曜08:00"
+        }
       ],
-      "examples": ["月曜朝のレポートオートメーションを設定"]
+      "examples": [
+        "月曜朝のレポートオートメーションを設定"
+      ]
     },
     "gmail": {
       "category": "メール",
       "summary": "メールを読んで要約、または役員レポートの下書きと送信。デフォルトのプロトタイプコネクター。",
       "usedBy": [
-        { "kind": "conversation", "name": "役員レポートメールの送信" }
+        {
+          "kind": "conversation",
+          "name": "役員レポートメールの送信"
+        }
       ],
-      "examples": ["今週の受信トレイの重要メールを要約", "このサマリーから役員レポートのメールを下書き"]
+      "examples": [
+        "今週の受信トレイの重要メールを要約",
+        "このサマリーから役員レポートのメールを下書き"
+      ]
     },
     "mcp-filesystem": {
       "category": "ファイルシステム",
       "summary": "コンピューターの指定フォルダーへの読み書きにより、エージェントがローカルファイルで作業できます。",
       "usedBy": [
-        { "kind": "skill", "name": "ローカルドキュメントサマリー" }
+        {
+          "kind": "skill",
+          "name": "ローカルドキュメントサマリー"
+        }
       ],
-      "examples": ["デスクトップのMarkdownファイルを整理"]
+      "examples": [
+        "デスクトップのMarkdownファイルを整理"
+      ]
     },
     "mcp-git": {
       "category": "バージョン管理",
       "summary": "ローカルリポジトリのコミット、差分、ログを読み取り、コードの変更を説明または要約。",
       "usedBy": [
-        { "kind": "conversation", "name": "変更レビュー" }
+        {
+          "kind": "conversation",
+          "name": "変更レビュー"
+        }
       ],
-      "examples": ["最近のコミットの変更を要約"]
+      "examples": [
+        "最近のコミットの変更を要約"
+      ]
     },
     "mcp-sqlite": {
       "category": "データベース",
       "summary": "分析のためにローカルSQLiteファイルをクエリ。ツールを検出するには接続してください。",
       "usedBy": [],
-      "examples": ["data.dbのテーブルを表示"]
+      "examples": [
+        "data.dbのテーブルを表示"
+      ]
     },
     "catalog": {
-      "github": { "summary": "課題、PR、コードを読み取り、変更を要約またはレビューを支援。", "examples": ["このリポジトリのオープンPRを要約"] },
-      "notion": { "summary": "ワークスペースのドキュメントを検索・要約し、ページを書き込む。", "examples": ["今週のミーティングメモを1ページにまとめる"] },
-      "linear": { "summary": "課題とサイクルを読み取り、進捗の追跡とチケットの作成。", "examples": ["このサイクルの残り課題を整理"] },
-      "confluence": { "summary": "スペースのドキュメントを検索して回答を探すかレポートを書く。", "examples": ["オンボーディングドキュメントを要約"] },
-      "salesforce": { "summary": "案件と顧客データをクエリしてパイプラインを分析。", "examples": ["今四半期のパイプラインのトップ案件を表示"] },
-      "hubspot": { "summary": "連絡先、案件、キャンペーンデータを読み取ってレポートを作成。", "examples": ["今月の新規リードの傾向を要約"] },
-      "asana": { "summary": "タスクとプロジェクトを読み取り、状況の追跡と作業アイテムの作成。", "examples": ["期限が近いタスクを教えて"] },
-      "dropbox": { "summary": "フォルダー内のドキュメントを読んで要約、または出力ファイルを保存。", "examples": ["このフォルダーの各PDFを1行で要約"] },
-      "postgres": { "summary": "スキーマを確認し、読み取り専用クエリでデータを分析。", "examples": ["ordersテーブルの最近のトレンドを分析"] },
-      "zendesk": { "summary": "チケットを読み取り、問題を分類して返答を下書き。", "examples": ["今日の緊急チケットを整理"] }
+      "github": {
+        "summary": "課題、PR、コードを読み取り、変更を要約またはレビューを支援。",
+        "examples": [
+          "このリポジトリのオープンPRを要約"
+        ]
+      },
+      "notion": {
+        "summary": "ワークスペースのドキュメントを検索・要約し、ページを書き込む。",
+        "examples": [
+          "今週のミーティングメモを1ページにまとめる"
+        ]
+      },
+      "linear": {
+        "summary": "課題とサイクルを読み取り、進捗の追跡とチケットの作成。",
+        "examples": [
+          "このサイクルの残り課題を整理"
+        ]
+      },
+      "confluence": {
+        "summary": "スペースのドキュメントを検索して回答を探すかレポートを書く。",
+        "examples": [
+          "オンボーディングドキュメントを要約"
+        ]
+      },
+      "salesforce": {
+        "summary": "案件と顧客データをクエリしてパイプラインを分析。",
+        "examples": [
+          "今四半期のパイプラインのトップ案件を表示"
+        ]
+      },
+      "hubspot": {
+        "summary": "連絡先、案件、キャンペーンデータを読み取ってレポートを作成。",
+        "examples": [
+          "今月の新規リードの傾向を要約"
+        ]
+      },
+      "asana": {
+        "summary": "タスクとプロジェクトを読み取り、状況の追跡と作業アイテムの作成。",
+        "examples": [
+          "期限が近いタスクを教えて"
+        ]
+      },
+      "dropbox": {
+        "summary": "フォルダー内のドキュメントを読んで要約、または出力ファイルを保存。",
+        "examples": [
+          "このフォルダーの各PDFを1行で要約"
+        ]
+      },
+      "postgres": {
+        "summary": "スキーマを確認し、読み取り専用クエリでデータを分析。",
+        "examples": [
+          "ordersテーブルの最近のトレンドを分析"
+        ]
+      },
+      "zendesk": {
+        "summary": "チケットを読み取り、問題を分類して返答を下書き。",
+        "examples": [
+          "今日の緊急チケットを整理"
+        ]
+      }
     }
   }
 }

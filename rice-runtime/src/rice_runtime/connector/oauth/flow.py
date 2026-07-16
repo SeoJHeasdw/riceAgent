@@ -71,10 +71,16 @@ def _pkce_challenge(code_verifier: str) -> str:
 
 @dataclass(frozen=True)
 class ClientConfig:
-    """Google OAuth client 자격증명 (client_id/secret)."""
+    """Google OAuth client 자격증명 (client_id/secret).
+
+    project_id 는 Google MCP tools/call 이 요구하는 x-goog-user-project 값의 정본
+    (client JSON 의 project_id 필드). env 경로 등으로 없으면 client_id 의 숫자
+    접두(project number)로 파생 가능하다 — quota_project() 참조.
+    """
 
     client_id: str
     client_secret: str
+    project_id: str | None = None
 
 
 # 하위호환 별칭 (구 이름).
@@ -98,7 +104,12 @@ def _load_client_config_from_json(path: Path) -> ClientConfig | None:
     if not cid or not csecret:
         log.debug("client json missing client_id/secret: %s", path)
         return None
-    return ClientConfig(client_id=str(cid), client_secret=str(csecret))
+    pid = block.get("project_id")
+    return ClientConfig(
+        client_id=str(cid),
+        client_secret=str(csecret),
+        project_id=str(pid) if pid else None,
+    )
 
 
 def load_client_config(
@@ -185,6 +196,7 @@ class OAuthFlow:
 
         self._client_id = (resolved.client_id if resolved else "") or client_id or ""
         self._client_secret = (resolved.client_secret if resolved else "") or client_secret or ""
+        self._project_id = resolved.project_id if resolved else None
         self._redirect_uri = (
             redirect_uri
             or os.environ.get(descriptor.env_redirect_uri)
@@ -198,6 +210,22 @@ class OAuthFlow:
     @property
     def redirect_uri(self) -> str:
         return self._redirect_uri
+
+    @property
+    def quota_project(self) -> str | None:
+        """Google MCP tools/call 에 붙일 x-goog-user-project 값.
+
+        Google MCP 서버는 tools/list 와 달리 tools/call 에서 과금/IAM 검사를 할
+        프로젝트 지정을 요구한다. client JSON 의 project_id 가 정본이고, 없으면
+        Google client_id(`<projectNumber>-....apps.googleusercontent.com`)의 숫자
+        접두를 project number 로 파생한다. 둘 다 없으면 None — 헤더 생략.
+        """
+        if self._project_id:
+            return self._project_id
+        prefix = self._client_id.split("-", 1)[0]
+        if prefix.isdigit() and self._client_id.endswith(".apps.googleusercontent.com"):
+            return prefix
+        return None
 
     def _require_client_id(self) -> None:
         """client_secret 은 이제 선택(public client 는 PKCE 로 대체) — client_id 만 필수."""

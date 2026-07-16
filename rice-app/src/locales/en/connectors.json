@@ -2,7 +2,6 @@
   "title": "Connectors",
   "localMcp": "Local MCP",
   "developerTag": "Developer",
-
   "meta": {
     "fallbackSummary": "{{type}} connector",
     "justNow": "just now",
@@ -16,27 +15,34 @@
       "category": "Mail",
       "connectedSummary": "Once connected, the agent can use the mail tools provided by the remote MCP server.",
       "connectableSummary": "Connecting opens Google sign-in in your browser, then lets you search, read, and send mail.",
-      "examples": ["Summarize recent important emails from my inbox", "Draft a reply with this content"]
+      "examples": [
+        "Summarize recent important emails from my inbox",
+        "Draft a reply with this content"
+      ]
     },
     "calendar": {
       "category": "Calendar",
       "connectedSummary": "Once connected, the agent can use the calendar tools provided by the remote MCP server.",
       "connectableSummary": "Connecting opens Google sign-in in your browser, then lets you query, create, and respond to events.",
-      "examples": ["What's on my schedule today?", "Book a team meeting for tomorrow at 3 pm"]
+      "examples": [
+        "What's on my schedule today?",
+        "Book a team meeting for tomorrow at 3 pm"
+      ]
     },
     "drive": {
       "category": "Storage",
       "connectedSummary": "Once connected, the agent can use the Drive tools provided by the remote MCP server.",
       "connectableSummary": "Connecting opens Google sign-in in your browser, then lets you search, read, and create files.",
-      "examples": ["Find my recently edited documents", "Create a new doc with this content"]
+      "examples": [
+        "Find my recently edited documents",
+        "Create a new doc with this content"
+      ]
     }
   },
-
   "kindTab": {
     "remote": "Remote",
     "localMcp": "Local MCP"
   },
-
   "summary": {
     "connectedConnectors": "Connected connectors",
     "runningMcpServers": "Running MCP servers",
@@ -45,7 +51,6 @@
     "needsConnection": "needs connection",
     "updates": "updates"
   },
-
   "filter": {
     "label": "Filter",
     "all": "All",
@@ -53,12 +58,10 @@
     "needsConnection": "Needs connection",
     "hasUpdate": "Has update"
   },
-
   "rail": {
     "tipLocal": "Local MCP servers run code directly on your computer. Only register servers from trusted sources.",
     "tipRemote": "Connectors are the gateway for agents to access external accounts and data. Only allow what you need."
   },
-
   "list": {
     "addServer": "Register server",
     "add": "Add",
@@ -72,14 +75,28 @@
     "statusConnected": "Connected",
     "statusStopped": "Stopped",
     "statusNeedsConnection": "Needs connection",
+    "statusAwaitingApproval": "Awaiting approval",
+    "statusReconnectNeeded": "Reconnect needed",
+    "statusCheckNeeded": "Needs attention",
     "updateBadge": "Update"
   },
-
   "detail": {
     "noSelection": "Select a connector.",
     "tagConnected": "Connected",
     "tagNeedsConnection": "Needs connection",
     "tagReconnectNeeded": "Reconnection needed",
+    "tagAwaitingApproval": "Awaiting approval",
+    "tagCheckNeeded": "Needs attention",
+    "connectionCheckFailed": "Tools aren't available yet",
+    "mcpServicePermissionDenied": "You're signed in, but Google hasn't allowed this app to use these tools yet. Once access is approved, just press 'Verify again' — no need to reconnect.",
+    "mcpServiceDisabled": "This service isn't turned on on Google's side yet. Once it's ready, press 'Verify again'.",
+    "mcpScopeInsufficient": "Not all required permissions were approved. Press 'Reconnect' and allow everything that's requested.",
+    "errorGenericSummary": "Something went wrong while checking the connection. Please press 'Verify again' in a moment.",
+    "showTechInfo": "Show technical details",
+    "hideTechInfo": "Hide technical details",
+    "openSetupGuide": "Open setup guide",
+    "btnVerifyAgain": "Verify again",
+    "btnVerifying": "Verifying…",
     "btnRemove": "Remove",
     "btnCancel": "Cancel",
     "btnConfirmRemove": "Remove",
@@ -145,7 +162,6 @@
     "usedByDesc": "Skills, plugins, and automations that call tools in this connector.",
     "usedByEmpty": "No skills or plugins use this connector yet."
   },
-
   "catalog": {
     "category": {
       "dev": "Development",
@@ -159,13 +175,16 @@
       "customerSupport": "Customer support"
     }
   },
-
   "toast": {
     "connectStart": "Starting connection",
     "browserLoginWaiting": "Waiting for browser login",
+    "browserLoginCancelHint": "{{name}} · If you closed the browser, press X to cancel",
+    "loginCancelled": "Browser login was cancelled.",
     "loginTimeout": "Login timed out. Please try again.",
     "connectSuccess": "{{name}} connected",
     "connectFail": "Could not start connection for {{name}}.",
+    "verifySuccess": "Remote tool execution verified for {{name}}.",
+    "verifyFail": "Tools aren't available yet. Check the connector page for details.",
     "disconnectFail": "Failed to disconnect {{name}}.",
     "resyncFail": "Could not refresh the tool list.",
     "refreshLocalFail": "Could not refresh the local MCP server.",
@@ -174,13 +193,11 @@
     "permSaveFail": "Could not save permission change.",
     "customConnectFail": "Could not start connection. Check your input and try again."
   },
-
   "badge": {
     "popular": "Popular",
     "new": "New",
     "recommended": "Recommended"
   },
-
   "directory": {
     "title": "Browse connectors",
     "searchPlaceholder": "Search connectors…",
@@ -195,7 +212,6 @@
     "comingSoonDisabled": "Not yet available in MVP — if you have an MCP server URL, use \"Add custom\"",
     "addAriaLabel": "Add {{name}}"
   },
-
   "required": {
     "title": "Connection required before activating",
     "later": "Later",
@@ -208,7 +224,6 @@
     "fallbackConnectorName": "Required connector",
     "hint": "Connection is completed from the Connectors screen after reviewing the permission scope. You can close this and the plugin will remain installed."
   },
-
   "custom": {
     "title": "Add custom connector",
     "cancel": "Cancel",
@@ -238,7 +253,6 @@
     "securityNote_strong": "only in the OS keychain",
     "securityNote_post": ". Clicking \"Add and connect\" opens the login screen in your system browser."
   },
-
   "marketplaceHeader": {
     "searchAriaLabel": "Search {{title}}",
     "searchPlaceholder": "Search",
@@ -246,7 +260,6 @@
     "sortAriaLabel": "Sort by",
     "tagFilterAriaLabel": "Tag filter"
   },
-
   "mcpRegister": {
     "modalTitle": "Register local MCP server",
     "cancel": "Cancel",
@@ -274,14 +287,24 @@
     "registerSummaryAllFail": "Registration failed. Check the per-item errors below.",
     "registerSummaryPartial": "Only {{success}}/{{total}} registered — check the remaining items."
   },
-
   "loopStages": {
-    "exp": { "label": "Experience", "desc": "Observe patterns from chats and tasks" },
-    "gen": { "label": "Skill creation", "desc": "Turn repetition into reusable skills" },
-    "use": { "label": "Use & improve", "desc": "Rules strengthen with every use" },
-    "model": { "label": "User model", "desc": "Remembered across sessions" }
+    "exp": {
+      "label": "Experience",
+      "desc": "Observe patterns from chats and tasks"
+    },
+    "gen": {
+      "label": "Skill creation",
+      "desc": "Turn repetition into reusable skills"
+    },
+    "use": {
+      "label": "Use & improve",
+      "desc": "Rules strengthen with every use"
+    },
+    "model": {
+      "label": "User model",
+      "desc": "Remembered across sessions"
+    }
   },
-
   "fixture": {
     "lastSync": {
       "justNow": "just now",
@@ -308,11 +331,23 @@
         "Run INSERT, UPDATE, and DELETE statements."
       ],
       "usedBy": [
-        { "kind": "skill", "name": "Quarterly sales summary" },
-        { "kind": "skill", "name": "Db2 schema check" },
-        { "kind": "plugin", "name": "Db2 expert" }
+        {
+          "kind": "skill",
+          "name": "Quarterly sales summary"
+        },
+        {
+          "kind": "skill",
+          "name": "Db2 schema check"
+        },
+        {
+          "kind": "plugin",
+          "name": "Db2 expert"
+        }
       ],
-      "examples": ["Review the sales table schema", "Create a 2026 Q1 sales summary"]
+      "examples": [
+        "Review the sales table schema",
+        "Create a 2026 Q1 sales summary"
+      ]
     },
     "slack": {
       "category": "Messaging",
@@ -327,9 +362,14 @@
         "Upload a file to a channel."
       ],
       "usedBy": [
-        { "kind": "automation", "name": "Weekly sales report → Slack" }
+        {
+          "kind": "automation",
+          "name": "Weekly sales report → Slack"
+        }
       ],
-      "examples": ["Send this week's summary to the #sales-report channel"]
+      "examples": [
+        "Send this week's summary to the #sales-report channel"
+      ]
     },
     "outlook": {
       "category": "Mail & Calendar",
@@ -343,9 +383,14 @@
         "Create a calendar event."
       ],
       "usedBy": [
-        { "kind": "conversation", "name": "Executive report email draft" }
+        {
+          "kind": "conversation",
+          "name": "Executive report email draft"
+        }
       ],
-      "examples": ["Draft an executive report email from this summary"]
+      "examples": [
+        "Draft an executive report email from this summary"
+      ]
     },
     "jira": {
       "category": "Issue tracker",
@@ -359,9 +404,14 @@
         "Transition an issue's status."
       ],
       "usedBy": [
-        { "kind": "skill", "name": "Meeting action item extraction" }
+        {
+          "kind": "skill",
+          "name": "Meeting action item extraction"
+        }
       ],
-      "examples": ["Summarize this sprint's retrospective"]
+      "examples": [
+        "Summarize this sprint's retrospective"
+      ]
     },
     "gdrive": {
       "category": "Storage",
@@ -374,7 +424,9 @@
         "Edit an existing file."
       ],
       "usedBy": [],
-      "examples": ["Summarize the documents in this folder"]
+      "examples": [
+        "Summarize the documents in this folder"
+      ]
     },
     "orchestrate": {
       "category": "Automation",
@@ -386,51 +438,124 @@
         "Register or modify a workflow schedule."
       ],
       "usedBy": [
-        { "kind": "automation", "name": "Quarterly sales summary · Every Mon 08:00" }
+        {
+          "kind": "automation",
+          "name": "Quarterly sales summary · Every Mon 08:00"
+        }
       ],
-      "examples": ["Set up a Monday morning report automation"]
+      "examples": [
+        "Set up a Monday morning report automation"
+      ]
     },
     "gmail": {
       "category": "Mail",
       "summary": "Read and summarize emails, or draft and send executive reports. Default prototype connector.",
       "usedBy": [
-        { "kind": "conversation", "name": "Executive report email send" }
+        {
+          "kind": "conversation",
+          "name": "Executive report email send"
+        }
       ],
-      "examples": ["Summarize important emails from this week in my inbox", "Draft an executive report email from this summary"]
+      "examples": [
+        "Summarize important emails from this week in my inbox",
+        "Draft an executive report email from this summary"
+      ]
     },
     "mcp-filesystem": {
       "category": "File system",
       "summary": "Read and write to a specified folder on your computer so the agent can work with local files.",
       "usedBy": [
-        { "kind": "skill", "name": "Local document summary" }
+        {
+          "kind": "skill",
+          "name": "Local document summary"
+        }
       ],
-      "examples": ["Organize the markdown files on my desktop"]
+      "examples": [
+        "Organize the markdown files on my desktop"
+      ]
     },
     "mcp-git": {
       "category": "Version control",
       "summary": "Read commits, diffs, and logs from a local repository to explain or summarize code changes.",
       "usedBy": [
-        { "kind": "conversation", "name": "Change review" }
+        {
+          "kind": "conversation",
+          "name": "Change review"
+        }
       ],
-      "examples": ["Summarize changes from recent commits"]
+      "examples": [
+        "Summarize changes from recent commits"
+      ]
     },
     "mcp-sqlite": {
       "category": "Database",
       "summary": "Query a local SQLite file for analysis. Connect to discover the exposed tools.",
       "usedBy": [],
-      "examples": ["Show me the tables in data.db"]
+      "examples": [
+        "Show me the tables in data.db"
+      ]
     },
     "catalog": {
-      "github": { "summary": "Read issues, PRs, and code to summarize changes or assist with reviews.", "examples": ["Summarize open PRs in this repository"] },
-      "notion": { "summary": "Search and summarize workspace documents, and write pages.", "examples": ["Compile this week's meeting notes into one page"] },
-      "linear": { "summary": "Read issues and cycles to track progress and create tickets.", "examples": ["Organize remaining issues in this cycle"] },
-      "confluence": { "summary": "Search space documents to find answers or write reports.", "examples": ["Summarize the onboarding documentation"] },
-      "salesforce": { "summary": "Query deals and customer data to analyse the pipeline.", "examples": ["Show top deals in this quarter's pipeline"] },
-      "hubspot": { "summary": "Read contacts, deals, and campaign data to build reports.", "examples": ["Summarize new lead trends this month"] },
-      "asana": { "summary": "Read tasks and projects to track status and create work items.", "examples": ["Tell me which tasks are due soon"] },
-      "dropbox": { "summary": "Read and summarize documents in a folder, or save output files.", "examples": ["Summarize each PDF in this folder in one line"] },
-      "postgres": { "summary": "Inspect schemas and analyse data with read-only queries.", "examples": ["Analyse recent trends in the orders table"] },
-      "zendesk": { "summary": "Read tickets to classify issues and draft responses.", "examples": ["Organize today's urgent tickets"] }
+      "github": {
+        "summary": "Read issues, PRs, and code to summarize changes or assist with reviews.",
+        "examples": [
+          "Summarize open PRs in this repository"
+        ]
+      },
+      "notion": {
+        "summary": "Search and summarize workspace documents, and write pages.",
+        "examples": [
+          "Compile this week's meeting notes into one page"
+        ]
+      },
+      "linear": {
+        "summary": "Read issues and cycles to track progress and create tickets.",
+        "examples": [
+          "Organize remaining issues in this cycle"
+        ]
+      },
+      "confluence": {
+        "summary": "Search space documents to find answers or write reports.",
+        "examples": [
+          "Summarize the onboarding documentation"
+        ]
+      },
+      "salesforce": {
+        "summary": "Query deals and customer data to analyse the pipeline.",
+        "examples": [
+          "Show top deals in this quarter's pipeline"
+        ]
+      },
+      "hubspot": {
+        "summary": "Read contacts, deals, and campaign data to build reports.",
+        "examples": [
+          "Summarize new lead trends this month"
+        ]
+      },
+      "asana": {
+        "summary": "Read tasks and projects to track status and create work items.",
+        "examples": [
+          "Tell me which tasks are due soon"
+        ]
+      },
+      "dropbox": {
+        "summary": "Read and summarize documents in a folder, or save output files.",
+        "examples": [
+          "Summarize each PDF in this folder in one line"
+        ]
+      },
+      "postgres": {
+        "summary": "Inspect schemas and analyse data with read-only queries.",
+        "examples": [
+          "Analyse recent trends in the orders table"
+        ]
+      },
+      "zendesk": {
+        "summary": "Read tickets to classify issues and draft responses.",
+        "examples": [
+          "Organize today's urgent tickets"
+        ]
+      }
     }
   }
 }

@@ -13,6 +13,7 @@
   POST   /connectors/{id}/tools/resync      force re-fetch + apply the remote MCP tool catalog
   POST   /connectors/{id}/tools/check       detect remote catalog changes (sets a pending update)
   POST   /connectors/{id}/tools/apply-update  adopt the pending catalog update
+  POST   /connectors/{id}/verify            execute a safe read-only health probe
   PUT    /connectors/{id}/tools/permission  set a tool's call policy (allow/approval/block)
   DELETE /connectors/{id}                   disconnect
   GET    /connectors/{id}/status            connection status
@@ -20,6 +21,8 @@
 """
 
 from __future__ import annotations
+
+from html import escape
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse
@@ -70,13 +73,17 @@ class CustomConnectIn(BaseModel):
     client_secret: str | None = None
 
 
-def _callback_page(title: str, message: str, ok: bool) -> HTMLResponse:
+def _callback_page(
+    title: str, message: str, ok: bool, *, http_status: int | None = None
+) -> HTMLResponse:
     """OAuth 콜백은 시스템 브라우저가 직접 연다 — 사람이 읽을 HTML 을 돌려준다.
     성공/실패에 따라 색만 다른 미니멀 페이지(자동 닫기 시도)."""
     color = "#198754" if ok else "#dc3545"
     icon = "✓" if ok else "✕"
+    safe_title = escape(title)
+    safe_message = escape(message)
     html = f"""<!doctype html><html lang="ko"><head><meta charset="utf-8">
-<title>{title}</title><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{safe_title}</title><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>body{{font-family:-apple-system,system-ui,sans-serif;background:#f6f8fa;color:#1f2328;
 display:flex;align-items:center;justify-content:center;height:100vh;margin:0}}
 .card{{background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:40px 48px;text-align:center;
@@ -84,9 +91,9 @@ box-shadow:0 1px 3px rgba(0,0,0,.06);max-width:420px}}
 .badge{{width:56px;height:56px;border-radius:50%;background:{color};color:#fff;font-size:30px;
 display:flex;align-items:center;justify-content:center;margin:0 auto 18px}}
 h1{{font-size:18px;margin:0 0 8px}}p{{color:#57606a;font-size:14px;line-height:1.6;margin:0}}</style></head>
-<body><div class="card"><div class="badge">{icon}</div><h1>{title}</h1><p>{message}</p></div>
+<body><div class="card"><div class="badge">{icon}</div><h1>{safe_title}</h1><p>{safe_message}</p></div>
 <script>setTimeout(function(){{window.close()}},2500)</script></body></html>"""
-    return HTMLResponse(content=html, status_code=200 if ok else 400)
+    return HTMLResponse(content=html, status_code=http_status or (200 if ok else 400))
 
 
 def _tools_payload(c: Container, connector_id: str) -> list[dict]:
@@ -226,18 +233,50 @@ async def oauth_callback(
 ):
     """Google OAuth redirect handler (CONTRACTS §4.2 step 4). 브라우저가 직접 연다."""
     if error:
-        return _callback_page("연결 취소됨", f"인증이 거부되었습니다 ({error}). 창을 닫으셔도 됩니다.", ok=False)
+        # Google의 취소 버튼도 callback(error=access_denied&state=...)으로 돌아온다.
+        # 이를 DB terminal 상태로 남겨야 앱 polling이 즉시 끝난다.
+        if state:
+            reject = getattr(c.connectors, "reject_oauth", None)
+            if reject is not None:
+                await reject(state=state, error=error)
+        return _callback_page(
+            "연결 취소됨",
+            f"인증이 거부되었습니다 ({error}). 창을 닫으셔도 됩니다.",
+            ok=False,
+            http_status=200,
+        )
     if not code or not state:
         return _callback_page("연결 실패", "필수 파라미터(code/state)가 없습니다.", ok=False)
     try:
         info = await c.connectors.complete_oauth(code=code, state=state)
     except Exception as exc:  # noqa: BLE001
-        return _callback_page("연결 실패", f"토큰 교환 중 오류: {exc}", ok=False)
+        return _callback_page("연결 실패", f"OAuth 연결 처리 중 오류: {exc}", ok=False)
+    if info.status == "error":
+        # 원문 진단(error_detail, 영문·IAM 용어)은 앱의 접힌 "기술 정보"와 런타임
+        # 로그가 전달한다. 브라우저 페이지는 비개발자가 보는 최종 화면 — 요약만.
+        return _callback_page(
+            f"{info.display_name} 연결 확인 필요",
+            "계정 연결은 완료됐지만 도구 사용 준비가 아직 끝나지 않았어요. "
+            "앱으로 돌아가 상태를 확인해주세요. 이 창은 닫으셔도 됩니다.",
+            ok=False,
+            # OAuth callback 자체는 정상 처리됐다. 후속 MCP/Cloud 설정 검증 실패를 HTTP
+            # 400으로 보내면 브라우저·로그가 "OAuth 요청 자체 실패"로 오해한다.
+            http_status=200,
+        )
     return _callback_page(
         f"{info.display_name} 연결 완료",
         "계정이 RICE 에 연결되었습니다. 이 창을 닫고 앱으로 돌아가세요.",
         ok=True,
     )
+
+
+@router.post("/{connector_id}/oauth/cancel")
+async def cancel_oauth(connector_id: str, c: Container = Depends(get_container)):
+    """앱의 로그인 대기 취소 — 아직 소비되지 않은 OAuth state를 즉시 무효화한다."""
+    _require_connector(c, connector_id)
+    cancel = getattr(c.connectors, "cancel_oauth", None)
+    cancelled = await cancel(connector_id) if cancel is not None else False
+    return {"success": True, "data": {"cancelled": cancelled}}
 
 
 @router.get("/{connector_id}")
@@ -279,6 +318,16 @@ async def resync_tools(connector_id: str, c: Container = Depends(get_container))
     sync_tools = getattr(c.connectors, "sync_tools", None)
     count = await sync_tools(connector_id) if sync_tools is not None else 0
     return {"success": True, "data": {"count": count, "tools": _tools_payload(c, connector_id)}}
+
+
+@router.post("/{connector_id}/verify")
+async def verify_connector(connector_id: str, c: Container = Depends(get_container)):
+    """안전한 read-only 도구를 실제 호출해 schema 발견이 아닌 실행 가능성을 확인한다."""
+    _require_connector(c, connector_id)
+    verify = getattr(c.connectors, "verify_connector", None)
+    result = await verify(connector_id) if verify is not None else {"ok": False, "error": "not supported"}
+    info = c.connectors.get_connector(connector_id)
+    return {"success": True, "data": {**result, "connector": _connector_payload(c, info) if info else None}}
 
 
 @router.post("/{connector_id}/tools/check")

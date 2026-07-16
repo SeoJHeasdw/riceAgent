@@ -22,6 +22,7 @@ interface ProgressItem {
   tone: ProgressTone;
   progress?: number;
   dismissSignal: number;
+  onCancel?: () => void;
 }
 
 interface NotificationItem {
@@ -63,12 +64,12 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           ),
         );
       },
-      progress: ({ label, sublabel, tone = 'progress', progress }) => {
+      progress: ({ label, sublabel, tone = 'progress', progress, onCancel }) => {
         const id = makeId();
         setItems((prev) =>
           [
             ...prev,
-            { kind: 'progress', id, label, sublabel, tone, progress, dismissSignal: 0 } as ToastItem,
+            { kind: 'progress', id, label, sublabel, tone, progress, dismissSignal: 0, onCancel } as ToastItem,
           ].slice(-MAX_VISIBLE_TOASTS),
         );
         return {
@@ -111,6 +112,7 @@ const ToastViewport: React.FC<{ items: ToastItem[]; onDismiss: (id: number) => v
               tone={it.tone}
               progress={it.progress}
               dismissSignal={it.dismissSignal}
+              onCancel={it.onCancel}
               onDismiss={() => onDismiss(it.id)}
             />
           ) : (

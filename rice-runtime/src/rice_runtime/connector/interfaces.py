@@ -27,7 +27,7 @@ from typing import Any, Literal, Protocol, runtime_checkable
 
 from ..core.types import ToolCall, ToolResult, ToolSpec
 
-ConnectorStatus = Literal["connected", "disconnected", "error"]
+ConnectorStatus = Literal["connected", "disconnected", "verifying", "error"]
 
 
 @dataclass(frozen=True)
@@ -39,6 +39,9 @@ class ConnectorInfo:
     scopes: tuple[str, ...] = ()
     connected_at: str | None = None
     last_verified_at: str | None = None
+    error_code: str | None = None
+    error_detail: str | None = None
+    setup_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -88,6 +91,19 @@ class IConnectorService(Protocol):
     async def complete_oauth(self, *, code: str, state: str) -> ConnectorInfo:
         """Handle the OAuth redirect: exchange code → tokens (→ keychain), mark
         connected (CONTRACTS §4.2 steps 3–6)."""
+        ...
+
+    async def cancel_oauth(self, connector_id: str) -> bool:
+        """Cancel a browser OAuth attempt that has not reached the callback."""
+        ...
+
+    async def reject_oauth(self, *, state: str, error: str) -> ConnectorInfo | None:
+        """Record an OAuth provider rejection (for example access_denied)."""
+        ...
+
+    async def verify_connector(self, connector_id: str) -> dict:
+        """Run a safe read-only MCP tool to prove the connector can execute, not
+        just discover, tools (tools/list can succeed while tools/call is denied)."""
         ...
 
     async def delete(self, connector_id: str) -> None: ...

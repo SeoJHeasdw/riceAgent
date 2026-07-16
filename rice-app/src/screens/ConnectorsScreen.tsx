@@ -67,12 +67,15 @@ interface ConnectorInfoWire {
   id: string;
   connector_type: string;
   display_name: string;
-  status: 'connected' | 'disconnected' | 'error';
+  status: 'connected' | 'disconnected' | 'verifying' | 'error';
   scopes?: string[];
   tools?: ConnectorToolWire[];
   update?: ConnectorUpdateWire | null;
   connected_at?: string | null;
   last_verified_at?: string | null;
+  error_code?: string | null;
+  error_detail?: string | null;
+  setup_url?: string | null;
 }
 
 /** GET /connectors/local 이 돌려주는 로컬 MCP 서버 wire 형태 (.mcp.json 파생). */
@@ -166,6 +169,35 @@ const DEFAULT_TYPE_META = {
   examples: [] as string[],
 };
 const typeMeta = (connectorType: string) => CONNECTOR_TYPE_META[connectorType] ?? DEFAULT_TYPE_META;
+/** 화면 기본 노출용 비개발자 요약. IAM/스코프/서비스명 같은 운영 용어는 여기 절대 넣지
+ *  않는다 — 원문 진단은 errorTechnical(접힌 "기술 정보")로만 내려간다. */
+const connectorErrorSummary = (info: ConnectorInfoWire): string | undefined => {
+  switch (info.error_code) {
+    case 'connectors.mcp_service_permission_denied':
+      return i18n.t('connectors:detail.mcpServicePermissionDenied');
+    case 'connectors.mcp_service_disabled':
+      return i18n.t('connectors:detail.mcpServiceDisabled');
+    case 'connectors.mcp_scope_insufficient':
+      return i18n.t('connectors:detail.mcpScopeInsufficient');
+    default:
+      return info.error_detail ? i18n.t('connectors:detail.errorGenericSummary') : undefined;
+  }
+};
+
+/** 접힌 "기술 정보"에 보여줄 원문 진단 — 런타임 error_detail(영문) + error_code. */
+const connectorErrorTechnical = (info: ConnectorInfoWire): string | undefined => {
+  if (!info.error_detail && !info.error_code) return undefined;
+  return [info.error_code, info.error_detail].filter(Boolean).join(' — ');
+};
+
+/** 오류의 복구 동작 분류. "재연결 필요"는 OAuth 자격증명 문제에만 붙인다 —
+ *  제공자 승인 대기(approval)에 재연결을 시키면 무의미한 OAuth 왕복만 생긴다. */
+const connectorErrorKind = (info: ConnectorInfoWire): NonNullable<Connector['errorKind']> => {
+  const code = info.error_code ?? '';
+  if (code.startsWith('connectors.oauth_') || code === 'connectors.mcp_scope_insufficient') return 'reconnect';
+  if (code === 'connectors.mcp_service_permission_denied' || code === 'connectors.mcp_service_disabled') return 'approval';
+  return 'check';
+};
 
 /** 백엔드 ConnectorInfo → UI Connector 매핑 (remote 전용). */
 const infoToConnector = (info: ConnectorInfoWire): Connector => {
@@ -173,7 +205,9 @@ const infoToConnector = (info: ConnectorInfoWire): Connector => {
   const errored = info.status === 'error';
   const meta = typeMeta(info.connector_type);
   // 도구는 하드코딩이 아니라 백엔드가 연결 시점에 원격 MCP tools/list 로 받아 저장한 실제 카탈로그.
-  const scopes: ConnectorScope[] = connected ? (info.tools ?? []).map(toolToScope) : [];
+  // error(실행 검증 실패) 상태에서도 이미 동기화된 카탈로그는 보여준다 — 사용자는 "무엇을
+  // 할 수 있게 되는지"를 봐야 하고, 실행 가능 여부는 오류 배너가 따로 알린다.
+  const scopes: ConnectorScope[] = connected || errored ? (info.tools ?? []).map(toolToScope) : [];
   return {
     id: info.id,
     name: info.display_name || info.connector_type,
@@ -182,9 +216,13 @@ const infoToConnector = (info: ConnectorInfoWire): Connector => {
     provider: meta.provider || info.connector_type,
     connectorType: info.connector_type,
     kind: 'remote',
-    // 백엔드 'error'(토큰 무효)는 UI 상 미연결로 취급하되 errored 플래그로 "재연결 필요"를 노출.
+    // 백엔드 'error'는 UI 상 미연결로 취급하되 errored 플래그 + errorKind 로 복구 경로를 노출.
     status: connected ? 'connected' : 'disconnected',
     errored,
+    errorKind: errored ? connectorErrorKind(info) : undefined,
+    errorDetail: connectorErrorSummary(info),
+    errorTechnical: connectorErrorTechnical(info),
+    setupUrl: info.setup_url ?? undefined,
     // 백엔드 레코드가 실재 — 미연결이어도 "제거" 가능(연결 실패한 커스텀 커넥터 정리 경로).
     persisted: true,
     account: connected ? info.display_name || i18n.t('connectors:detail.tagConnected') : undefined,
@@ -266,8 +304,12 @@ const SectionLabel: React.FC<{ children: React.ReactNode; right?: React.ReactNod
   </div>
 );
 
-const StatusDot: React.FC<{ connected: boolean }> = ({ connected }) => (
-  <span className={`w-2 h-2 rounded-full flex-shrink-0 ${connected ? 'bg-support-success' : 'bg-layer-03'}`} />
+const StatusDot: React.FC<{ connected: boolean; attention?: boolean }> = ({ connected, attention }) => (
+  <span
+    className={`w-2 h-2 rounded-full flex-shrink-0 ${
+      connected ? 'bg-support-success' : attention ? 'bg-support-warning' : 'bg-layer-03'
+    }`}
+  />
 );
 
 /**
@@ -489,6 +531,7 @@ const ConnectorDetailView: React.FC<{
   onRealConnect: (c: Connector) => void;
   onRealDisconnect: (c: Connector) => void;
   onResyncTools: (c: Connector) => void;
+  onVerify: (c: Connector) => void;
   onRefreshLocal: (c: Connector) => void;
   onRemoveLocal: (c: Connector) => void;
   onApplyUpdate: (c: Connector) => void;
@@ -502,6 +545,7 @@ const ConnectorDetailView: React.FC<{
   onRealConnect,
   onRealDisconnect,
   onResyncTools,
+  onVerify,
   onRefreshLocal,
   onRemoveLocal,
   onApplyUpdate,
@@ -510,8 +554,12 @@ const ConnectorDetailView: React.FC<{
   const { t } = useTranslation('connectors');
   const c = connectors.find((x) => x.id === connectorId);
   const [confirmingRemove, setConfirmingRemove] = useState(false);
-  // 다른 커넥터로 넘어가면 "정말 제거할까요?" 상태가 안 따라오게 초기화(잘못 클릭 방지).
-  useEffect(() => setConfirmingRemove(false), [connectorId]);
+  const [showTechInfo, setShowTechInfo] = useState(false);
+  // 다른 커넥터로 넘어가면 "정말 제거할까요?"/기술 정보 펼침 상태가 안 따라오게 초기화.
+  useEffect(() => {
+    setConfirmingRemove(false);
+    setShowTechInfo(false);
+  }, [connectorId]);
 
   if (!c || !connectorId) {
     return <div className="flex-1 flex items-center justify-center text-body-short-02 text-text-helper">{t('detail.noSelection')}</div>;
@@ -521,6 +569,8 @@ const ConnectorDetailView: React.FC<{
   const errored = !!c.errored;
   const isMcp = connectorKind(c) === 'local-mcp';
   const busy = busyId === c.id;
+  // 승인 대기/원인 미상 오류의 주 복구 동작은 재검증 — OAuth 재연결은 자격증명 오류에만.
+  const verifyRecovery = errored && !isMcp && online && c.errorKind !== 'reconnect';
   // 제거 가능: 로컬 MCP(.mcp.json 항목 삭제) 또는 미연결이지만 백엔드 레코드가 남아 있는
   // 원격 커넥터(연결 실패·중도 취소된 커스텀 커넥터 정리 경로 — DELETE /connectors/{id}).
   // 연결된 원격은 아래 "연결 해제" 버튼이 같은 삭제를 수행하므로 중복 노출하지 않는다.
@@ -613,8 +663,15 @@ const ConnectorDetailView: React.FC<{
             <div className="flex items-center gap-2 flex-wrap">
               <h2 className="text-heading-03 font-semibold text-text-primary">{c.name}</h2>
               {errored ? (
-                // Tag red는 어두운 적색 배경이 뭉개져서 명도 대비가 있는 chip으로
-                <span className="status-chip status-chip--block">{t('detail.tagReconnectNeeded')}</span>
+                // Tag red는 어두운 적색 배경이 뭉개져서 명도 대비가 있는 chip으로.
+                // 승인 대기(approval)는 실패가 아니라 대기 상태 — 재연결 문구·적색을 쓰지 않는다.
+                c.errorKind === 'reconnect' ? (
+                  <span className="status-chip status-chip--block">{t('detail.tagReconnectNeeded')}</span>
+                ) : (
+                  <span className="status-chip status-chip--ask">
+                    {t(c.errorKind === 'approval' ? 'detail.tagAwaitingApproval' : 'detail.tagCheckNeeded')}
+                  </span>
+                )
               ) : (
                 <Tag type={connected ? 'green' : 'gray'} size="sm">
                   {connected ? t('detail.tagConnected') : t('detail.tagNeedsConnection')}
@@ -662,11 +719,13 @@ const ConnectorDetailView: React.FC<{
               kind={connected ? 'secondary' : 'primary'}
               size="sm"
               disabled={busy}
-              icon={<Icon name={busy ? 'renew' : isMcp && online ? 'renew' : connected ? 'close' : 'connect'} size={15} />}
-              onClick={toggleConnect}
+              icon={<Icon name={busy ? 'renew' : isMcp && online ? 'renew' : connected ? 'close' : verifyRecovery ? 'renew' : 'connect'} size={15} />}
+              onClick={verifyRecovery ? () => onVerify(c) : toggleConnect}
             >
               {busy
-                ? isMcp && online
+                ? verifyRecovery
+                  ? t('detail.btnVerifying')
+                  : isMcp && online
                   ? t('detail.btnRefreshing')
                   : online && !connected
                   ? t('detail.btnConnecting')
@@ -680,7 +739,9 @@ const ConnectorDetailView: React.FC<{
                 : connected
                 ? t('detail.btnDisconnect')
                 : errored
-                ? t('detail.btnReconnect')
+                ? verifyRecovery
+                  ? t('detail.btnVerifyAgain')
+                  : t('detail.btnReconnect')
                 : t('detail.btnConnect')}
             </Button>
           </div>
@@ -712,6 +773,46 @@ const ConnectorDetailView: React.FC<{
             <Button kind="primary" size="sm" icon={<Icon name="renew" size={14} />} onClick={applyUpdate} className="flex-shrink-0">
               {t('detail.update.btnApply')}
             </Button>
+          </div>
+        )}
+
+        {errored && c.errorDetail && (
+          <div className="mt-4 rounded-xl border border-support-error/35 bg-support-error/10 px-3.5 py-3">
+            <div className="flex items-start gap-3">
+              <Icon name="warning" size={17} className="mt-0.5 flex-shrink-0 text-text-error" />
+              <div className="min-w-0 flex-1">
+                <div className="text-body-short-01 font-semibold text-text-primary">{t('detail.connectionCheckFailed')}</div>
+                <p className="mt-1 text-caption-01 leading-5 text-text-secondary">{c.errorDetail}</p>
+              </div>
+              <Button kind="secondary" size="sm" disabled={busy} onClick={() => onVerify(c)}>
+                {busy ? t('detail.btnVerifying') : t('detail.btnVerifyAgain')}
+              </Button>
+            </div>
+            {/* 운영/개발자용 원문 진단은 기본 접힘 — 비개발자 화면을 IAM·스코프 용어로 오염시키지 않는다. */}
+            {(c.errorTechnical || c.setupUrl) && (
+              <div className="mt-2 pl-8">
+                <button
+                  onClick={() => setShowTechInfo((v) => !v)}
+                  className="text-caption-01 text-text-helper underline underline-offset-2 hover:text-text-secondary transition-colors"
+                >
+                  {showTechInfo ? t('detail.hideTechInfo') : t('detail.showTechInfo')}
+                </button>
+                {showTechInfo && (
+                  <div className="mt-2 flex flex-col items-start gap-2">
+                    {c.errorTechnical && (
+                      <p className="text-caption-01 leading-5 text-text-helper font-mono break-all select-text">
+                        {c.errorTechnical}
+                      </p>
+                    )}
+                    {c.setupUrl && (
+                      <Button kind="ghost" size="sm" onClick={() => void openExternal(c.setupUrl!)}>
+                        {t('detail.openSetupGuide')}
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -982,18 +1083,56 @@ function ConnectorsScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 브라우저 OAuth 완료까지 폴링(최대 ~2분) — predicate 를 만족하는 커넥터가 나타나면 true.
+  // 브라우저 OAuth 완료까지 폴링(최대 ~2분) — connected/error 둘 다 terminal이다.
   // 신규 연결(connector_type 기준)과 커스텀 커넥터 등록 직후(connector_id 기준) 양쪽에 쓴다
   // (구 pollConnected/pollConnectedById 를 통합 — 로직이 거의 동일해 중복이었다).
-  const pollUntilConnected = async (predicate: (info: ConnectorInfoWire) => boolean): Promise<boolean> => {
-    for (let i = 0; i < 48; i++) {
-      await new Promise((r) => setTimeout(r, 2500));
-      if (!mountedRef.current) return false;
-      const res = await api.getConnectors();
-      if (!mountedRef.current) return false;
-      if (res.success && Array.isArray(res.data) && (res.data as ConnectorInfoWire[]).some(predicate)) return true;
+  const waitForPollInterval = (signal: AbortSignal, delayMs: number): Promise<boolean> =>
+    new Promise((resolve) => {
+      if (signal.aborted) {
+        resolve(false);
+        return;
+      }
+      const timer = window.setTimeout(() => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(true);
+      }, delayMs);
+      const onAbort = () => {
+        window.clearTimeout(timer);
+        resolve(false);
+      };
+      signal.addEventListener('abort', onAbort, { once: true });
+    });
+
+  const pollUntilTerminal = async (
+    predicate: (info: ConnectorInfoWire) => boolean,
+    signal: AbortSignal,
+  ): Promise<ConnectorInfoWire | null> => {
+    const deadline = Date.now() + 120_000;
+    while (Date.now() < deadline) {
+      if (!(await waitForPollInterval(signal, Math.min(2500, deadline - Date.now())))) return null;
+      if (!mountedRef.current) return null;
+
+      // 로컬 runtime 요청 하나가 멈춰도 전체 OAuth 대기가 무한정 늘어나지 않게 한다.
+      // 사용자 AbortSignal도 전달해 토스트 X가 진행 중 fetch까지 즉시 끊는다.
+      const requestController = new AbortController();
+      const forwardAbort = () => requestController.abort();
+      signal.addEventListener('abort', forwardAbort, { once: true });
+      const requestTimeout = window.setTimeout(
+        () => requestController.abort(),
+        Math.min(5000, Math.max(1, deadline - Date.now())),
+      );
+      const res = await api.getConnectors(requestController.signal);
+      window.clearTimeout(requestTimeout);
+      signal.removeEventListener('abort', forwardAbort);
+      if (!mountedRef.current || signal.aborted) return null;
+      if (res.success && Array.isArray(res.data)) {
+        const found = (res.data as ConnectorInfoWire[]).find(
+          (info) => predicate(info) && (info.status === 'connected' || info.status === 'error'),
+        );
+        if (found) return found;
+      }
     }
-    return false;
+    return null;
   };
 
   const handleRealConnect = async (c: Connector) => {
@@ -1001,22 +1140,45 @@ function ConnectorsScreen() {
     // (error 상태) 실제 커넥터는 infoToConnector 가 채운 connectorType 을 그대로 쓴다.
     const connectorType = c.connectorType ?? c.id;
     setBusyId(c.id);
-    const job = toast.progress({ label: t('toast.connectStart'), sublabel: c.name });
+    const controller = new AbortController();
+    let connectorId: string | undefined;
+    const cancel = () => {
+      if (controller.signal.aborted) return;
+      controller.abort();
+      if (connectorId) void api.cancelConnectorOAuth(connectorId);
+      toast.notify({ message: t('toast.loginCancelled'), variant: 'info' });
+    };
+    const job = toast.progress({
+      label: t('toast.connectStart'),
+      sublabel: c.name,
+      onCancel: cancel,
+    });
     try {
       const res = await api.connectConnector(connectorType);
-      const url = (res.data as { oauth_url?: string } | undefined)?.oauth_url;
-      if (!res.success || !url) {
+      const data = res.data as { oauth_url?: string; connector_id?: string } | undefined;
+      connectorId = data?.connector_id;
+      if (controller.signal.aborted) {
+        if (connectorId) await api.cancelConnectorOAuth(connectorId);
+        return;
+      }
+      const url = data?.oauth_url;
+      if (!res.success || !url || !data?.connector_id) {
         job.done('error', res.code ? apiErrorMessage(res) : t('toast.connectFail', { name: c.name }));
         return;
       }
       await openExternal(url); // 시스템 브라우저에서 구글 로그인
-      job.update({ label: t('toast.browserLoginWaiting'), sublabel: c.name });
-      const ok = await pollUntilConnected((x) => x.connector_type === connectorType && x.status === 'connected');
+      job.update({
+        label: t('toast.browserLoginWaiting'),
+        sublabel: t('toast.browserLoginCancelHint', { name: c.name }),
+      });
+      const outcome = await pollUntilTerminal((x) => x.id === data.connector_id, controller.signal);
+      if (controller.signal.aborted) return;
       if (!mountedRef.current) {
         job.dismiss(); // 화면을 이미 떠났다 — 결과를 알릴 대상이 없다.
         return;
       }
-      if (!ok) {
+      if (!outcome) {
+        await api.cancelConnectorOAuth(data.connector_id);
         job.done('error', t('toast.loginTimeout'));
         return;
       }
@@ -1026,6 +1188,16 @@ function ConnectorsScreen() {
         mergeRemote(infos.map(infoToConnector));
         const found = infos.find((x) => x.connector_type === connectorType && x.status === 'connected');
         if (found) setSel(found.id);
+      }
+      if (outcome.status === 'error') {
+        setSel(outcome.id);
+        job.done(
+          'error',
+          outcome.error_code === 'connectors.oauth_cancelled'
+            ? t('toast.loginCancelled')
+            : connectorErrorSummary(outcome) ?? t('toast.verifyFail'),
+        );
+        return;
       }
       job.done('success', t('toast.connectSuccess', { name: c.name }));
     } finally {
@@ -1051,17 +1223,39 @@ function ConnectorsScreen() {
     setCustomModalOpen(false);
     await openExternal(data.oauth_url); // 시스템 브라우저에서 로그인
     const connectorId = data.connector_id;
-    const job = toast.progress({ label: t('toast.browserLoginWaiting'), sublabel: payload.display_name });
-    const ok = await pollUntilConnected((x) => x.id === connectorId && x.status === 'connected');
+    const controller = new AbortController();
+    const cancel = () => {
+      if (controller.signal.aborted) return;
+      controller.abort();
+      void api.cancelConnectorOAuth(connectorId);
+      toast.notify({ message: t('toast.loginCancelled'), variant: 'info' });
+    };
+    const job = toast.progress({
+      label: t('toast.browserLoginWaiting'),
+      sublabel: t('toast.browserLoginCancelHint', { name: payload.display_name }),
+      onCancel: cancel,
+    });
+    const outcome = await pollUntilTerminal((x) => x.id === connectorId, controller.signal);
+    if (controller.signal.aborted) return null;
     if (!mountedRef.current) {
       job.dismiss();
       return null;
     }
-    if (ok) {
+    if (outcome?.status === 'connected') {
       await refresh();
       setSel(connectorId);
       job.done('success', t('toast.connectSuccess', { name: payload.display_name }));
+    } else if (outcome?.status === 'error') {
+      await refresh();
+      setSel(connectorId);
+      job.done(
+        'error',
+        outcome.error_code === 'connectors.oauth_cancelled'
+          ? t('toast.loginCancelled')
+          : connectorErrorSummary(outcome) ?? t('toast.verifyFail'),
+      );
     } else {
+      await api.cancelConnectorOAuth(connectorId);
       job.done('error', t('toast.loginTimeout'));
     }
     return null;
@@ -1076,6 +1270,22 @@ function ConnectorsScreen() {
         return;
       }
       await refresh();
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleVerify = async (c: Connector) => {
+    setBusyId(c.id);
+    try {
+      const res = await api.verifyConnector(c.id);
+      await refresh();
+      const data = res.data as { ok?: boolean; error?: string } | undefined;
+      if (res.success && data?.ok) {
+        toast.notify({ message: t('toast.verifySuccess', { name: c.name }), variant: 'success' });
+      } else {
+        toast.notify({ message: t('toast.verifyFail'), variant: 'error' });
+      }
     } finally {
       setBusyId(null);
     }
@@ -1344,6 +1554,23 @@ function ConnectorsScreen() {
         {list.map((c) => {
           const on = c.id === effectiveSel;
           const connected = c.status === 'connected';
+          // errored 를 "연결 필요"로 뭉뚱그리지 않는다 — 이미 로그인된 계정에 재연결을
+          // 시키는 잘못된 안내가 된다. 복구 동작(errorKind)별 라벨로 나눈다.
+          const statusLabel = connected
+            ? isLocal
+              ? t('list.statusRunning')
+              : t('list.statusConnected')
+            : c.errored
+            ? t(
+                c.errorKind === 'approval'
+                  ? 'list.statusAwaitingApproval'
+                  : c.errorKind === 'reconnect'
+                  ? 'list.statusReconnectNeeded'
+                  : 'list.statusCheckNeeded',
+              )
+            : isLocal
+            ? t('list.statusStopped')
+            : t('list.statusNeedsConnection');
           return (
             <button
               key={c.id}
@@ -1369,9 +1596,9 @@ function ConnectorsScreen() {
                   )}
                 </div>
                 <div className="flex items-center gap-1.5 mt-0.5">
-                  <StatusDot connected={connected} />
+                  <StatusDot connected={connected} attention={!!c.errored} />
                   <span className="text-caption-01 text-text-helper truncate">
-                    {connected ? (isLocal ? t('list.statusRunning') : t('list.statusConnected')) : isLocal ? t('list.statusStopped') : t('list.statusNeedsConnection')} · {c.category}
+                    {statusLabel} · {c.category}
                   </span>
                 </div>
               </div>
@@ -1418,6 +1645,7 @@ function ConnectorsScreen() {
         onRealConnect={handleRealConnect}
         onRealDisconnect={handleRealDisconnect}
         onResyncTools={handleResyncTools}
+        onVerify={handleVerify}
         onRefreshLocal={handleRefreshLocal}
         onRemoveLocal={handleRemoveLocal}
         onApplyUpdate={handleApplyUpdate}

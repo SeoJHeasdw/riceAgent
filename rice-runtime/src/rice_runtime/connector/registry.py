@@ -31,6 +31,13 @@ class ConnectorDescriptor:
     # 재사용된다(Google API 활성화는 프로젝트 단위, OAuth client 는 그 위에 하나). 그래서
     # 타입 전용 파일이 없으면 이 목록을 순서대로 시도한다 — 파일 복제 없이 기존 설치를 공유.
     client_secret_fallback_filenames: tuple[str, ...] = ()
+    # 원격 MCP는 기반 Workspace API와 별도 Google Cloud service enable이 필요하다.
+    # tools/list는 service가 꺼져도 성공할 수 있어, 연결 직후 아래 read-only tool을 실제
+    # 호출해야 사용 가능한 연결인지 판별할 수 있다.
+    mcp_service_name: str | None = None
+    mcp_setup_url: str | None = None
+    health_check_tool: str | None = None
+    health_check_arguments: dict[str, object] = field(default_factory=dict)
     # 사용자가 런타임에 "커스텀 추가"로 등록한 타입(custom_registry.py 산출) 여부.
     # 자격증명 오류 안내가 갈린다: 정적 타입은 env/JSON 설치를, 커스텀은 모달의
     # client ID 직접 입력을 안내해야 한다(OAuthFlow._require_client_id).
@@ -77,6 +84,9 @@ GMAIL_DESCRIPTOR = ConnectorDescriptor(
     mcp_endpoint="https://gmailmcp.googleapis.com/mcp/v1",
     env_prefix="RICE_GMAIL",
     client_secret_filename="gmail_client_secret.json",
+    mcp_service_name="gmailmcp.googleapis.com",
+    mcp_setup_url="https://developers.google.com/workspace/gmail/api/guides/configure-mcp-server",
+    health_check_tool="list_labels",
 )
 
 CALENDAR_DESCRIPTOR = ConnectorDescriptor(
@@ -95,6 +105,9 @@ CALENDAR_DESCRIPTOR = ConnectorDescriptor(
     client_secret_filename="calendar_client_secret.json",
     # 전용 파일이 없으면 이미 설치된 Gmail 용 client(같은 GCP 프로젝트)를 그대로 재사용.
     client_secret_fallback_filenames=("gmail_client_secret.json",),
+    mcp_service_name="calendarmcp.googleapis.com",
+    mcp_setup_url="https://developers.google.com/workspace/calendar/api/guides/configure-mcp-server",
+    health_check_tool="list_calendars",
 )
 
 DRIVE_DESCRIPTOR = ConnectorDescriptor(
@@ -110,6 +123,8 @@ DRIVE_DESCRIPTOR = ConnectorDescriptor(
     env_prefix="RICE_DRIVE",
     client_secret_filename="drive_client_secret.json",
     client_secret_fallback_filenames=("gmail_client_secret.json",),
+    mcp_service_name="drivemcp.googleapis.com",
+    mcp_setup_url="https://developers.google.com/workspace/drive/api/guides/configure-mcp-server",
 )
 
 

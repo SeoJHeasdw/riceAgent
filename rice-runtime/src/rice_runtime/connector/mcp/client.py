@@ -93,11 +93,17 @@ class RemoteMcpClient:
         )
         error = resp.get("error")
         if error:
-            return ToolResult(call_id, ok=False, error=_stringify(error))
+            message = _stringify(error)
+            # 사용자 콘솔에서 원인 확정이 가능하도록 서버의 원문 오류를 남긴다 —
+            # httpx 의 상태줄 로그만으로는 PERMISSION_DENIED 사유를 알 수 없다.
+            log.warning("mcp tools/call %s returned error: %s", tool_name, message[:600])
+            return ToolResult(call_id, ok=False, error=message)
         result = resp.get("result", {})
         # MCP tools/call 규약: result.isError=True 면 도구 실행 자체가 실패한 것.
         if isinstance(result, dict) and result.get("isError"):
-            return ToolResult(call_id, ok=False, error=_stringify(result.get("content", result)))
+            message = _stringify(result.get("content", result))
+            log.warning("mcp tools/call %s failed (isError): %s", tool_name, message[:600])
+            return ToolResult(call_id, ok=False, error=message)
         return ToolResult(call_id, ok=True, result=result)
 
     # ── internals ─────────────────────────────────────────────────────────────
@@ -156,7 +162,18 @@ class RemoteMcpClient:
                 headers=self._headers(access_token),
                 timeout=60.0,
             )
-            resp.raise_for_status()
+            try:
+                resp.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                # Google 계열 서버는 4xx 본문에 진짜 사유(SERVICE_DISABLED,
+                # PERMISSION_DENIED, 활성화 URL 등)를 담는다. 상태줄만 남기면
+                # 사용자/진단 코드가 원인을 잃는다 — 본문을 보존해 승격한다.
+                body = exc.response.text.strip()
+                detail = f"MCP server returned HTTP {exc.response.status_code} for {method}"
+                if body:
+                    detail = f"{detail}: {body[:600]}"
+                log.warning("%s", detail)
+                raise RuntimeError(detail) from exc
             if capture_session:
                 sid = resp.headers.get("mcp-session-id")
                 if sid:

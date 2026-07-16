@@ -36,7 +36,7 @@ from rice_runtime.connector.service import ConnectorService
 from rice_runtime.core.errors import NotFoundError, ValidationError
 from rice_runtime.core.paths import RicePaths
 from rice_runtime.core.storage.sqlite import Database
-from rice_runtime.core.types import ToolCall
+from rice_runtime.core.types import ToolCall, ToolResult
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -116,6 +116,57 @@ class TestBeginConnect:
 
         assert oauth_start.state == "s1"
         assert oauth_start.connector_id
+
+    def test_reconnect_clears_previous_terminal_error_while_oauth_is_pending(self):
+        """error 행 재사용 시 이전 실패가 새 OAuth polling의 terminal 결과로 보이면 안 된다."""
+        self._db.execute(
+            "INSERT INTO connectors(id, connector_type, display_name, status, error_code, error_detail) "
+            "VALUES ('c1', 'gmail', 'Gmail', 'error', 'old.code', 'old failure')"
+        )
+        with patch(
+            "rice_runtime.connector.oauth.flow.OAuthFlow.build_auth_url",
+            return_value=("https://auth?state=s2", "s2", "v2"),
+        ):
+            result = self._svc._manager.begin_connect("gmail")
+        row = self._db.query_one("SELECT status, error_code, error_detail FROM connectors WHERE id='c1'")
+        assert result.connector_id == "c1"
+        assert row is not None and row["status"] == "disconnected"
+        assert row["error_code"] is None and row["error_detail"] is None
+
+    def test_new_attempt_invalidates_the_previous_pending_state(self):
+        """같은 connector를 다시 열면 닫힌 과거 브라우저의 state는 더 이상 유효하지 않다."""
+        with patch(
+            "rice_runtime.connector.oauth.flow.OAuthFlow.build_auth_url",
+            side_effect=[
+                ("https://auth?state=old", "old", "v-old"),
+                ("https://auth?state=new", "new", "v-new"),
+            ],
+        ):
+            first = self._svc._manager.begin_connect("gmail")
+            second = self._svc._manager.begin_connect("gmail")
+
+        rows = self._db.query_all(
+            "SELECT state, connector_id FROM oauth_pending_states ORDER BY state"
+        )
+        assert first.connector_id == second.connector_id
+        assert [(row["state"], row["connector_id"]) for row in rows] == [
+            ("new", second.connector_id)
+        ]
+
+    @pytest.mark.asyncio
+    async def test_manual_cancel_removes_pending_state_immediately(self):
+        with patch(
+            "rice_runtime.connector.oauth.flow.OAuthFlow.build_auth_url",
+            return_value=("https://auth?state=cancel", "cancel", "v-cancel"),
+        ):
+            start = await self._svc.begin_connect("gmail")
+
+        assert await self._svc.cancel_oauth(start.connector_id) is True
+        assert await self._svc.cancel_oauth(start.connector_id) is False
+        assert self._db.query_one(
+            "SELECT state FROM oauth_pending_states WHERE connector_id=?",
+            (start.connector_id,),
+        ) is None
 
 
 # ── 수용 기준 2: complete_oauth — state 검증 + 키체인 저장 + status=connected ───
@@ -205,8 +256,19 @@ class TestCompleteOAuth:
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=None)
 
+            # OAuth token exchange와 원격 MCP 검증 사이에는 connected가 아니라
+            # verifying이어야 한다. GET /connectors polling이 도구 없는 connected를
+            # 순간적으로 성공으로 오인했던 회귀를 잡는다.
+            observed_during_sync: list[str] = []
+            original_sync_tools = svc.sync_tools
+
+            async def sync_while_observing(connector_id: str) -> int:
+                observed_during_sync.append(svc.status(connector_id))
+                return await original_sync_tools(connector_id)
+
             with patch("rice_runtime.connector.credential.keychain.KeychainStore._keyring", return_value=self._mock_keyring), \
                  patch("rice_runtime.connector.oauth.flow.OAuthFlow._require_client_id"), \
+                 patch.object(svc, "sync_tools", side_effect=sync_while_observing), \
                  patch("httpx.AsyncClient", return_value=mock_client):
                 info = await svc.complete_oauth(code="valid_code", state="valid_state")
 
@@ -214,6 +276,7 @@ class TestCompleteOAuth:
         assert info.status == "connected"
         assert info.id == oauth_start.connector_id
         assert info.connected_at is not None
+        assert observed_during_sync == ["verifying"]
 
         # 키체인에 저장됐는지 확인 (AC-4: DB 에는 토큰이 없어야 함)
         access_key = ("rice", f"rice.connector.{oauth_start.connector_id}.access_token")
@@ -285,6 +348,58 @@ class TestCompleteOAuth:
             )
             with pytest.raises(ValidationError, match="state"):
                 await svc.complete_oauth(code="c", state="old_state")
+
+    @pytest.mark.asyncio
+    async def test_callback_returns_http_200_when_oauth_succeeds_but_mcp_probe_fails(self):
+        """후속 MCP/Cloud 검증 실패를 OAuth 프로토콜 실패(HTTP 400)로 기록하지 않는다."""
+        from rice_runtime.connector.interfaces import ConnectorInfo
+        from rice_runtime.server.routes.connectors import oauth_callback
+
+        info = ConnectorInfo(
+            id="gmail_1",
+            connector_type="gmail",
+            display_name="Gmail",
+            status="error",
+            error_code="connectors.mcp_service_permission_denied",
+            error_detail="Enable gmailmcp.googleapis.com and verify again.",
+        )
+        container = MagicMock()
+        container.connectors.complete_oauth = AsyncMock(return_value=info)
+
+        response = await oauth_callback(code="valid", state="valid", c=container)
+
+        assert response.status_code == 200
+        body = response.body.decode()
+        assert "Gmail 연결 확인 필요" in body
+        # 브라우저 페이지는 비개발자용 — 영문 원문 진단(IAM/서비스명)을 노출하지 않는다.
+        assert "gmailmcp.googleapis.com" not in body
+        assert "도구 사용 준비" in body
+
+    @pytest.mark.asyncio
+    async def test_provider_access_denied_callback_ends_polling_as_cancelled(self):
+        """Google 취소 버튼의 error callback을 DB terminal 상태로 남긴다."""
+        from rice_runtime.server.routes.connectors import oauth_callback
+
+        with patch(
+            "rice_runtime.connector.oauth.flow.OAuthFlow.build_auth_url",
+            return_value=("https://auth?state=denied", "denied", "v-denied"),
+        ):
+            svc = ConnectorService(self._db, self._paths)
+            start = await svc.begin_connect("gmail")
+
+        container = MagicMock()
+        container.connectors = svc
+        response = await oauth_callback(
+            state="denied", error="access_denied", c=container
+        )
+
+        assert response.status_code == 200
+        info = svc.get_connector(start.connector_id)
+        assert info is not None and info.status == "error"
+        assert info.error_code == "connectors.oauth_cancelled"
+        assert self._db.query_one(
+            "SELECT state FROM oauth_pending_states WHERE state='denied'"
+        ) is None
 
 
 # ── refresh token rotation — 갱신 응답의 새 refresh_token 채택 ─────────────────
@@ -623,6 +738,185 @@ class TestToolSurface:
             call = ToolCall(tool_name="gmail_search", arguments={"query": "test"})
             result = await self._svc.invoke(call)
         assert result.ok is False
+
+    @pytest.mark.asyncio
+    async def test_verify_detects_google_mcp_execution_permission_failure(self):
+        """tools/list 성공과 무관하게 read-only probe 거부를 error 상태+복구 안내로 남긴다."""
+        self._db.execute(
+            "INSERT INTO connectors(id, connector_type, display_name, status) "
+            "VALUES ('calendar_1', 'calendar', 'Google Calendar', 'connected')"
+        )
+        client = MagicMock()
+        client.call_tool = AsyncMock(return_value=ToolResult(
+            "health", ok=False,
+            error='[{"text":"The caller does not have permission","type":"text"}]',
+        ))
+        with patch.object(self._svc, "_access_token", AsyncMock(return_value="valid-token")), \
+             patch.object(self._svc, "_client_for", return_value=client):
+            result = await self._svc.verify_connector("calendar_1")
+
+        assert result["ok"] is False
+        assert result["code"] == "connectors.mcp_service_permission_denied"
+        assert "calendarmcp.googleapis.com" in result["error"]
+        info = self._svc.get_connector("calendar_1")
+        assert info is not None and info.status == "error"
+        assert info.error_code == "connectors.mcp_service_permission_denied"
+        assert info.setup_url and "configure-mcp-server" in info.setup_url
+        client.call_tool.assert_awaited_once_with(
+            "list_calendars", {}, "valid-token", "health-calendar_1"
+        )
+
+    @pytest.mark.asyncio
+    async def test_verify_success_clears_persisted_mcp_error(self):
+        """Cloud service를 활성화한 뒤 재검증하면 OAuth 재연결 없이 connected로 복구한다."""
+        self._db.execute(
+            "INSERT INTO connectors(id, connector_type, display_name, status, error_code, error_detail) "
+            "VALUES ('gmail_1', 'gmail', 'Gmail', 'error', "
+            "'connectors.mcp_service_permission_denied', 'enable service')"
+        )
+        client = MagicMock()
+        client.call_tool = AsyncMock(return_value=ToolResult("health", ok=True, result={"labels": []}))
+        with patch.object(self._svc, "_access_token", AsyncMock(return_value="valid-token")), \
+             patch.object(self._svc, "_client_for", return_value=client):
+            result = await self._svc.verify_connector("gmail_1")
+
+        assert result == {"ok": True}
+        info = self._svc.get_connector("gmail_1")
+        assert info is not None and info.status == "connected"
+        assert info.error_code is None and info.error_detail is None
+
+    @pytest.mark.asyncio
+    async def test_verify_classifies_http_error_body_from_transport(self):
+        """HTTP 403 본문(PERMISSION_DENIED)이 예외로 유실되지 않고 진단 코드로 분류된다."""
+        self._db.execute(
+            "INSERT INTO connectors(id, connector_type, display_name, status) "
+            "VALUES ('gmail_1', 'gmail', 'Gmail', 'connected')"
+        )
+        client = MagicMock()
+        client.call_tool = AsyncMock(side_effect=RuntimeError(
+            "MCP server returned HTTP 403 for tools/call: "
+            '{"error":{"code":403,"message":"The caller does not have permission",'
+            '"status":"PERMISSION_DENIED"}}'
+        ))
+        with patch.object(self._svc, "_access_token", AsyncMock(return_value="valid-token")), \
+             patch.object(self._svc, "_client_for", return_value=client):
+            result = await self._svc.verify_connector("gmail_1")
+
+        assert result["ok"] is False
+        assert result["code"] == "connectors.mcp_service_permission_denied"
+        info = self._svc.get_connector("gmail_1")
+        assert info is not None and info.status == "error"
+
+    def test_diagnose_classifies_service_disabled_and_scope_errors(self):
+        """SERVICE_DISABLED/scope 오류는 permission_denied 와 다른 복구 안내를 받는다."""
+        code, detail = self._svc._diagnose_mcp_failure(
+            "gmail",
+            "Gmail MCP API has not been used in project 1082091413989 before or it is disabled.",
+        )
+        assert code == "connectors.mcp_service_disabled"
+        assert "gmailmcp.googleapis.com" in detail
+
+        code, detail = self._svc._diagnose_mcp_failure(
+            "gmail", "Request had insufficient authentication scopes."
+        )
+        assert code == "connectors.mcp_scope_insufficient"
+        assert "Reconnect" in detail
+
+        # 분류 불가 오류는 원문 그대로 — 억지 분류로 잘못된 복구 안내를 내지 않는다.
+        code, detail = self._svc._diagnose_mcp_failure("gmail", "socket hang up")
+        assert code is None and detail == "socket hang up"
+
+    def test_client_for_google_type_sends_quota_project_header(self):
+        """Google MCP tools/call 요건인 x-goog-user-project 를 client_id 에서 파생해 붙인다."""
+        with patch.dict("os.environ", {
+            "RICE_GMAIL_CLIENT_ID": "1082091413989-abc.apps.googleusercontent.com",
+            "RICE_GMAIL_CLIENT_SECRET": "csecret",
+        }):
+            svc = ConnectorService(self._db, self._paths)
+            client = svc._client_for("conn_1", "gmail")
+        assert client._extra_headers.get("x-goog-user-project") == "1082091413989"
+
+    def test_client_for_non_google_type_omits_quota_project_header(self):
+        """Google 프로젝트 개념이 없는 client_id 면 헤더를 붙이지 않는다(오탐 방지)."""
+        with patch.dict("os.environ", {
+            "RICE_GMAIL_CLIENT_ID": "plain-client-id",
+            "RICE_GMAIL_CLIENT_SECRET": "csecret",
+        }):
+            svc = ConnectorService(self._db, self._paths)
+            client = svc._client_for("conn_1", "gmail")
+        assert "x-goog-user-project" not in client._extra_headers
+
+
+# ── 원격 MCP HTTP 오류 본문 보존 ────────────────────────────────────────────────
+
+class TestRemoteMcpHttpErrors:
+    @pytest.mark.asyncio
+    async def test_http_4xx_body_is_preserved_in_raised_error(self):
+        """상태줄('403 Forbidden')만 남던 기존 동작 대신 서버 본문을 예외에 싣는다."""
+        import httpx
+
+        from rice_runtime.connector.mcp.client import RemoteMcpClient
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                403,
+                json={"error": {"code": 403, "status": "PERMISSION_DENIED",
+                                "message": "The caller does not have permission"}},
+            )
+
+        client = RemoteMcpClient(
+            "https://gmailmcp.googleapis.com/mcp/v1",
+            transport=httpx.MockTransport(handler),
+        )
+        with pytest.raises(RuntimeError) as excinfo:
+            await client.call_tool("list_labels", {}, "token", "call-1")
+        message = str(excinfo.value)
+        assert "HTTP 403" in message
+        assert "PERMISSION_DENIED" in message
+
+
+# ── OAuth client 의 quota project 해석 ─────────────────────────────────────────
+
+class TestQuotaProjectResolution:
+    def test_project_id_from_client_json_wins(self, tmp_path):
+        """client_secret JSON 의 project_id 필드가 x-goog-user-project 의 정본이다."""
+        import json as _json
+
+        from rice_runtime.connector.oauth.flow import OAuthFlow
+        from rice_runtime.connector.registry import GMAIL_DESCRIPTOR
+
+        secret = tmp_path / "gmail_client_secret.json"
+        secret.write_text(_json.dumps({
+            "installed": {
+                "client_id": "999-abc.apps.googleusercontent.com",
+                "client_secret": "s",
+                "project_id": "rice-501004",
+            }
+        }), encoding="utf-8")
+        flow = OAuthFlow(GMAIL_DESCRIPTOR, connectors_dir=tmp_path)
+        assert flow.quota_project == "rice-501004"
+
+    def test_project_number_derived_from_google_client_id(self):
+        from rice_runtime.connector.oauth.flow import OAuthFlow
+        from rice_runtime.connector.registry import GMAIL_DESCRIPTOR
+
+        with patch.dict("os.environ", {
+            "RICE_GMAIL_CLIENT_ID": "1082091413989-xyz.apps.googleusercontent.com",
+            "RICE_GMAIL_CLIENT_SECRET": "s",
+        }):
+            flow = OAuthFlow(GMAIL_DESCRIPTOR)
+        assert flow.quota_project == "1082091413989"
+
+    def test_non_google_client_id_yields_none(self):
+        from rice_runtime.connector.oauth.flow import OAuthFlow
+        from rice_runtime.connector.registry import GMAIL_DESCRIPTOR
+
+        with patch.dict("os.environ", {
+            "RICE_GMAIL_CLIENT_ID": "not-a-google-id",
+            "RICE_GMAIL_CLIENT_SECRET": "s",
+        }):
+            flow = OAuthFlow(GMAIL_DESCRIPTOR)
+        assert flow.quota_project is None
 
 
 # ── 키체인 단위 테스트 ─────────────────────────────────────────────────────────

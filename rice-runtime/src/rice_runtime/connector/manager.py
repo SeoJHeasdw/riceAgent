@@ -2,7 +2,8 @@
 
 책임:
   - begin_connect: pending connector 레코드 생성 + OAuth URL 구성
-  - complete_oauth: code 교환 → 키체인 저장 → status='connected' 갱신
+  - complete_oauth: code 교환 → 키체인 저장 → status='verifying' 갱신
+    (실제 MCP read-only probe 성공 뒤 service가 connected로 확정)
   - delete: connector 레코드 삭제 + 키체인 항목 정리
 
 타입별 차이(지원 타입·표시명·OAuth 엔드포인트)는 registry.ConnectorDescriptor 에서 오고,
@@ -23,7 +24,7 @@ from .credential.keychain import KeychainStore
 from .custom_registry import CustomConnectorStore, resolve_descriptor, resolve_supported_types
 from .interfaces import ConnectorInfo, OAuthStart
 from .oauth.flow import OAuthFlow
-from .registry import descriptors
+from .registry import descriptors, get_descriptor
 
 log = logging.getLogger("rice.connector.manager")
 
@@ -79,11 +80,19 @@ class ConnectorManager:
         # 같은 타입의 재사용 가능한 레코드(연결 전 pending 또는 자격증명 오류로 재연결 대상)
         # 를 재사용 — 없으면 새로 생성. error 상태도 재사용해 재연결 시 중복 레코드를 막는다.
         existing = self._db.query_one(
-            "SELECT id FROM connectors WHERE connector_type=? AND status IN ('disconnected','error') LIMIT 1",
+            "SELECT id FROM connectors WHERE connector_type=? "
+            "AND status IN ('disconnected','verifying','error') LIMIT 1",
             (connector_type,),
         )
         if existing:
             connector_id = existing["id"]
+            # 재연결을 시작한 error 행이 그대로 error면 UI polling이 이전 실패를 새 OAuth
+            # 결과로 즉시 오인한다. pending 상태로 되돌리고 과거 진단을 비운다.
+            self._db.execute(
+                "UPDATE connectors SET status='disconnected', error_code=NULL, error_detail=NULL "
+                "WHERE id=?",
+                (connector_id,),
+            )
         else:
             connector_id = new_id("conn")
             self._db.execute(
@@ -97,6 +106,12 @@ class ConnectorManager:
         # code 자체의 통상 수명(수 분)보다 넉넉한 상한.
         self._db.execute(
             "DELETE FROM oauth_pending_states WHERE created_at < datetime('now','-15 minutes')"
+        )
+        # 한 connector에는 최신 브라우저 시도 하나만 유효하다. 이전 창을 닫고 다시
+        # 연결했을 때 과거 callback이 뒤늦게 새 시도를 덮어쓰는 것을 막는다.
+        self._db.execute(
+            "DELETE FROM oauth_pending_states WHERE connector_id=?",
+            (connector_id,),
         )
         self._db.execute(
             "INSERT OR REPLACE INTO oauth_pending_states(state, connector_id, code_verifier) "
@@ -145,8 +160,11 @@ class ConnectorManager:
 
         connected_at = now_iso()
         self._db.execute(
-            "UPDATE connectors SET status='connected', connected_at=?, last_verified_at=? WHERE id=?",
-            (connected_at, connected_at, connector_id),
+            # OAuth 토큰 교환 성공만으로 connected를 외부에 노출하지 않는다. service가
+            # tools/list 동기화 + 실제 read-only tool probe까지 성공시킨 뒤 connected로 바꾼다.
+            "UPDATE connectors SET status='verifying', connected_at=?, last_verified_at=NULL, "
+            "error_code=NULL, error_detail=NULL WHERE id=?",
+            (connected_at, connector_id),
         )
 
         expires_at_iso: str | None = None
@@ -172,6 +190,55 @@ class ConnectorManager:
         )
         return _row_to_info(updated)
 
+    def cancel_oauth(self, connector_id: str) -> bool:
+        """앱에서 OAuth 대기를 취소한다 — pending state만 폐기하고 계정 행은 유지한다.
+
+        시스템 브라우저 창 close는 Electron에 전달되지 않으므로 UI의 명시적 취소가 이
+        경로를 호출한다. 이미 callback이 state를 소비했다면 아무것도 건드리지 않는다.
+        """
+        pending = self._db.query_one(
+            "SELECT state FROM oauth_pending_states WHERE connector_id=? LIMIT 1",
+            (connector_id,),
+        )
+        self._db.execute(
+            "DELETE FROM oauth_pending_states WHERE connector_id=?",
+            (connector_id,),
+        )
+        return pending is not None
+
+    def reject_oauth(self, *, state: str, error: str) -> ConnectorInfo | None:
+        """OAuth provider가 callback으로 보낸 거부를 terminal error로 기록한다."""
+        pending = self._db.query_one(
+            "SELECT connector_id FROM oauth_pending_states "
+            "WHERE state=? AND created_at >= datetime('now','-15 minutes')",
+            (state,),
+        )
+        self._db.execute("DELETE FROM oauth_pending_states WHERE state=?", (state,))
+        if pending is None:
+            return None
+
+        connector_id = pending["connector_id"]
+        cancelled = error == "access_denied"
+        code = "connectors.oauth_cancelled" if cancelled else "connectors.oauth_authorization_failed"
+        detail = (
+            "OAuth authorization was cancelled in the browser."
+            if cancelled
+            else f"OAuth authorization failed ({error[:120]})."
+        )
+        # callback 성공 경로가 이미 verifying/connected로 진행됐다면 늦은 거부 응답으로
+        # 상태를 되돌리지 않는다. 정상 pending은 begin_connect가 disconnected로 둔다.
+        self._db.execute(
+            "UPDATE connectors SET status='error', error_code=?, error_detail=? "
+            "WHERE id=? AND status='disconnected'",
+            (code, detail, connector_id),
+        )
+        row = self._db.query_one(
+            "SELECT c.*, cc.scopes FROM connectors c "
+            "LEFT JOIN connector_credentials cc ON c.id=cc.connector_id WHERE c.id=?",
+            (connector_id,),
+        )
+        return _row_to_info(row) if row else None
+
     async def delete(self, connector_id: str) -> None:
         """connector 레코드 삭제 + 키체인 항목 정리 + 저장된 도구 권한 정리.
 
@@ -193,6 +260,7 @@ def _row_to_info(row) -> ConnectorInfo:
         except (json.JSONDecodeError, TypeError):
             scopes = ()
 
+    descriptor = get_descriptor(row["connector_type"]) if row is not None else None
     return ConnectorInfo(
         id=row["id"],
         connector_type=row["connector_type"],
@@ -201,4 +269,7 @@ def _row_to_info(row) -> ConnectorInfo:
         scopes=scopes,
         connected_at=row["connected_at"],
         last_verified_at=row["last_verified_at"],
+        error_code=row["error_code"] if "error_code" in row.keys() else None,
+        error_detail=row["error_detail"] if "error_detail" in row.keys() else None,
+        setup_url=descriptor.mcp_setup_url if descriptor else None,
     )

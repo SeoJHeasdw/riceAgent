@@ -27,6 +27,8 @@ export interface ProgressToastProps {
   progress?: number;
   /** 값이 바뀌면(초기값 제외) 즉시 퇴장 애니메이션을 시작 — 외부에서 닫을 때. */
   dismissSignal?: number;
+  /** tone=progress일 때 X가 화면뿐 아니라 실제 작업도 취소하도록 알린다. */
+  onCancel?: () => void;
   /** 퇴장 애니메이션이 끝난 뒤(또는 닫기 누른 뒤) 호출. */
   onDismiss?: () => void;
 }
@@ -85,6 +87,7 @@ export const ProgressToast: React.FC<ProgressToastProps> = ({
   tone,
   progress,
   dismissSignal = 0,
+  onCancel,
   onDismiss,
 }) => {
   const { t } = useTranslation('common');
@@ -162,7 +165,10 @@ export const ProgressToast: React.FC<ProgressToastProps> = ({
 
         {/* Dismiss / cancel */}
         <button
-          onClick={() => setLeaving(true)}
+          onClick={() => {
+            if (inProgress) onCancel?.();
+            setLeaving(true);
+          }}
           className="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-lg text-icon-secondary hover:bg-layer-hover-01 hover:text-text-primary transition-colors"
           aria-label={inProgress ? t('cancel') : t('close')}
         >

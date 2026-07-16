@@ -812,6 +812,14 @@ export interface Connector {
   update?: ConnectorUpdate;
   /** 토큰 만료·취소 등으로 자격증명이 무효해져 재연결이 필요한 상태(백엔드 status='error') */
   errored?: boolean;
+  /** 비개발자용 한 줄 요약(로케일) — 화면의 기본 오류 문구. */
+  errorDetail?: string;
+  /** 복구 동작 분류 — reconnect(OAuth 재연결), approval(제공자 승인 대기, 재연결 무의미),
+   *  check(원인 미상, 재검증 우선). 상태 태그·버튼 라벨이 이 값으로 갈린다. */
+  errorKind?: 'reconnect' | 'approval' | 'check';
+  /** 런타임이 기록한 원문 진단(영문, error_code 포함) — 접힌 "기술 정보"에서만 노출. */
+  errorTechnical?: string;
+  setupUrl?: string;
   /**
    * 백엔드 connectors 테이블에 실제 레코드가 있는 커넥터(GET /connectors 유래) — true 면
    * 미연결 상태에서도 "제거"(DELETE /connectors/{id})가 가능하다. 연결 가능 프리셋 카드·
