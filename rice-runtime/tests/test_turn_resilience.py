@@ -25,7 +25,15 @@ from rice_runtime.agent.providers.interfaces import ProviderCapabilities, Provid
 from rice_runtime.agent.providers.openai import OpenAIProvider
 from rice_runtime.agent.tool_dispatch import ToolDispatcher
 from rice_runtime.core.config import ProviderConfig
-from rice_runtime.core.errors import is_transient_provider_error
+from rice_runtime.core.errors import (
+    PROVIDER_AUTH_FAILED,
+    PROVIDER_MODEL_NOT_FOUND,
+    PROVIDER_OLLAMA_UNREACHABLE,
+    PROVIDER_QUOTA_EXCEEDED,
+    ProviderError,
+    classify_provider_error,
+    is_transient_provider_error,
+)
 from rice_runtime.core.types import Message, ToolSpec, TurnContext
 from rice_runtime.server.approval import ApprovalRegistry
 
@@ -50,6 +58,33 @@ class TestTransientErrorDetection:
         assert not is_transient_provider_error(Exception("invalid_request_error: bad tool schema"))
         # 상태 코드는 단어 경계 매칭 — 토큰 수 같은 무관한 숫자에 오탐하지 않는다.
         assert not is_transient_provider_error(Exception("prompt is too long: 500123 tokens > 200000"))
+
+
+class TestProviderErrorClassification:
+    @pytest.mark.parametrize(
+        ("message", "provider", "expected"),
+        [
+            ("401 Unauthorized: invalid API key", "openai", PROVIDER_AUTH_FAILED),
+            ("403 Forbidden", "claude", PROVIDER_AUTH_FAILED),
+            ("404 model not found", "ollama", PROVIDER_MODEL_NOT_FOUND),
+            ("model 'deleted-model' was not found", "ollama", PROVIDER_MODEL_NOT_FOUND),
+            ("model does not exist", "openai", PROVIDER_MODEL_NOT_FOUND),
+            ("429 Too Many Requests", "openai", PROVIDER_QUOTA_EXCEEDED),
+            ("insufficient_quota", "openai", PROVIDER_QUOTA_EXCEEDED),
+            ("connection refused", "ollama", PROVIDER_OLLAMA_UNREACHABLE),
+            ("read timed out", "ollama", PROVIDER_OLLAMA_UNREACHABLE),
+        ],
+    )
+    def test_actionable_provider_failures_have_stable_codes(self, message, provider, expected):
+        assert classify_provider_error(Exception(message), provider).code == expected
+
+    def test_unknown_provider_failure_keeps_generic_code(self):
+        error = classify_provider_error(Exception("400 invalid tool schema"), "openai")
+        assert error.code == "provider_error"
+
+    def test_preclassified_error_is_preserved(self):
+        original = ProviderError("missing model", code=PROVIDER_MODEL_NOT_FOUND)
+        assert classify_provider_error(original, "ollama") is original
 
 
 # ── AgentLoop transient 재시도 ────────────────────────────────────────────────

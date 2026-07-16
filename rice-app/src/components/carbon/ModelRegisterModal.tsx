@@ -1,19 +1,17 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import { Button, Icon, Modal } from '../ui';
-import { useToast } from '../../lib/toast/ToastContext';
 
 /**
  * ModelRegisterModal — provider-agnostic (모델, API 키) 등록 모달.
  *
- * ModelSettingsPanel에서 분리된 독립 컴포넌트. 폼 상태(provider/모델명/키/검증)는
+ * ModelSettingsPanel에서 분리된 독립 컴포넌트. 폼 상태(provider/모델명/키)는
  * 이 컴포넌트의 로컬 상태로 캡슐화하고, 결과만 onRegister 콜백으로 올려보낸다.
  *
- * 등록 흐름(게이트형):
+ * 등록 흐름:
  *   1. provider 선택 → 모델명 · API 키 입력
- *   2. "연결 테스트"로 키 검증 (선택이 아니라 필수 게이트)
- *   3. 테스트 통과 시에만 "등록" 활성화 — 비활성 상태에서 hover 시 안내 표시
- *   4. 등록 시 즉시 목록에 추가 후 닫힘 (인위적 지연·자동 닫힘 없음)
+ *   2. 필수 입력을 채우면 즉시 등록 가능
+ *   3. 실제 연결 오류는 첫 채팅 요청에서 provider 오류 코드로 안내
  */
 
 export interface RegisterPayload {
@@ -31,8 +29,6 @@ interface ProviderSpec {
   id: string;
   /** 브랜드명 라벨 (custom 제외 번역 대상 아님) */
   label: string;
-  /** 라이트한 형식 검증용 접두사 (없으면 검증 생략) */
-  keyPrefix: string;
   /** 빠른 선택용 모델명 제안 */
   suggestions: string[];
   /** Base URL 필드 노출 여부 */
@@ -45,21 +41,18 @@ const PROVIDERS: ProviderSpec[] = [
   {
     id: 'anthropic',
     label: 'Anthropic',
-    keyPrefix: 'sk-ant-',
     suggestions: ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
     baseUrl: 'none',
   },
   {
     id: 'openai',
     label: 'OpenAI',
-    keyPrefix: 'sk-',
     suggestions: ['gpt-4o', 'gpt-4o-mini', 'o3-mini'],
     baseUrl: 'optional',
   },
   {
     id: 'watsonx',
     label: 'IBM watsonx',
-    keyPrefix: '',
     suggestions: ['ibm/granite-3-8b-instruct', 'meta-llama/llama-3-3-70b-instruct'],
     baseUrl: 'required',
     needsProjectId: true,
@@ -67,18 +60,15 @@ const PROVIDERS: ProviderSpec[] = [
   {
     id: 'custom',
     label: 'OpenAI-compatible (Custom)',
-    keyPrefix: '',
     suggestions: [],
     baseUrl: 'required',
   },
 ];
 
-type TestState = 'idle' | 'testing' | 'ok' | 'fail';
-
 export interface ModelRegisterModalProps {
   open: boolean;
   onClose: () => void;
-  /** 테스트 통과 후 등록 확정 시 호출 */
+  /** 필수 입력을 채운 뒤 등록 확정 시 호출 */
   onRegister: (payload: RegisterPayload) => void;
   /** 특정 모델 카드의 "연결"에서 열 때, 제공자·모델명을 미리 채운다 */
   defaults?: { provider?: string; modelId?: string };
@@ -92,8 +82,6 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
   const [baseUrl, setBaseUrl] = useState('');
   const [projectId, setProjectId] = useState('');
   const [showKey, setShowKey] = useState(false);
-  const [test, setTest] = useState<TestState>('idle');
-  const toast = useToast();
 
   const provider = useMemo(
     () => PROVIDERS.find((p) => p.id === providerId) ?? PROVIDERS[0],
@@ -109,7 +97,6 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
       setBaseUrl('');
       setProjectId('');
       setShowKey(false);
-      setTest('idle');
     }
     // defaults는 열림 시점의 스냅샷만 사용 — open 토글에만 반응
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -126,36 +113,12 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
     trimmedId.length > 0 &&
     (!needsBaseUrl || trimmedBaseUrl.length > 0) &&
     (!needsProjectId || trimmedProjectId.length > 0);
-  const canTest = fieldsReady && test !== 'testing';
-  const canRegister = test === 'ok';
-
-  // provider / 입력값이 바뀌면 이전 테스트 결과는 무효
-  const invalidateTest = () => setTest((prev) => (prev === 'idle' ? prev : 'idle'));
+  const canRegister = fieldsReady;
 
   const handleProvider = (id: string) => {
     setProviderId(id);
     setBaseUrl('');
     setProjectId('');
-    invalidateTest();
-  };
-
-  const runTest = () => {
-    if (!canTest) return;
-    setTest('testing');
-    // 진척률 없는 작업 → indeterminate 진행률 토스트(progress 생략).
-    const job = toast.progress({
-      label: t('modelRegister.toastConnecting'),
-      sublabel: `${provider.label} · ${trimmedId}`,
-    });
-    // 프로토타입: 실제 네트워크 호출 없이 키 형식만 검증
-    window.setTimeout(() => {
-      const prefixOk = !provider.keyPrefix || trimmedKey.startsWith(provider.keyPrefix);
-      setTest(prefixOk ? 'ok' : 'fail');
-      job.done(
-        prefixOk ? 'success' : 'error',
-        prefixOk ? t('modelRegister.toastConnOk') : t('modelRegister.toastConnFail'),
-      );
-    }, 1000);
   };
 
   const handleRegister = () => {
@@ -184,48 +147,19 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
 
   const footer = (
     <div className="flex items-center justify-between w-full">
-      <Button kind="ghost" size="sm" onClick={onClose} disabled={test === 'testing'}>
+      <Button kind="ghost" size="sm" onClick={onClose}>
         {t('modelRegister.cancel')}
       </Button>
-      <div className="flex items-center gap-2">
-        <Button
-          kind="tertiary"
-          size="sm"
-          onClick={runTest}
-          loading={test === 'testing'}
-          disabled={!canTest}
-          icon={test !== 'testing' ? <Icon name="connect" size={14} /> : undefined}
-        >
-          {test === 'testing'
-            ? t('modelRegister.testingBtn')
-            : test === 'ok'
-              ? t('modelRegister.retestBtn')
-              : t('modelRegister.testBtn')}
-        </Button>
-        {/* 등록은 테스트 통과(게이트) 후에만 활성화 — 비활성 시 hover 안내 */}
-        <div className="relative group">
-          <Button kind="primary" size="sm" onClick={handleRegister} disabled={!canRegister} icon={<Icon name="check" size={14} />}>
-            {t('modelRegister.register')}
-          </Button>
-          {!canRegister && (
-            <div className="pointer-events-none absolute bottom-full right-0 mb-2 w-max max-w-[220px] px-2.5 py-1.5 rounded-md bg-text-primary text-text-inverse text-caption-01 shadow-elevation-2 opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-150">
-              {fieldsReady
-                ? t('modelRegister.gatePrimary')
-                : t('modelRegister.gateSecondary')}
-              <span className="absolute top-full right-4 -mt-px border-4 border-transparent border-t-text-primary" />
-            </div>
-          )}
-        </div>
-      </div>
+      <Button kind="primary" size="sm" onClick={handleRegister} disabled={!canRegister} icon={<Icon name="check" size={14} />}>
+        {t('modelRegister.register')}
+      </Button>
     </div>
   );
 
   return (
     <Modal
       open={open}
-      onClose={() => {
-        if (test !== 'testing') onClose();
-      }}
+      onClose={onClose}
       title={t('modelRegister.title')}
       size="sm"
       footer={footer}
@@ -266,10 +200,7 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
           <input
             type="text"
             value={modelId}
-            onChange={(e) => {
-              setModelId(e.target.value);
-              invalidateTest();
-            }}
+            onChange={(e) => setModelId(e.target.value)}
             placeholder={provider.suggestions[0] ?? t('modelRegister.modelIdPlaceholder')}
             className="w-full h-9 px-3 bg-field-01 text-text-primary font-mono text-body-short-01 border border-border-strong-01 rounded-lg outline-none transition-colors focus:border-focus focus:ring-1 focus:ring-focus placeholder:text-text-placeholder placeholder:font-sans"
           />
@@ -279,10 +210,7 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
                 <button
                   key={s}
                   type="button"
-                  onClick={() => {
-                    setModelId(s);
-                    invalidateTest();
-                  }}
+                  onClick={() => setModelId(s)}
                   className={`px-2 py-1 rounded-md font-mono text-caption-01 border transition-colors ${
                     modelId === s
                       ? 'border-interactive bg-layer-selected-01 text-text-primary'
@@ -305,7 +233,7 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
             <input
               type="text"
               value={projectId}
-              onChange={(e) => { setProjectId(e.target.value); invalidateTest(); }}
+              onChange={(e) => setProjectId(e.target.value)}
               placeholder={t('modelRegister.projectIdPlaceholder')}
               autoComplete="off"
               spellCheck={false}
@@ -323,7 +251,7 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
             <input
               type="text"
               value={baseUrl}
-              onChange={(e) => { setBaseUrl(e.target.value); invalidateTest(); }}
+              onChange={(e) => setBaseUrl(e.target.value)}
               placeholder={providerBaseUrlPlaceholder}
               autoComplete="off"
               spellCheck={false}
@@ -341,10 +269,7 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
             <input
               type={showKey ? 'text' : 'password'}
               value={apiKey}
-              onChange={(e) => {
-                setApiKey(e.target.value);
-                invalidateTest();
-              }}
+              onChange={(e) => setApiKey(e.target.value)}
               placeholder={providerKeyPlaceholder}
               autoComplete="off"
               spellCheck={false}
@@ -360,26 +285,6 @@ export const ModelRegisterModal: React.FC<ModelRegisterModalProps> = ({ open, on
               <Icon name={showKey ? 'view-off' : 'view'} size={16} />
             </button>
           </div>
-
-          {/* 테스트 결과 인라인 표시 */}
-          {test === 'testing' && (
-            <div className="flex items-center gap-2 mt-2 text-caption-01 text-text-secondary">
-              <span className="ia-spinner w-3.5 h-3.5" /> {t('modelRegister.testingInline')}
-            </div>
-          )}
-          {test === 'ok' && (
-            <div className="flex items-center gap-1.5 mt-2 text-caption-01 text-support-success">
-              <Icon name="check-circle" size={14} /> {t('modelRegister.testOk')}
-            </div>
-          )}
-          {test === 'fail' && (
-            <div className="flex items-center gap-1.5 mt-2 text-caption-01 text-support-error">
-              <Icon name="warning" size={14} filled />
-              {provider.keyPrefix
-                ? t('modelRegister.testFailPrefix', { prefix: provider.keyPrefix })
-                : t('modelRegister.testFailGeneric')}
-            </div>
-          )}
         </div>
 
         {/* 저장 위치 안내 */}

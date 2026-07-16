@@ -14,7 +14,7 @@ import { defaultModelSettings } from '../lib/mockData';
 import { RUN_SKILL_EVENT, NEW_CHAT_EVENT, openCommandPalette } from '../lib/commandBridge';
 import { api } from '../lib/api';
 import { sseClient } from '../lib/sse';
-import type { ApprovalMode, PatchTrigger, PendingApproval, PlanUpdatedEventData, ToolApprovalRequiredData, SkillPatchProposedData, MemoryWrittenEventData, SSEEvent } from '../lib/types';
+import type { ApprovalMode, PatchTrigger, PendingApproval, PlanUpdatedEventData, ToolApprovalRequiredData, SkillPatchProposedData, MemoryWrittenEventData, ErrorEventData, SSEEvent } from '../lib/types';
 import { CompanionCloudIcon, Icon, Kbd, ResizeHandle, ConfirmDialog, Tooltip, Toggle } from '../components/ui';
 import type { IconName } from '../components/ui/Icon';
 import { FileViewerProvider } from '../lib/fileViewer/FileViewerProvider';
@@ -1270,28 +1270,14 @@ function ChatScreen({ active = true }: { active?: boolean }) {
     if (!connected) return;
     let cancelled = false;
 
-    // 1) Restore model settings saved by PUT /settings, then health-check when local
-    void api.getSettings().then(async (res) => {
+    // 1) Restore model settings saved by PUT /settings. Provider/model validity is
+    // checked by the first real chat request so startup never performs a probe.
+    void api.getSettings().then((res) => {
       if (cancelled || !res.success) return;
       const data = res.data as RuntimeModelSettings;
       const prov = data?.provider;
       if (prov) {
         applyRuntimeModelSettings(data);
-
-        // Local 모드일 때만: 설정된 모델이 실제 Ollama에 남아 있는지 확인
-        if (prov.kind === 'ollama' && prov.model) {
-          const hc = await api.checkOllamaModelHealth();
-          if (cancelled) return;
-          if (!hc.success) {
-            toast.notify({ message: t('error.ollamaUnreachable'), variant: 'error' });
-          } else if (hc.data && !hc.data.exists) {
-            toast.notify({
-              message: t('error.ollamaModelMissing', { model: prov.model }),
-              variant: 'warning',
-              duration: 8000,
-            });
-          }
-        }
       }
     });
 
@@ -1936,8 +1922,26 @@ function ChatScreen({ active = true }: { active?: boolean }) {
       } else if (e.type === 'error') {
         sealAnswer(sessionId);
         finalizeThinking(sessionId);
-        const d = e.data as { message?: string };
-        pushAgentText(sessionId, t('error.turnError', { message: d.message ?? 'error' }));
+        const d = e.data as ErrorEventData;
+        const providerMessage = (() => {
+          switch (d.error_code) {
+            case 'provider.ollama_unreachable':
+              return t('error.ollamaUnreachable');
+            case 'provider.model_not_found':
+              return t('error.modelNotFound');
+            case 'provider.auth_failed':
+              return t('error.providerAuthFailed');
+            case 'provider.quota_exceeded':
+              return t('error.providerQuotaExceeded');
+            default:
+              return null;
+          }
+        })();
+        if (providerMessage) {
+          toast.notify({ message: providerMessage, variant: 'error', duration: 8000 });
+        } else {
+          pushAgentText(sessionId, t('error.turnError', { message: d.message ?? 'error' }));
+        }
         finishLiveTurn(sessionId, requestId);
       }
     },
@@ -1945,7 +1949,11 @@ function ChatScreen({ active = true }: { active?: boolean }) {
       if (turnRequestRef.current !== requestId) return;
       sealAnswer(sessionId);
       finalizeThinking(sessionId);
-      pushAgentText(sessionId, t('error.connectionError', { message: msg }));
+      toast.notify({
+        message: t('error.runtimeConnectionFailed', { message: msg }),
+        variant: 'error',
+        duration: 8000,
+      });
       finishLiveTurn(sessionId, requestId);
     },
     onClose: () => {

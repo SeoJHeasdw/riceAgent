@@ -29,7 +29,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from ...core.config import ProviderConfig
-from ...core.errors import ProviderError
+from ...core.errors import ProviderError, classify_provider_error
 from ...core.types import IMAGES_METADATA_KEY, Message, ToolCall, ToolSpec
 from .interfaces import ILLMProvider, ProviderCapabilities, ProviderChunk
 from .ollama_lifecycle import OllamaLifecycleManager, OllamaModelKey
@@ -312,7 +312,7 @@ class OllamaProvider(ILLMProvider):
             try:
                 item = await self._post_chat(payload)
             except Exception as exc:
-                raise ProviderError(f"ollama post failed: {exc}") from exc
+                raise classify_provider_error(exc, self.name) from exc
             content = (item.get("message") or {}).get("content") or ""
             if not content and item.get("done_reason") == "length":
                 # Confirmed signature of a reasoning-mandatory model eating the
@@ -324,7 +324,7 @@ class OllamaProvider(ILLMProvider):
                 try:
                     item = await self._post_chat(payload)
                 except Exception as exc:
-                    raise ProviderError(f"ollama post retry failed: {exc}") from exc
+                    raise classify_provider_error(exc, self.name) from exc
                 content = (item.get("message") or {}).get("content") or ""
             if content:
                 yield ProviderChunk(kind="text", text=content)
@@ -389,7 +389,7 @@ class OllamaProvider(ILLMProvider):
         except ProviderError:
             raise
         except Exception as exc:  # pragma: no cover - exercised via mocks in tests
-            raise ProviderError(f"ollama stream failed: {exc}") from exc
+            raise classify_provider_error(exc, self.name) from exc
 
         if not yielded_done:
             yield ProviderChunk(kind="done", stop_reason="error")

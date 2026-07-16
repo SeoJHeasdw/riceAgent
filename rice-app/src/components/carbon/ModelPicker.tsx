@@ -175,7 +175,7 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({
     );
   };
 
-  // 모델 등록: 테스트를 통과한 (provider, modelId, apiKey)를 목록에 반영하고 선택
+  // 모델 등록: 필수 입력을 채운 (provider, modelId, apiKey)를 목록에 반영하고 선택
   const handleRegister = (payload: RegisterPayload) => {
     setLocalSettings((s) => ({
       ...s,

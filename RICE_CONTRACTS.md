@@ -117,7 +117,7 @@ Electron main process
 6. `memory_written` - 메모리 저장됨 (memory_type, content)
 7. `skill_patched` - 스킬 개선 **또는 신규 생성** 적용됨 (skill_id, version) — LEARNING_LOOP 5.2·§4. `version === 1`이면 신규 생성이었다는 뜻 — 클라이언트는 로컬 목록에 해당 skill_id가 없으면 갱신이 아니라 **추가**해야 한다.
 8. `done` - 응답 완료
-9. `error` - 오류 발생 (error_code, message)
+9. `error` - 오류 발생 (error_code, message). 모델 호출의 사용자 조치 가능 오류는 `provider.ollama_unreachable`·`provider.model_not_found`·`provider.auth_failed`·`provider.quota_exceeded` 네 안정 코드로 전달한다.
 
 > **`tool_call` bridge 표현 계약**: abort 없이 결과까지 도달한 bridge 실행은 public
 > SSE에서 wrapper의 outer `tool_call_id`를 유지한 요청 대상 이름·인자의 `tool_call`

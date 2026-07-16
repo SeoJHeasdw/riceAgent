@@ -472,9 +472,6 @@ class ApiClient {
     return this.get('/ollama/models');
   }
   /** 현재 설정된 모델 하나만 설치 여부 확인 (local 모드 전용) */
-  checkOllamaModelHealth(): Promise<ApiResponse<{ exists: boolean; model: string }>> {
-    return this.get('/ollama/health');
-  }
   getSettings(): Promise<ApiResponse> {
     return this.get('/settings');
   }

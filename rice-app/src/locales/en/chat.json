@@ -340,9 +340,12 @@
   "error": {
     "turnError": "⚠️ Error: {{message}}",
     "connectionError": "⚠️ Connection error: {{message}}",
+    "runtimeConnectionFailed": "Could not connect to the RICE runtime. Check that the app is running, then try again. ({{message}})",
     "sessionCreateFailed": "⚠️ Failed to create runtime session: {{message}}",
     "ollamaUnreachable": "Cannot reach Ollama. Please check your endpoint.",
-    "ollamaModelMissing": "Model \"{{model}}\" is not available in Ollama. Open model settings to choose another.",
+    "modelNotFound": "The configured model could not be found. Choose another model in settings or install it.",
+    "providerAuthFailed": "The API key is invalid or lacks permission. Check the API key and permissions in model settings.",
+    "providerQuotaExceeded": "The model usage limit has been reached. Check the provider usage or billing status.",
     "patchExpired": "⏳ Card expired — moved to proposals · decide in the learning panel",
     "memoryQuarantined": "🔒 Memory from external content quarantined · approve or delete in the learning panel: {{content}}",
     "memoryFact": "Fact remembered",

@@ -87,6 +87,106 @@ class ProviderError(RiceError):
     http = 502
 
 
+# 채팅 UI가 사용자의 다음 행동을 정확히 안내할 수 있는 provider 실패 코드.
+# provider SDK/httpx 예외 타입은 어댑터마다 다르므로, 네트워크 경계에서 아래의
+# 안정 코드로 정규화한 뒤 SSE까지 그대로 보존한다.
+PROVIDER_OLLAMA_UNREACHABLE = "provider.ollama_unreachable"
+PROVIDER_MODEL_NOT_FOUND = "provider.model_not_found"
+PROVIDER_AUTH_FAILED = "provider.auth_failed"
+PROVIDER_QUOTA_EXCEEDED = "provider.quota_exceeded"
+
+
+def _provider_status_code(exc: BaseException) -> int | None:
+    """SDK/httpx 예외에서 HTTP status를 라이브러리 결합 없이 꺼낸다."""
+
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None) or getattr(exc, "status_code", None)
+    if isinstance(status, int):
+        return status
+
+    match = re.search(r"(?<!\d)(401|402|403|404|429)(?!\d)", str(exc))
+    return int(match.group(1)) if match else None
+
+
+def classify_provider_error(exc: BaseException, provider: str) -> ProviderError:
+    """Provider 경계의 원시 예외를 사용자 조치가 가능한 네 분류로 정규화한다.
+
+    분류하지 못한 400/5xx/프로토콜 오류는 기존 ``provider_error``로 남긴다.
+    메시지는 진단 로그용으로 보존하고 UI는 안정적인 ``code``만 사용한다.
+    """
+
+    if isinstance(exc, ProviderError) and exc.code != ProviderError.code:
+        return exc
+
+    status = _provider_status_code(exc)
+    text = str(exc).lower()
+
+    if status in {401, 403} or any(
+        marker in text
+        for marker in (
+            "unauthorized",
+            "forbidden",
+            "authentication_error",
+            "authentication failed",
+            "invalid api key",
+            "invalid_api_key",
+            "incorrect api key",
+        )
+    ):
+        code = PROVIDER_AUTH_FAILED
+    elif status in {402, 429} or any(
+        marker in text
+        for marker in (
+            "rate limit",
+            "rate_limit",
+            "too many requests",
+            "insufficient_quota",
+            "quota exceeded",
+            "usage limit",
+            "credit balance",
+            "billing limit",
+            "payment required",
+        )
+    ):
+        code = PROVIDER_QUOTA_EXCEEDED
+    elif status == 404 or re.search(
+        r"\bmodel\b.{0,80}\b(?:not found|does not exist|was not found)\b", text
+    ) or any(
+        marker in text
+        for marker in (
+            "model not found",
+            "model_not_found",
+            "model does not exist",
+            "model was not found",
+            "no such model",
+        )
+    ):
+        code = PROVIDER_MODEL_NOT_FOUND
+    elif provider == "ollama" and (
+        (status is not None and status >= 500)
+        or any(
+            marker in text
+            for marker in (
+                "connection refused",
+                "connection reset",
+                "connect error",
+                "connection error",
+                "network is unreachable",
+                "name or service not known",
+                "timed out",
+                "timeout",
+                "peer closed connection",
+                "incomplete chunked read",
+            )
+        )
+    ):
+        code = PROVIDER_OLLAMA_UNREACHABLE
+    else:
+        code = ProviderError.code
+
+    return ProviderError(f"{provider} request failed: {exc}", code=code)
+
+
 class AbortedError(RiceError):
     """Turn cancelled via POST /sessions/{id}/abort."""
 

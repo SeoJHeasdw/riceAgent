@@ -17,7 +17,7 @@ from collections.abc import AsyncIterable, AsyncIterator, Sequence
 from typing import Any
 
 from ...core.config import ProviderConfig
-from ...core.errors import ProviderError
+from ...core.errors import ProviderError, classify_provider_error
 from ...core.types import Message, ToolSpec
 from . import _openai_compat as oai
 from .interfaces import ILLMProvider, ProviderCapabilities, ProviderChunk
@@ -91,4 +91,4 @@ class OpenAIProvider(ILLMProvider):
         except ProviderError:
             raise
         except Exception as exc:  # pragma: no cover - exercised via mocks in tests
-            raise ProviderError(f"openai stream failed: {exc}") from exc
+            raise classify_provider_error(exc, self.name) from exc

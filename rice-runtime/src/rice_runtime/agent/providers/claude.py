@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ...core.config import ProviderConfig
-from ...core.errors import ProviderError
+from ...core.errors import ProviderError, classify_provider_error
 from ...core.types import IMAGES_METADATA_KEY, Message, ToolCall, ToolSpec
 from .interfaces import ILLMProvider, ProviderCapabilities, ProviderChunk
 
@@ -319,7 +319,7 @@ class ClaudeProvider(ILLMProvider):
         except ProviderError:
             raise
         except Exception as exc:  # pragma: no cover - exercised via mocks in tests
-            raise ProviderError(f"claude stream failed: {exc}") from exc
+            raise classify_provider_error(exc, self.name) from exc
 
         if not yielded_done:
             yield ProviderChunk(kind="done", stop_reason="error")

@@ -60,6 +60,7 @@ from typing import AsyncIterator, Callable
 
 from ..connector.interfaces import IConnectorService
 from ..core.config import Config, ConfigStore, ContextConfig
+from ..core.errors import RiceError
 from ..core.paths import WorkspaceLocation
 from ..core.types import (
     ApprovalMode,
@@ -474,7 +475,10 @@ class Orchestrator:
                 ):
                     yield event
 
-        except Exception as exc:  # any failure → one terminal error event
+        except RiceError as exc:
+            log.exception("turn failed for session %s", session_id)
+            yield ev_error(exc.code, exc.message)
+        except Exception as exc:  # any unclassified failure → one terminal error event
             log.exception("turn failed for session %s", session_id)
             yield ev_error("turn_failed", str(exc))
         finally:

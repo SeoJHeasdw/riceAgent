@@ -340,9 +340,12 @@
   "error": {
     "turnError": "⚠️ 오류: {{message}}",
     "connectionError": "⚠️ 연결 오류: {{message}}",
+    "runtimeConnectionFailed": "RICE 런타임에 연결할 수 없어요. 앱 실행 상태를 확인한 뒤 다시 시도하세요. ({{message}})",
     "sessionCreateFailed": "⚠️ 런타임 세션 생성 실패: {{message}}",
     "ollamaUnreachable": "Ollama에 연결할 수 없어요. 엔드포인트를 확인하세요.",
-    "ollamaModelMissing": "설정된 모델 \"{{model}}\"이 Ollama에 없어요. 모델 설정을 열어 다시 선택하세요.",
+    "modelNotFound": "설정된 모델을 찾을 수 없어요. 모델 설정에서 다시 선택하거나 모델을 설치하세요.",
+    "providerAuthFailed": "API 키가 올바르지 않거나 권한이 없어요. 모델 설정에서 API 키와 권한을 확인하세요.",
+    "providerQuotaExceeded": "모델 사용 한도에 도달했어요. 제공자의 사용량 또는 결제 상태를 확인하세요.",
     "patchExpired": "⏳ 카드가 만료되어 제안함으로 이동했어요 · 학습 패널에서 결정할 수 있습니다",
     "memoryQuarantined": "🔒 외부 콘텐츠 유래 메모리 격리됨 · 학습 패널에서 승인/삭제: {{content}}",
     "memoryFact": "사실 기억됨",

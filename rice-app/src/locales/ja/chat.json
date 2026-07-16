@@ -340,9 +340,12 @@
   "error": {
     "turnError": "⚠️ エラー: {{message}}",
     "connectionError": "⚠️ 接続エラー: {{message}}",
+    "runtimeConnectionFailed": "RICEランタイムに接続できません。アプリの実行状態を確認してから、もう一度お試しください。（{{message}}）",
     "sessionCreateFailed": "⚠️ ランタイムセッションの作成に失敗しました: {{message}}",
     "ollamaUnreachable": "Ollamaに接続できません。エンドポイントを確認してください。",
-    "ollamaModelMissing": "モデル「{{model}}」はOllamaで利用できません。モデル設定を開いて別のものを選択してください。",
+    "modelNotFound": "設定されたモデルが見つかりません。モデル設定で選び直すか、モデルをインストールしてください。",
+    "providerAuthFailed": "APIキーが無効か、権限がありません。モデル設定でAPIキーと権限を確認してください。",
+    "providerQuotaExceeded": "モデルの使用上限に達しました。プロバイダーの使用量または支払い状況を確認してください。",
     "patchExpired": "⏳ カードが期限切れ — 提案に移動しました · 学習パネルで決定してください",
     "memoryQuarantined": "🔒 外部コンテンツからのメモリが隔離されました · 学習パネルで承認または削除してください: {{content}}",
     "memoryFact": "事実を記憶しました",
