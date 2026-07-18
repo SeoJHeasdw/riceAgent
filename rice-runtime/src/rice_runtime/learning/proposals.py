@@ -28,6 +28,10 @@ MAX_CHANGELOG_CHARS = 200
 MAX_DESCRIPTION_CHARS = 1_000
 MAX_TAGS = 5
 MAX_TAG_CHARS = 80
+# candidate 평가(§10.6)의 held-out 과제 원천 상한 — 사용자 발화라 시크릿 scrub 을
+# 반드시 거치고, 평가 프롬프트 예산을 위해 개수/길이를 여기서 한 번에 묶는다.
+MAX_SEED_PROMPTS = 3
+MAX_SEED_PROMPT_CHARS = 600
 EXTERNAL_CONTENT_REVIEW_WARNING = "external_content_review"
 # 매개변수가 있는 warning은 "코드:값" 형태로 싣는다 — 로케일 문장으로 푸는 것은
 # 프론트(learningWarnings.ts)의 몫. 런타임이 자연어를 합성하면 UI 언어와 어긋난다.
@@ -100,6 +104,23 @@ def sanitize_metadata(
     return description, tags, changelog, labels
 
 
+def sanitize_seed_prompts(prompts) -> tuple[str, ...]:
+    """held-out 평가 seed 정규화 — scrub·길이·개수 상한. 어떤 경로(리뷰 엔진,
+    미드턴 스테이징, 구형 payload 복원)로 오든 영속 전에 여기를 거친다."""
+    cleaned: list[str] = []
+    for raw in prompts or ():
+        text = " ".join(str(raw).split())[:MAX_SEED_PROMPT_CHARS]
+        if not text:
+            continue
+        text, _ = skill_guard.scrub_secrets(text)
+        text = text[:MAX_SEED_PROMPT_CHARS]
+        if text and text not in cleaned:
+            cleaned.append(text)
+        if len(cleaned) >= MAX_SEED_PROMPTS:
+            break
+    return tuple(cleaned)
+
+
 def _build_warnings(
     body: str,
     scrubbed_labels: list[str],
@@ -131,6 +152,7 @@ def make_create_proposal(
     max_body_chars: int = skill_guard.DEFAULT_MAX_BODY_CHARS,
     derived_from_external: bool = False,
     evidence_message_ids: tuple[str, ...] = (),
+    seed_prompts: tuple[str, ...] = (),
 ) -> PatchProposal | None:
     """신규 스킬 제안(from_version=0). 이름 규약(kebab)·크기·시크릿 가드를 여기서
     일괄 적용한다. 이름이 규약 위반이면 None — LLM/에이전트가 이상한 이름을 주는
@@ -168,6 +190,7 @@ def make_create_proposal(
         ),
         derived_from_external=derived_from_external,
         evidence_message_ids=evidence_message_ids,
+        seed_prompts=sanitize_seed_prompts(seed_prompts),
     )
 
 
@@ -200,6 +223,7 @@ def make_patch_proposal(
     evidence_message_ids: tuple[str, ...] = (),
     new_description: str | None = None,
     new_tags: tuple[str, ...] | None = None,
+    seed_prompts: tuple[str, ...] = (),
 ) -> PatchProposal | None:
     """기존 스킬 개선 제안. 실질 변경이 없으면(diff 빈 줄 + 메타데이터 변경 없음)
     None — 빈 제안 카드로 사용자를 방해하지 않는다.
@@ -249,6 +273,7 @@ def make_patch_proposal(
         evidence_message_ids=evidence_message_ids,
         new_description=desc_change,
         new_tags=tags_change,
+        seed_prompts=sanitize_seed_prompts(seed_prompts),
     )
 
 
@@ -271,4 +296,5 @@ def proposal_to_payload(p: PatchProposal) -> dict:
         "evidence_message_ids": list(p.evidence_message_ids),
         "new_description": p.new_description,
         "new_tags": list(p.new_tags) if p.new_tags is not None else None,
+        "seed_prompts": list(p.seed_prompts),
     }

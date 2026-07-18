@@ -324,6 +324,11 @@ class EventType(str, Enum):
     MESSAGE = "message"
     MEMORY_WRITTEN = "memory_written"
     SKILL_PATCHED = "skill_patched"
+    # 승인이 즉시 적용 대신 candidate 격리로 귀결됨 (LEARNING_LOOP §10.6,
+    # candidate_eval_enabled). 순수 추가 이벤트 — 구형 클라이언트는 무시한다
+    # (sse.ts 는 미지 타입을 드랍). 이후의 승격/폐기는 백그라운드에서 일어나므로
+    # SSE 가 아니라 GET /skills/candidates·GET /learning/events 로 관찰한다.
+    SKILL_CANDIDATE_STAGED = "skill_candidate_staged"
     DONE = "done"
     ERROR = "error"
     # control events (carry approval_id — out-of-band HITL, CONTRACTS §1.2)
@@ -400,6 +405,19 @@ def ev_memory_written(
 
 def ev_skill_patched(skill_id: str, version: int) -> SSEEvent:
     return SSEEvent(EventType.SKILL_PATCHED, {"skill_id": skill_id, "version": version})
+
+
+def ev_skill_candidate_staged(
+    skill_id: str, candidate_id: str, baseline_version: int
+) -> SSEEvent:
+    return SSEEvent(
+        EventType.SKILL_CANDIDATE_STAGED,
+        {
+            "skill_id": skill_id,
+            "candidate_id": candidate_id,
+            "baseline_version": baseline_version,
+        },
+    )
 
 
 def ev_done() -> SSEEvent:

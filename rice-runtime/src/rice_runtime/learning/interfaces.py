@@ -112,11 +112,30 @@ class PatchProposal:
     # 생성됨" 경고를 띄워, 학습이 마술처럼 보이지 않고 감사 가능해진다.
     derived_from_external: bool = False
     evidence_message_ids: tuple[str, ...] = ()
+    # candidate 평가(§10.6)의 held-out 과제 원천 — 제안을 낳은 구간의 실제 사용자
+    # 발화(시크릿 scrub·길이 제한 후). 카드/diff 렌더링과 무관한 평가 전용
+    # 메타데이터라 SSE payload 에는 싣지 않고 제안함 payload 에는 실린다(제안함
+    # 경유 승인도 같은 평가를 받아야 하므로). 빈 튜플 = 평가 시 paraphrase 생성만.
+    seed_prompts: tuple[str, ...] = ()
 
 
 # An effect is either an immediate notification (memory) or a proposal that the
 # orchestrator must gate through HITL (skill create/patch). PEP 695 alias (3.12+).
 type LearningEffect = MemoryWritten | PatchProposal
+
+
+@dataclass(frozen=True)
+class CandidateStaged:
+    """승인이 즉시 적용 대신 candidate 격리로 귀결됐음을 나타내는 결과
+    (LEARNING_LOOP §10.6, `candidate_eval_enabled` 켜짐). `resolve_proposal` 이
+    approve 에서 버전 번호 대신 이것을 반환하면 스킬 파일은 아직 불변이고,
+    백그라운드 평가가 baseline 과 비교해 통과해야 실제 버전이 생긴다.
+    effect_surfacing 은 이를 `skill_patched` 가 아니라 `skill_candidate_staged`
+    SSE 로 서피싱한다 — "적용됨"과 "평가 대기"는 다른 사건이다."""
+
+    candidate_id: str
+    skill_id: str
+    baseline_version: int  # 0 = 신규 생성(baseline 없음)
 
 
 # ── management DTOs (UI-facing, served by routes) ────────────────────────────
@@ -315,10 +334,15 @@ class ILearningService(Protocol):
         session_id: str,
         decision: str,
         edited_body: str | None = None,
-    ) -> int | None:
+    ) -> int | CandidateStaged | None:
         """파킹된 PatchProposal의 HITL 결정 처리 — apply_patch를 감싸며 (1) 결정을
         ledger에 기록하고(메타학습 원천), (2) timeout이면 폐기 대신 제안함
-        (skill_suggestions)으로 옮긴다. approve면 새 버전 번호, 그 외 None."""
+        (skill_suggestions)으로 옮긴다. approve면 새 버전 번호, 그 외 None.
+
+        §10.6 (sanctioned widening): `candidate_eval_enabled` 가 켜져 있으면
+        approve 가 즉시 적용 대신 candidate 격리로 귀결되고 `CandidateStaged` 를
+        반환한다 — 스킬 파일은 백그라운드 baseline-vs-candidate 평가 통과 전까지
+        불변이다. 기존 호출자의 `is not None` 검사는 그대로 유효하다."""
         ...
 
     # ── suggestion inbox (Self-Improvement v3) ───────────────────────────────
@@ -333,6 +357,33 @@ class ILearningService(Protocol):
         """제안함 항목 승인/거부 (POST /skills/suggestions/{id}/decision). 승인 시
         kind에 따라 apply_patch(create/patch) 또는 decide_archive(archive)로 적용.
         반환: {"applied": bool, "version": int | None}."""
+        ...
+
+    # ── candidate 승격 게이트 (LEARNING_LOOP §10.6) ───────────────────────────
+    def list_candidates(self, limit: int = 50) -> list[dict]:
+        """candidate 목록 (GET /skills/candidates) — 미결(pending/running) 우선,
+        그 다음 최근 결정 순. 각 항목은 skill_candidates 행(payload·report 포함)."""
+        ...
+
+    async def evaluate_candidate(self, candidate_id: str) -> dict:
+        """candidate 1건을 지금 평가한다 (POST /skills/candidates/{id}/evaluate —
+        수동 트리거; 백그라운드 드레인은 run_pending_candidate_evals). 평가 통과
+        시 승격(apply_patch 실행)까지 이 호출 안에서 끝난다. 반환: 갱신된
+        candidate 행. 없는/이미 결정된 candidate 면 NotFoundError, 평가 인프라
+        실패는 재시도 계약(attempts)으로 처리되고 상태가 pending/failed 로 남는다."""
+        ...
+
+    def decide_candidate(self, candidate_id: str, *, approved: bool) -> dict:
+        """candidate 수동 결정 (POST /skills/candidates/{id}/decision) — 평가를
+        기다리지 않고 사용자가 직접 승격(approved=True → 즉시 apply_patch) 또는
+        폐기한다. 스킬은 사용자 소유이므로 평가 게이트는 사용자를 이길 수 없다
+        — provider 오프라인·평가 실패 시의 탈출구이기도 하다. 반환:
+        {"applied": bool, "version": int | None, "status": str}."""
+        ...
+
+    async def run_pending_candidate_evals(self, limit: int = 1) -> int:
+        """pending candidate 를 최대 limit 건 평가한다 (server/scheduler.py 주기
+        호출). 반환: 처리 건수(평가 완료 — 승격/폐기/재시도 소진 포함)."""
         ...
 
     async def discover(self, digests: list) -> list[dict]:

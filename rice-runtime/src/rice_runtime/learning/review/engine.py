@@ -356,9 +356,19 @@ class ReviewEngine:
             log.exception("review LLM call failed for session %s", session_id)
             raise ReviewLLMError(f"review LLM call failed ({origin}): {exc}") from exc
 
+        # candidate 평가(§10.6)의 held-out 과제 원천 — 리뷰가 본 구간의 실제 사용자
+        # 발화(최근 것 우선). 정규화/scrub 은 proposal 빌더(sanitize_seed_prompts)가
+        # 최종 적용한다.
+        seed_prompts = tuple(
+            m.content for m in review_history if m.role == "user" and m.content.strip()
+        )[-3:]
+
         effects: list[LearningEffect] = []
         for call in calls:
-            effect = self._to_effect(session_id, call, external=external, evidence_ids=evidence_ids)
+            effect = self._to_effect(
+                session_id, call, external=external, evidence_ids=evidence_ids,
+                seed_prompts=seed_prompts,
+            )
             if effect is None:
                 continue
             if isinstance(effect, PatchProposal):
@@ -485,19 +495,29 @@ class ReviewEngine:
         *,
         external: bool = False,
         evidence_ids: tuple[str, ...] = (),
+        seed_prompts: tuple[str, ...] = (),
     ) -> LearningEffect | None:
         args = call.arguments if isinstance(call.arguments, dict) else {}
         if call.tool_name == "propose_skill_create":
-            return self._skill_create_effect(args, external=external, evidence_ids=evidence_ids)
+            return self._skill_create_effect(
+                args, external=external, evidence_ids=evidence_ids, seed_prompts=seed_prompts
+            )
         if call.tool_name == "propose_skill_patch":
-            return self._skill_patch_effect(args, external=external, evidence_ids=evidence_ids)
+            return self._skill_patch_effect(
+                args, external=external, evidence_ids=evidence_ids, seed_prompts=seed_prompts
+            )
         if call.tool_name == "propose_memory_write":
             return self._memory_effect(session_id, args, external=external, evidence_ids=evidence_ids)
         log.warning("review engine: unknown tool call %r", call.tool_name)
         return None
 
     def _skill_create_effect(
-        self, args: dict, *, external: bool = False, evidence_ids: tuple[str, ...] = ()
+        self,
+        args: dict,
+        *,
+        external: bool = False,
+        evidence_ids: tuple[str, ...] = (),
+        seed_prompts: tuple[str, ...] = (),
     ) -> PatchProposal | None:
         name = str(args.get("name") or "").strip()
         body = str(args.get("body") or "")
@@ -529,10 +549,16 @@ class ReviewEngine:
             max_body_chars=self._max_body_chars,
             derived_from_external=external,
             evidence_message_ids=evidence_ids,
+            seed_prompts=seed_prompts,
         )
 
     def _skill_patch_effect(
-        self, args: dict, *, external: bool = False, evidence_ids: tuple[str, ...] = ()
+        self,
+        args: dict,
+        *,
+        external: bool = False,
+        evidence_ids: tuple[str, ...] = (),
+        seed_prompts: tuple[str, ...] = (),
     ) -> PatchProposal | None:
         skill_id = str(args.get("skill_id") or "").strip()
         new_body = str(args.get("new_body") or "")
@@ -563,6 +589,7 @@ class ReviewEngine:
             evidence_message_ids=evidence_ids,
             new_description=str(raw_new_desc) if raw_new_desc else None,
             new_tags=tuple(str(t) for t in raw_new_tags) if isinstance(raw_new_tags, (list, tuple)) else None,
+            seed_prompts=seed_prompts,
         )
 
     def _memory_effect(

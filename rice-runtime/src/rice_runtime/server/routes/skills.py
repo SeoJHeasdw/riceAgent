@@ -110,6 +110,10 @@ class SuggestionDecisionIn(BaseModel):
     edited_body: str | None = None
 
 
+class CandidateDecisionIn(BaseModel):
+    approved: bool
+
+
 @router.get("")
 async def list_skills(c: Container = Depends(get_container)):
     return {"success": True, "data": [s.__dict__ for s in c.learning.list_skills()]}
@@ -146,6 +150,34 @@ async def decide_suggestion(
     result = c.learning.decide_suggestion(
         suggestion_id, approved=body.approved, edited_body=body.edited_body
     )
+    return {"success": True, "data": result}
+
+
+@router.get("/candidates")
+async def list_candidates(c: Container = Depends(get_container)):
+    """candidate 승격 게이트(LEARNING_LOOP §10.6) 목록 — 승인됐지만 아직
+    baseline-vs-candidate 평가를 통과하지 못한 제안들 + 최근 결정(리포트 포함).
+    payload 는 제안함과 같은 어휘, report 는 평가 리포트(arm 별 지표·판정 사유)."""
+    return {"success": True, "data": c.learning.list_candidates()}
+
+
+@router.post("/candidates/{candidate_id}/evaluate")
+async def evaluate_candidate(candidate_id: str, c: Container = Depends(get_container)):
+    """candidate 1건을 지금 평가한다(수동 트리거 — 백그라운드 드레인은 스케줄러).
+    통과 시 승격(apply_patch)까지 이 호출 안에서 끝난다. LLM 호출 다수(과제 생성 +
+    2-arm 롤아웃 + 심판)라 오래 걸리는 일반 REST — 프론트는 로딩 상태를 보여줘야
+    한다."""
+    return {"success": True, "data": await c.learning.evaluate_candidate(candidate_id)}
+
+
+@router.post("/candidates/{candidate_id}/decision")
+async def decide_candidate(
+    candidate_id: str, body: CandidateDecisionIn, c: Container = Depends(get_container)
+):
+    """candidate 수동 승격/폐기 — 평가를 기다리지 않는 사용자 오버라이드(스킬은
+    사용자 소유; provider 오프라인·평가 실패의 탈출구). approved=true 는 즉시
+    apply_patch(baseline 충돌 시 409), false 는 폐기(스킬 불변)."""
+    result = c.learning.decide_candidate(candidate_id, approved=body.approved)
     return {"success": True, "data": result}
 
 

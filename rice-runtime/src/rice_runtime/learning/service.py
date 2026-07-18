@@ -49,11 +49,13 @@ from ..prompts.system import (
     SKILL_PRECEDENCE_NOTE,
     SKILL_TRUST_NOTE,
 )
+from .candidate import CandidateEvalError, CandidateEvalHarness, CandidateStore
 from .curator.consolidate import ConsolidationEngine
 from .curator.curator import Curator
 from .discovery import DiscoveryEngine
 from .interfaces import (
     ArchiveProposal,
+    CandidateStaged,
     ConsolidateResult,
     CurateResult,
     ILearningService,
@@ -74,6 +76,7 @@ from .proposals import (
     make_patch_proposal,
     proposal_to_payload,
     sanitize_metadata,
+    sanitize_seed_prompts,
 )
 from .review.context import LearningContextManager, ReviewContextConfig, filter_learning_history
 from .review.engine import ReviewEngine, ReviewLLMError
@@ -342,13 +345,40 @@ class LearningService(ILearningService):
             if resolve_provider is not None
             else None
         )
+        # candidate 승격 게이트 (§10.6): store 는 무조건 배선(목록/수동 결정은
+        # provider 없이도 동작해야 한다), harness 는 provider 필요. 게이트 자체는
+        # config.candidate_eval_enabled 로 켠다 — 꺼져 있으면 승인은 기존 그대로
+        # 즉시 apply_patch 다(순수 추가, 기본 동작 불변).
+        self._candidates = CandidateStore(db)
+        self._candidate_harness = (
+            CandidateEvalHarness(
+                resolve_provider=resolve_provider,
+                render_skill_block=self._render_candidate_skill_block,
+                resolve_tool_names=resolve_tool_names,
+                paraphrase_tasks=config.candidate_eval_paraphrase_tasks,
+                max_tasks=config.candidate_eval_max_tasks,
+                runs_per_task=config.candidate_eval_runs_per_task,
+                max_steps=config.candidate_eval_max_steps,
+                cost_tolerance=config.candidate_eval_cost_tolerance,
+                output_max_tokens=config.candidate_eval_output_max_tokens,
+            )
+            if resolve_provider is not None
+            else None
+        )
 
     # ── boot recovery ─────────────────────────────────────────────────────────
     def recover_boot_state(self) -> int:
-        """부팅 시 1회 — 이전 프로세스가 남긴 고아 'running' 리뷰 잡을 pending 으로
-        되돌린다(composition_root 가 호출). 없으면 0. 자세한 근거는
+        """부팅 시 1회 — 이전 프로세스가 남긴 고아 'running' 리뷰 잡과 candidate 를
+        pending 으로 되돌린다(composition_root 가 호출). 없으면 0. 자세한 근거는
         LearningLedger.requeue_orphan_running_jobs docstring."""
-        return self._ledger.requeue_orphan_running_jobs()
+        return self._ledger.requeue_orphan_running_jobs() + self._candidates.requeue_orphan_running()
+
+    def _render_candidate_skill_block(self, skill_id: str, body: str, version: int) -> str:
+        """candidate 평가 arm 의 스킬 블록 — 실전 주입 렌더러(_render_skills)를
+        그대로 태워 평가가 배포 표면과 같은 프롬프트를 보게 한다."""
+        return _render_skills(
+            [InjectedSkill(skill_id=skill_id, name=skill_id, version=version, body=body or "")]
+        )
 
     # ── skill collection + relevance (hybrid injection) ───────────────────────
     def _active_skills(self) -> list[SkillData]:
@@ -1237,6 +1267,8 @@ class LearningService(ILearningService):
         except Exception:
             return {"status": "dropped", "message": f"Invalid skill name: {name!r}"}
 
+        # candidate 평가(§10.6)의 held-out seed — 이 제안을 낳은 턴의 사용자 발화.
+        seed_prompts = (self._last_query.get(session_id) or "",)
         if current is None:
             proposal = make_create_proposal(
                 name=name,
@@ -1246,6 +1278,7 @@ class LearningService(ILearningService):
                 changelog=changelog,
                 trigger="T5",
                 max_body_chars=self._config.skill_max_body_chars,
+                seed_prompts=seed_prompts,
             )
         else:
             if (current.source or "").startswith("plugin:"):
@@ -1265,6 +1298,7 @@ class LearningService(ILearningService):
                 # 발견성(라우팅) 결함을 대화 중에도 고칠 수 있게.
                 new_description=description or None,
                 new_tags=tags or None,
+                seed_prompts=seed_prompts,
             )
         if proposal is None:
             return {
@@ -1333,7 +1367,7 @@ class LearningService(ILearningService):
         session_id: str,
         decision: str,
         edited_body: str | None = None,
-    ) -> int | None:
+    ) -> int | CandidateStaged | None:
         """파킹된 제안의 HITL 결정 처리 (effect_surfacing이 호출).
 
         v3의 두 가지 변화:
@@ -1349,6 +1383,43 @@ class LearningService(ILearningService):
         """
         base_detail = {"changelog": proposal.changelog, "trigger": proposal.trigger}
         if decision == "approve":
+            if self._candidate_gate_active():
+                # §10.6: 승인 = 동의이지 증명이 아니다 — 즉시 적용 대신 candidate
+                # 로 격리하고, 백그라운드 평가가 baseline 대비 회귀 없음을 확인한
+                # 뒤에만 실제 버전이 생긴다. 스킬 파일은 여기서 불변.
+                payload = proposal_to_payload(proposal)
+                payload["session_id"] = session_id
+                if edited_body is not None:
+                    payload["edited_body"] = edited_body
+                try:
+                    staged = self._stage_candidate(
+                        payload,
+                        skill_id=proposal.skill_id,
+                        from_version=proposal.from_version,
+                        origin="hitl",
+                    )
+                except ConflictError:
+                    self._ledger.record(
+                        "conflict",
+                        skill_id=proposal.skill_id,
+                        session_id=session_id,
+                        trigger=proposal.trigger,
+                        detail={**base_detail, "expected_version": proposal.from_version},
+                    )
+                    raise
+                self._ledger.record(
+                    "approved",
+                    skill_id=proposal.skill_id,
+                    session_id=session_id,
+                    trigger=proposal.trigger,
+                    detail={
+                        **base_detail,
+                        "candidate_id": staged.candidate_id,
+                        "staged": True,
+                        "edited": edited_body is not None,
+                    },
+                )
+                return staged
             try:
                 version = self.apply_patch(
                     proposal.skill_id,
@@ -1408,6 +1479,313 @@ class LearningService(ILearningService):
         )
         return None
 
+    # ── candidate 승격 게이트 (LEARNING_LOOP §10.6) ───────────────────────────
+    def _candidate_gate_active(self) -> bool:
+        """켜짐 조건: config 플래그 + harness 배선(provider 필요). provider 미배선
+        상태에서 격리만 하면 아무도 평가하지 못하는 무덤이 된다 — 그 경우 기존
+        즉시 적용으로 폴백한다(수동 decide_candidate 는 그와 무관하게 동작)."""
+        return bool(self._config.candidate_eval_enabled) and self._candidate_harness is not None
+
+    def _stage_candidate(
+        self, payload: dict, *, skill_id: str, from_version: int, origin: str
+    ) -> CandidateStaged:
+        """승인된 제안을 candidate 로 격리한다 — 스킬 파일 불변.
+
+        baseline 워터마크(version + body fingerprint)를 지금 고정한다: 평가/승격
+        시점에 스킬이 다른 경로(직접 편집, rollback, 다른 제안 승인)로 움직였으면
+        이 후보는 오래된 전제 위에 있으므로 expired 로 마감된다 — consolidation 의
+        version+hash 순서 가드(§10.4)와 같은 원칙."""
+        self._ensure_not_builtin(skill_id, "candidate 격리")
+        baseline_hash: str | None = None
+        if from_version > 0:
+            try:
+                current = self._skill_store.read(skill_id)
+            except NotFoundError:
+                raise ConflictError(
+                    f"skill {skill_id!r} was deleted; cannot stage a candidate based on v{from_version}",
+                    code="skill.patch_target_deleted",
+                    params={"skillId": skill_id, "expectedVersion": from_version},
+                )
+            self._ensure_not_plugin(current, "candidate 격리")
+            if current.version != from_version:
+                raise ConflictError(
+                    f"skill {skill_id!r} moved from v{from_version} to v{current.version}; "
+                    "this proposal is based on a stale version",
+                    code="skill.patch_version_mismatch",
+                    params={
+                        "skillId": skill_id,
+                        "expectedVersion": from_version,
+                        "currentVersion": current.version,
+                    },
+                )
+            baseline_hash = body_fingerprint(current.body)
+        # seed 는 어떤 경로로 왔든 최종 저장 전 다시 정규화한다(구형 payload 방어).
+        payload["seed_prompts"] = list(sanitize_seed_prompts(payload.get("seed_prompts") or ()))
+        candidate_id = self._candidates.add(
+            skill_id=skill_id,
+            kind="create" if from_version == 0 else "patch",
+            baseline_version=from_version,
+            baseline_body_hash=baseline_hash,
+            payload=payload,
+        )
+        if candidate_id is None:
+            raise ConflictError(
+                f"skill {skill_id!r} already has an undecided candidate",
+                code="skill.candidate_pending",
+                params={"skillId": skill_id},
+            )
+        self._ledger.record(
+            "candidate_staged",
+            skill_id=skill_id,
+            session_id=payload.get("session_id"),
+            origin=origin,
+            detail={"candidate_id": candidate_id, "baseline_version": from_version},
+        )
+        return CandidateStaged(
+            candidate_id=candidate_id, skill_id=skill_id, baseline_version=from_version
+        )
+
+    def list_candidates(self, limit: int = 50) -> list[dict]:
+        return self._candidates.list(limit)
+
+    async def evaluate_candidate(self, candidate_id: str) -> dict:
+        cand = self._candidates.get(candidate_id)
+        if cand is None:
+            raise NotFoundError(f"candidate {candidate_id} not found")
+        claimed = self._candidates.claim(candidate_id)
+        if claimed is None:
+            raise ConflictError(
+                f"candidate {candidate_id} is not pending (status={cand['status']})",
+                code="skill.candidate_not_pending",
+                params={"candidateId": candidate_id, "status": cand["status"]},
+            )
+        return await self._run_candidate_eval(claimed)
+
+    async def run_pending_candidate_evals(self, limit: int = 1) -> int:
+        if not self._candidate_gate_active():
+            return 0
+        processed = 0
+        for _ in range(max(1, limit)):
+            cand = self._candidates.claim_next()
+            if cand is None:
+                break
+            await self._run_candidate_eval(cand)
+            processed += 1
+        return processed
+
+    async def _run_candidate_eval(self, cand: dict) -> dict:
+        """claim 된(running) candidate 1건의 평가 실행 → 승격/폐기/재시도.
+
+        실패 구분(§10.3 과 동일 원칙): '회귀 검출로 폐기'는 정상 판정이고,
+        provider/infra 실패(CandidateEvalError)는 재시도 계약(attempts)으로
+        pending 에 돌아간다 — 상한 도달 시 failed 로 남되 candidate 는 보존되어
+        수동 결정(decide_candidate)이 가능하다."""
+        candidate_id = cand["id"]
+        skill_id = cand["skill_id"]
+        payload = cand.get("payload") or {}
+        body = payload.get("edited_body") or payload.get("proposed_body")
+        if self._candidate_harness is None:
+            # provider 가 사라진 배선(테스트/설정 변경) — 판단 불능이므로 재시도 계약.
+            self._candidates.retry(
+                candidate_id, max_attempts=self._config.candidate_eval_max_attempts
+            )
+            return self._candidates.get(candidate_id) or cand
+        if not body or not str(body).strip():
+            self._candidates.finish(candidate_id, "failed", {"error": "no_body"})
+            self._ledger.record(
+                "candidate_eval_failed", skill_id=skill_id,
+                detail={"candidate_id": candidate_id, "error": "no_body"},
+            )
+            return self._candidates.get(candidate_id) or cand
+
+        # baseline 재검증 — 격리 이후 스킬이 움직였으면 평가 자체가 무의미하다.
+        baseline_body: str | None = None
+        baseline_version = int(cand["baseline_version"])
+        if baseline_version > 0:
+            stale_reason = None
+            try:
+                current = self._skill_store.read(skill_id)
+            except NotFoundError:
+                stale_reason = "baseline_deleted"
+            else:
+                if current.version != baseline_version:
+                    stale_reason = "baseline_version_moved"
+                elif (
+                    cand.get("baseline_body_hash")
+                    and body_fingerprint(current.body) != cand["baseline_body_hash"]
+                ):
+                    # 버전은 그대로인데 본문이 다르다 — 사용자가 파일을 직접
+                    # 편집한 경우(버전 비증가). 오래된 전제 위의 평가를 막는다.
+                    stale_reason = "baseline_body_changed"
+                else:
+                    baseline_body = current.body
+            if stale_reason is not None:
+                self._candidates.finish(candidate_id, "expired", {"error": stale_reason})
+                self._ledger.record(
+                    "candidate_expired", skill_id=skill_id,
+                    detail={"candidate_id": candidate_id, "error": stale_reason},
+                )
+                return self._candidates.get(candidate_id) or cand
+        else:
+            try:
+                self._skill_store.read(skill_id)
+            except NotFoundError:
+                pass
+            else:
+                self._candidates.finish(
+                    candidate_id, "expired", {"error": "skill_already_exists"}
+                )
+                self._ledger.record(
+                    "candidate_expired", skill_id=skill_id,
+                    detail={"candidate_id": candidate_id, "error": "skill_already_exists"},
+                )
+                return self._candidates.get(candidate_id) or cand
+
+        try:
+            verdict = await self._candidate_harness.evaluate(
+                skill_id=skill_id,
+                baseline_body=baseline_body,
+                candidate_body=str(body),
+                baseline_version=baseline_version,
+                description=str(
+                    payload.get("new_description") or payload.get("description") or ""
+                ),
+                seed_prompts=tuple(payload.get("seed_prompts") or ()),
+                changelog=str(payload.get("changelog") or ""),
+            )
+        except CandidateEvalError as exc:
+            requeued = self._candidates.retry(
+                candidate_id, max_attempts=self._config.candidate_eval_max_attempts
+            )
+            self._ledger.record(
+                "candidate_eval_failed",
+                skill_id=skill_id,
+                detail={
+                    "candidate_id": candidate_id,
+                    "error": str(exc)[:200],
+                    "requeued": requeued,
+                },
+            )
+            log.warning(
+                "candidate eval failed for %s — %s",
+                candidate_id, "requeued" if requeued else "gave up (max attempts)",
+            )
+            return self._candidates.get(candidate_id) or cand
+
+        if verdict.promote:
+            self._promote_candidate(cand, report=verdict.report)
+        else:
+            self._candidates.finish(candidate_id, "discarded", verdict.report)
+            self._ledger.record(
+                "candidate_discarded",
+                skill_id=skill_id,
+                detail={
+                    "candidate_id": candidate_id,
+                    "reasons": list(verdict.reasons),
+                    "baseline_success": verdict.report.get("baseline", {}).get("success_rate"),
+                    "candidate_success": verdict.report.get("candidate", {}).get("success_rate"),
+                },
+            )
+        return self._candidates.get(candidate_id) or cand
+
+    def _promote_candidate(
+        self, cand: dict, *, report: dict | None, forced: bool = False, raise_on_error: bool = False
+    ) -> int | None:
+        """평가 통과(또는 수동 승격) → 실제 쓰기. apply_patch 를 그대로 태워
+        검증 harness·낙관적 동시성·history 보관·usage 카운터가 전부 기존 경로와
+        동일하게 적용된다. 실패는 candidate 상태로 번역된다(expired/failed)."""
+        candidate_id = cand["id"]
+        skill_id = cand["skill_id"]
+        payload = cand.get("payload") or {}
+        source_session = payload.get("session_id")
+        source = f"session:{source_session}" if source_session else "candidate_eval"
+        raw_new_tags = payload.get("new_tags")
+        base_report = dict(report or {})
+        if forced:
+            base_report["forced"] = True
+        try:
+            version = self.apply_patch(
+                skill_id,
+                approved=True,
+                proposed_body=payload.get("proposed_body"),
+                edited_body=payload.get("edited_body"),
+                description=str(payload.get("description") or ""),
+                tags=tuple(str(t) for t in (payload.get("tags") or ())),
+                source=source,
+                expected_version=int(cand["baseline_version"]),
+                new_description=payload.get("new_description"),
+                new_tags=(
+                    tuple(str(t) for t in raw_new_tags) if raw_new_tags is not None else None
+                ),
+            )
+        except ConflictError:
+            self._candidates.finish(
+                candidate_id, "expired", {**base_report, "error": "baseline_conflict"}
+            )
+            self._ledger.record(
+                "candidate_expired", skill_id=skill_id,
+                detail={"candidate_id": candidate_id, "error": "baseline_conflict"},
+            )
+            if raise_on_error:
+                raise
+            return None
+        except Exception as exc:  # noqa: BLE001 — 검증 실패/IO 오류
+            self._candidates.finish(
+                candidate_id, "failed", {**base_report, "error": f"apply: {exc}"[:300]}
+            )
+            self._ledger.record(
+                "candidate_eval_failed", skill_id=skill_id,
+                detail={"candidate_id": candidate_id, "error": str(exc)[:200]},
+            )
+            if raise_on_error:
+                raise
+            return None
+        self._candidates.finish(
+            candidate_id, "promoted", {**base_report, "version": version}
+        )
+        self._ledger.record(
+            "candidate_promoted",
+            skill_id=skill_id,
+            detail={
+                "candidate_id": candidate_id,
+                "version": version,
+                "forced": forced,
+                "reasons": list((report or {}).get("reasons") or ()),
+            },
+        )
+        return version
+
+    def decide_candidate(self, candidate_id: str, *, approved: bool) -> dict:
+        """수동 승격/폐기 — 스킬은 사용자 소유이므로 평가 게이트가 사용자를 이길
+        수 없다(provider 오프라인·평가 실패의 탈출구). pending/failed 에서만 가능;
+        running(평가 진행 중)은 끝나기를 기다려야 한다."""
+        cand = self._candidates.get(candidate_id)
+        if cand is None:
+            raise NotFoundError(f"candidate {candidate_id} not found")
+        if not self._candidates.claim_for_decision(candidate_id):
+            raise ConflictError(
+                f"candidate {candidate_id} cannot be decided now (status={cand['status']})",
+                code="skill.candidate_not_decidable",
+                params={"candidateId": candidate_id, "status": cand["status"]},
+            )
+        if not approved:
+            self._candidates.finish(candidate_id, "discarded", {"forced": True})
+            self._ledger.record(
+                "candidate_discarded", skill_id=cand["skill_id"],
+                detail={"candidate_id": candidate_id, "forced": True},
+            )
+            updated = self._candidates.get(candidate_id) or cand
+            return {"applied": False, "version": None, "status": updated["status"]}
+        version = self._promote_candidate(
+            cand, report=cand.get("report"), forced=True, raise_on_error=True
+        )
+        updated = self._candidates.get(candidate_id) or cand
+        return {
+            "applied": version is not None,
+            "version": version,
+            "status": updated["status"],
+        }
+
     # ── suggestion inbox (Self-Improvement v3) ───────────────────────────────
     def suggestions(self) -> list[dict]:
         return self._ledger.suggestions()
@@ -1444,7 +1822,57 @@ class LearningService(ILearningService):
             )
             return {"applied": applied, "version": None}
 
-        # create/patch — 파킹 경로와 동일하게 apply_patch로 수렴.
+        # create/patch — 파킹 경로와 동일하게 candidate 게이트를 먼저 지나고,
+        # 꺼져 있으면 apply_patch 로 수렴.
+        if self._candidate_gate_active():
+            staged_payload = dict(payload)
+            if edited_body is not None:
+                staged_payload["edited_body"] = edited_body
+            try:
+                staged = self._stage_candidate(
+                    staged_payload,
+                    skill_id=sug["skill_id"],
+                    from_version=int(payload.get("from_version") or 0),
+                    origin=sug["origin"],
+                )
+            except ConflictError as exc:
+                if getattr(exc, "code", None) == "skill.candidate_pending":
+                    # 같은 스킬의 다른 후보가 아직 미결 — 제안은 pending 으로
+                    # 유지한다(그 후보가 결정되면 이 제안을 다시 결정할 수 있다).
+                    raise
+                # 스킬이 그 사이 다른 경로로 변경/삭제됨 — 기존 규칙과 동일하게
+                # expired 로 옮기고 409 전파(rebase 필요).
+                self._ledger.decide_suggestion(suggestion_id, "expired")
+                self._ledger.record(
+                    "conflict",
+                    skill_id=sug["skill_id"],
+                    origin=sug["origin"],
+                    detail={
+                        "changelog": payload.get("changelog", ""),
+                        "suggestion_id": suggestion_id,
+                        "expected_version": payload.get("from_version"),
+                    },
+                )
+                raise
+            self._ledger.decide_suggestion(suggestion_id, "approved")
+            self._ledger.record(
+                "approved",
+                skill_id=sug["skill_id"],
+                origin=sug["origin"],
+                detail={
+                    "changelog": payload.get("changelog", ""),
+                    "suggestion_id": suggestion_id,
+                    "candidate_id": staged.candidate_id,
+                    "staged": True,
+                    "edited": edited_body is not None,
+                },
+            )
+            return {
+                "applied": False,
+                "version": None,
+                "candidate_id": staged.candidate_id,
+                "staged": True,
+            }
         source_session = payload.get("session_id")
         source = f"session:{source_session}" if source_session else sug["origin"]
         try:

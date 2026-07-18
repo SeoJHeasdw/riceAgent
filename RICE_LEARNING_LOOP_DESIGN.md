@@ -640,15 +640,62 @@ nudge 카운터를 초기화한다. claim은 오래된 잡 우선이고 retry/fi
 
 ### 10.5 이번에 안 한 것 (후속 과제, 우선순위 순)
 
-- **candidate 상태 + baseline-vs-candidate 평가** — 후보 스킬을 즉시 active로
-  승격하지 않고 held-out/paraphrased task에서 기존 버전과 비교해 성공률·비용·
-  회귀 조건 통과 시 승격하는 체계. 현재 eval(`eval/scripted_provider.py`)은
-  marker 유무로 scripted branch를 고르는 구조라 "스킬이 모델 성능을 개선했다"의
-  증거가 못 된다(리뷰 지적 그대로). 평가 하네스 자체의 재설계가 선행돼야 한다
-  — RICE_LEARNING_EVAL.md 개정과 함께 별도 배치로.
+- ~~**candidate 상태 + baseline-vs-candidate 평가**~~ — **2026-07-19 구현 완료,
+  §10.6.** 평가 하네스 재설계(시뮬레이션 롤아웃 + LLM 심판)를 포함하며, 방법론
+  정본은 [RICE_LEARNING_EVAL.md](RICE_LEARNING_EVAL.md) §10.
 - **완전한 LearningEpisode** — 도구 호출 인자/결과 전사, 성공/중단/사용자 수정
   판정까지 담는 독립 엔티티. §10.1의 watermark가 스키마 진화 없이 그 방향으로
   확장 가능한 발판이다(evidence JSON에 필드 추가 = 순수 추가).
 - **proposal group 트랜잭션** — consolidation의 umbrella+archive들을 하나의
   승인 단위로 묶는 것. §10.4의 순서 가드가 데이터 손실은 이미 막으므로,
   UI/계약 변경이 필요한 그룹화는 후속 순수 추가.
+
+### 10.6 candidate 승격 게이트 — baseline-vs-candidate 평가 (2026-07-19, §10.5 1번 이행)
+
+> 코드: `learning/candidate/`(store·rollout·harness), `prompts/candidate_eval.py`,
+> 마이그레이션 `0017_skill_candidates.sql`. 평가 방법론 정본은
+> [RICE_LEARNING_EVAL.md](RICE_LEARNING_EVAL.md) §10 — 여기는 루프 통합만 기술.
+
+지금까지 루프는 안전한 제안·승인·적용과 인과 증거 보존(§10.1)까지는 견고했지만
+"자가개선된 스킬이 실제로 더 좋아졌다"를 자동으로 증명하지 못했다. 이 절이 그
+간극을 닫는다: **승인 = 동의 게이트(사용자), 평가 = 증거 게이트(시스템)**.
+
+**흐름** (`candidate_eval_enabled=True`일 때 — 기본 꺼짐, 아래 "기본값" 참고):
+
+```
+HITL 승인(카드 resolve_proposal / 제안함 decide_suggestion)
+  → apply_patch 대신 candidate 격리 (skill_candidates, 스킬 파일 불변)
+     · baseline 워터마크 고정: version + body SHA-256 (§10.4 순서 가드와 동일 원칙)
+     · SSE `skill_candidate_staged` (skill_patched 가 아니다 — "적용됨"은 거짓)
+  → 백그라운드 평가 (스케줄러 candidate_eval_interval_seconds 틱, 또는
+     POST /skills/candidates/{id}/evaluate 수동)
+     · held-out(제안을 낳은 구간의 실제 사용자 발화 = PatchProposal.seed_prompts)
+       + paraphrase 과제에서 baseline vs candidate 2-arm 비교 (EVAL §10)
+  → 판정: 회귀 조건(성공률·비용·심판 일관 열세) 위반 없음 → promoted
+     (apply_patch 실행 — 검증 harness·낙관적 동시성·history·usage 전부 기존 경로)
+     | 위반 → discarded (스킬 불변, 리포트 보존)
+     | baseline 이동 감지 → expired (직접 편집·rollback 이 이긴다)
+     | 인프라 실패 → attempts 재시도, 상한 도달 시 failed (후보 보존)
+```
+
+**설계 결정과 근거**:
+
+- **평가는 승인 뒤에 온다** (§10.5 문구 그대로 "즉시 active로 승격하지 않고 …
+  통과 시 승격"). 카드 앞에 두면 LLM 호출 다수(과제 생성 + 2-arm 롤아웃 + 심판)
+  가 미드턴 카드를 분 단위로 지연시킨다. 사용자가 이미 동의한 변경이므로 이
+  게이트의 일은 **개선 증명이 아니라 회귀 방지**다 — tie 는 통과.
+- **사용자가 항상 이긴다**: `POST /skills/candidates/{id}/decision` 으로 평가와
+  무관하게 즉시 승격/폐기할 수 있다(pending/failed 에서). provider 오프라인·평가
+  실패의 탈출구이자 "스킬은 사용자 소유" 원칙의 유지.
+- **실패 구분**(§10.3 원칙 재적용): 회귀 검출(discarded)은 정상 판정, provider/
+  infra 실패(`CandidateEvalError`)는 재시도 계약. 이전 eval 처럼 실패가 조용히
+  삼켜지지 않는다. 부팅 시 running 고아는 pending 복구(recover_boot_state).
+- **같은 스킬의 미결 후보는 1개**(409 `skill.candidate_pending`): 후보가 줄서면
+  어느 baseline 과 비교했는지가 흐려진다. 제안함 pending 은 유지되므로 기존
+  후보 결정 후 다시 승인하면 된다.
+- **기본값은 꺼짐**: 평가 1건 = LLM 호출 다수로, discovery 를 기본 꺼짐으로 둔
+  것과 같은 비용 논리. 켜기 전까지 승인 경로는 바이트 단위로 기존과 동일하다
+  (순수 추가). consolidation 병합 승인은 이 게이트를 타지 않는다 — §10.4 의
+  version+hash 순서 가드가 이미 그 경로의 안전을 소유한다.
+- **ledger 이벤트**: `candidate_staged/promoted/discarded/expired/eval_failed` —
+  폐기도 리포트와 함께 남는다(증거 없는 폐기는 증발과 같다).

@@ -58,6 +58,7 @@ class CuratorScheduler:
         self._since_discovery = 0
         self._since_review_sweep = 0
         self._since_analysis = 0
+        self._since_candidate_eval = 0
 
     def start(self) -> None:
         if self._task is None or self._task.done():
@@ -80,6 +81,7 @@ class CuratorScheduler:
             self._since_discovery += _TICK_SECONDS
             self._since_review_sweep += _TICK_SECONDS
             self._since_analysis += _TICK_SECONDS
+            self._since_candidate_eval += _TICK_SECONDS
             cfg = self._container.config_store.config.learning
 
             if cfg.curator_interval_seconds and 0 < cfg.curator_interval_seconds <= self._since_curate:
@@ -120,6 +122,22 @@ class CuratorScheduler:
                         log.info("skill analysis tick refreshed %d sidecar(s)", done)
                 except Exception as exc:  # noqa: BLE001
                     log.warning("skill analysis tick failed: %s", exc)
+
+            # candidate 승격 게이트 드레인(§10.6): 승인으로 격리된 pending candidate
+            # 를 평가한다. 한 틱에 1건 — 평가 1건이 LLM 호출 다수(과제 생성 +
+            # 2-arm 롤아웃 + 심판)라 로컬 모델을 오래 점유하므로 배치로 몰지 않는다.
+            # 게이트가 꺼져 있으면 run_pending_candidate_evals 가 0을 즉시 반환한다.
+            if (
+                cfg.candidate_eval_interval_seconds
+                and 0 < cfg.candidate_eval_interval_seconds <= self._since_candidate_eval
+            ):
+                self._since_candidate_eval = 0
+                try:
+                    done = await self._container.learning.run_pending_candidate_evals(limit=1)
+                    if done:
+                        log.info("candidate eval tick processed %d candidate(s)", done)
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("candidate eval tick failed: %s", exc)
 
             if cfg.discovery_interval_seconds and 0 < cfg.discovery_interval_seconds <= self._since_discovery:
                 self._since_discovery = 0

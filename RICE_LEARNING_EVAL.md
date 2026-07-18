@@ -1,6 +1,6 @@
 # RICE Learning Eval Design
 
-> 작성일: 2026-06-22 (개정: 2026-06-26, **2026-07-08 — 소스 드리프트 동기화**: `/eval/impact` 실배선 반영, mock 메커니즘 정정, §9 negative eval 신규) · 상태: **확정 (결정 완료)**
+> 작성일: 2026-06-22 (개정: 2026-06-26, **2026-07-08 — 소스 드리프트 동기화**: `/eval/impact` 실배선 반영, mock 메커니즘 정정, §9 negative eval 신규, **2026-07-19 — §10 candidate 승격 평가 하네스 신규**) · 상태: **확정 (결정 완료)**
 > 범위: 제품 thesis "쓸수록 똑똑해짐"을 **정량적으로 측정·증명**하는 방법 — 측정 지표, cold/warm 실험 설계, eval harness, in-app "Learning Impact" 가시화(디자인 데모 surface), 데이터 계약, 데모 스크립트
 > 관계: [RICE_LEARNING_LOOP_DESIGN.md](RICE_LEARNING_LOOP_DESIGN.md)는 *무엇이 학습되는가*(skill·memory·patch)를 정의한다. 이 문서는 *학습이 일어났음을 어떻게 측정·증명하는가*를 정의한다. patch 메커니즘은 [RICE_LEARNING_LOOP_DESIGN.md](RICE_LEARNING_LOOP_DESIGN.md) 5.2, SSE 이벤트는 [RICE_CONTRACTS.md](RICE_CONTRACTS.md) 1.3, 화면 매핑은 [RICE_RUNTIME_DIRECTORY.md](RICE_RUNTIME_DIRECTORY.md) 4장.
 
@@ -241,3 +241,44 @@ UI는 이 스키마에만 의존한다. 디자인 단계엔 **시드 fixture**�
 | N6 | 외부 콘텐츠 파생 메모리가 승인 전엔 주입되지 않고, 승인 후엔 정상 주입됨(격리와 같은 축의 왕복 확인) |
 
 이 6종은 이미 통과하는 상태로 하네스에 들어와 있다(신규 기능이 아니라 §1-8과 마찬가지로 이미 구현된 방어선의 **회귀 방지 축**). §1의 "측정은 곧 contribution의 증거다" 원칙을 안전성 쪽에도 적용한 것 — 정량적 학습 효과만 자랑하고 안전장치는 말로만 있다고 하지 않기 위함이다.
+
+---
+
+## 10. Candidate 승격 평가 하네스 — "이 patch가 실제로 더 낫다"의 자동 증명 (2026-07-19 신규)
+
+§1-8의 cold/warm 하네스는 **suite 수준의 데모/회귀 도구**다: 결정적이지만, task가 고정 YAML이고 `scripted_provider.py`가 marker 유무로 각본을 고르는 구조라 "스킬이 *모델의* 성능을 개선했다"의 증거가 못 된다(LEARNING_LOOP §10.5의 리뷰 지적). 이 절의 하네스는 다른 질문에 답한다 — **"방금 승인된 이 특정 patch/신규 스킬이, 이 사용자의 실제 모델에서, 기존 버전보다 회귀 없이 동작하는가"** — 그리고 그 답이 승격/폐기를 자동으로 결정한다(루프 통합은 LEARNING_LOOP §10.6이 정본, 여기는 평가 방법론).
+
+### 10.1 설계 — 무엇이 §1-8과 다른가
+
+| 축 | cold/warm 하네스 (§3-5) | candidate 하네스 (이 절) |
+|----|------------------------|--------------------------|
+| 질문 | "학습이 쌓이면 좋아지는가" (suite) | "이 한 건의 변경이 회귀 없는가" (per-candidate) |
+| task | 고정 YAML 3종 | **held-out**(제안을 낳은 구간의 실제 사용자 발화, `PatchProposal.seed_prompts`) + **paraphrase**(LLM 재표현 — 원문 암기 과적합 방지) |
+| provider | scripted 각본 재생 | **실제 배선된 provider** (메인 턴과 동일 — 더 싼 모델로 대체하면 결과가 배포 환경을 대표하지 못한다) |
+| 성공 판정 | mock tool 시퀀스 | 결정적 지표(도구 시퀀스·비용) + **rubric 기반 LLM 심판** |
+| 산출 | ImpactReport (데모 패널) | 승격/폐기 판정 + 영속 리포트 (`skill_candidates.report`) |
+
+**단일 변인 통제**(§3의 원칙 유지): 두 arm(baseline/candidate)은 같은 provider·같은 scaffold 프롬프트·같은 도구 표면(두 본문의 참조 도구 **합집합** — 한쪽만 아는 도구가 있으면 표면 차이가 스킬 차이와 교락된다)을 보고, 다른 것은 **주입된 스킬 블록 하나**다(실전 주입 렌더러 `_render_skills`를 그대로 태워 배포 표면과 동일). 신규 생성 후보는 baseline arm이 스킬 없이 돈다 — §3 cold/warm과 같은 축.
+
+### 10.2 시뮬레이션 롤아웃 — 정직성 경계
+
+`learning/candidate/rollout.py`: 메인 루프를 흉내낸 bounded 미니 루프(기본 5스텝)를 돌리되 **도구는 절대 실제로 실행하지 않는다**. 모든 도구 호출에 동일한 중립 승인 결과가 돌아가고, 관찰 대상은 "모델이 어떤 절차를 어떤 순서로 밟으려 했고 최종적으로 뭐라고 답했는가"다.
+
+**한계를 명시한다**(리포트에 `mode: "simulated_rollout"` 고정): 도구 결과 *내용*에 따라 갈리는 분기(진단→대응)는 관찰되지 않는다. 얻는 것은 (1) 부작용 제로 — 평가가 사용자 파일·외부 세계를 건드리지 않는다, (2) 결정성 — 환경 노이즈 없음, (3) 공정성 — 두 arm이 완전히 동일한 환경. "시뮬레이션이라 증거가 아니다"가 아니라 "이 증거는 절차·응답 품질 축을 커버하고 환경 반응 축은 커버하지 않는다"가 정확한 서술이다. 환경 반응 축은 완전한 LearningEpisode(LEARNING_LOOP §10.5 후속)의 몫.
+
+### 10.3 심판과 판정 — 회귀 방지 게이트
+
+- **rubric**: 과제 생성 호출이 seed에서 2-4개의 관찰 가능한 성공 기준을 도출한다(스킬/버전 언급 금지 — 과제 성공을 기술하지, 스킬 사용을 기술하지 않는다). 생성 실패 시 held-out만으로 강등(+기록), seed가 아예 없으면 infra 실패로 재시도.
+- **pairwise 심판**: 과제마다 두 전사를 A/B로 **은닉**하고 rubric 충족 수를 센다. 좌우는 (task, run) 인덱스로 결정적으로 스왑 — 위치 편향이 평균에서 상쇄된다. 구조화 출력(response_schema·think=False·temp 0.1 — 소형 모델 안정화 레시피).
+- **판정 = 회귀 조건 검사** (LEARNING_LOOP §10.5 문구의 "성공률·비용·회귀 조건"):
+  - `success_regression`: candidate rubric 충족률 평균 < baseline
+  - `cost_regression`: 출력량이 상대 허용율(기본 +50%) **과** 절대 하한(+2,000자)을 모두 초과 — 상대만 쓰면 짧은 출력에서 몇십 자 차이가 오탐된다
+  - `judge_preference_regression`: 심판이 일관되게 baseline 우세(candidate 무승·유패)
+  - 위반 0건 → promote. **tie는 통과다** — 사용자가 이미 동의한 변경이므로 이 게이트의 일은 개선 증명이 아니라 회귀 방지이고, 폐기 쪽에 보수 편향을 걸면 정상 개선이 심판 노이즈로 계속 좌초한다.
+- **실패 구분**(LEARNING_LOOP §10.3 원칙): provider/infra 실패는 `CandidateEvalError` → attempts 재시도(기본 2회), 소진 시 failed로 **보존**(수동 결정 가능). 회귀 검출은 정상 판정(discarded)이며 리포트와 함께 남는다.
+
+### 10.4 노브·API (요약 — wire 정본은 CONTRACTS)
+
+`LearningConfig.candidate_eval_*`: `enabled`(기본 **False** — 평가 1건=LLM 호출 다수, discovery와 같은 비용 논리로 기본 꺼짐; 꺼진 동안 승인 경로는 기존과 동일), `interval_seconds`(스케줄러 드레인, 기본 120), `paraphrase_tasks`/`max_tasks`/`runs_per_task`/`max_steps`, `cost_tolerance`, `max_attempts`, `output_max_tokens`.
+
+`GET /skills/candidates` · `POST /skills/candidates/{id}/evaluate` · `POST /skills/candidates/{id}/decision` + SSE `skill_candidate_staged`. 테스트는 `tests/test_candidate_eval.py`(결정적 fake provider — 테스트 더블이 각본을 연기하는 것과, 출하 하네스가 실제 provider 행동을 관찰하는 것은 별개다).

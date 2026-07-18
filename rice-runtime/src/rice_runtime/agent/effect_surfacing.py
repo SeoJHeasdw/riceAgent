@@ -22,10 +22,17 @@ from ..core.types import (
     SSEEvent,
     ev_error,
     ev_memory_written,
+    ev_skill_candidate_staged,
     ev_skill_patch_proposed,
     ev_skill_patched,
 )
-from ..learning.interfaces import ILearningService, LearningEffect, MemoryWritten, PatchProposal
+from ..learning.interfaces import (
+    CandidateStaged,
+    ILearningService,
+    LearningEffect,
+    MemoryWritten,
+    PatchProposal,
+)
 from .interfaces import IApprovalGate
 
 log = logging.getLogger("rice.agent.effect_surfacing")
@@ -142,6 +149,16 @@ async def surface_learning_effect(
             yield ev_error("skill_patch_failed", f"스킬 '{effect.skill_id}' 적용 실패: {exc}")
             return
         if response.decision == "approve" and new_version is not None:
-            yield ev_skill_patched(effect.skill_id, new_version)
+            if isinstance(new_version, CandidateStaged):
+                # §10.6: 승인이 즉시 적용이 아니라 candidate 격리로 귀결됐다 —
+                # "적용됨"(skill_patched)이라고 말하면 거짓이 된다. 승격/폐기는
+                # 백그라운드 평가 후의 일이고 이 스트림은 그때 이미 없다.
+                yield ev_skill_candidate_staged(
+                    new_version.skill_id,
+                    new_version.candidate_id,
+                    new_version.baseline_version,
+                )
+            else:
+                yield ev_skill_patched(effect.skill_id, new_version)
     else:  # pragma: no cover - effect union is closed
         log.warning("unknown learning effect: %r", effect)

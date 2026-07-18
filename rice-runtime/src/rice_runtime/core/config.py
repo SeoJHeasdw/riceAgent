@@ -171,6 +171,31 @@ class LearningConfig:
     # LLM 1회 호출이지만 트리거가 전부 사용자 승인 이벤트라 빈도가 낮다 — 기본 켜짐.
     analysis_interval_seconds: int = 180
     analysis_max_per_tick: int = 2
+    # ── candidate 승격 게이트 (learning/candidate/, LEARNING_LOOP §10.6) ──
+    # 켜면 승인된 스킬 제안이 즉시 active 로 쓰이지 않고 candidate 로 격리된 뒤,
+    # held-out/paraphrase 과제에서 baseline(현재 버전)과 비교 평가를 통과해야
+    # 승격된다. 평가는 candidate 1건당 LLM 호출 다수(과제 생성 + 롤아웃 2-arm ×
+    # 과제 수 + 심판)라 비싸다 — discovery 와 같은 이유로 기본 꺼짐(기존 즉시
+    # 적용 동작 유지). 켜기 전과 후 모두 HITL 승인이 선행 조건이다(동의 게이트는
+    # 사용자, 증거 게이트는 평가).
+    candidate_eval_enabled: bool = False
+    # pending candidate 를 스케줄러가 드레인하는 주기(초). 0 이면 백그라운드
+    # 비활성(수동 POST /skills/candidates/{id}/evaluate 만).
+    candidate_eval_interval_seconds: int = 120
+    # 평가 인프라 실패(provider 장애 등)의 재시도 상한 — 리뷰 잡과 동일 패턴.
+    # 상한 도달 시 failed 로 마감하되 candidate 는 남는다(수동 승격/폐기 가능).
+    candidate_eval_max_attempts: int = 2
+    # held-out 과제 외에 LLM 이 생성하는 paraphrase 과제 수 / 전체 과제 상한 /
+    # 과제당 arm 별 롤아웃 반복 수 / 롤아웃 도구 스텝 상한.
+    candidate_eval_paraphrase_tasks: int = 2
+    candidate_eval_max_tasks: int = 4
+    candidate_eval_runs_per_task: int = 1
+    candidate_eval_max_steps: int = 5
+    # 비용 회귀 허용율 — candidate arm 의 출력량(문자)이 baseline 의
+    # (1+tolerance)배를 넘으면 비용 회귀로 폐기.
+    candidate_eval_cost_tolerance: float = 0.5
+    # 롤아웃/심판 한 호출의 출력 토큰 상한 (폭주 방어).
+    candidate_eval_output_max_tokens: int = 1_024
 
 
 @dataclass(frozen=True)
