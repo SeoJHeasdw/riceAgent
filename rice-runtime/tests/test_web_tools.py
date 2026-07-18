@@ -522,6 +522,9 @@ async def test_low_quality_status_200_response_is_not_cached():
     assert "from_cache" not in second
 
 
+# ── v3: web_search (DuckDuckGo HTML) ──────────────────────────────────────────
+
+
 _DDG_PAGE = """
 <html><body>
   <div class="result results_links web-result">
