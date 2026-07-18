@@ -154,13 +154,14 @@ class TestReviewQuarantineIntegration:
         return LearningService(_fresh_db(), cfg, _fresh_paths(), resolve_provider=lambda: provider)
 
     @pytest.mark.asyncio
-    async def test_memory_from_external_turn_is_quarantined_not_injected(self):
+    @pytest.mark.parametrize("tool_source", ["connector", "web"])
+    async def test_memory_from_external_turn_is_quarantined_not_injected(self, tool_source):
         svc = self._svc(_MemoryProposingProvider("Gmail에서 본 마감일은 금요일이다"))
         # 외부(connector) 도구 결과가 섞인 히스토리
         history = [
             Message(role="user", content="메일 정리해줘"),
             Message(role="assistant", content="", tool_calls=(ToolCall(tool_name="gmail_search", arguments={}, id="c1"),)),
-            Message(role="tool", content="{...메일 본문...}", metadata={"tool_call_id": "c1", "tool_source": "connector"}),
+            Message(role="tool", content="{...외부 본문...}", metadata={"tool_call_id": "c1", "tool_source": tool_source}),
             Message(role="assistant", content="정리했습니다."),
         ]
         await svc.observe(TurnOutcome(session_id="s1", final_message="정리했습니다.", history=tuple(history), tool_calls_made=3, injected_skill_ids=()))

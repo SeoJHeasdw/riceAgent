@@ -50,9 +50,9 @@ _MAX_KNOWN_FACTS = 20
 
 # 외부 콘텐츠로 간주하는 도구 출처(메모리 오염 방지). connector(Gmail/
 # Calendar/Drive), plugin(설치된 플러그인 도구), bridge(progressive disclosure로
-# 접힌 connector/plugin 도구) — 모두 사용자 발화 밖의 데이터를 끌어온다. builtin
-# (파일/터미널/스킬)은 로컬이라 제외.
-_EXTERNAL_TOOL_SOURCES = frozenset({"connector", "plugin", "bridge"})
+# 접힌 connector/plugin 도구), web(fetch_url/web_search) — 모두 사용자 발화 밖의
+# 비신뢰 데이터를 끌어온다. builtin(파일/터미널/스킬)은 로컬이라 제외.
+_EXTERNAL_TOOL_SOURCES = frozenset({"connector", "plugin", "bridge", "web"})
 
 
 def _external_evidence(history: Sequence[Message]) -> tuple[bool, tuple[str, ...]]:

@@ -323,6 +323,38 @@ async def test_loop_without_plan_stays_pure_react():
 
 
 @pytest.mark.asyncio
+async def test_web_tool_result_is_marked_as_external_content():
+    provider = _ScriptedProvider(
+        [
+            [ProviderChunk(
+                kind="tool_call",
+                tool_call=ToolCall(tool_name="fetch_url", arguments={}, id="call_web"),
+            )],
+            _text("웹 내용을 정리했습니다."),
+        ]
+    )
+
+    async def fetch_url(_args):
+        return {"text": "untrusted page content"}
+
+    spec = ToolSpec(
+        name="fetch_url",
+        description="test web tool",
+        parameters={"type": "object", "properties": {}},
+        source="builtin",  # 실행 라우팅은 builtin
+        is_web_tool=True,  # 데이터 provenance는 external web
+    )
+    loop = AgentLoop(provider=provider, dispatcher=_dispatcher({"fetch_url": fetch_url}))
+    result = LoopResult()
+    _events = [
+        ev async for ev in loop.run(_ctx((spec,)), "s1", result, asyncio.Event())
+    ]
+
+    tool_message = next(m for m in result.history if m.metadata.get("tool_name") == "fetch_url")
+    assert tool_message.metadata["tool_source"] == "web"
+
+
+@pytest.mark.asyncio
 async def test_loop_escalates_to_plan_via_start_plan():
     """#2 lazy escalation: 단순으로 판정돼 ReAct로 출발하지만, 실행 중 복잡도가
     드러나면 모델이 start_plan으로 그 자리에서 계획으로 승격한다."""

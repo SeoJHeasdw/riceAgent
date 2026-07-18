@@ -675,11 +675,14 @@ class AgentLoop:
                     yield ev
                 for req, res in zip(scheduled, batch.ordered([req.call for req in scheduled]), strict=True):
                     call = req.call
-                    # tool_source: 이 결과가 외부 콘텐츠(connector/plugin/bridge =
-                    # Gmail·웹·원격 도구)에서 왔는지 표시한다. 학습 리뷰가 메모리를
-                    # 격리할지 판단하는 근거(메모리 오염 방지).
+                    # tool_source: 웹 도구는 실행 라우팅상 builtin이지만 결과 데이터는
+                    # 외부·비신뢰 콘텐츠다. 그대로 builtin으로 기록하면 학습 리뷰가
+                    # 웹페이지발 메모리/스킬을 격리하지 못한다. capability 선언을
+                    # provenance로 승격해 connector/plugin/bridge와 같은 외부 증거로
+                    # 다룬다(프롬프트 인젝션의 영구 메모리 오염 방지).
+                    source = "web" if req.spec.is_web_tool else req.spec.source
                     messages.append(
-                        _tool_result_message(res, tool_name=call.tool_name, source=req.spec.source)
+                        _tool_result_message(res, tool_name=call.tool_name, source=source)
                     )
                     tool_calls_made += 1
 

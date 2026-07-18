@@ -58,7 +58,7 @@ rice-runtime/                                # 배포물 ② : 로컬 단일 프
 │   │
 │   ├── agent/                               # ▣ #1 대화 루프  + #2 tool dispatch/scheduling + sub-agent
 │   │   ├── interfaces.py                    #   IAgent / ILLMProvider (Protocol)
-│   │   ├── loop.py                          # ▣ #1 conversation/agent 루프 — plan-and-execute × ReAct + plan 강제종결(reconcile) (max_iterations, context render, scheduler 호출) — AGENT_EXECUTION §3
+│   │   ├── loop.py                          # ▣ #1 conversation/agent 루프 — plan-and-execute × ReAct + plan 강제종결(reconcile) (max_iterations, context render, scheduler 호출) + is_web_tool 결과 provenance를 external `web`으로 기록(학습 오염 격리) — AGENT_EXECUTION §3
 │   │   ├── planner.py                       #   TurnPlanner(의도 파악·계획 수립 LLM 1회) + PlanState(update_plan/start_plan 상태 기계, reconcile_abandoned) — AGENT_EXECUTION §2·§3
 │   │   ├── profiles.py                      #   ★ 신규(2026-07-10) OrchestrationProfile — local↔frontier 이원화(액션규칙 에필로그·서사 넛지·num_ctx 클램프) — AGENT_EXECUTION §10
 │   │   ├── context_manager.py               #   provider-facing context 렌더링/압축/마스킹 (원본 transcript 불변, 최근 도구출력 증류 완화)
@@ -69,7 +69,7 @@ rice-runtime/                                # 배포물 ② : 로컬 단일 프
 │   │   ├── effect_surfacing.py              #   LearningEffect→SSE(+HITL), 메인 턴과 /learning-review·/learn이 공유
 │   │   ├── subagents.py                     #   focused sub-agent runner (delegate_subagent builtin의 실행체) — 격리 미니 ReAct 루프 + 스킬 인덱스 주입 + tools 화이트리스트 + write_scratch 아티팩트 채널(2026-07-10 v2)
 │   │   ├── titler.py                        #   세션 제목 생성 (post-turn, 논블로킹 — /learning-review·/learn과 같은 트리거 지점 패턴)
-│   │   ├── builtins/                        #   등록 도구: read_file/write_file/edit_file/list_dir/search_files, terminal, fetch_url(v3 — markdown 추출·홉별 SSRF·재시도·페이지네이션·링크·JS껍데기 진단 + §hygiene 소형모델 위생: main/article 스코핑·링크팜/숨김텍스트/레이아웃표 제거·저품질 명시실패·기본 12k자) + web_search(2026-07-18 — DuckDuckGo HTML 키리스 검색; 검색엔진 URL을 fetch하던 소형 모델 함정 해소), vision_analyze, skill_search/skill_view/propose_skill, delegate_subagent, create_*/edit_presentation; workspace.py는 경로 샌드박스 helper, write_scratch는 sub-agent 전용(thread 격리)
+│   │   ├── builtins/                        #   등록 도구: read_file/write_file/edit_file/list_dir/search_files, terminal, fetch_url(v3 — markdown 추출·홉별 SSRF·재시도·페이지네이션·링크·JS껍데기 진단 + §hygiene 소형모델 위생: 문장/사실밀도 기반 main/article 스코핑·링크팜/숨김CSS·ARIA 비본문/레이아웃표 제거·반복 위젯/저엔트로피 명시실패(no-echo·no-cache)·짧은 고밀도 공지 보존·기본 12k자) + web_search(2026-07-18 — DuckDuckGo HTML 키리스 검색; 검색엔진 URL을 fetch하던 소형 모델 함정 해소), vision_analyze, skill_search/skill_view/propose_skill, delegate_subagent, create_*/edit_presentation; workspace.py는 경로 샌드박스 helper, write_scratch는 sub-agent 전용(thread 격리)
 │   │   │   └── office/                      #   ★ 2026-07-05/06(+07-10 v2) — create_presentation/edit_presentation/create_workbook/create_document 빌트인, stdlib-only OOXML 라이터(sandbox 미적용 — RUNTIME_DESIGN 5장)
 │   │   │       ├── pptx_writer.py           #     11레이아웃(title/section/bullets/two_column/stats/table/chart/timeline/quote/image/closing) + speaker notes + 그리드라인 차트 + autofit 폰트 스케일 + 임베디드 스펙(docProps/riceSpec.json — edit_presentation의 편집 원본)
 │   │   │       ├── xlsx_writer.py           #     수식 로컬 평가 → 캐시값+계산결과 반환
@@ -134,7 +134,7 @@ rice-runtime/                                # 배포물 ② : 로컬 단일 프
 │   │   │   └── builtin_skills/              #   패키지 동봉 스킬 원문 마크다운(예: business-planning.md) — pyproject package-data로 포함
 │   │   ├── review/                          #   LLM 기반 스킬/메모리 저작
 │   │   │   ├── gate.py                      #     ReviewGate — LLM 호출 가치 판단(값싼 휴리스틱, 내용 판단은 안 함)
-│   │   │   ├── engine.py                    #     ReviewEngine — review()/learn() LLM 1회 호출, 쓰기 권한 없음(제안만) + 메모리 quarantine 판정(_memory_effect)
+│   │   │   ├── engine.py                    #     ReviewEngine — review()/learn() LLM 1회 호출, 쓰기 권한 없음(제안만) + connector/plugin/bridge/web 외부 증거의 메모리 quarantine 판정(_memory_effect)
 │   │   │   └── context.py                   #     리뷰 전용 턴 컨텍스트 렌더러
 │   │   ├── curator/                         # ▣ #5 curator
 │   │   │   ├── curator.py                   #   자동 전이 규칙 + 수동 "스킬 정리"(mode=rules)
