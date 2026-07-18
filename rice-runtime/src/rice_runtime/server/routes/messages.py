@@ -197,10 +197,12 @@ async def learning_review(
 ):
     """Gated LLM review, called fire-and-forget by the client right after the main
     turn's `done` (same trigger point as /title). Fast no-op (single `done` frame)
-    when there is no pending server-side review job (exactly-once:
-    observe()가 턴 종료 시 영속화한 learning_jobs를 claim해 실행한다; 중복 호출·
-    재시도는 자동으로 no-op) or when `ReviewGate` decides the turn doesn't
-    warrant an LLM call. The request body is deprecated and ignored."""
+    when there is no pending server-side review job (observe()가 턴 종료 시
+    영속화한 learning_jobs를 원자적으로 claim하므로 동시 중복 호출은 no-op) or
+    when `ReviewGate` decides the turn doesn't
+    warrant an LLM call. A provider/context failure requeues the claimed job;
+    a later POST or scheduler sweep retries it up to the configured attempt cap.
+    The request body is deprecated and ignored."""
     info = c.sessions.get(session_id)
     if info is None:
         raise NotFoundError(f"session {session_id} not found")

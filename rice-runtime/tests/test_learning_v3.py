@@ -72,7 +72,15 @@ class _FakeProvider:
         return ProviderCapabilities()
 
     async def stream(
-        self, *, system: str, messages, tools: Sequence[ToolSpec] = (), temperature: float = 0.7
+        self,
+        *,
+        system: str,
+        messages,
+        tools: Sequence[ToolSpec] = (),
+        temperature: float = 0.7,
+        response_schema: dict | None = None,
+        think: bool | None = None,
+        max_tokens: int | None = None,
     ) -> AsyncIterator[ProviderChunk]:
         for call in self._tool_calls:
             yield ProviderChunk(kind="tool_call", tool_call=call)

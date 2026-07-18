@@ -9,9 +9,9 @@ Hermes learning_loop 이식 작업(2026-07-02) — RICE_LEARNING_LOOP_DESIGN.md 
      실행한다(스텁 provider가 tool call 0개를 반환해도 규칙 전이는 일어남).
   2. 스텁 provider의 propose_consolidate(신규/기존 양쪽)·propose_prune 호출이
      올바른 PatchProposal/ArchiveProposal DTO로 매핑된다(trigger="T3").
-  3. decide_archive(approved=True, absorbed_into="x")가 상태를 archived로 전이
-     하고 absorbed_into를 frontmatter에 기록한다. approved=False는 무변화.
-  4. plugin: source 스킬은 후보 목록에서 제외된다(제안 대상이 될 수 없음).
+  3. decide_archive() 흡수는 active/non-self 대상의 version+본문 hash가
+     제안 시점과 일치할 때만 archived 전이를 허용한다.
+  4. plugin: source 스킬은 후보에서 제외되고 모든 최종 쓰기 경계에서 불변이다.
   5. 가드(크기/시크릿)가 통합 제안에도 적용된다.
 
 격리: 실제 ~/.rice 건드리지 않음. tempfile.mkdtemp() / in-memory sqlite.
@@ -26,11 +26,13 @@ import pytest
 
 from rice_runtime.agent.providers.interfaces import ProviderCapabilities, ProviderChunk
 from rice_runtime.core.config import LearningConfig
+from rice_runtime.core.errors import ConflictError, ValidationError
 from rice_runtime.core.paths import RicePaths
 from rice_runtime.core.storage.sqlite import Database
 from rice_runtime.core.types import ToolCall, ToolSpec
 from rice_runtime.learning.curator.consolidate import ConsolidationEngine
 from rice_runtime.learning.interfaces import ArchiveProposal, PatchProposal
+from rice_runtime.learning.proposals import body_fingerprint
 from rice_runtime.learning.service import LearningService
 from rice_runtime.learning.skill.store import SkillData, SkillStore
 from rice_runtime.learning.skill.usage import UsageStore
@@ -142,6 +144,11 @@ class TestConsolidationEngine:
         assert "build web" in umbrella.proposed_body and "build api" in umbrella.proposed_body
         assert {a.skill_id for a in archives} == {"deploy-web", "deploy-api"}
         assert all(a.absorbed_into == "deploy-service" for a in archives)
+        assert all(a.absorbed_into_version == umbrella.to_version for a in archives)
+        assert all(
+            a.absorbed_into_body_hash == body_fingerprint(umbrella.proposed_body)
+            for a in archives
+        )
 
     @pytest.mark.asyncio
     async def test_propose_consolidate_existing_umbrella_maps_to_patch_proposal(self):
@@ -167,6 +174,32 @@ class TestConsolidationEngine:
         assert umbrella.to_version == 2
         assert archive.skill_id == "sibling-sk"
         assert archive.absorbed_into == "umbrella-sk"
+        assert archive.absorbed_into_version == umbrella.to_version
+        assert archive.absorbed_into_body_hash == body_fingerprint(umbrella.proposed_body)
+
+    @pytest.mark.asyncio
+    async def test_existing_unchanged_umbrella_uses_current_body_precondition(self):
+        current_body = "## Already merged\n"
+        self._skill_store.write(_make_skill("umbrella-sk", body=current_body))
+        self._skill_store.write(_make_skill("sibling-sk", body="## Sibling\n"))
+        call = ToolCall(
+            tool_name="propose_consolidate",
+            arguments={
+                "umbrella_id": "umbrella-sk",
+                "is_new": False,
+                "umbrella_body": current_body,
+                "changelog": "archive sibling only",
+                "absorbed_skill_ids": ["sibling-sk"],
+            },
+        )
+
+        proposals = await self._engine(_FakeProvider([call])).analyze()
+
+        assert len(proposals) == 1
+        archive = proposals[0]
+        assert isinstance(archive, ArchiveProposal)
+        assert archive.absorbed_into_version == 1
+        assert archive.absorbed_into_body_hash == body_fingerprint(current_body)
 
     @pytest.mark.asyncio
     async def test_propose_prune_maps_to_archive_proposal_no_absorption(self):
@@ -289,8 +322,18 @@ class TestConsolidateFacade:
 
     def test_decide_archive_approved_sets_archived_and_absorbed_into(self):
         svc = LearningService(_fresh_db(), LearningConfig(), self._paths)
-        SkillStore(self._paths).write(_make_skill("to-archive"))
-        applied = svc.decide_archive("to-archive", approved=True, absorbed_into="umbrella-x")
+        store = SkillStore(self._paths)
+        store.write(_make_skill("to-archive"))
+        # 순서 보장(2026-07-18): absorb 대상 umbrella가 실존해야 archive가 적용된다.
+        store.write(_make_skill("umbrella-x"))
+        target = store.read("umbrella-x")
+        applied = svc.decide_archive(
+            "to-archive",
+            approved=True,
+            absorbed_into="umbrella-x",
+            absorbed_into_version=target.version,
+            absorbed_into_body_hash=body_fingerprint(target.body),
+        )
         assert applied is True
         detail = svc.get_skill("to-archive")
         assert detail is not None
@@ -298,6 +341,146 @@ class TestConsolidateFacade:
         # frontmatter 왕복 확인 — SkillStore를 통해 absorbed_into가 실제로 저장됐는지.
         raw = SkillStore(self._paths).read("to-archive")
         assert raw.absorbed_into == "umbrella-x"
+
+    def test_decide_archive_missing_absorb_target_conflicts(self):
+        """umbrella가 아직 없는데 흡수 archive를 먼저 승인하면 409 — "기존 스킬은
+        사라졌는데 대체 스킬은 없는" 통합 순서 위반을 막는다."""
+        svc = LearningService(_fresh_db(), LearningConfig(), self._paths)
+        SkillStore(self._paths).write(_make_skill("to-archive"))
+        with pytest.raises(ConflictError) as exc_info:
+            svc.decide_archive("to-archive", approved=True, absorbed_into="umbrella-x")
+        assert exc_info.value.code == "skill.absorb_target_missing"
+        detail = svc.get_skill("to-archive")
+        assert detail is not None
+        assert detail.state == "active"  # 변경 없음 — 스킬은 그대로 남는다
+
+    def test_decide_archive_requires_target_version_and_body_hash(self):
+        svc = LearningService(_fresh_db(), LearningConfig(), self._paths)
+        store = SkillStore(self._paths)
+        store.write(_make_skill("to-archive"))
+        store.write(_make_skill("umbrella-x"))
+
+        with pytest.raises(ConflictError) as exc_info:
+            svc.decide_archive("to-archive", approved=True, absorbed_into="umbrella-x")
+
+        assert exc_info.value.code == "skill.absorb_precondition_missing"
+        assert store.read("to-archive").state == "active"
+
+    def test_decide_archive_rejects_self_absorption(self):
+        svc = LearningService(_fresh_db(), LearningConfig(), self._paths)
+        store = SkillStore(self._paths)
+        store.write(_make_skill("self-archive"))
+
+        with pytest.raises(ConflictError) as exc_info:
+            svc.decide_archive(
+                "self-archive",
+                approved=True,
+                absorbed_into="self-archive",
+                absorbed_into_version=1,
+                absorbed_into_body_hash=body_fingerprint(store.read("self-archive").body),
+            )
+
+        assert exc_info.value.code == "skill.absorb_target_self"
+        assert store.read("self-archive").state == "active"
+
+    @pytest.mark.parametrize(
+        ("target_state", "target_enabled"),
+        (("stale", True), ("archived", True), ("active", False)),
+    )
+    def test_decide_archive_requires_active_enabled_target(
+        self, target_state: str, target_enabled: bool
+    ):
+        svc = LearningService(_fresh_db(), LearningConfig(), self._paths)
+        store = SkillStore(self._paths)
+        store.write(_make_skill("to-archive"))
+        target = _make_skill("umbrella-x", state=target_state)
+        target.enabled = target_enabled
+        store.write(target)
+
+        with pytest.raises(ConflictError) as exc_info:
+            svc.decide_archive(
+                "to-archive",
+                approved=True,
+                absorbed_into="umbrella-x",
+                absorbed_into_version=target.version,
+                absorbed_into_body_hash=body_fingerprint(target.body),
+            )
+
+        assert exc_info.value.code == "skill.absorb_target_inactive"
+        assert store.read("to-archive").state == "active"
+
+    @pytest.mark.parametrize("mismatch", ("version", "body_hash"))
+    def test_decide_archive_rejects_changed_target(self, mismatch: str):
+        svc = LearningService(_fresh_db(), LearningConfig(), self._paths)
+        store = SkillStore(self._paths)
+        store.write(_make_skill("to-archive"))
+        target = _make_skill("umbrella-x")
+        store.write(target)
+        expected_version = target.version + (1 if mismatch == "version" else 0)
+        expected_hash = (
+            "0" * 64 if mismatch == "body_hash" else body_fingerprint(target.body)
+        )
+
+        with pytest.raises(ConflictError) as exc_info:
+            svc.decide_archive(
+                "to-archive",
+                approved=True,
+                absorbed_into="umbrella-x",
+                absorbed_into_version=expected_version,
+                absorbed_into_body_hash=expected_hash,
+            )
+
+        assert exc_info.value.code == "skill.absorb_target_mismatch"
+        assert store.read("to-archive").state == "active"
+
+    def test_applied_umbrella_roundtrip_matches_canonical_body_hash(self):
+        svc = LearningService(_fresh_db(), LearningConfig(), self._paths)
+        store = SkillStore(self._paths)
+        store.write(_make_skill("to-archive"))
+        store.write(_make_skill("umbrella-x"))
+        proposed_body = "\r\n\r\n## Merged\r\n1. Keep both procedures\r\n"
+
+        version = svc.apply_patch(
+            "umbrella-x",
+            approved=True,
+            proposed_body=proposed_body,
+            expected_version=1,
+        )
+        applied = svc.decide_archive(
+            "to-archive",
+            approved=True,
+            absorbed_into="umbrella-x",
+            absorbed_into_version=version,
+            absorbed_into_body_hash=body_fingerprint(proposed_body),
+        )
+
+        assert applied is True
+
+    def test_decide_archive_rejects_plugin_owned_absorb_target(self):
+        svc = LearningService(_fresh_db(), LearningConfig(), self._paths)
+        store = SkillStore(self._paths)
+        store.write(_make_skill("to-archive"))
+        target = _make_skill("plugin-target", source="plugin:owner")
+        store.write(target)
+
+        with pytest.raises(ConflictError) as exc_info:
+            svc.decide_archive(
+                "to-archive",
+                approved=True,
+                absorbed_into="plugin-target",
+                absorbed_into_version=target.version,
+                absorbed_into_body_hash=body_fingerprint(target.body),
+            )
+
+        assert exc_info.value.code == "skill.absorb_target_plugin"
+        assert store.read("to-archive").state == "active"
+
+    def test_decide_archive_already_archived_source_is_noop(self):
+        svc = LearningService(_fresh_db(), LearningConfig(), self._paths)
+        store = SkillStore(self._paths)
+        store.write(_make_skill("already-archived", state="archived"))
+
+        assert svc.decide_archive("already-archived", approved=True) is False
 
     def test_decide_archive_rejected_leaves_unchanged(self):
         svc = LearningService(_fresh_db(), LearningConfig(), self._paths)
@@ -311,3 +494,69 @@ class TestConsolidateFacade:
     def test_decide_archive_unknown_skill_returns_false(self):
         svc = LearningService(_fresh_db(), LearningConfig(), self._paths)
         assert svc.decide_archive("does-not-exist", approved=True) is False
+
+
+class TestPluginImmutability:
+    def setup_method(self):
+        self._paths = _fresh_paths()
+        self._store = SkillStore(self._paths)
+        self._svc = LearningService(_fresh_db(), LearningConfig(), self._paths)
+
+    @pytest.mark.parametrize(
+        "operation",
+        (
+            "apply_patch",
+            "update_skill",
+            "update_skill_file",
+            "delete_skill",
+            "decide_archive",
+            "rollback",
+            "set_state",
+        ),
+    )
+    def test_store_backed_plugin_is_immutable_at_every_service_write_sink(self, operation: str):
+        plugin = _make_skill("plugin-owned", source="plugin:wxo-expert")
+        self._store.write(plugin)
+
+        def mutate() -> None:
+            if operation == "apply_patch":
+                self._svc.apply_patch(
+                    "plugin-owned", approved=True, proposed_body="## Changed\n1. no\n"
+                )
+            elif operation == "update_skill":
+                self._svc.update_skill("plugin-owned", description="changed")
+            elif operation == "update_skill_file":
+                self._svc.update_skill_file("plugin-owned", "references/note.md", "changed")
+            elif operation == "delete_skill":
+                self._svc.delete_skill("plugin-owned")
+            elif operation == "decide_archive":
+                self._svc.decide_archive("plugin-owned", approved=True)
+            elif operation == "rollback":
+                self._svc.rollback("plugin-owned", 1)
+            else:
+                self._svc.set_state("plugin-owned", "archived")
+
+        with pytest.raises(ValidationError) as exc_info:
+            mutate()
+
+        assert exc_info.value.code == "skill.plugin_immutable"
+        unchanged = self._store.read("plugin-owned")
+        assert (unchanged.version, unchanged.body, unchanged.state) == (
+            plugin.version,
+            plugin.body,
+            plugin.state,
+        )
+
+    def test_rule_curator_does_not_transition_store_backed_plugin(self):
+        plugin = _make_skill("plugin-owned", source="plugin:wxo-expert")
+        self._store.write(plugin)
+        svc = LearningService(
+            _fresh_db(),
+            LearningConfig(stale_after_days=0, archive_after_days=0),
+            self._paths,
+        )
+
+        result = svc.curate()
+
+        assert all(skill_id != "plugin-owned" for skill_id, _ in result.transitioned)
+        assert self._store.read("plugin-owned").state == "active"

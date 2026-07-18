@@ -23,9 +23,13 @@ from ...core.errors import NotFoundError
 from ...core.types import ToolCall
 from ...prompts.curator import build_curator_messages, build_curator_tool_specs
 from ..interfaces import ArchiveProposal, PatchProposal
-from ..proposals import MASKED_WARNING_PREFIX
+from ..proposals import (
+    body_fingerprint,
+    make_create_proposal,
+    make_patch_proposal,
+    sanitize_metadata,
+)
 from ..skill import guard as skill_guard
-from ..skill.patch import build_diff
 from ..skill.store import SkillStore
 from ..skill.usage import UsageStore
 
@@ -33,7 +37,6 @@ log = logging.getLogger("rice.learning.curator.consolidate")
 
 _CONSOLIDATE_TEMPERATURE = 0.3
 _PLUGIN_SOURCE_PREFIX = "plugin:"
-_MAX_CHANGELOG_CHARS = 200
 
 
 class ConsolidationEngine:
@@ -119,7 +122,14 @@ class ConsolidationEngine:
             reason = str(args.get("reason") or "curator 정리 제안")
             if skill_id not in candidate_ids:
                 return []
-            return [ArchiveProposal(skill_id=skill_id, reason=reason, absorbed_into=None)]
+            _, _, clean_reason, _ = sanitize_metadata(None, None, reason)
+            return [
+                ArchiveProposal(
+                    skill_id=skill_id,
+                    reason=clean_reason or "",
+                    absorbed_into=None,
+                )
+            ]
         log.warning("consolidation engine: unknown tool call %r", call.tool_name)
         return []
 
@@ -134,7 +144,8 @@ class ConsolidationEngine:
         is_new = bool(args.get("is_new"))
         body = str(args.get("umbrella_body") or "")
         # 폴백 문장을 합성하지 않는다 — 비면 빈 채로 두고 표시 폴백은 프론트 몫.
-        changelog = str(args.get("changelog") or "").strip()[:_MAX_CHANGELOG_CHARS]
+        raw_changelog = str(args.get("changelog") or "")
+        umbrella_description = str(args.get("umbrella_description") or "")
         absorbed_ids = [
             str(sid).strip()
             for sid in (args.get("absorbed_skill_ids") or ())
@@ -142,27 +153,24 @@ class ConsolidationEngine:
         ]
         if not umbrella_id or not body.strip():
             return []
-        try:
-            skill_guard.validate_content_size(body, self._max_body_chars)
-        except Exception:
-            log.warning("consolidation engine: umbrella body too large for %r, dropped", umbrella_id)
-            return []
-        body, warnings = skill_guard.scrub_secrets(body)
-        warning_tuple = tuple(f"{MASKED_WARNING_PREFIX}{label}" for label in warnings)
-
         umbrella_proposal: PatchProposal | None = None
+        target_version: int | None = None
+        target_hash: str | None = None
         if is_new and umbrella_id not in candidate_ids:
-            umbrella_proposal = PatchProposal(
-                skill_id=umbrella_id,
-                changelog=changelog,
-                diff=build_diff("", body),
+            # 공용 builder를 반드시 통과한다: 이름/크기/secret뿐 아니라 body와
+            # metadata의 risk scan까지 review/discovery와 같은 승인 경계로 만든다.
+            umbrella_proposal = make_create_proposal(
+                name=umbrella_id,
+                body=body,
+                description=umbrella_description,
+                changelog=raw_changelog,
                 trigger="T3",
-                proposed_body=body,
-                from_version=0,
-                to_version=1,
-                description=str(args.get("umbrella_description") or ""),
-                warnings=warning_tuple,
+                max_body_chars=self._max_body_chars,
             )
+            if umbrella_proposal is None:
+                return []
+            target_version = umbrella_proposal.to_version
+            target_hash = body_fingerprint(umbrella_proposal.proposed_body)
         else:
             # is_new=false, 또는 모델이 기존 스킬 이름을 "신규"라고 잘못 표시한 경우
             # (existing으로 정정) — 둘 다 patch 경로로 처리.
@@ -170,18 +178,31 @@ class ConsolidationEngine:
                 current = self._skill_store.read(umbrella_id)
             except NotFoundError:
                 return []  # 실존하지 않는데 is_new=false — 잘못된 제안, 버림
-            diff = build_diff(current.body, body)
-            if diff["lines"]:
-                umbrella_proposal = PatchProposal(
-                    skill_id=umbrella_id,
-                    changelog=changelog,
-                    diff=diff,
-                    trigger="T3",
-                    proposed_body=body,
-                    from_version=current.version,
-                    to_version=current.version + 1,
-                    warnings=warning_tuple,
-                )
+            # An absorbed skill must be replaced by something that is actually
+            # injectable.  Patching a stale/inactive umbrella does not itself
+            # change lifecycle state, so such a multi-card proposal could never
+            # satisfy the archive endpoint's active-target precondition.
+            if current.state != "active" or not current.enabled:
+                return []
+            umbrella_proposal = make_patch_proposal(
+                current=current,
+                new_body=body,
+                changelog=raw_changelog,
+                trigger="T3",
+                max_body_chars=self._max_body_chars,
+            )
+            if umbrella_proposal is not None:
+                target_version = umbrella_proposal.to_version
+                target_hash = body_fingerprint(umbrella_proposal.proposed_body)
+            else:
+                # No-op body는 이미 적용된 umbrella로 흡수할 수 있다. Builder가
+                # 다른 이유(크기/빈 본문)로 drop한 경우까지 archive를 허용하면
+                # 대체 본문 없이 원본만 사라지므로, scrub 후 완전 동일할 때만 허용.
+                sanitized_body, _ = skill_guard.scrub_secrets(body)
+                if sanitized_body != current.body:
+                    return []
+                target_version = current.version
+                target_hash = body_fingerprint(current.body)
 
         if umbrella_proposal is None and not absorbed_ids:
             return []  # umbrella도 실질 변경 없고 흡수 대상도 없음 — 제안할 게 없다
@@ -189,11 +210,14 @@ class ConsolidationEngine:
         proposals: list[PatchProposal | ArchiveProposal] = []
         if umbrella_proposal is not None:
             proposals.append(umbrella_proposal)
+        _, _, clean_changelog, _ = sanitize_metadata(None, None, raw_changelog)
         proposals.extend(
             ArchiveProposal(
                 skill_id=sid,
-                reason=f"{umbrella_id}로 통합됨 · {changelog}",
+                reason=f"{umbrella_id}로 통합됨 · {clean_changelog or ''}",
                 absorbed_into=umbrella_id,
+                absorbed_into_version=target_version,
+                absorbed_into_body_hash=target_hash,
             )
             for sid in absorbed_ids
         )

@@ -27,7 +27,7 @@ Implementation status per task batch:
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import Callable
@@ -68,9 +68,15 @@ from .interfaces import (
 from .ledger import LearningLedger
 from .memory.search import MemorySearch
 from .memory.store import MemoryStore
-from .proposals import make_create_proposal, make_patch_proposal, proposal_to_payload
+from .proposals import (
+    body_fingerprint,
+    make_create_proposal,
+    make_patch_proposal,
+    proposal_to_payload,
+    sanitize_metadata,
+)
 from .review.context import LearningContextManager, ReviewContextConfig, filter_learning_history
-from .review.engine import ReviewEngine
+from .review.engine import ReviewEngine, ReviewLLMError
 from .review.gate import ReviewGate
 from .signals import has_correction_signal, has_failure_signal
 from .skill import guard as skill_guard
@@ -86,6 +92,14 @@ from .skill.usage import UsageStore
 from .user_model.profile import UserProfile
 
 log = logging.getLogger("rice.learning.service")
+
+
+class _EvidenceBoundaryError(ValueError):
+    """Persisted review evidence cannot be mapped onto the supplied transcript."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 # 토큰 추정: CJK 인식 휴리스틱(core.tokens) — 이전 len//4는 한국어 예산을 2~4배 과소평가했다.
@@ -198,6 +212,9 @@ class LearningService(ILearningService):
         resolve_provider: Callable[[], ILLMProvider] | None = None,
         resolve_analyzer_provider: Callable[[], ILLMProvider] | None = None,
         resolve_tool_names: Callable[[], set[str]] | None = None,
+        review_request_token_budget: int | None = None,
+        review_output_token_budget: int | None = None,
+        resolve_review_token_budgets: Callable[[], tuple[int, int]] | None = None,
     ) -> None:
         self._db = db
         self._config = config
@@ -248,7 +265,7 @@ class LearningService(ILearningService):
         self._staged: dict[str, list[PatchProposal]] = {}
         # skill_view 로 이번 턴에 전문을 당긴 스킬들 — 세션별. observe()가 드레인해
         # auto-injected 와 합쳐 use 카운터에 귀속한다(온디맨드 로딩도 '사용'이다).
-        self._viewed_skills: dict[str, set[str]] = {}
+        self._viewed_skills: dict[str, dict[str, int]] = {}
         # 자동 주입 점착(sticky) 상태 — 세션별 {skill_name: 남은 턴 수}. 한 번
         # 전문 주입된 스킬은 후속 턴이 재매칭에 실패해도 이 턴 수만큼 계속
         # 주입된다("3번 슬라이드 파랗게" 같은 후속 지시는 어휘 라우터에 안 걸린다 —
@@ -286,6 +303,17 @@ class LearningService(ILearningService):
                     )
                 ),
                 builtin_catalog=self._builtin_skills,
+                request_token_budget=(
+                    config.review_request_max_tokens
+                    if review_request_token_budget is None
+                    else review_request_token_budget
+                ),
+                max_output_tokens=(
+                    config.review_output_max_tokens
+                    if review_output_token_budget is None
+                    else review_output_token_budget
+                ),
+                resolve_token_budgets=resolve_review_token_budgets,
             )
             if resolve_provider is not None
             else None
@@ -561,11 +589,11 @@ class LearningService(ILearningService):
             extra = self._extra_skills.get(skill_id)
             if extra is None:
                 raise NotFoundError(f"skill {skill_id!r} not found or not active")
-            viewed = self._viewed_skills.setdefault(session_id, set())
+            viewed = self._viewed_skills.setdefault(session_id, {})
             repeat = extra.skill_id in viewed
             if not repeat:
                 self._note_routing_miss(session_id, extra, is_store_skill=False)
-            viewed.add(extra.skill_id)
+            viewed[extra.skill_id] = extra.version
             out = {
                 "name": extra.name,
                 "version": extra.version,
@@ -583,12 +611,12 @@ class LearningService(ILearningService):
             if repeat:
                 out["note"] = self._REPEAT_VIEW_NOTE
             return out
-        viewed = self._viewed_skills.setdefault(session_id, set())
+        viewed = self._viewed_skills.setdefault(session_id, {})
         repeat = skill_id in viewed
         self._usage_store.increment_view(skill_id)
         if not repeat:
             self._note_routing_miss(session_id, skill, is_store_skill=True)
-        viewed.add(skill_id)
+        viewed[skill_id] = skill.version
         out = {
             "name": skill.name,
             "version": skill.version,
@@ -706,7 +734,7 @@ class LearningService(ILearningService):
         self,
         skill_id: str,
         *,
-        viewed: set[str],
+        viewed: Collection[str],
         user_tokens: set[str],
         turn_tools: set[str],
     ) -> bool:
@@ -763,7 +791,7 @@ class LearningService(ILearningService):
         effects: list[LearningEffect] = []
 
         # ① 텔레메트리 — 노출(injected)과 관여(use)를 분리 집계한다.
-        viewed = self._viewed_skills.pop(outcome.session_id, set())
+        viewed = self._viewed_skills.pop(outcome.session_id, {})
         learning_history = filter_learning_history(outcome.history)
         turn_tools = set(_turn_tool_names(tuple(learning_history))) if not outcome.aborted else set()
         user_text = next(
@@ -781,6 +809,7 @@ class LearningService(ILearningService):
             except Exception:  # noqa: BLE001 — 카운터 오류가 턴을 깨지 않게
                 pass
 
+        engaged: list[str] = []
         if not outcome.aborted:
             for skill_id in dict.fromkeys((*outcome.injected_skill_ids, *viewed)):
                 try:
@@ -788,6 +817,7 @@ class LearningService(ILearningService):
                         skill_id, viewed=viewed, user_tokens=user_tokens, turn_tools=turn_tools
                     ):
                         continue
+                    engaged.append(skill_id)
                     self._usage_store.increment_use(skill_id)
                     if turn_tools:
                         # 도구 귀속은 여전히 턴 단위 실행 로그다 — 다만 이제
@@ -811,9 +841,89 @@ class LearningService(ILearningService):
         # ③ 서버 소유 리뷰 잡 영속화: tool_calls_made는 이제 프론트가
         #    세어 보내는 값이 아니라 서버가 턴 종료 시점에 직접 기록하는 값이다.
         #    /learning-review(또는 스케줄러 sweep)가 이 잡을 claim해서 실행한다.
-        self._ledger.enqueue_review_job(outcome.session_id, outcome.tool_calls_made)
+        #    evidence watermark(0016): "이 구간에서 어떤 스킬 버전이 관여했는가"를
+        #    턴 종료 시점에 고정한다 — 리뷰 시점의 전역 스냅샷으로는 재구성 불가
+        #    (그 사이 스킬이 패치되거나 카탈로그 정렬이 바뀐다).
+        self._ledger.enqueue_review_job(
+            outcome.session_id,
+            outcome.tool_calls_made,
+            self._turn_evidence(
+                learning_history,
+                injected_versions=self._snapshot_versions(
+                    tuple(dict.fromkeys(outcome.injected_skill_ids)),
+                    dict(outcome.injected_skill_versions),
+                ),
+                viewed_versions=dict(viewed),
+                engaged=tuple(engaged),
+                friction=friction_turn,
+            ),
+        )
 
         return effects
+
+    def _snapshot_versions(
+        self, ids: tuple[str, ...], captured: dict[str, int]
+    ) -> dict[str, int]:
+        """Prefer start/view-time versions; live lookup is legacy-test fallback."""
+        versions: dict[str, int] = {}
+        for sid in ids:
+            if sid in captured:
+                versions[sid] = int(captured[sid])
+                continue
+            skill = self._read_any_skill(sid)
+            if skill is not None:
+                versions[sid] = skill.version
+        return versions
+
+    def _turn_evidence(
+        self,
+        history: list[Message],
+        *,
+        injected_versions: dict[str, int],
+        viewed_versions: dict[str, int],
+        engaged: tuple[str, ...],
+        friction: bool,
+    ) -> dict:
+        """learning_jobs.evidence 한 턴 분 — 병합은 ledger._merge_evidence 몫.
+
+        `from_message_id`는 이 턴의 user 발화(구간 병합 시 가장 오래된 것이
+        보존된다), `through_message_id`는 관찰된 마지막 메시지 — 이 둘이 리뷰가
+        본 대화 구간의 재현 가능한 워터마크다."""
+
+        engaged_versions: dict[str, list[int]] = {}
+        for sid in engaged:
+            versions: list[int] = []
+            for snapshot in (injected_versions, viewed_versions):
+                version = snapshot.get(sid)
+                if version is not None and version not in versions:
+                    versions.append(version)
+            if versions:
+                engaged_versions[sid] = versions
+        friction_by_version = {
+            sid: {str(version): 1 for version in versions}
+            for sid, versions in engaged_versions.items()
+            if friction and versions
+        }
+
+        return {
+            "schema_version": 1,
+            # Real turns have a user message. The first retained message is a
+            # compatibility boundary for synthetic/unit callers that supply an
+            # assistant-only transcript; keeping a concrete id is safer than
+            # persisting an unusable nullable watermark.
+            "from_message_id": next(
+                (m.id for m in reversed(history) if m.role == "user"),
+                history[0].id if history else None,
+            ),
+            "through_message_id": history[-1].id if history else None,
+            "injected_skills": {sid: [version] for sid, version in injected_versions.items()},
+            "viewed_skills": {sid: [version] for sid, version in viewed_versions.items()},
+            "engaged_skills": list(engaged),
+            "engaged_skill_versions": engaged_versions,
+            "friction_by_skill_version": friction_by_version,
+            "friction_turns": 1 if friction else 0,
+            "turns": 1,
+        }
 
     def apply_patch(
         self,
@@ -879,6 +989,9 @@ class LearningService(ILearningService):
                 return None  # 본문이 전혀 없으면 만들 수 없다 (fail-closed)
             skill_guard.validate_content_size(new_body, self._config.skill_max_body_chars)
             new_body, _ = skill_guard.scrub_secrets(new_body)  # 방어적 재적용(대부분 이미 클린)
+            clean_description, clean_tags, _, _ = sanitize_metadata(description, tags, None)
+            description = clean_description or ""
+            tags = clean_tags or ()
             # 승격 검증 harness의 **최종 관문** — 어떤 경로(카드 승인, 제안함,
             # 사용자 편집 본문)로 왔든 fail 본문은 디스크에 닿지 못한다.
             self._enforce_verification(
@@ -906,6 +1019,7 @@ class LearningService(ILearningService):
         # 승인했는데 조용히 적용 안 됨"으로 끝났다(적대 리뷰 P0#5). 전파된 예외는
         # effect_surfacing 이 skill_patch_failed SSE 로, 라우트는 API 오류로 보여준다.
 
+        self._ensure_not_plugin(current, "패치")
         if expected_version is not None and expected_version != current.version:
             # 스킬은 존재하지만 제안이 만들어진 이후 버전이 움직였다(다른 제안 승인,
             # 직접 편집, rollback 등). 그대로 쓰면 그 변경을 덮어쓴다 — rebase 필요.
@@ -935,20 +1049,29 @@ class LearningService(ILearningService):
             new_body = current.body
         skill_guard.validate_content_size(new_body, self._config.skill_max_body_chars)
         new_body, _ = skill_guard.scrub_secrets(new_body)
+        clean_new_description, clean_new_tags, _, _ = sanitize_metadata(
+            new_description, new_tags, None
+        )
+        target_description = (
+            clean_new_description
+            if clean_new_description is not None and clean_new_description.strip()
+            else current.description
+        )
+        target_tags = clean_new_tags if clean_new_tags is not None else tuple(current.tags)
         # 최종 관문(패치 경로) — 사용자 편집(edited_body)이 본문을 깨뜨린 경우까지 잡는다.
         self._enforce_verification(
-            name=skill_id, body=new_body, description=current.description,
-            tags=tuple(current.tags), current_body=current.body,
+            name=skill_id, body=new_body, description=target_description,
+            tags=target_tags, current_body=current.body,
         )
         new_version = current.version + 1
         current.version = new_version
         current.body = new_body
         # 발견성 메타데이터 변경(제안의 new_description/new_tags) — 본문 patch 와
         # 같은 승인 카드에서 함께 승인된 것만 도달한다(warnings 로 명시됨).
-        if new_description is not None and new_description.strip():
-            current.description = " ".join(new_description.split())
-        if new_tags is not None:
-            current.tags = [t for t in dict.fromkeys(t.strip() for t in new_tags) if t]
+        if clean_new_description is not None and clean_new_description.strip():
+            current.description = clean_new_description
+        if clean_new_tags is not None:
+            current.tags = list(clean_new_tags)
         current.updated_at = now_iso()
         self._skill_store.write(current)
 
@@ -1308,7 +1431,11 @@ class LearningService(ILearningService):
 
         if sug["kind"] == "archive":
             applied = self.decide_archive(
-                sug["skill_id"], approved=True, absorbed_into=payload.get("absorbed_into")
+                sug["skill_id"],
+                approved=True,
+                absorbed_into=payload.get("absorbed_into"),
+                absorbed_into_version=payload.get("absorbed_into_version"),
+                absorbed_into_body_hash=payload.get("absorbed_into_body_hash"),
             )
             self._ledger.decide_suggestion(suggestion_id, "approved")
             self._ledger.record(
@@ -1416,6 +1543,65 @@ class LearningService(ILearningService):
         user_text = next((m.content for m in reversed(history) if m.role == "user"), None)
         return final_message, user_text
 
+    @staticmethod
+    def _evidence_history(history: list[Message], evidence: dict | None) -> list[Message]:
+        """Return the exact persisted evidence interval, inclusive.
+
+        `None` is the only legacy fallback to full history. Once a job carries
+        evidence, silently widening a missing/corrupt boundary to the current
+        transcript would review later turns under the wrong causal job.
+        """
+        if evidence is None:
+            return history
+        if not isinstance(evidence, dict):
+            raise _EvidenceBoundaryError(
+                "evidence_boundary_missing", "review evidence is not an object"
+            )
+        if evidence.get("_decode_error"):
+            raise _EvidenceBoundaryError(
+                "evidence_decode_failed", "review evidence JSON could not be decoded"
+            )
+        from_id = evidence.get("from_message_id")
+        through_id = evidence.get("through_message_id")
+        if not isinstance(from_id, str) or not from_id or not isinstance(through_id, str) or not through_id:
+            raise _EvidenceBoundaryError(
+                "evidence_boundary_missing", "review evidence is missing from/through message ids"
+            )
+
+        positions = {message.id: index for index, message in enumerate(history)}
+        if from_id not in positions or through_id not in positions:
+            missing = [mid for mid in (from_id, through_id) if mid not in positions]
+            raise _EvidenceBoundaryError(
+                "evidence_boundary_missing",
+                f"review evidence message ids are absent from transcript: {missing!r}",
+            )
+        start = positions[from_id]
+        end = positions[through_id]
+        if start > end:
+            raise _EvidenceBoundaryError(
+                "evidence_boundary_invalid",
+                f"review evidence boundary is reversed: {from_id!r} follows {through_id!r}",
+            )
+        return history[start : end + 1]
+
+    def _fail_evidence_boundary(self, job_id: str, exc: _EvidenceBoundaryError) -> None:
+        log.warning("review job %s has invalid evidence boundary: %s", job_id, exc)
+        self._ledger.finish_review_job(
+            job_id,
+            "failed",
+            {"error": exc.code, "message": str(exc)},
+        )
+
+    @staticmethod
+    def _evidence_turns(evidence: dict | None) -> int:
+        """Number of unreviewed turns represented by one merged job."""
+        if not isinstance(evidence, dict):
+            return 1
+        try:
+            return max(1, int(evidence.get("turns") or 1))
+        except (TypeError, ValueError):
+            return 1
+
     async def review(
         self, session_id: str, history: list[Message], tool_calls_made: int = 0
     ) -> list[LearningEffect]:
@@ -1425,7 +1611,7 @@ class LearningService(ILearningService):
         실행 근거가 **서버가 영속화한 리뷰 잡**으로 바뀌었다.
         observe()가 턴 종료 시 learning_jobs에 pending 잡(+서버가 직접 센
         tool_calls_made)을 남기고, 여기서 그 잡을 원자적으로 claim한다:
-          - 잡이 없으면(이미 실행됨/중복 POST/관찰된 턴 없음) 즉시 [] — exactly-once.
+          - 잡이 없으면(이미 완료됨/다른 호출이 claim 중/관찰된 턴 없음) 즉시 [].
           - `tool_calls_made` 파라미터는 하위호환용으로만 남았고 **무시된다** —
             프론트 카운트는 이벤트 누락/재시도에 취약해 신뢰하지 않는다.
         """
@@ -1433,30 +1619,75 @@ class LearningService(ILearningService):
         if job is None:
             return []
 
+        try:
+            review_history = self._evidence_history(history, job.get("evidence"))
+        except _EvidenceBoundaryError as exc:
+            self._fail_evidence_boundary(job["id"], exc)
+            return []
+
         if self._review_engine is None:
             # resolve_provider 미배선(대부분의 단위 테스트) — 잡은 소진 처리.
             self._ledger.finish_review_job(job["id"], "done", {"skipped": "no_provider"})
             return []
 
-        final_message, user_text = self._gate_inputs(history)
-        if not self._review_gate.should_review(
-            session_id,
-            tool_calls_made=job["tool_calls_made"],
-            final_message=final_message,
-            user_text=user_text,
-        ):
-            self._ledger.finish_review_job(job["id"], "done", {"skipped": "gate"})
-            return []
-        self._review_gate.mark_reviewed(session_id)
+        # Once an eligible review reached the provider and failed, its retry is
+        # already admitted. Re-running the heuristic can erase a nudge-triggered
+        # job after mark/reset or after later session messages changed the signal.
+        if int(job.get("attempts") or 0) <= 0:
+            final_message, user_text = self._gate_inputs(review_history)
+            if not self._review_gate.should_review(
+                session_id,
+                tool_calls_made=job["tool_calls_made"],
+                final_message=final_message,
+                user_text=user_text,
+                turns_elapsed=self._evidence_turns(job.get("evidence")),
+            ):
+                self._ledger.finish_review_job(job["id"], "done", {"skipped": "gate"})
+                return []
         try:
-            effects = await self._review_engine.review(session_id, history)
+            effects = await self._review_engine.review(
+                session_id,
+                review_history,
+                priority_skill_ids=self._evidence_priority(job.get("evidence")),
+            )
+            # 승격 검증 harness — LLM 제안은 카드에 닿기 전에 스크리닝된다.
+            effects = self._screen_proposals(effects, origin="review", session_id=session_id)
+        except ReviewLLMError:
+            # provider/context 실패 — done으로 접지 않고 pending으로 되돌려
+            # 재시도를 남긴다(다음 턴의 POST 또는 스케줄러 sweep이 집어간다).
+            # 상한 도달 시 ledger가 failed로 마감한다. 사용자 스트림은 깨지 않는다.
+            requeued = self._ledger.retry_review_job(
+                job["id"], max_attempts=self._config.review_job_max_attempts
+            )
+            log.warning(
+                "review LLM failed for session %s — job %s %s",
+                session_id, job["id"], "requeued" if requeued else "gave up (max attempts)",
+            )
+            return []
         except Exception:
             self._ledger.finish_review_job(job["id"], "failed", {"error": "engine"})
             raise
-        # 승격 검증 harness — LLM 제안은 카드에 닿기 전에 스크리닝된다.
-        effects = self._screen_proposals(effects, origin="review", session_id=session_id)
+        self._review_gate.mark_reviewed(session_id)
         self._ledger.finish_review_job(job["id"], "done", {"effects": len(effects)})
         return effects
+
+    @staticmethod
+    def _evidence_priority(evidence: dict | None) -> tuple[str, ...]:
+        """잡 evidence → 리뷰 카탈로그 우선순위 스킬 목록.
+
+        관여(engaged) > 온디맨드 조회(viewed) > 자동 주입(injected) 순 — 실제
+        사용 근거가 강한 순서로 전문(full-body) 예산을 먼저 배정한다."""
+        if not evidence:
+            return ()
+        return tuple(
+            dict.fromkeys(
+                (
+                    *(evidence.get("engaged_skills") or ()),
+                    *(evidence.get("viewed_skills") or {}),
+                    *(evidence.get("injected_skills") or {}),
+                )
+            )
+        )
 
     async def sweep_review_jobs(
         self, history_for: Callable[[str], list[Message]], *, older_than_seconds: int, limit: int = 3
@@ -1479,32 +1710,62 @@ class LearningService(ILearningService):
             except Exception:
                 self._ledger.finish_review_job(job["id"], "failed", {"error": "history_unavailable"})
                 continue
-            final_message, user_text = self._gate_inputs(history)
-            if not self._review_gate.should_review(
-                session_id,
-                tool_calls_made=job["tool_calls_made"],
-                final_message=final_message,
-                user_text=user_text,
-            ):
-                self._ledger.finish_review_job(job["id"], "done", {"skipped": "gate", "sweep": True})
+            try:
+                review_history = self._evidence_history(history, job.get("evidence"))
+            except _EvidenceBoundaryError as exc:
+                self._fail_evidence_boundary(job["id"], exc)
+                continue
+
+            if int(job.get("attempts") or 0) <= 0:
+                final_message, user_text = self._gate_inputs(review_history)
+                if not self._review_gate.should_review(
+                    session_id,
+                    tool_calls_made=job["tool_calls_made"],
+                    final_message=final_message,
+                    user_text=user_text,
+                    turns_elapsed=self._evidence_turns(job.get("evidence")),
+                ):
+                    self._ledger.finish_review_job(
+                        job["id"], "done", {"skipped": "gate", "sweep": True}
+                    )
+                    continue
+            try:
+                effects = await self._review_engine.review(
+                    session_id,
+                    review_history,
+                    priority_skill_ids=self._evidence_priority(job.get("evidence")),
+                )
+                effects = self._screen_proposals(
+                    effects, origin="review_sweep", session_id=session_id
+                )
+                suggestions_added = 0
+                for effect in effects:
+                    if not isinstance(effect, PatchProposal):
+                        continue  # MemoryWritten은 엔진이 이미 반영했다
+                    payload = proposal_to_payload(effect)
+                    payload["session_id"] = session_id
+                    sid = self._ledger.add_suggestion(
+                        origin="review_sweep",
+                        kind="create" if effect.from_version == 0 else "patch",
+                        skill_id=effect.skill_id,
+                        payload=payload,
+                    )
+                    if sid is not None:
+                        suggestions_added += 1
+            except ReviewLLMError:
+                # 백그라운드 sweep의 provider 실패도 동일하게 재시도 보존 — 다음
+                # sweep 틱이 다시 집어간다. 예외를 흘리면 스케줄러 틱 전체가 죽는다.
+                self._ledger.retry_review_job(
+                    job["id"], max_attempts=self._config.review_job_max_attempts
+                )
+                continue
+            except Exception:
+                log.exception("review sweep failed for session %s", session_id)
+                self._ledger.finish_review_job(
+                    job["id"], "failed", {"error": "engine", "sweep": True}
+                )
                 continue
             self._review_gate.mark_reviewed(session_id)
-            effects = await self._review_engine.review(session_id, history)
-            effects = self._screen_proposals(effects, origin="review_sweep", session_id=session_id)
-            suggestions_added = 0
-            for effect in effects:
-                if not isinstance(effect, PatchProposal):
-                    continue  # MemoryWritten은 엔진이 이미 반영했다
-                payload = proposal_to_payload(effect)
-                payload["session_id"] = session_id
-                sid = self._ledger.add_suggestion(
-                    origin="review_sweep",
-                    kind="create" if effect.from_version == 0 else "patch",
-                    skill_id=effect.skill_id,
-                    payload=payload,
-                )
-                if sid is not None:
-                    suggestions_added += 1
             self._ledger.finish_review_job(
                 job["id"],
                 "done",
@@ -1535,6 +1796,21 @@ class LearningService(ILearningService):
                 f"{skill_id!r} is a builtin skill — cannot {action}, only enable/disable is allowed",
                 code="skill.builtin_immutable",
                 params={"skillId": skill_id, "action": action},
+            )
+
+    @staticmethod
+    def _ensure_not_plugin(skill: SkillData, action: str) -> None:
+        """Store-backed plugin skills are immutable at every final write sink.
+
+        Normal plugin skills live outside SkillStore, but legacy/imported rows can
+        still carry ``source=plugin:*``. Prompt instructions are not an ownership
+        boundary, so the service enforces it again immediately before mutation.
+        """
+        if (skill.source or "").startswith("plugin:"):
+            raise ValidationError(
+                f"{skill.name!r} is plugin-provided and cannot be {action}",
+                code="skill.plugin_immutable",
+                params={"skillId": skill.name, "action": action},
             )
 
     def list_skills(self) -> list[SkillSummary]:
@@ -1634,6 +1910,9 @@ class LearningService(ILearningService):
         # 수동 경로만 무결성 검사를 우회하면 관문이 관문이 아니게 된다.
         skill_guard.validate_content_size(body, self._config.skill_max_body_chars)
         body, _ = skill_guard.scrub_secrets(body)
+        clean_description, clean_tags, _, _ = sanitize_metadata(description, tags, None)
+        description = clean_description or ""
+        tags = clean_tags or ()
         self._enforce_verification(name=name, body=body, description=description, tags=tags)
 
         now = now_iso()
@@ -1666,10 +1945,12 @@ class LearningService(ILearningService):
         """스킬 직접 편집 (PUT /skills/{id}). 본문 변경 시 history 보관 + version+1."""
         self._ensure_not_builtin(skill_id, "편집")
         current = self._skill_store.read(skill_id)  # NotFoundError 위임
+        self._ensure_not_plugin(current, "edited")
 
         if state is not None and state not in ("active", "stale", "archived"):
             raise ValidationError(f"Unknown skill state {state!r}")
 
+        clean_description, clean_tags, _, _ = sanitize_metadata(description, tags, None)
         body_changed = body is not None and body != current.body
         if body_changed:
             assert body is not None  # narrows for the type checker (body_changed implies this)
@@ -1677,8 +1958,8 @@ class LearningService(ILearningService):
             body, _ = skill_guard.scrub_secrets(body)
             self._enforce_verification(
                 name=skill_id, body=body,
-                description=description if description is not None else current.description,
-                tags=tuple(tags) if tags is not None else tuple(current.tags),
+                description=clean_description if clean_description is not None else current.description,
+                tags=clean_tags if clean_tags is not None else tuple(current.tags),
                 current_body=current.body,
             )
             current_path = self._paths.skills / f"{skill_id}.md"
@@ -1690,15 +1971,16 @@ class LearningService(ILearningService):
             current.version += 1
             current.body = body
 
-        if description is not None:
-            current.description = description
-        if tags is not None:
-            current.tags = list(tags)
+        if clean_description is not None:
+            current.description = clean_description
+        if clean_tags is not None:
+            current.tags = list(clean_tags)
         if state is not None:
             current.state = state
         current.updated_at = now_iso()
         self._skill_store.write(current)
         if body_changed:
+            self._usage_store.increment_patch(skill_id)
             self.request_analysis(skill_id)  # 직접/AI 편집 저장 → 재분석
         return self._detail_from(current, self._usage_store.read(skill_id))
 
@@ -1721,6 +2003,7 @@ class LearningService(ILearningService):
             return self.update_skill(skill_id, body=parse_skill_md(content).body)
 
         current = self._skill_store.read(skill_id)
+        self._ensure_not_plugin(current, "edited")
         skill_guard.validate_content_size(content, self._config.skill_max_body_chars)
         content, _ = skill_guard.scrub_secrets(content)
         current_path = self._paths.skills / f"{skill_id}.md"
@@ -1739,7 +2022,8 @@ class LearningService(ILearningService):
     def delete_skill(self, skill_id: str) -> None:
         """스킬 삭제 (DELETE /skills/{id}). 본문/usage/history 사이드카 모두 제거."""
         self._ensure_not_builtin(skill_id, "삭제")
-        self._skill_store.read(skill_id)  # 없으면 NotFoundError → 404
+        current = self._skill_store.read(skill_id)  # 없으면 NotFoundError → 404
+        self._ensure_not_plugin(current, "deleted")
         self._skill_store.delete(skill_id)
         self._usage_store.delete(skill_id)
         self._analysis_store.delete(skill_id)
@@ -1760,15 +2044,82 @@ class LearningService(ILearningService):
         return ConsolidateResult(transitioned=rule_result.transitioned, proposals=tuple(proposals))
 
     def decide_archive(
-        self, skill_id: str, *, approved: bool, absorbed_into: str | None = None
+        self,
+        skill_id: str,
+        *,
+        approved: bool,
+        absorbed_into: str | None = None,
+        absorbed_into_version: int | None = None,
+        absorbed_into_body_hash: str | None = None,
     ) -> bool:
-        """ArchiveProposal 승인/거부. 승인 시 archived 전이 + absorbed_into 기록."""
+        """ArchiveProposal 승인/거부. 승인 시 archived 전이 + absorbed_into 기록.
+
+        통합(consolidation) 순서 보장(2026-07-18): `absorbed_into`가 지정된
+        archive는 제안에 고정된 umbrella version+canonical body hash가 현재의
+        active/enabled target과 정확히 같을 때만 적용한다. umbrella patch와 형제
+        archive가 각각 독립 승인되므로, archive를 먼저 승인하거나 umbrella 적용이
+        충돌/실패한 경우 원본을 409로 보존한다. self/plugin target도 허용하지 않는다."""
         if not approved:
             return False
         if self._builtin_skills.is_builtin(skill_id):
             # 통합(consolidation)은 SkillStore만 스캔하므로 정상 경로로는 도달하지
             # 않는다 — 방어적으로 no-op 처리(absorbed_into는 빌트인에 무의미).
             return False
+        try:
+            source = self._skill_store.read(skill_id)
+        except NotFoundError:
+            return False
+        self._ensure_not_plugin(source, "archived")
+        if source.state == "archived":
+            return False
+        if absorbed_into:
+            if absorbed_into == skill_id:
+                raise ConflictError(
+                    f"cannot archive {skill_id!r} into itself",
+                    code="skill.absorb_target_self",
+                    params={"skillId": skill_id},
+                )
+            try:
+                target = self._skill_store.read(absorbed_into)
+            except NotFoundError as exc:
+                raise ConflictError(
+                    f"cannot archive {skill_id!r}: absorb target {absorbed_into!r} does not exist",
+                    code="skill.absorb_target_missing",
+                    params={"skillId": skill_id, "absorbedInto": absorbed_into},
+                ) from exc
+            if target.state != "active" or not target.enabled:
+                raise ConflictError(
+                    f"cannot archive {skill_id!r}: absorb target {absorbed_into!r} is not active",
+                    code="skill.absorb_target_inactive",
+                    params={"skillId": skill_id, "absorbedInto": absorbed_into},
+                )
+            if (target.source or "").startswith("plugin:"):
+                raise ConflictError(
+                    f"cannot archive {skill_id!r}: absorb target {absorbed_into!r} is plugin-owned",
+                    code="skill.absorb_target_plugin",
+                    params={"skillId": skill_id, "absorbedInto": absorbed_into},
+                )
+            if absorbed_into_version is None or absorbed_into_body_hash is None:
+                raise ConflictError(
+                    "absorption approval is missing the umbrella proposal precondition",
+                    code="skill.absorb_precondition_missing",
+                    params={"skillId": skill_id, "absorbedInto": absorbed_into},
+                )
+            actual_hash = body_fingerprint(target.body)
+            if (
+                target.version != absorbed_into_version
+                or actual_hash != absorbed_into_body_hash
+            ):
+                raise ConflictError(
+                    f"cannot archive {skill_id!r}: the approved umbrella body is not current",
+                    code="skill.absorb_target_mismatch",
+                    params={
+                        "skillId": skill_id,
+                        "absorbedInto": absorbed_into,
+                        "expectedVersion": absorbed_into_version,
+                        "currentVersion": target.version,
+                    },
+                )
         try:
             self._lifecycle.archive_with_absorption(skill_id, absorbed_into)
         except NotFoundError:
@@ -1780,6 +2131,7 @@ class LearningService(ILearningService):
         if self._builtin_skills.is_builtin(skill_id):
             self._builtin_skills.set_state(skill_id, state)
             return
+        self._ensure_not_plugin(self._skill_store.read(skill_id), "state-changed")
         self._lifecycle.set_state(skill_id, state)
 
     def history(self, skill_id: str) -> list[SkillVersion]:
@@ -1796,7 +2148,9 @@ class LearningService(ILearningService):
     def rollback(self, skill_id: str, version: int) -> int:
         """히스토리 버전을 현재로 복원한다. 새 version 번호 반환."""
         self._ensure_not_builtin(skill_id, "롤백")
+        self._ensure_not_plugin(self._skill_store.read(skill_id), "rolled back")
         new_version = self._lifecycle.rollback(skill_id, version)
+        self._usage_store.increment_patch(skill_id)
         self.request_analysis(skill_id)  # 본문이 과거본으로 교체됨 → 재분석
         return new_version
 

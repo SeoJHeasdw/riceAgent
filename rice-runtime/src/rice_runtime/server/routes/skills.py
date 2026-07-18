@@ -48,6 +48,8 @@ class StateIn(BaseModel):
 class ArchiveDecisionIn(BaseModel):
     approved: bool
     absorbed_into: str | None = None
+    absorbed_into_version: int | None = None
+    absorbed_into_body_hash: str | None = None
 
 
 class ConsolidateDecisionIn(BaseModel):
@@ -280,7 +282,11 @@ async def archive_decision(skill_id: str, body: ArchiveDecisionIn, c: Container 
     달리 diff가 없는 상태전이라 `IApprovalGate` 파킹을 쓰지 않는다 — 프론트가 로컬에
     들고 있던 제안을 바로 이 엔드포인트로 보낸다(비동기 승인 대기 없음)."""
     applied = c.learning.decide_archive(
-        skill_id, approved=body.approved, absorbed_into=body.absorbed_into
+        skill_id,
+        approved=body.approved,
+        absorbed_into=body.absorbed_into,
+        absorbed_into_version=body.absorbed_into_version,
+        absorbed_into_body_hash=body.absorbed_into_body_hash,
     )
     return {"success": True, "data": {"applied": applied}}
 

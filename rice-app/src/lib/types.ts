@@ -215,6 +215,13 @@ export interface SkillPatchProposedData {
   /** authoritative proposed full body — prefer this over reconstructing from
    * diff.lines (which was a fragile client-side join, see ChatScreen.tsx) */
   proposed_body?: string;
+  /** Metadata persisted with a new skill (from_version=0). Empty values are
+   * explicit so the approval surface can show the exact write. */
+  description?: string;
+  tags?: string[];
+  /** Metadata replacements persisted with an existing-skill patch. */
+  new_description?: string;
+  new_tags?: string[];
   /** Phase D guard redaction notices (secret-scrub/size-cap), empty/absent when clean */
   warnings?: string[];
   /** 외부 콘텐츠(도구 결과) 유래 제안인지 + 근거 메시지 id들(감사). */
@@ -244,6 +251,8 @@ export interface SkillSuggestion {
     proposed_body: string;
     description?: string;
     tags?: string[];
+    new_description?: string;
+    new_tags?: string[];
     warnings?: string[];
     session_id?: string;
     derived_from_external?: boolean;
@@ -337,6 +346,8 @@ export interface ConsolidateArchiveProposal {
   skill_id: string;
   reason: string;
   absorbed_into: string | null;
+  absorbed_into_version?: number | null;
+  absorbed_into_body_hash?: string | null;
 }
 export type ConsolidateProposal = ConsolidateMergeProposal | ConsolidateArchiveProposal;
 export interface CurateConsolidateResult {

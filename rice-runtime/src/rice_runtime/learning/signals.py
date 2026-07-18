@@ -137,16 +137,50 @@ def _contains_any(text: str, signals: tuple[str, ...]) -> bool:
     return any(sig in low for sig in signals)
 
 
+# ── 오탐 가드 (2026-07-18) ────────────────────────────────────────────────────
+# 신호 단어 자체에 거대한 look-around를 붙이지 않고, 명시적인 성공/첨가 구문만
+# 먼저 제거한다. `no + 임의 3단어 + failed` 같은 넓은 정규식은
+# "no fallback meant deployment failed"의 진짜 실패 절까지 지워버렸다.
+_CORRECTION_RES = tuple(re.compile(re.escape(sig)) for sig in CORRECTION_SIGNALS)
+_FAILURE_RES = tuple(re.compile(re.escape(sig)) for sig in FAILURE_SIGNALS)
+
+_KO_ADDITIVE_NOT_CORRECTION_RE = re.compile(r"뿐\s*(?:만\s*)?(?:이\s*)?아니라")
+_KO_NEGATED_FAILURE_RE = re.compile(
+    r"(?:실패|오류|에러)\s*"
+    r"(?:(?:가|는|도)\s*)?"
+    r"(?:(?:하나도|전혀)\s*)?"
+    r"(?:없이|없|하지(?:는)?\s*않|발생하지\s*않|나지\s*않)"
+)
+
+# 영어도 실제 성공 보고에서 흔한 주어만 열거한다. 문장 앞의 `no`가 뒤쪽의
+# 독립된 실패 절을 삼키지 않도록 임의 단어 범위를 허용하지 않는다.
+_EN_NEGATED_FAILURE_RE = re.compile(
+    r"\bno\s+(?:\w+\s+)?(?:tests?|checks?|jobs?|steps?|commands?|builds?|deployments?)\s+"
+    r"(?:have\s+|has\s+|had\s+)?failed\b"
+    r"|\b(?:tests?|checks?|jobs?|steps?|commands?|builds?|deployments?)\s+"
+    r"(?:have|has|had)\s+not\s+failed\b"
+    r"|\b(?:no|none|zero)\s+(?:failures?|errors?)\b"
+    r"|\b0\s+(?:tests?\s+)?failed\b"
+    r"|\bwithout\s+(?:any\s+)?(?:failures?|errors?)\b"
+    r"|\bno\s+errors?\s+occurred\b"
+    r"|\bnever\s+failed\b"
+    r"|\berror[- ]free\b"
+)
+
+
 def has_skill_creation_intent(message: str) -> bool:
     return _contains_any(message, SKILL_INTENT_KEYWORDS)
 
 
 def has_correction_signal(message: str) -> bool:
-    return _contains_any(message, CORRECTION_SIGNALS)
+    low = _KO_ADDITIVE_NOT_CORRECTION_RE.sub(" ", message.lower())
+    return any(p.search(low) for p in _CORRECTION_RES)
 
 
 def has_failure_signal(message: str) -> bool:
-    return _contains_any(message, FAILURE_SIGNALS)
+    low = _KO_NEGATED_FAILURE_RE.sub(" ", message.lower())
+    low = _EN_NEGATED_FAILURE_RE.sub(" ", low)
+    return any(p.search(low) for p in _FAILURE_RES)
 
 
 def extract_skill_name(message: str) -> str | None:

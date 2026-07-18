@@ -81,7 +81,15 @@ class _FakeProvider:
         return ProviderCapabilities()
 
     async def stream(
-        self, *, system: str, messages, tools: Sequence[ToolSpec] = (), temperature: float = 0.7
+        self,
+        *,
+        system: str,
+        messages: Sequence[Message],
+        tools: Sequence[ToolSpec] = (),
+        temperature: float = 0.7,
+        response_schema: dict | None = None,
+        think: bool | None = None,
+        max_tokens: int | None = None,
     ) -> AsyncIterator[ProviderChunk]:
         self.seen_messages = list(messages)
         for call in self._tool_calls:
@@ -467,11 +475,16 @@ class TestReviewEngine:
         assert any(isinstance(e, PatchProposal) for e in effects)
 
     @pytest.mark.asyncio
-    async def test_provider_failure_returns_empty_not_raises(self):
-        """LLM 호출이 실패해도 review()는 예외를 던지지 않는다 — best-effort."""
+    async def test_provider_failure_raises_review_llm_error(self):
+        """LLM 호출 실패는 조용한 []가 아니라 ReviewLLMError다 — "제안 없음"(정상)
+        과 "판단 못 함"(장애)을 구분해야 service가 잡을 pending으로 되돌려 재시도를
+        보존할 수 있다(이전엔 done으로 마감돼 학습 기회가 소실됐다). "리뷰 실패가
+        턴을 깨면 안 된다" 불변식은 service.review()의 catch가 이어받는다."""
+        from rice_runtime.learning.review.engine import ReviewLLMError
+
         engine = self._engine(_RaisingProvider())
-        effects = await engine.review("s1", [Message(role="user", content="hi")])
-        assert effects == []
+        with pytest.raises(ReviewLLMError):
+            await engine.review("s1", [Message(role="user", content="hi")])
 
     @pytest.mark.asyncio
     async def test_learn_uses_directive_prompt_and_always_attempts(self):
@@ -498,6 +511,41 @@ class TestReviewEngine:
         assert "small-skill" in patchable_ids
         assert "huge-skill" not in patchable_ids
         assert any(s[0] == "huge-skill" for s in compact)
+
+    @pytest.mark.asyncio
+    async def test_store_backed_plugin_is_visible_but_never_patchable(self):
+        plugin = _make_skill("plugin-visible", body="## Plugin body\n")
+        plugin.source = "plugin:wxo-expert"
+        self._skill_store.write(plugin)
+
+        full_body, compact, patchable_ids = self._engine(_FakeProvider([]))._build_catalog(
+            ("plugin-visible",)
+        )
+
+        assert all(skill_id != "plugin-visible" for skill_id, _, _ in full_body)
+        assert "plugin-visible" not in patchable_ids
+        assert ("plugin-visible", "(plugin, read-only) A test skill") in compact
+
+    @pytest.mark.asyncio
+    async def test_review_engine_drops_forged_plugin_patch_tool_call(self):
+        plugin = _make_skill("plugin-forged", body="## Plugin body\n")
+        plugin.source = "plugin:wxo-expert"
+        self._skill_store.write(plugin)
+        call = ToolCall(
+            tool_name="propose_skill_patch",
+            arguments={
+                "skill_id": "plugin-forged",
+                "changelog": "try to mutate plugin",
+                "new_body": "## Mutated\n",
+                "trigger_reason": "T1a",
+            },
+        )
+
+        effects = await self._engine(_FakeProvider([call])).review(
+            "s1", [Message(role="user", content="hi")]
+        )
+
+        assert effects == []
 
 
 # ── effect_surfacing 테스트 (Phase A.3, 추출 회귀 방지) ───────────────────────
@@ -559,6 +607,61 @@ class TestEffectSurfacing:
         assert detail is not None
         assert detail.version == 1
         assert detail.source == "session:s2"  # apply_patch가 session_id로 source를 구성
+
+    @pytest.mark.parametrize(
+        ("proposal", "expected_metadata"),
+        (
+            (
+                PatchProposal(
+                    skill_id="metadata-create", changelog="신규", diff={"lines": []}, trigger="T4",
+                    proposed_body="## Steps\n1. Create\n", from_version=0, to_version=1,
+                    description="정확히 보일 설명", tags=("alpha", "beta"),
+                ),
+                {"description": "정확히 보일 설명", "tags": ["alpha", "beta"]},
+            ),
+            (
+                PatchProposal(
+                    skill_id="metadata-patch", changelog="발견성 개선", diff={"lines": []}, trigger="T1a",
+                    proposed_body="## Steps\n1. Patch\n", from_version=2, to_version=3,
+                    new_description="변경될 정확한 설명", new_tags=("new-a", "new-b"),
+                ),
+                {"new_description": "변경될 정확한 설명", "new_tags": ["new-a", "new-b"]},
+            ),
+        ),
+    )
+    @pytest.mark.asyncio
+    async def test_proposal_metadata_is_visible_in_sse_and_parked_approval(
+        self, proposal: PatchProposal, expected_metadata: dict
+    ):
+        """승인으로 함께 저장되는 metadata는 live SSE뿐 아니라 reconnect가 읽는
+        ApprovalRequest.payload에도 정확히 남아야 한다."""
+        session_id = f"s-{proposal.skill_id}"
+        gen = surface_learning_effect(
+            session_id=session_id, effect=proposal, learning=self._svc,
+            approvals=self._approvals, approval_timeout_s=5,
+        )
+        first = await gen.__anext__()
+        assert first.type == EventType.SKILL_PATCH_PROPOSED
+        for key, value in expected_metadata.items():
+            assert first.data[key] == value
+
+        # 첫 SSE yield 뒤 실제 approval request를 파킹시켜 reconnect payload도 검사한다.
+        consume_rest = asyncio.create_task(gen.__anext__())
+        for _ in range(1000):
+            if self._approvals.pending(session_id):
+                break
+            await asyncio.sleep(0)
+        parked = self._approvals.pending(session_id)
+        assert len(parked) == 1
+        for key, value in expected_metadata.items():
+            assert parked[0].payload[key] == value
+
+        self._approvals.resolve(
+            parked[0].approval_id,
+            ApprovalResponse(approval_id=parked[0].approval_id, decision="reject"),
+        )
+        with pytest.raises(StopAsyncIteration):
+            await consume_rest
 
     @pytest.mark.asyncio
     async def test_patch_proposal_rejected_does_not_apply(self):
@@ -801,6 +904,67 @@ class TestGuardWiredIntoWritePaths:
         self._svc.create_skill(name="meta-only", body="1. short step\n")
         detail = self._svc.update_skill("meta-only", description="새 설명")
         assert detail.description == "새 설명"
+
+    @pytest.mark.parametrize(
+        "write_path",
+        ("create_skill", "update_skill", "apply_patch_create", "apply_patch_existing"),
+    )
+    def test_metadata_is_sanitized_again_at_every_final_write_sink(self, write_path: str):
+        """제안 빌더를 우회한 직접 API/예전 제안 payload도 최종 저장 경계에서
+        description/tag 시크릿·크기 상한을 다시 적용받아야 한다."""
+        secret = "AKIAABCDEFGHIJKLMNOP"
+        description = f"  Metadata   {secret}  " + ("x" * 1_200)
+        tags = (
+            "  keep   me  ",
+            ("z" * 58) + secret,
+            "q" * 120,
+            "four",
+            "five",
+            "six",
+        )
+
+        if write_path == "create_skill":
+            detail = self._svc.create_skill(
+                name="metadata-create-final",
+                body="## Steps\n1. Keep safe\n",
+                description=description,
+                tags=tags,
+            )
+        elif write_path == "update_skill":
+            self._svc.create_skill(name="metadata-update-final", body="## Steps\n1. Old\n")
+            detail = self._svc.update_skill(
+                "metadata-update-final", description=description, tags=tags
+            )
+        elif write_path == "apply_patch_create":
+            self._svc.apply_patch(
+                "metadata-proposal-create",
+                approved=True,
+                proposed_body="## Steps\n1. New\n",
+                description=description,
+                tags=tags,
+            )
+            detail = self._svc.get_skill("metadata-proposal-create")
+        else:
+            self._svc.create_skill(name="metadata-proposal-patch", body="## Steps\n1. Old\n")
+            self._svc.apply_patch(
+                "metadata-proposal-patch",
+                approved=True,
+                proposed_body="## Steps\n1. New\n",
+                new_description=description,
+                new_tags=tags,
+            )
+            detail = self._svc.get_skill("metadata-proposal-patch")
+
+        assert detail is not None
+        detail = self._svc.get_skill(detail.id)  # 직렬화된 SKILL.md 재읽기 경로까지 확인
+        assert detail is not None
+        rendered_metadata = "\n".join((detail.description, *detail.tags))
+        assert secret not in rendered_metadata
+        assert "[REDACTED:" in rendered_metadata
+        assert len(detail.description) <= 1_000
+        assert len(detail.tags) == 5
+        assert detail.tags[0] == "keep me"
+        assert all(len(tag) <= 80 for tag in detail.tags)
 
     def test_apply_patch_rejects_oversize_proposed_body(self):
         self._svc.create_skill(name="patch-target", body="1. short step\n")

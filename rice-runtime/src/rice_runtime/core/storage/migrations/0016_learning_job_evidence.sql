@@ -1,0 +1,28 @@
+-- learning loop 폐루프화 1단계: 리뷰 잡에 (1) evidence watermark, (2) 재시도 카운터.
+--
+-- evidence (JSON) — "어떤 대화 구간에서 어떤 스킬 버전이 관여했는가"의 고정 기록.
+-- 지금까지 리뷰 잡은 session_id + tool_calls_made만 남겨서, 리뷰 시점에는 실제
+-- 사용된 스킬이 아니라 전체 active 스킬(누적 사용량 순)을 카탈로그에 넣었다 —
+-- 턴에서 실제 관여한 스킬과 개선 제안 사이의 인과가 여기서 끊겼다. 이 칼럼은
+-- 감사 가능한 구간과 catalog 우선순위 hint를 보존한다. 도구 결과·성공 판정·
+-- baseline 비교를 담는 완전한 LearningEpisode는 아니며 별도 후속이다:
+--   {
+--     "schema_version":     1,
+--     "from_message_id":    "<구간 시작 — 첫 미리뷰 턴의 user 메시지 id>",
+--     "through_message_id": "<구간 끝 — 마지막 관찰 메시지 id>",
+--     "injected_skills":    {"<skill_id>": [<주입 당시 version>, ...], ...},
+--     "viewed_skills":      {"<skill_id>": [<version>, ...], ...},
+--     "engaged_skills":     ["<관여 근거가 있던 skill_id>", ...],
+--     "engaged_skill_versions": {"<skill_id>": [<version>, ...], ...},
+--     "friction_by_skill_version": {"<skill_id>": {"<version>": <count>}},
+--     "friction_turns":     <교정/실패 신호가 감지된 턴 수>,
+--     "turns":              <병합된 턴 수>
+--   }
+-- 병합 규칙(enqueue_review_job): from은 보존(가장 오래된 미리뷰 지점), through는
+-- 갱신, 스킬/버전은 합집합(한 구간에 v3·v4가 모두 관여했으면 둘 다 기록).
+--
+-- attempts — provider/context 실패 재시도 카운터. 이전엔 리뷰 LLM 호출이 실패하면
+-- engine이 []를 반환하고 잡이 done 처리돼 학습 기회가 조용히 소실됐다. 이제
+-- 실패는 pending으로 되돌리고(attempts += 1), 상한 도달 시에만 failed로 마감한다.
+ALTER TABLE learning_jobs ADD COLUMN evidence TEXT;
+ALTER TABLE learning_jobs ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;

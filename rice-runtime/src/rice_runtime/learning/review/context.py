@@ -30,9 +30,6 @@ from typing import Sequence
 
 from ...core.types import Message
 
-_CHARS_PER_TOKEN = 4  # _clip의 char 상한 환산용(추정과 무관)
-
-
 def filter_learning_history(history: Sequence[Message]) -> list[Message]:
     """학습 판단의 근거가 될 실제 대화만 남긴다.
 
@@ -63,16 +60,53 @@ def _one_line(text: str) -> str:
 
 
 def _clip(text: str, max_tokens: int, label: str) -> str:
-    """head/tail 증류 — agent 쪽 `_distill_text`와 같은 모양이지만 리뷰 톤."""
-    max_chars = max(160, max_tokens * _CHARS_PER_TOKEN)
-    if len(text) <= max_chars:
+    """head/tail 증류 — agent 쪽 `_distill_text`와 같은 모양이지만 리뷰 톤.
+
+    문자 예산은 고정 환산(1토큰=4자)이 아니라 **CJK 인식 추정기로 역산**한다 —
+    고정 4자 환산은 한국어에서 토큰을 최대 4배 과소평가해, 24K 예산이 실제로는
+    ~96K 토큰짜리 컨텍스트가 되고 provider 한도에서 터졌다(리뷰 잡 소실의 주요
+    원인). 역산 후에도 추정기가 통과할 때까지 줄여 상한을 실제로 보장한다."""
+    if max_tokens <= 0 or not text:
+        return ""
+    total_tokens = _estimate_tokens(text)
+    if total_tokens <= max_tokens:
         return text
-    head = max_chars // 2
-    tail = max_chars - head
-    return (
-        f"[{label} — {len(text)}자 중 중간 생략]\n"
-        f"{text[:head].rstrip()}\n[...]\n{text[-tail:].lstrip()}"
-    )
+
+    # Retained characters를 이분 탐색한다. 작은 테스트/사용자 설정에서도 '최소
+    # 160자' 같은 가독성 하한이 안전 상한을 깨지 않게, 맞는 후보가 없으면 marker
+    # 없이 raw prefix를 토큰 상한까지 줄인다.
+    def _head_tail(retained: int) -> str:
+        head = retained // 2
+        tail = retained - head
+        return (
+            f"[{label} — {len(text)}자 중 중간 생략]\n"
+            f"{text[:head].rstrip()}\n[...]\n{text[-tail:].lstrip()}"
+        )
+
+    lo, hi = 1, len(text) - 1
+    best = ""
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        candidate = _head_tail(mid)
+        if _estimate_tokens(candidate) <= max_tokens:
+            best = candidate
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    if best:
+        return best
+
+    lo, hi = 0, len(text)
+    prefix = ""
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        candidate = text[:mid]
+        if _estimate_tokens(candidate) <= max_tokens:
+            prefix = candidate
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    return prefix
 
 
 @dataclass(frozen=True)
@@ -92,8 +126,13 @@ class LearningContextManager:
     def __init__(self, config: ReviewContextConfig) -> None:
         self._config = config
 
-    def render(self, history: Sequence[Message]) -> list[Message]:
+    def render(
+        self, history: Sequence[Message], *, max_total_tokens: int | None = None
+    ) -> list[Message]:
         cfg = self._config
+        total_budget = cfg.max_total_tokens if max_total_tokens is None else max(0, max_total_tokens)
+        if total_budget <= 0:
+            return []
         reviewable = filter_learning_history(history)
         recent = reviewable[-cfg.recent_messages :] if cfg.recent_messages > 0 else reviewable
         older = reviewable[: len(reviewable) - len(recent)]
@@ -112,12 +151,12 @@ class LearningContextManager:
         # 총 예산 초과 시 오래된 블록부터 버린다(요약 블록 우선 제거 — 최근 전문이
         # 리뷰 판단의 핵심이다). 남는 것이 하나뿐이면 그것을 잘라서라도 맞춘다.
         while (
-            sum(_estimate_tokens(t) for _, t in merged) > cfg.max_total_tokens and len(merged) > 1
+            sum(_estimate_tokens(t) for _, t in merged) > total_budget and len(merged) > 1
         ):
             merged.pop(0)
-        if merged and _estimate_tokens(merged[0][1]) > cfg.max_total_tokens:
+        if merged and _estimate_tokens(merged[0][1]) > total_budget:
             role, text = merged[0]
-            merged[0] = (role, _clip(text, cfg.max_total_tokens, "리뷰 컨텍스트"))
+            merged[0] = (role, _clip(text, total_budget, "리뷰 컨텍스트"))
 
         return [Message(role=role, content=text) for role, text in merged]  # type: ignore[arg-type]
 
@@ -139,13 +178,15 @@ class LearningContextManager:
         return role, text
 
     def _summarize_older(self, older: Sequence[Message]) -> str:
-        budget_chars = max(400, self._config.older_summary_tokens * _CHARS_PER_TOKEN)
+        """예산 단위는 **토큰**(CJK 인식 추정기)이다 — 이전의 `토큰×4자` 환산은
+        한국어 요약 블록이 명목 예산의 최대 4배 토큰으로 부풀게 했다."""
+        budget_tokens = max(100, self._config.older_summary_tokens)
         lines = [
             "## Earlier conversation (compressed for learning review)",
             "Older messages are summarized one per line with their message ids — "
             "treat them as observed facts, and rely on the recent messages below for exact detail.",
         ]
-        remaining = budget_chars
+        remaining = budget_tokens
         rendered = 0
         for message in older:
             if remaining <= 0:
@@ -159,12 +200,17 @@ class LearningContextManager:
             else:
                 prefix = f"[{message.id}] {message.role}"
             body = _one_line(message.content)
-            limit = max(60, min(400, remaining - len(prefix) - 8))
-            if len(body) > limit:
-                body = body[:limit].rstrip() + "..."
             line = f"- {prefix}: {body}" if body else f"- {prefix}"
+            # 라인당 토큰 상한(100)과 남은 예산 중 작은 쪽에 맞춰 본문을 줄인다.
+            line_budget = min(100, remaining)
+            line_tokens = _estimate_tokens(line)
+            if line_tokens > line_budget and body:
+                keep = max(20, int(len(body) * line_budget / line_tokens))
+                body = body[:keep].rstrip() + "..."
+                line = f"- {prefix}: {body}"
+                line_tokens = _estimate_tokens(line)
             lines.append(line)
-            remaining -= len(line) + 1
+            remaining -= line_tokens
             rendered += 1
         if rendered < len(older):
             lines.append(f"- ... {len(older) - rendered} more older messages omitted.")

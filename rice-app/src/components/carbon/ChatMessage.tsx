@@ -1147,6 +1147,11 @@ const PatchProposalCard: React.FC<{
   const [body, setBody] = useState(m.proposedBody);
   const edited = editing && body !== m.proposedBody;
   const { t } = useTranslation('chat');
+  const descriptionValue = m.isCreation ? m.description : m.newDescription;
+  const tagsValue = m.isCreation ? m.tags : m.newTags;
+  const showDescription = m.isCreation || m.newDescription !== undefined;
+  const showTags = m.isCreation || m.newTags !== undefined;
+  const showMetadata = showDescription || showTags;
 
   return (
     <div className="my-2 max-w-[680px]">
@@ -1193,6 +1198,49 @@ const PatchProposalCard: React.FC<{
           </div>
         )}
         </div>
+
+        {/* Metadata is part of the same approved write as the body. Keep the
+            exact values visible instead of reducing them to a generic warning. */}
+        {showMetadata && (
+          <div className="mx-4 mt-3 rounded-lg border border-border-subtle-01 bg-background/35 px-3 py-2.5">
+            <div className="mb-2 text-caption-01 font-semibold text-text-secondary">
+              {t('message.patchMetadataTitle')}
+            </div>
+            <dl className="space-y-2 text-caption-01">
+              {showDescription && (
+                <div>
+                  <dt className="text-text-helper">
+                    {t(m.isCreation ? 'message.patchMetadataDescription' : 'message.patchMetadataNewDescription')}
+                  </dt>
+                  <dd className="mt-0.5 whitespace-pre-wrap break-words font-mono text-text-primary">
+                    {descriptionValue || t('message.patchMetadataEmpty')}
+                  </dd>
+                </div>
+              )}
+              {showTags && (
+                <div>
+                  <dt className="text-text-helper">
+                    {t(m.isCreation ? 'message.patchMetadataTags' : 'message.patchMetadataNewTags')}
+                  </dt>
+                  <dd className="mt-1 flex flex-wrap gap-1">
+                    {(tagsValue ?? []).length > 0 ? (
+                      (tagsValue ?? []).map((tag, index) => (
+                        <span
+                          key={`${tag}-${index}`}
+                          className="max-w-full break-all rounded border border-border-subtle-01 bg-layer-02 px-1.5 py-0.5 font-mono text-text-primary"
+                        >
+                          {tag}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="font-mono text-text-helper">{t('message.patchMetadataNoTags')}</span>
+                    )}
+                  </dd>
+                </div>
+              )}
+            </dl>
+          </div>
+        )}
 
         {/* diff (or editable body) */}
         <div className="mx-4 mb-3 mt-3 overflow-hidden rounded-lg border border-border-subtle-01 bg-background/35">

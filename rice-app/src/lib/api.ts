@@ -288,8 +288,17 @@ class ApiClient {
     return this.send('POST', `/skills/${id}/patch`, decision);
   }
   /** Phase B: ArchiveProposal(순수 정리 or 병합 흡수) 승인/거부 — approval_id 없음 */
-  answerArchiveDecision(id: string, approved: boolean, absorbedInto?: string | null): Promise<ApiResponse> {
-    return this.send('POST', `/skills/${id}/archive-decision`, { approved, absorbed_into: absorbedInto ?? null });
+  answerArchiveDecision(
+    id: string,
+    approved: boolean,
+    precondition?: { absorbedInto?: string | null; version?: number | null; bodyHash?: string | null },
+  ): Promise<ApiResponse> {
+    return this.send('POST', `/skills/${id}/archive-decision`, {
+      approved,
+      absorbed_into: precondition?.absorbedInto ?? null,
+      absorbed_into_version: precondition?.version ?? null,
+      absorbed_into_body_hash: precondition?.bodyHash ?? null,
+    });
   }
   /** Phase B: 통합 병합 제안(umbrella 생성/patch) 승인/거부 — approval_id 없음,
    *  프론트가 들고 있던 proposed_body를 그대로 반송한다. */

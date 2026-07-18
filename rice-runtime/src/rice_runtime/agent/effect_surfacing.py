@@ -59,6 +59,17 @@ async def surface_learning_effect(
             derived_from_external=effect.derived_from_external,
         )
     elif isinstance(effect, PatchProposal):
+        metadata_payload: dict[str, object] = {}
+        if effect.from_version == 0:
+            # Creation metadata is persisted together with the v1 body.  Include
+            # empty values as well: omitting them would make the approval card
+            # unable to distinguish "empty by proposal" from "wire data lost".
+            metadata_payload["description"] = effect.description
+            metadata_payload["tags"] = list(effect.tags)
+        if effect.new_description is not None:
+            metadata_payload["new_description"] = effect.new_description
+        if effect.new_tags is not None:
+            metadata_payload["new_tags"] = list(effect.new_tags)
         req = ApprovalRequest(
             kind="skill_patch",
             payload={
@@ -68,6 +79,15 @@ async def surface_learning_effect(
                 "trigger": effect.trigger,
                 "from_version": effect.from_version,
                 "to_version": effect.to_version,
+                # Reconnect must restore the exact same safety/approval surface
+                # as the live SSE card.  A diff is not an authoritative body and
+                # warnings/provenance must not disappear merely because the tab
+                # reconnected while the approval was parked.
+                "proposed_body": effect.proposed_body,
+                "warnings": list(effect.warnings),
+                "derived_from_external": effect.derived_from_external,
+                "evidence_message_ids": list(effect.evidence_message_ids),
+                **metadata_payload,
             },
         )
         yield ev_skill_patch_proposed(
@@ -79,6 +99,10 @@ async def surface_learning_effect(
             effect.from_version,
             effect.to_version,
             proposed_body=effect.proposed_body,
+            description=effect.description if effect.from_version == 0 else None,
+            tags=effect.tags if effect.from_version == 0 else None,
+            new_description=effect.new_description,
+            new_tags=effect.new_tags,
             warnings=effect.warnings,
             derived_from_external=effect.derived_from_external,
             evidence_message_ids=effect.evidence_message_ids,

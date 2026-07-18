@@ -6,11 +6,12 @@
 포맷 (LEARNING_LOOP §3):
   {
     "skill": "<name>",
-    "use": <int>,      # 턴 종료 시 **관여(engagement) 근거가 있는** 스킬에 +1 (observe)
+    "use": <int>,      # lifetime 관여 누적
+    "version_use": <int>, # 현재 version에서의 관여 — friction 분모
     "view": <int>,     # 모델의 skill_view 온디맨드 로딩 시 +1 (view_skill_body)
     "injected": <int>, # 자동 전문 주입 횟수 (관여 여부와 무관 — 노출 측정)
     "patch": <int>,    # 본문 수정 승인 시 +1 (apply_patch에서)
-    "friction": <int>, # 이 스킬이 관여한 턴에서 교정/실패 신호가 감지된 횟수
+    "friction": <int>, # **현재 버전**이 관여한 턴에서 교정/실패 신호가 감지된 횟수
     "routing_miss": <int>, # 라우터가 못 맞췄는데 모델이 수동 로딩한 횟수 (발견성 결함 신호)
     "last_used_at": "<ISO8601 | null>",
     "created_at": "<ISO8601>",
@@ -59,6 +60,9 @@ MAX_OBSERVED_TOOLS = 40
 class UsageData:
     skill: str
     use: int = 0
+    # 현재 skill version에서 발생한 use. `use`는 lifetime 누적이라 friction과
+    # 직접 나누면 서로 다른 기간을 비교하게 된다.
+    version_use: int = 0
     view: int = 0
     injected: int = 0
     patch: int = 0
@@ -72,6 +76,7 @@ class UsageData:
         return {
             "skill": self.skill,
             "use": self.use,
+            "version_use": self.version_use,
             "view": self.view,
             "injected": self.injected,
             "patch": self.patch,
@@ -89,6 +94,9 @@ class UsageData:
         return cls(
             skill=d.get("skill", ""),
             use=int(d.get("use", 0)),
+            # 구형 sidecar는 현재까지의 lifetime use를 현재 version의 보수적
+            # 근사로 사용하고, 다음 version transition부터 정확히 0에서 시작한다.
+            version_use=int(d.get("version_use", d.get("use", 0))),
             view=int(d.get("view", 0)),
             injected=int(d.get("injected", 0)),
             patch=int(d.get("patch", 0)),
@@ -135,6 +143,7 @@ class UsageStore:
         """use += 1, last_used_at = now. 턴 관찰(observe)에서 호출."""
         usage = self.read(name)
         usage.use += 1
+        usage.version_use += 1
         usage.last_used_at = now_iso()
         self._write(usage)
         return usage
@@ -172,9 +181,18 @@ class UsageStore:
         return usage
 
     def increment_patch(self, name: str) -> UsageData:
-        """patch += 1. apply_patch 승인 시 증가."""
+        """patch += 1, current-version counters reset. 모든 version 전이에서 호출.
+
+        friction 리셋(2026-07-18, 버전 스코핑): friction은 "현재 본문이 관여한
+        턴의 교정/실패 신호" 카운터여야 한다. 리셋하지 않으면 패치 전 버전의
+        실패가 패치 후 버전의 통계에 영구히 남아, 리뷰 힌트("이 스킬을 의심하라")
+        가 방금 고친 스킬을 계속 의심하게 만들고 "패치가 실제로 개선했는가"를
+        friction 추이로 판정할 길이 없어진다. 누적 이력이 필요하면 ledger의
+        learning_events가 이미 시계열로 남는다."""
         usage = self.read(name)
         usage.patch += 1
+        usage.version_use = 0
+        usage.friction = 0
         self._write(usage)
         return usage
 

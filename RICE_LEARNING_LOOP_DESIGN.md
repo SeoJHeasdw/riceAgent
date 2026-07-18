@@ -66,11 +66,12 @@ absorbed_into: null                   # curator 통합으로 archived됐으면 �
 ```json
 {
   "skill": "deploy-k8s-service",
-  "use": 12,          // 관여(engagement) 근거가 있는 턴 수 — 아래 정직화 참고
+  "use": 12,          // lifetime 관여(engagement) 턴 수 — 아래 정직화 참고
+  "version_use": 4,   // 현재 version에서의 관여 턴 수 — friction의 같은 기간 분모
   "view": 3,          // 모델이 skill_view 로 온디맨드 로딩한 횟수 (UI 열람은 세지 않음)
   "injected": 30,     // 전문 자동 주입(노출) 횟수 — use 와 분리 (2026-07-11 신규)
   "patch": 2,         // 개선(본문 수정)된 횟수 → version과 동기
-  "friction": 1,      // 관여한 턴에서 교정/실패 신호가 함께 감지된 횟수 (2026-07-11 신규)
+  "friction": 1,      // 현재 version 관여 턴에서 교정/실패가 함께 감지된 횟수
   "routing_miss": 4,  // 라우터가 못 맞췄는데 모델이 수동 로딩한 횟수 = 발견성 결함 (2026-07-11 신규)
   "tools": {"kubectl_apply": 5, "search_files": 2},  // 관측된 도구 호출 빈도(상한 40종, 2026-07-06 신규)
   "last_used_at": "2026-06-18T09:00:00Z",
@@ -90,6 +91,9 @@ absorbed_into: null                   # curator 통합으로 archived됐으면 �
     올리지 않는다.
   - `injected` = 전문 자동 주입(노출) 집계 — "주입은 됐지만 안 쓰인" 스킬(오탐)을
     `injected≫use` 패턴으로 식별할 수 있다.
+  - `version_use`/`friction` = 현재 version 안에서 같은 기간을 갖는 관여/마찰
+    카운터. 본문·번들 리소스 수정 또는 rollback으로 version이 오르면 둘 다 0부터
+    다시 시작하고, `use`는 lifetime 누적을 유지한다.
   - `friction`/`routing_miss` = 리뷰 LLM에 실리는 실측 힌트(§5.2.2) — 각각 "절차를
     의심하라", "발견성(설명/태그)을 고쳐라"의 근거.
 - 카운터 증가 시점: `use`/`injected`/`friction`=턴 종료 observe, `view`/`routing_miss`=`skill_view`, `patch`=본문 수정(승인) 시 (§5.2.4)
@@ -225,9 +229,10 @@ patch로 표현되고(`from_version=0`), `skill_patch_proposed`가 diff 카드�
   요청일 수 있기 때문(쿨다운은 무인 재제안을 막는 장치지 명시적 의도를 막는
   장치가 아니다).
 
-- **실측 텔레메트리 힌트(2026-07-11 신규).** 리뷰 프롬프트의 patch 가능 스킬
-  헤딩에 `use/friction/routing_miss`(§3) 한 줄이 붙는다(0이면 생략). 시스템
-  프롬프트가 해석 규칙을 준다 — friction 높음 = "이 스킬이 관여한 턴마다
+- **실측 텔레메트리 힌트(2026-07-11 신규, v4 기간 정합).** 리뷰 프롬프트의
+  patch 가능 스킬 헤딩에 `lifetime_use/current_version_use/
+  current_version_friction/routing_miss`(§3) 한 줄이 붙는다(신호가 없으면 생략).
+  시스템 프롬프트가 해석 규칙을 준다 — friction 높음 = "현재 version 관여 턴마다
   교정/실패가 겹쳤다, 절차를 의심하라"; routing_miss 높음 = "본문이 아니라
   발견성이 문제다, `new_description`/`new_tags`로 사용자가 실제로 쓰는 단어를
   추가하라". 리뷰가 대화 하나만 보던 맹점을 누적 실측이 보완한다.
@@ -536,3 +541,114 @@ tool 결과는 이름만)를 놓고 LLM 1회 호출로 2회+ 반복 패턴을 �
   ledger 기록으로 통제.
 - **제안함 항목의 자동 만료** — pending cap으로 충분. 시간 기반 expired 전이는
   curator에 붙일 수 있는 향후 순수 추가.
+
+---
+
+## 10. 폐루프 고도화 1차 — 인과 보존·안전 경계 확장·실패 보존 (2026-07-18 신규, v4)
+
+적대 리뷰(업계 최고수준 모델의 심층 분석) 결론: 루프의 저작·승인·감사 축은
+탄탄하지만 **경험→귀속→평가→승격의 폐루프가 중간에서 끊긴다.** 이 절은 그 지적
+중 즉시 구조로 닫을 수 있는 것들을 반영한 변경의 정본이다(회귀 테스트:
+`tests/test_learning_hardening_v4.py`).
+
+### 10.1 evidence watermark — 감사 가능한 구간 고정 + 카탈로그 우선순위 hint
+
+리뷰 잡(learning_jobs, `0016_learning_job_evidence.sql`)에 **evidence(JSON)** 를
+부착한다: 관찰 구간의 메시지 워터마크(`from_message_id`/`through_message_id`),
+그 구간에서 주입/조회/관여된 스킬과 **실제 주입·조회 시점의 버전 목록**,
+버전별 friction 턴 수(`friction_by_skill_version`).
+`observe()`가 턴 종료 시점에 고정하고(리뷰 시점의 전역 스냅샷으로는 재구성
+불가 — 그 사이 스킬이 패치된다), 잡 병합 시 from 보존·through 갱신·버전
+합집합으로 합성된다(`LearningLedger._merge_evidence`).
+
+**소비**는 세 군데다. (1) `from..through` inclusive 구간만 gate와 review engine에
+동일하게 전달해 이후 대화가 과거 잡에 섞이지 않게 한다(경계가 없거나 역전되면
+전체 history로 넓히지 않고 잡을 failed 처리; evidence가 없는 구버전 잡만 전체
+history 허용). (2) 병합된 `turns`를 nudge gate에 반영한다. (3) evidence 스킬을
+관여>조회>주입 순으로 `ReviewEngine._build_catalog(priority_skill_ids)`에 넘겨
+전문(full-body) 예산을 이번 구간의 스킬에 먼저 배정한다. 이전엔 누적 사용량
+순에서 잘리면 방금 사용된 저사용 스킬이 빠졌다.
+
+이것은 **완전한 LearningEpisode가 아니다.** 버전/마찰 맵은 감사와 후보 우선순위
+hint이며, 과거 버전 본문·도구 결과·성공 판정과 baseline 비교까지 재현하지는
+못한다. 잡에 붙인 이유는 잡이 "미리뷰 구간"과 같은 수명을 갖기 때문이다.
+
+### 10.2 안전 경계 확장 — "본문"이 아니라 "모델에 닿는 모든 데이터"
+
+§8의 경계가 본문에만 걸려 있던 세 구멍을 닫았다:
+
+- **memory secret 재유출(P0)**: `_memory_effect`가 store가 반환한 **정제본
+  (`item.content`)** 만 ledger detail·SSE(`MemoryWritten.content`)에 싣는다.
+  이전엔 memories 테이블에는 `[REDACTED]`가 저장되는데 learning_events와
+  스트림으로는 원문 시크릿이 그대로 샜다. `memory_blocked` 차단 기록도 scrub
+  후 저장.
+- **metadata scrub/scan**: description/tags/changelog(create·patch·consolidate
+  전부)도 시크릿 scrub + risk scan 대상이다(`proposals.py::sanitize_metadata`).
+  description은 승인 후 매 턴 시스템 프롬프트의 스킬 인덱스에 들어가므로
+  본문과 동일한 위협 표면이다. 최종 서비스 쓰기 경계에서도 다시 scrub·길이/개수
+  상한을 적용하고, 승인 카드(SSE·재연결·제안함·통합 화면)는 실제 저장될 metadata와
+  warning/diff/본문을 숨기지 않는다.
+- **quarantine 격리 완결**: 격리 메모리는 리뷰 프롬프트의 "Already-known
+  facts"로 재공급되지 않는다(`_recent_fact_strings`가 active만). 격리는 출처
+  기반 방어인데, 기지사실 재공급은 그 방어를 우회해 다음 리뷰어의 전제를
+  오염시켰다.
+- **plugin 소유권 경계**: store에 남은 legacy `source=plugin:*` 행도 review
+  카탈로그에서는 compact/read-only로만 보이며 patch/edit/delete/archive/rollback/
+  state 변경과 시간 규칙 curator 전이를 서비스 최종 경계에서 거부한다.
+
+### 10.3 리뷰 실패의 보존 — done이 아니라 retryable pending
+
+리뷰 LLM 호출 실패(provider 장애, context 한도)는 이제 `ReviewLLMError`로
+구분된다 — "제안 없음"(정상 `[]`)과 "판단 못 함"(장애)은 다른 사건이다.
+`service.review()`/`sweep`은 이를 받아 잡을 **pending으로 되돌리고**(attempts+=1,
+`0016`), `review_job_max_attempts`(기본 3) 도달 시에만 failed로 마감한다.
+재시도 잡은 이미 gate를 통과했으므로 gate를 다시 평가하지 않으며, 성공한 뒤에만
+nudge 카운터를 초기화한다. claim은 오래된 잡 우선이고 retry/finish는 `running`
+상태에서만 원자적으로 전이한다. 재시도는 다음 POST 또는 스케줄러 sweep이
+자연히 집어간다. `/learn`(명시적
+사용자 요청)은 SSE error로 정직하게 실패를 보여준다(이전: 조용한 빈 결과).
+
+**context 예산의 CJK 정합**: `review/context.py::_clip`의 1토큰=4자 고정 환산을
+제거하고 `core/tokens.py` estimator로 역산+검증한다(§7과 동일 원칙). 이전엔
+한국어 세션에서 24K 명목 예산이 실제 ~96K 토큰이 되어 리뷰 호출이 provider
+한도에서 터졌고, 그 실패가 §10.3 이전엔 done으로 삼켜져 한국어 사용자의 학습
+기회가 체계적으로 소실됐다.
+
+**한 요청 예산**: history와 catalog를 각각 24K로 잡지 않는다. system prompt,
+메시지, skill catalog, known facts, tool schema를 합친 입력 전체에 하나의 상한을
+적용하고 review 출력 상한도 provider에 명시한다. Ollama는 live `num_ctx`에서
+입력+출력+추정 여유를 매 호출 역산하므로 설정 화면에서 모델을 바꿔도 시작 시점의
+낡은 예산을 쓰지 않는다.
+
+### 10.4 귀속 정밀도 — friction 버전 스코핑 & 신호 오탐 가드
+
+- **friction 버전 스코핑**: `version_use`와 `friction`을 현재 version 카운터로
+  두고, 승인 patch뿐 아니라 직접 본문/번들 편집과 rollback을 포함한 모든 version
+  전이에서 함께 리셋한다(`UsageStore.increment_patch`). 잡 evidence에는 관찰 당시
+  `skill_id/version`별 friction을 남긴다. 다만 이것만으로 baseline-vs-candidate
+  성능을 증명하지는 않는다(§10.5).
+- **signals.py 오탐 가드**: 부정문("오류/에러/실패 (+가/는/도) 없-",
+  "no tests failed"/"without errors"/"0 failed")과 첨가 표현("뿐(만) 아니라")은
+  신호가 아니다. friction과 리뷰 게이트가 이 신호를 먹으므로 재현율보다
+  정밀도가 우선이다. 한국어는 고정폭 look-around, 영어는 부정 구문 사전 제거
+  방식(부정어와 신호 사이에 단어가 끼는 언어 구조 차이).
+- **consolidation 순서 보장**: archive proposal이 가진 umbrella의 목표
+  `version + canonical body SHA-256`이 승인 시점의 active/enabled target과 정확히
+  같을 때만 흡수를 허용한다. self/inactive/plugin target도 거부한다. 단순 존재
+  확인만으로는 기존 umbrella patch 미승인을 구분할 수 없던 구멍을 닫았고,
+  umbrella가 먼저 적용되지 않았거나 그 뒤 다시 바뀌면 409로 원본을 보존한다.
+
+### 10.5 이번에 안 한 것 (후속 과제, 우선순위 순)
+
+- **candidate 상태 + baseline-vs-candidate 평가** — 후보 스킬을 즉시 active로
+  승격하지 않고 held-out/paraphrased task에서 기존 버전과 비교해 성공률·비용·
+  회귀 조건 통과 시 승격하는 체계. 현재 eval(`eval/scripted_provider.py`)은
+  marker 유무로 scripted branch를 고르는 구조라 "스킬이 모델 성능을 개선했다"의
+  증거가 못 된다(리뷰 지적 그대로). 평가 하네스 자체의 재설계가 선행돼야 한다
+  — RICE_LEARNING_EVAL.md 개정과 함께 별도 배치로.
+- **완전한 LearningEpisode** — 도구 호출 인자/결과 전사, 성공/중단/사용자 수정
+  판정까지 담는 독립 엔티티. §10.1의 watermark가 스키마 진화 없이 그 방향으로
+  확장 가능한 발판이다(evidence JSON에 필드 추가 = 순수 추가).
+- **proposal group 트랜잭션** — consolidation의 umbrella+archive들을 하나의
+  승인 단위로 묶는 것. §10.4의 순서 가드가 데이터 손실은 이미 막으므로,
+  UI/계약 변경이 필요한 그룹화는 후속 순수 추가.

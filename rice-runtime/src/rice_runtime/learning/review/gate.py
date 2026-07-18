@@ -40,14 +40,17 @@ class ReviewGate:
         tool_calls_made: int,
         final_message: str = "",
         user_text: str | None = None,
+        turns_elapsed: int = 1,
     ) -> bool:
         """이 턴에 대해 review()를 부를지 판단한다.
 
-        호출할 때마다 세션의 "마지막 리뷰 이후 턴 수" 카운터가 +1 된다 — 단순
-        체크(응답이 False였던 경우 포함)로는 리셋되지 않는다. 실제로 리뷰를
-        실행했을 때만 `mark_reviewed()`를 호출해 리셋한다.
+        호출할 때마다 세션의 "마지막 리뷰 이후 턴 수" 카운터에
+        `turns_elapsed`를 더한다. pending review job이 여러 턴의 evidence를
+        병합했으면 그 턴 수를 한 번에 반영해 nudge를 과소 계수하지 않는다.
+        단순 체크(응답이 False였던 경우 포함)로는 리셋되지 않고,
+        실제 리뷰가 성공했을 때만 `mark_reviewed()`를 호출해 리셋한다.
         """
-        turns = self._turns_since_review.get(session_id, 0) + 1
+        turns = self._turns_since_review.get(session_id, 0) + max(1, int(turns_elapsed))
         self._turns_since_review[session_id] = turns
 
         haystack = final_message if not user_text else f"{final_message}\n{user_text}"

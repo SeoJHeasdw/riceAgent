@@ -274,6 +274,9 @@ class TurnOutcome:
     history: tuple[Message, ...]
     tool_calls_made: int
     injected_skill_ids: tuple[str, ...]
+    # Exact prefetch snapshot, captured before the turn starts. IDs alone are
+    # retained for compatibility; learning evidence prefers these pairs.
+    injected_skill_versions: tuple[tuple[str, int], ...] = ()
     aborted: bool = False
 
 
@@ -423,6 +426,10 @@ def ev_skill_patch_proposed(
     from_version: int | None = None,
     to_version: int | None = None,
     proposed_body: str | None = None,
+    description: str | None = None,
+    tags: tuple[str, ...] | None = None,
+    new_description: str | None = None,
+    new_tags: tuple[str, ...] | None = None,
     warnings: tuple[str, ...] = (),
     derived_from_external: bool = False,
     evidence_message_ids: tuple[str, ...] = (),
@@ -444,6 +451,18 @@ def ev_skill_patch_proposed(
         # 재구성 로직은 remove 아닌 줄을 이어붙이는 방식이라 원문과 미묘하게
         # 어긋날 잠재 위험이 있었다(개행/공백 edge case).
         data["proposed_body"] = proposed_body
+    # Metadata is part of the approved write, so it must travel on the same
+    # control event as the body.  Creation uses description/tags; an existing
+    # skill patch uses new_description/new_tags.  Keep empty creation values
+    # ("" / []) explicit so the review card can show the exact persisted shape.
+    if description is not None:
+        data["description"] = description
+    if tags is not None:
+        data["tags"] = list(tags)
+    if new_description is not None:
+        data["new_description"] = new_description
+    if new_tags is not None:
+        data["new_tags"] = list(new_tags)
     if warnings:
         data["warnings"] = list(warnings)
     # Provenance— 카드가 "외부 콘텐츠 유래" 배지 + 근거 개수를 표시.

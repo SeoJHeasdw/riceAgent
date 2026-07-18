@@ -314,6 +314,11 @@ const pendingToThread = (p: PendingApproval): ThreadMessage | null => {
         .filter((l) => l.type !== 'remove')
         .map((l) => l.text)
         .join('\n'),
+    isCreation: isNew,
+    description: d.description,
+    tags: d.tags,
+    newDescription: d.new_description,
+    newTags: d.new_tags,
     warnings: d.warnings,
   };
 };

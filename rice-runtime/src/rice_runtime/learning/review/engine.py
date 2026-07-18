@@ -21,6 +21,7 @@ WHY `agent.providers.interfaces`를 여기서 import해도 순환 의존이 아�
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Callable, Sequence
 
@@ -48,6 +49,16 @@ log = logging.getLogger("rice.learning.review")
 _REVIEW_TEMPERATURE = 0.3  # titler.py와 동일 원칙: 구조화된 산출물은 낮은 변동성이 낫다
 _MAX_KNOWN_FACTS = 20
 
+
+class ReviewLLMError(RuntimeError):
+    """리뷰/학습 LLM 호출 자체의 실패(provider 오류, context 한도 초과 등).
+
+    이전엔 `_run`이 삼키고 []를 반환해 상위(service)가 잡을 done으로 마감했다 —
+    일시적 장애 한 번에 그 구간의 학습 기회가 재시도 없이 조용히 소실되는
+    구조였다. 이제 명시적으로 던져서 service가 잡을 pending으로 되돌리고
+    (ledger.retry_review_job) 재시도 상한까지 기회를 보존한다. "제안이 없었다"
+    (정상 [])와 "판단을 못 했다"(이 예외)는 다른 사건이다."""
+
 # 외부 콘텐츠로 간주하는 도구 출처(메모리 오염 방지). connector(Gmail/
 # Calendar/Drive), plugin(설치된 플러그인 도구), bridge(progressive disclosure로
 # 접힌 connector/plugin 도구), web(fetch_url/web_search) — 모두 사용자 발화 밖의
@@ -70,6 +81,28 @@ def _estimate_tokens(text: str) -> int:
     from ...core.tokens import estimate_tokens  # noqa: PLC0415
 
     return estimate_tokens(text)
+
+
+def _request_tokens(system: str, messages: Sequence[Message], tools: Sequence[object]) -> int:
+    """CJK-aware estimate of the complete provider input, not just history."""
+    message_tokens = sum(_estimate_tokens(m.content) + 4 for m in messages)
+    tool_tokens = _estimate_tokens(
+        json.dumps([getattr(t, "__dict__", str(t)) for t in tools], ensure_ascii=False, default=str)
+    )
+    return _estimate_tokens(system) + message_tokens + tool_tokens
+
+
+def _bounded_strings(values: Sequence[str], max_tokens: int) -> list[str]:
+    out: list[str] = []
+    remaining = max(0, max_tokens)
+    for value in values:
+        tokens = _estimate_tokens(value)
+        if tokens <= remaining:
+            out.append(value)
+            remaining -= tokens
+        if remaining <= 0:
+            break
+    return out
 
 
 class ReviewEngine:
@@ -95,12 +128,21 @@ class ReviewEngine:
         max_rejections: int = 0,
         context: LearningContextManager | None = None,
         builtin_catalog=None,
+        request_token_budget: int = 0,
+        max_output_tokens: int = 8_192,
+        resolve_token_budgets: Callable[[], tuple[int, int]] | None = None,
     ) -> None:
         self._resolve_provider = resolve_provider
         self._skill_store = skill_store
         self._usage_store = usage_store
         self._mem_store = mem_store
         self._catalog_budget = skill_catalog_token_budget
+        self._request_budget = max(0, request_token_budget)
+        self._max_output_tokens = max(1, max_output_tokens)
+        # Provider settings are live-editable.  A fixed startup-time budget can
+        # become unsafe when the user switches from a large SaaS window to a
+        # local Ollama model, so production supplies a per-call resolver.
+        self._resolve_token_budgets = resolve_token_budgets
         self._max_body_chars = max_body_chars
         # 빌트인 스킬 카탈로그(BuiltinSkillCatalog 호환: .list()/.names()) —
         # 없으면(None, 기존 테스트) 리뷰 LLM 은 빌트인의 존재를 모른 채 동작한다.
@@ -120,11 +162,26 @@ class ReviewEngine:
         self._rejection_cooldown_hours = rejection_cooldown_hours
         self._max_rejections = max_rejections
 
-    async def review(self, session_id: str, history: Sequence[Message]) -> list[LearningEffect]:
+    async def review(
+        self,
+        session_id: str,
+        history: Sequence[Message],
+        *,
+        priority_skill_ids: Sequence[str] = (),
+    ) -> list[LearningEffect]:
         """정기 리뷰 — `learning/review/gate.py::ReviewGate`가 호출 여부를 이미
-        결정했다고 가정한다(이 메서드 자체는 게이팅하지 않는다)."""
+        결정했다고 가정한다(이 메서드 자체는 게이팅하지 않는다).
+
+        `priority_skill_ids`: 리뷰 대상 구간(learning_jobs.evidence)에서 실제로
+        관여/주입/조회된 스킬들 — 카탈로그 전문(full-body) 예산을 이들에게 먼저
+        배정한다. 없으면(구버전 잡, 단위 테스트) 누적 사용량 순 그대로."""
         return await self._run(
-            session_id, history, system_prompt=REVIEW_SYSTEM_PROMPT, instruction=None, origin="review"
+            session_id,
+            history,
+            system_prompt=REVIEW_SYSTEM_PROMPT,
+            instruction=None,
+            origin="review",
+            priority_skill_ids=priority_skill_ids,
         )
 
     async def learn(self, session_id: str, history: Sequence[Message], instruction: str) -> list[LearningEffect]:
@@ -165,49 +222,139 @@ class ReviewEngine:
         system_prompt: str,
         instruction: str | None,
         origin: str,
+        priority_skill_ids: Sequence[str] = (),
     ) -> list[LearningEffect]:
-        provider = self._resolve_provider()
-        if getattr(provider, "name", "") == "echo":
-            # titler.py와 동일 가드 — API 키 미설정/오프라인 폴백 provider로는
-            # 구조화된 제안을 만들 수 없다(에코는 입력을 그대로 반사할 뿐).
-            return []
-
         # 런타임이 모델에게만 주입한 계획 정리/서사 넛지는 사용자 발화가
         # 아니다. 리뷰 컨텍스트 렌더러가 없는 단위 조합에서도 안전하게 먼저
         # 제거한다. 외부 콘텐츠(도구 결과) 근거는 메타데이터가 남은 이
         # 필터된 원본에서 계산한다.
         review_history = filter_learning_history(history)
         external, evidence_ids = _external_evidence(review_history)
-
-        full_body_skills, compact_skills, patchable_ids = self._build_catalog()
-        known_facts = self._recent_fact_strings()
-        kwargs = {} if instruction is None else {"instruction": instruction}
-        # 리뷰 전용 렌더: 긴 세션에서도 호출이 bounded가 되고, 도구
-        # 라운드는 순수 텍스트라 wire 규칙 위반이 구조적으로 불가능해진다.
-        rendered_history = self._context.render(review_history) if self._context is not None else review_history
-        _, messages = build_review_messages(
-            rendered_history,
-            full_body_skills=full_body_skills,
-            compact_skills=compact_skills,
-            known_facts=known_facts,
-            rejected_recently=self._recent_rejection_lines(),
-            usage_hints=self._usage_hints(patchable_ids),
-            **kwargs,
-        )
-        tools = build_review_tool_specs(patchable_ids)
-
         calls: list[ToolCall] = []
         try:
+            provider = self._resolve_provider()
+            if getattr(provider, "name", "") == "echo":
+                # API 키 미설정/오프라인 폴백 provider는 구조화 제안을 못 만든다.
+                return []
+
+            request_budget = self._request_budget
+            max_output_tokens = self._max_output_tokens
+            if self._resolve_token_budgets is not None:
+                resolved_input, resolved_output = self._resolve_token_budgets()
+                request_budget = int(resolved_input)
+                if request_budget <= 0:
+                    raise ValueError("review input budget is unavailable for the current model window")
+                max_output_tokens = max(1, int(resolved_output))
+
+            catalog_budget = self._catalog_budget
+            if request_budget:
+                catalog_budget = min(catalog_budget, max(0, int(request_budget * 0.4)))
+            full_body_skills, compact_skills, patchable_ids = self._build_catalog(
+                priority_skill_ids, token_budget=catalog_budget
+            )
+            known_facts = _bounded_strings(self._recent_fact_strings(), 2_000)
+            rejected = _bounded_strings(self._recent_rejection_lines(), 1_000)
+            kwargs = {} if instruction is None else {"instruction": instruction}
+
+            # First build the non-history portion, then give history exactly the
+            # remainder of one shared request budget. This closes the old
+            # 24K-history + 24K-catalog = ~50K request on a 32K local model.
+            history_budget: int | None = None
+            usage_hints = self._usage_hints(patchable_ids)
+            tools = build_review_tool_specs(patchable_ids)
+            if request_budget:
+                # Catalog estimates deliberately stay cheap, but headings,
+                # telemetry hints and the patch tool's enum add wire overhead.
+                # Trim lowest-priority catalog rows until the *exact same*
+                # renderer/tool schema used below fits, instead of turning a
+                # large skill library into a retry loop.
+                history_reserve = min(1_024, request_budget // 5)
+                priority_ids = set(priority_skill_ids)
+                while True:
+                    _, base_messages = build_review_messages(
+                        [],
+                        full_body_skills=full_body_skills,
+                        compact_skills=compact_skills,
+                        known_facts=known_facts,
+                        rejected_recently=rejected,
+                        usage_hints=usage_hints,
+                        **kwargs,
+                    )
+                    non_history = _request_tokens(system_prompt, base_messages, tools)
+                    if non_history <= request_budget - history_reserve:
+                        break
+                    # Preserve causal priority: if the just-used skill only fits
+                    # as a compact row, discard an unrelated full row first.
+                    if compact_skills and compact_skills[-1][0] not in priority_ids:
+                        compact_skills.pop()
+                        continue
+                    if full_body_skills and full_body_skills[-1][0] not in priority_ids:
+                        full_body_skills.pop()
+                        patchable_ids = tuple(skill[0] for skill in full_body_skills)
+                        usage_hints = self._usage_hints(patchable_ids)
+                        tools = build_review_tool_specs(patchable_ids)
+                        continue
+                    if compact_skills:
+                        compact_skills.pop()
+                        continue
+                    if full_body_skills:
+                        full_body_skills.pop()
+                        patchable_ids = tuple(skill[0] for skill in full_body_skills)
+                        usage_hints = self._usage_hints(patchable_ids)
+                        tools = build_review_tool_specs(patchable_ids)
+                        continue
+                    break
+
+                _, base_messages = build_review_messages(
+                    [],
+                    full_body_skills=full_body_skills,
+                    compact_skills=compact_skills,
+                    known_facts=known_facts,
+                    rejected_recently=rejected,
+                    usage_hints=usage_hints,
+                    **kwargs,
+                )
+                non_history = _request_tokens(system_prompt, base_messages, tools)
+                history_budget = max(0, request_budget - non_history - 256)
+
+            rendered_history = (
+                self._context.render(review_history, max_total_tokens=history_budget)
+                if self._context is not None
+                else review_history
+            )
+            _, messages = build_review_messages(
+                rendered_history,
+                full_body_skills=full_body_skills,
+                compact_skills=compact_skills,
+                known_facts=known_facts,
+                rejected_recently=rejected,
+                usage_hints=usage_hints,
+                **kwargs,
+            )
+            estimated = _request_tokens(system_prompt, messages, tools)
+            if request_budget and estimated > request_budget:
+                raise ValueError(
+                    f"bounded review request still exceeds budget: {estimated} > {request_budget}"
+                )
+
             async for chunk in provider.stream(
-                system=system_prompt, messages=messages, tools=tools, temperature=_REVIEW_TEMPERATURE
+                system=system_prompt,
+                messages=messages,
+                tools=tools,
+                temperature=_REVIEW_TEMPERATURE,
+                max_tokens=max_output_tokens,
             ):
                 if chunk.kind == "tool_call" and chunk.tool_call is not None:
                     calls.append(chunk.tool_call)
-        except Exception:
-            # best-effort — 리뷰 실패가 (이미 사용자에게 답변이 끝난) 상위 흐름을
-            # 깨서는 안 된다. titler.py의 "titling must never break a turn"과 동일.
+        except ReviewLLMError:
+            raise
+        except Exception as exc:
+            # 상위 흐름(이미 사용자 답변이 끝난 턴)을 깨지 않는 원칙은 유지하되,
+            # 조용히 []로 접지 않는다 — service가 이 예외를 받아 잡을 pending으로
+            # 되돌려(retry_review_job) 학습 기회를 보존한다. context 한도 초과
+            # (한국어 세션에서 발생하던 경로 포함)도 여기로 온다.
             log.exception("review LLM call failed for session %s", session_id)
-            return []
+            raise ReviewLLMError(f"review LLM call failed ({origin}): {exc}") from exc
 
         effects: list[LearningEffect] = []
         for call in calls:
@@ -215,7 +362,7 @@ class ReviewEngine:
             if effect is None:
                 continue
             if isinstance(effect, PatchProposal):
-                if self._is_suppressed(effect.skill_id):
+                if origin != "learn" and self._is_suppressed(effect.skill_id):
                     # 프롬프트 회피 지시에도 불구하고 나온 재제안 — 쿨다운 창 안에서는
                     # 사용자를 다시 방해하지 않는다(사후 억제, fail-closed).
                     log.info("proposal for %r suppressed (recent rejections)", effect.skill_id)
@@ -234,29 +381,54 @@ class ReviewEngine:
 
     def _build_catalog(
         self,
+        priority_skill_ids: Sequence[str] = (),
+        *,
+        token_budget: int | None = None,
     ) -> tuple[list[tuple[str, str, str]], list[tuple[str, str]], tuple[str, ...]]:
-        """active 스킬을 use 상위 정렬 후 예산 내에서 전체 본문으로, 나머지는
-        name+description만 담는다. `prefetch()`의 budget-fit과 같은 모양이지만
-        렌더링 목적이 달라(리뷰는 skill_id를 명시적으로 라벨링해야 모델이
-        propose_skill_patch에서 정확히 참조할 수 있다) 별도로 둔다."""
+        """active 스킬을 예산 내에서 전체 본문으로, 나머지는 name+description만
+        담는다. `prefetch()`의 budget-fit과 같은 모양이지만 렌더링 목적이 달라
+        (리뷰는 skill_id를 명시적으로 라벨링해야 모델이 propose_skill_patch에서
+        정확히 참조할 수 있다) 별도로 둔다.
+
+        정렬(2026-07-18): **리뷰 대상 구간에서 실제 관여한 스킬이 먼저**, 그
+        다음이 누적 사용량 순이다. 이전엔 누적 사용량만 봐서, 예산에서 잘리면
+        이번 턴에 실제 사용된 저사용 스킬이 카탈로그에서 빠지고 무관한 고사용
+        스킬이 전문을 차지했다 — 관찰과 제안 사이의 인과가 끊기는 지점이었다."""
         all_active = [s for s in self._skill_store.list() if s.state == "active"]
+        plugin_skills = [s for s in all_active if (s.source or "").startswith("plugin:")]
+        mutable_active = [s for s in all_active if not (s.source or "").startswith("plugin:")]
 
         def _use_count(name: str) -> int:
             return self._usage_store.read(name).use
 
-        active_sorted = sorted(all_active, key=lambda s: _use_count(s.name), reverse=True)
+        priority_set = {sid for sid in priority_skill_ids}
+        by_name = {s.name: s for s in mutable_active}
+        prioritized = [by_name[sid] for sid in dict.fromkeys(priority_skill_ids) if sid in by_name]
+        rest = sorted(
+            (s for s in mutable_active if s.name not in priority_set),
+            key=lambda s: _use_count(s.name),
+            reverse=True,
+        )
+        active_sorted = prioritized + rest
 
         full_body: list[tuple[str, str, str]] = []
         compact: list[tuple[str, str]] = []
-        remaining_budget = self._catalog_budget
+        remaining_budget = self._catalog_budget if token_budget is None else max(0, token_budget)
+        compact_candidates: list[tuple[str, str]] = []
         for skill in active_sorted:
             body = skill.body or ""
-            tokens = _estimate_tokens(body)
+            tokens = _estimate_tokens(f"[{skill.name}] {skill.description}\n{body}")
             if tokens <= remaining_budget:
                 full_body.append((skill.name, skill.description, body))
                 remaining_budget -= tokens
             else:
-                compact.append((skill.name, skill.description))
+                compact_candidates.append((skill.name, skill.description))
+
+        # Store-backed plugin skills are legacy/imported read-only content. They
+        # remain visible for duplicate avoidance but never enter patchable_ids.
+        compact_candidates.extend(
+            (s.name, f"(plugin, read-only) {s.description}") for s in plugin_skills
+        )
 
         # 빌트인 스킬은 patch 불가(이름 예약)지만 **존재는 보여야** 한다 — 안
         # 보이면 리뷰 LLM 이 빌트인이 이미 덮는 절차를 신규 스킬로 재발명한다.
@@ -265,9 +437,19 @@ class ReviewEngine:
             try:
                 for b in self._builtin_catalog.list():
                     if getattr(b, "state", "active") == "active" and getattr(b, "enabled", True):
-                        compact.append((b.name, f"(builtin) {b.description}"))
+                        compact_candidates.append((b.name, f"(builtin) {b.description}"))
             except Exception:  # noqa: BLE001 — 카탈로그 조회 실패가 리뷰를 깨면 안 된다
                 log.warning("builtin catalog unavailable for review context", exc_info=True)
+
+        # Compact rows count against the same catalog budget. Previously only
+        # full bodies were metered, so thousands of descriptions could overflow
+        # the supposedly bounded review request.
+        for name, description in compact_candidates:
+            tokens = _estimate_tokens(f"[{name}] {description}") + 2
+            if tokens > remaining_budget:
+                continue
+            compact.append((name, description))
+            remaining_budget -= tokens
 
         patchable_ids = tuple(s[0] for s in full_body)
         return full_body, compact, patchable_ids
@@ -284,11 +466,17 @@ class ReviewEngine:
                 continue
             if u.friction <= 0 and u.routing_miss <= 0:
                 continue
-            hints[sid] = f"use={u.use}, friction={u.friction}, routing_miss={u.routing_miss}"
+            hints[sid] = (
+                f"lifetime_use={u.use}, current_version_use={u.version_use}, "
+                f"current_version_friction={u.friction}, routing_miss={u.routing_miss}"
+            )
         return hints
 
     def _recent_fact_strings(self, limit: int = _MAX_KNOWN_FACTS) -> list[str]:
-        return [m.content for m in self._mem_store.list()[:limit]]
+        """리뷰 프롬프트의 "Already-known facts"는 **active만** — quarantined는
+        외부 콘텐츠 유래로 사용자 승인 전인 미검증 데이터다. 이걸 기지사실로
+        재공급하면 격리가 무의미해진다(다음 리뷰어가 오염 데이터를 전제로 판단)."""
+        return [m.content for m in self._mem_store.list() if m.status == "active"][:limit]
 
     def _to_effect(
         self,
@@ -360,6 +548,9 @@ class ReviewEngine:
             # 모델이 카탈로그에 없는/유효하지 않은 skill_id를 줬다 — 스키마의 enum이
             # 이미 이걸 막지만(build_review_tool_specs), 방어적으로 한 번 더 확인.
             return None
+        if (current.source or "").startswith("plugin:"):
+            log.warning("review engine: patch proposal for plugin skill %r ignored", skill_id)
+            return None
         raw_new_desc = args.get("new_description")
         raw_new_tags = args.get("new_tags")
         return make_patch_proposal(
@@ -389,11 +580,14 @@ class ReviewEngine:
         if risks:
             log.warning("memory write blocked (risk flags: %s)", risks)
             if self._ledger is not None:
+                # 차단 사유 기록에도 원본을 싣지 않는다 — 시크릿이 섞인 content가
+                # 저장은 막혔는데 감사 로그로 새는 것을 막는다(§8 위협 모델 동일).
+                scrubbed_preview, _ = skill_guard.scrub_secrets(content)
                 self._ledger.record(
                     "memory_blocked",
                     session_id=session_id,
                     origin="review",
-                    detail={"kind": kind, "risks": risks, "content": content[:120]},
+                    detail={"kind": kind, "risks": risks, "content": scrubbed_preview[:120]},
                 )
             return None
         # 외부 콘텐츠(도구 결과)가 섞인 턴에서 나온 메모리는 격리(quarantined)로
@@ -409,16 +603,19 @@ class ReviewEngine:
             )
         except Exception:
             return None
+        # 이후로는 반드시 store가 반환한 item.content(시크릿 scrub 적용본)만 쓴다.
+        # 원본 content를 쓰면 memories 테이블에는 [REDACTED]가 남는데 ledger
+        # detail과 SSE(memory_written)로는 원문 시크릿이 그대로 새는 P0 구멍이 된다.
         if self._ledger is not None:
             self._ledger.record(
                 "memory_quarantined" if item.status == "quarantined" else "memory_written",
                 session_id=session_id,
                 origin="review",
-                detail={"kind": kind, "content": content[:120], "memory_id": item.id, "status": item.status},
+                detail={"kind": kind, "content": item.content[:120], "memory_id": item.id, "status": item.status},
             )
         return MemoryWritten(
             memory_type=kind,  # type: ignore[arg-type]
-            content=content,
+            content=item.content,
             status=item.status,
             memory_id=item.id,
             derived_from_external=external,

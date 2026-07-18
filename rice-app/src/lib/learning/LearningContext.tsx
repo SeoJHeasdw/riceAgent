@@ -273,6 +273,10 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           proposed_body:
             d.proposed_body ??
             d.diff.lines.filter((l) => l.type !== 'remove').map((l) => l.text).join('\n'),
+          description: d.description,
+          tags: d.tags,
+          new_description: d.new_description,
+          new_tags: d.new_tags,
           warnings: d.warnings,
           session_id: sessionId,
           derived_from_external: d.derived_from_external,

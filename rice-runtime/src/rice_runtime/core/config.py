@@ -150,11 +150,21 @@ class LearningConfig:
     review_context_tool_output_tokens: int = 600
     review_context_message_tokens: int = 2_000
     review_context_summary_tokens: int = 2_000
+    # history/catalog/system/tool schema를 모두 합친 **한 요청**의 입력 상한.
+    # 개별 24K 예산 둘을 독립 합산해 기본 Ollama 32K 창을 넘기지 않게 한다.
+    review_request_max_tokens: int = 28_000
+    # review는 full replacement body를 tool argument로 낼 수 있어 8K를 예약한다.
+    # composition root가 로컬 num_ctx가 더 작으면 둘을 함께 비례 클램프한다.
+    review_output_max_tokens: int = 8_192
     # ── 서버 소유 리뷰 잡 ────────────────────────────
     # 턴 종료 시 observe()가 남긴 pending 리뷰 잡을 클라이언트가 이만큼(초) 지나도
     # claim하지 않으면(탭 종료 등) 스케줄러 sweep이 백그라운드로 실행해 제안함으로
     # 라우팅한다. 0 이면 sweep 비활성(잡은 pending으로 남는다).
     review_job_stale_seconds: int = 900
+    # 리뷰 LLM 호출(provider/context) 실패 시 잡을 pending으로 되돌려 재시도하는
+    # 총 시도 상한 — 이전엔 실패가 done으로 마감돼 학습 기회가 조용히 소실됐다.
+    # 상한 도달 시 failed로 마감(감사 가능, 무한 재시도 방지).
+    review_job_max_attempts: int = 3
     # ── 설명용 스킬 분석 사이드카 (learning/skill/analysis.py) ──
     # 본문 변경 경로들이 enqueue 한 재분석 잡을 스케줄러가 이 주기(초)로 드레인.
     # 0 이면 백그라운드 비활성 (수동 POST /skills/{id}/analysis/refresh 만).

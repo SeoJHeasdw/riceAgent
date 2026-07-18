@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 
 from .interfaces import PatchProposal, PatchTrigger
@@ -23,7 +24,10 @@ from .skill.store import SkillData
 
 log = logging.getLogger("rice.learning.proposals")
 
-_MAX_CHANGELOG_CHARS = 200
+MAX_CHANGELOG_CHARS = 200
+MAX_DESCRIPTION_CHARS = 1_000
+MAX_TAGS = 5
+MAX_TAG_CHARS = 80
 EXTERNAL_CONTENT_REVIEW_WARNING = "external_content_review"
 # 매개변수가 있는 warning은 "코드:값" 형태로 싣는다 — 로케일 문장으로 푸는 것은
 # 프론트(learningWarnings.ts)의 몫. 런타임이 자연어를 합성하면 UI 언어와 어긋난다.
@@ -33,24 +37,86 @@ DESCRIPTION_CHANGE_WARNING_PREFIX = "description_change:"
 TAGS_CHANGE_WARNING_PREFIX = "tags_change:"
 
 
+def body_fingerprint(body: str) -> str:
+    """Stable SkillStore-roundtrip fingerprint for multi-card consolidation.
+
+    ``parse_skill_md`` removes separator-leading blank lines and text reads
+    normalize platform newlines.  Hash the same canonical body so a correctly
+    applied umbrella proposal does not reject its sibling archive merely because
+    serialization normalized those bytes.
+    """
+    canonical = body.replace("\r\n", "\n").replace("\r", "\n").lstrip("\n")
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def _clean_changelog(text: str) -> str:
     """LLM이 준 changelog 정리 — 폴백 문장을 합성하지 않는다(사용자용 텍스트
     하드코딩 금지). 비면 빈 문자열 그대로 두고, 표시 폴백은 프론트
-    (learningData.ts renderChangelog)가 로케일로 결정한다."""
-    return text.strip()[:_MAX_CHANGELOG_CHARS]
+    (learningData.ts renderChangelog)가 로케일로 결정한다. 시크릿 scrub은
+    `sanitize_metadata`가 이미 적용한 상태로 들어온다."""
+    return text.strip()[:MAX_CHANGELOG_CHARS]
+
+
+def sanitize_metadata(
+    description: str | None, tags: tuple[str, ...] | None, changelog: str | None
+) -> tuple[str | None, tuple[str, ...] | None, str | None, list[str]]:
+    """Bound, normalize, and scrub every persisted/displayed metadata field.
+
+    The builder is not the only caller: final write sinks call it again so a
+    legacy suggestion payload or a direct REST request cannot bypass the same
+    boundary.  Bounding is part of the safety contract too — descriptions and
+    tags are rendered into the always-on skill index and must not become an
+    unmetered prompt side channel.
+    """
+    labels: list[str] = []
+    if description is not None:
+        description = " ".join(str(description).split())[:MAX_DESCRIPTION_CHARS]
+        description, found = skill_guard.scrub_secrets(description)
+        # Redaction labels can be longer than the secret they replace.  Reapply
+        # the persisted-field bound after scrubbing so the safety transform
+        # itself cannot push metadata over its prompt budget.
+        description = description[:MAX_DESCRIPTION_CHARS]
+        labels.extend(found)
+    if tags is not None:
+        cleaned: list[str] = []
+        for raw_tag in tags:
+            tag = " ".join(str(raw_tag).split())[:MAX_TAG_CHARS]
+            if not tag:
+                continue
+            clean_tag, found = skill_guard.scrub_secrets(tag)
+            clean_tag = clean_tag[:MAX_TAG_CHARS]
+            labels.extend(found)
+            if not clean_tag or clean_tag in cleaned:
+                continue
+            cleaned.append(clean_tag)
+            if len(cleaned) >= MAX_TAGS:
+                break
+        tags = tuple(cleaned)
+    if changelog is not None:
+        changelog = " ".join(str(changelog).split())[:MAX_CHANGELOG_CHARS]
+        changelog, found = skill_guard.scrub_secrets(changelog)
+        changelog = changelog[:MAX_CHANGELOG_CHARS]
+        labels.extend(found)
+    return description, tags, changelog, labels
 
 
 def _build_warnings(
-    body: str, scrubbed_labels: list[str], derived_from_external: bool = False
+    body: str,
+    scrubbed_labels: list[str],
+    derived_from_external: bool = False,
+    metadata_text: str = "",
 ) -> tuple[str, ...]:
     """승인 카드에 실을 warnings: 시크릿 마스킹 알림 + 위험 플래그(learning safety
     scanner) + 외부 콘텐츠 유래 경고. 전부 차단이 아니라 표시다 —
-    스킬은 HITL이 있으므로 카드에 보여주고 사용자가 판단한다."""
+    스킬은 HITL이 있으므로 카드에 보여주고 사용자가 판단한다.
+    `metadata_text`: description/tags/changelog 결합 — 위험 플래그 스캔을 본문
+    밖 필드까지 확장한다(주입 지시가 description으로 우회하는 경로 차단)."""
     warnings: list[str] = []
     if derived_from_external:
         warnings.append(EXTERNAL_CONTENT_REVIEW_WARNING)
     warnings.extend(f"{MASKED_WARNING_PREFIX}{label}" for label in scrubbed_labels)
-    warnings.extend(f"{RISK_FLAG_WARNING_PREFIX}{label}" for label in skill_guard.scan_risks(body))
+    scan_target = f"{body}\n{metadata_text}" if metadata_text else body
+    warnings.extend(f"{RISK_FLAG_WARNING_PREFIX}{label}" for label in skill_guard.scan_risks(scan_target))
     return tuple(warnings)
 
 
@@ -81,6 +147,9 @@ def make_create_proposal(
         log.warning("create proposal dropped: body too large for %r", name)
         return None
     body, scrubbed = skill_guard.scrub_secrets(body)
+    description, tags, changelog, meta_labels = sanitize_metadata(description, tags, changelog)
+    description = description or ""
+    tags = tags or ()
     return PatchProposal(
         skill_id=name,
         changelog=_clean_changelog(changelog or ""),
@@ -91,13 +160,15 @@ def make_create_proposal(
         to_version=1,
         description=description,
         tags=tags,
-        warnings=_build_warnings(body, scrubbed, derived_from_external),
+        warnings=_build_warnings(
+            body,
+            scrubbed + meta_labels,
+            derived_from_external,
+            metadata_text="\n".join((description, *tags, changelog or "")),
+        ),
         derived_from_external=derived_from_external,
         evidence_message_ids=evidence_message_ids,
     )
-
-
-_MAX_TAGS = 5
 
 
 def _clean_metadata_change(
@@ -112,7 +183,7 @@ def _clean_metadata_change(
             desc = cleaned
     tags = None
     if new_tags is not None:
-        cleaned_tags = tuple(dict.fromkeys(t.strip() for t in new_tags if t.strip()))[:_MAX_TAGS]
+        cleaned_tags = tuple(dict.fromkeys(t.strip() for t in new_tags if t.strip()))[:MAX_TAGS]
         if cleaned_tags and list(cleaned_tags) != list(current.tags):
             tags = cleaned_tags
     return desc, tags
@@ -145,11 +216,22 @@ def make_patch_proposal(
         log.warning("patch proposal dropped: body too large for %r", current.name)
         return None
     new_body, scrubbed = skill_guard.scrub_secrets(new_body)
+    new_description, new_tags, scrubbed_changelog, meta_labels = sanitize_metadata(
+        new_description, new_tags, changelog
+    )
+    changelog = scrubbed_changelog or ""
     diff = build_diff(current.body, new_body)
     desc_change, tags_change = _clean_metadata_change(current, new_description, new_tags)
     if not diff["lines"] and desc_change is None and tags_change is None:
         return None
-    warnings = list(_build_warnings(new_body, scrubbed, derived_from_external))
+    warnings = list(
+        _build_warnings(
+            new_body,
+            scrubbed + meta_labels,
+            derived_from_external,
+            metadata_text="\n".join((desc_change or "", *(tags_change or ()), changelog or "")),
+        )
+    )
     if desc_change is not None:
         warnings.append(f"{DESCRIPTION_CHANGE_WARNING_PREFIX}{desc_change}")
     if tags_change is not None:

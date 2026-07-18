@@ -506,6 +506,13 @@ export type ThreadMessage =
       diff: PatchDiffLine[];
       /** 승인 전 편집 가능한 개선된 전체 본문 */
       proposedBody: string;
+      /** 승인과 함께 저장될 메타데이터. 생성은 description/tags, 기존 스킬
+       * 개선은 newDescription/newTags를 사용한다. */
+      isCreation: boolean;
+      description?: string;
+      tags?: string[];
+      newDescription?: string;
+      newTags?: string[];
       /** 승인 시 My Skills 히스토리에 보관될 이 버전의 규칙 스냅샷 */
       newRules?: SkillVersionRule[];
       /** 적용 후 사용처에 남길 한 줄 (선택) */

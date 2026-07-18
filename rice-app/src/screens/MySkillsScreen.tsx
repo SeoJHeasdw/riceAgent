@@ -18,6 +18,7 @@ import { ownedSkillFiles, ownedToMarketSkill, publishedMarketId } from '../lib/s
 import { languageFromPath } from '../lib/skillFiles';
 import { api } from '../lib/api';
 import { useToast } from '../lib/toast/ToastContext';
+import { localizeLearningWarning } from '../lib/learningWarnings';
 import type { RuntimeSkillAnalysis, RuntimeSkillVersion, Skill, SkillAnalysisConfidence, SkillAnalysisToolMention, SkillDetail, SkillOrigin, SkillStep, SkillUpstream, SkillVersion } from '../lib/learningData';
 import type { IconName } from '../components/ui';
 import type { ConsolidateProposal, ImpactReport } from '../lib/types';
@@ -85,6 +86,98 @@ const skillStatus = (s: Skill): SkillStatus => {
 };
 /** 이 상태가 "주입 중"을 의미하는가 */
 const isInjected = (st: SkillStatus) => st === 'active' || st === 'stale';
+
+const ConsolidatePatchReview: React.FC<{
+  proposal: Extract<ConsolidateProposal, { kind: 'patch' }>;
+}> = ({ proposal }) => {
+  const { t } = useTranslation('skills');
+  const { t: tChat } = useTranslation('chat');
+  const isCreation = proposal.from_version === 0;
+  const showMetadata = isCreation || proposal.description !== undefined || proposal.tags !== undefined;
+
+  return (
+    <div className="mt-2 space-y-2">
+      {!!proposal.warnings?.length && (
+        <div className="rounded-md border border-support-warning/35 bg-support-warning/10 px-2 py-1.5 text-caption-01 text-text-secondary">
+          <div className="flex items-start gap-1.5">
+            <Icon name="warning" size={12} className="mt-0.5 flex-shrink-0 text-support-warning" />
+            <div>
+              <div className="font-semibold text-support-warning">{t('mySkills.consolidateWarningsLabel')}</div>
+              <div className="mt-0.5 break-words">
+                {proposal.warnings.map((warning) => localizeLearningWarning(warning, tChat)).join(' · ')}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showMetadata && (
+        <div className="rounded-md border border-border-subtle-01 bg-layer-01 px-2 py-1.5 text-caption-01">
+          <div className="font-semibold text-text-secondary">{t('mySkills.consolidateMetadataLabel')}</div>
+          <div className="mt-1">
+            <span className="text-text-helper">{t('mySkills.consolidateDescriptionLabel')}</span>
+            <div className="whitespace-pre-wrap break-words font-mono text-text-primary">
+              {proposal.description || t('mySkills.consolidateEmptyValue')}
+            </div>
+          </div>
+          <div className="mt-1.5">
+            <span className="text-text-helper">{t('mySkills.consolidateTagsLabel')}</span>
+            <div className="mt-0.5 flex flex-wrap gap-1">
+              {(proposal.tags ?? []).length > 0 ? (
+                (proposal.tags ?? []).map((tag, index) => (
+                  <span
+                    key={`${tag}-${index}`}
+                    className="max-w-full break-all rounded border border-border-subtle-01 bg-layer-02 px-1.5 py-0.5 font-mono text-text-primary"
+                  >
+                    {tag}
+                  </span>
+                ))
+              ) : (
+                <span className="font-mono text-text-helper">{t('mySkills.consolidateNoTags')}</span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="overflow-hidden rounded-md border border-border-subtle-01 bg-layer-01">
+        <div className="border-b border-border-subtle-01 px-2 py-1.5 text-caption-01 font-semibold text-text-secondary">
+          {t('mySkills.consolidateDiffLabel')}
+        </div>
+        <div className="max-h-40 overflow-y-auto py-1 font-mono text-label-micro leading-[17px]">
+          {proposal.diff.lines.length > 0 ? (
+            proposal.diff.lines.map((line, index) => (
+              <div
+                key={index}
+                className={`flex gap-1.5 px-2 py-0.5 ${
+                  line.type === 'add'
+                    ? 'bg-diff-add-bg text-diff-add-text'
+                    : line.type === 'remove'
+                      ? 'bg-diff-remove-bg text-diff-remove-text'
+                      : 'text-text-helper'
+                }`}
+              >
+                <span className="w-2 flex-shrink-0 select-none text-center">
+                  {line.type === 'add' ? '+' : line.type === 'remove' ? '−' : ' '}
+                </span>
+                <span className="min-w-0 whitespace-pre-wrap break-all">{line.text || ' '}</span>
+              </div>
+            ))
+          ) : (
+            <div className="px-2 py-1 text-text-helper">{t('mySkills.consolidateNoChanges')}</div>
+          )}
+        </div>
+      </div>
+
+      <div className="overflow-hidden rounded-md border border-border-subtle-01 bg-layer-01">
+        <div className="border-b border-border-subtle-01 px-2 py-1.5 text-caption-01 font-semibold text-text-secondary">
+          {t('mySkills.consolidateBodyLabel')}
+        </div>
+        <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words px-2 py-1.5 font-mono text-label-micro leading-[17px] text-text-secondary">{proposal.proposed_body}</pre>
+      </div>
+    </div>
+  );
+};
 
 // ── 출처(provenance) — 내가 만든 것 vs 다운받은 것 vs 앱 내장 (git fork 모델) ──
 const ORIGIN_ICON: Record<SkillOrigin, IconName> = {
@@ -2346,7 +2439,11 @@ function MySkillsScreen() {
         });
       }
     } else {
-      const res = await api.answerArchiveDecision(p.skill_id, approved, p.absorbed_into);
+      const res = await api.answerArchiveDecision(p.skill_id, approved, {
+        absorbedInto: p.absorbed_into,
+        version: p.absorbed_into_version,
+        bodyHash: p.absorbed_into_body_hash,
+      });
       if (approved && res.success) {
         setSkills((arr) =>
           arr.map((s) => (s.id === p.skill_id ? { ...s, state: 'archived' as const, enabled: false } : s)),
@@ -2452,7 +2549,8 @@ function MySkillsScreen() {
                     <p className="text-caption-01 text-text-secondary mb-2 line-clamp-2">
                       {p.kind === 'patch' ? renderChangelog(p.changelog, p.from_version === 0, tChat) : p.reason}
                     </p>
-                    <div className="flex items-center justify-end gap-1.5">
+                    {p.kind === 'patch' && <ConsolidatePatchReview proposal={p} />}
+                    <div className="mt-2 flex items-center justify-end gap-1.5">
                       <Button kind="ghost" size="sm" onClick={() => void decideProposal(p, false)}>
                         {t('mySkills.consolidateReject')}
                       </Button>

@@ -456,6 +456,7 @@ class Orchestrator:
                 history=result.history,
                 tool_calls_made=result.tool_calls_made,
                 injected_skill_ids=tuple(s.skill_id for s in pf.skills),
+                injected_skill_versions=tuple((s.skill_id, s.version) for s in pf.skills),
                 aborted=result.aborted,
             )
             effects = await self._learning.observe(outcome)

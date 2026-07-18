@@ -50,6 +50,11 @@ class Curator:
         transitioned: list[tuple[str, SkillState]] = []
 
         for skill in skills:
+            # Plugin-provided rows are owned by the plugin lifecycle.  They may
+            # exist in SkillStore for legacy/import compatibility, but usage-age
+            # rules must never silently rewrite their state.
+            if (skill.source or "").startswith("plugin:"):
+                continue
             last_used_at = (
                 self._usage_store.read(skill.name).last_used_at if self._usage_store else None
             )

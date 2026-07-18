@@ -134,7 +134,9 @@ class SkillSummary:
     patch: int = 0
     last_used_at: str | None = None
     enabled: bool = True
-    # 텔레메트리 정직화(2026-07-11): 노출/마찰/발견성 결함 카운터 — use 와 분리.
+    # 텔레메트리 정직화: 노출/마찰/발견성 결함 카운터 — use 와 분리.
+    # friction은 현재 version 범위이며, lifetime use와의 같은 기간 분모인
+    # version_use는 review hint/usage sidecar 내부에 유지한다.
     injected: int = 0
     friction: int = 0
     routing_miss: int = 0
@@ -169,6 +171,11 @@ class ArchiveProposal:
     reason: str
     # 병합 흡수 대상 umbrella skill_id. 순수 정리(병합 대상 없음)면 None.
     absorbed_into: str | None = None
+    # 흡수는 umbrella 제안이 실제 적용된 뒤에만 가능하다. 단순 존재 확인은 기존
+    # umbrella 통합에서 무의미하므로, 제안 당시의 목표 version+본문 hash를 함께
+    # 보내 archive 승인 시 정확한 대체 본문이 현재인지 검증한다.
+    absorbed_into_version: int | None = None
+    absorbed_into_body_hash: str | None = None
 
 
 @dataclass(frozen=True)
@@ -353,9 +360,11 @@ class ILearningService(Protocol):
         """Gated LLM review (Phase A.2/A.3; 서버 소유 잡 재구성).
 
         Runs against the review job `observe()` persisted at turn end
-        (learning_jobs): claims it atomically, so a duplicate/retried POST is a
-        no-op (exactly-once). Returns `[]` when there is no pending job, the
-        heuristic gate (`review/gate.py`) says no, or no provider was wired.
+        (learning_jobs): claims it atomically, so a concurrent duplicate POST is
+        a no-op. Provider/context failure returns the same job to pending with an
+        attempts counter; a later POST/sweep retries it without re-running the
+        heuristic gate. Returns `[]` when there is no pending job, the heuristic
+        gate (`review/gate.py`) says no, or no provider was wired.
         `tool_calls_made` is DEPRECATED and ignored — the server-recorded count
         on the job is used instead (the client count was lossy)."""
         ...
@@ -420,7 +429,7 @@ class ILearningService(Protocol):
 
     def curate(self) -> CurateResult: ...
 
-    def consolidate(self) -> ConsolidateResult:
+    async def consolidate(self) -> ConsolidateResult:
         """수동 "스킬 정리"의 심화판(Phase B, `POST /skills/curate?mode=consolidate`).
         규칙 기반 전이(curate()와 동일 로직)를 먼저 실행한 뒤, LLM이 배선되어
         있으면(`resolve_provider` 주입됨) 유사/중복 스킬 묶음을 하나의 class-level
@@ -429,11 +438,20 @@ class ILearningService(Protocol):
         ...
 
     def decide_archive(
-        self, skill_id: str, *, approved: bool, absorbed_into: str | None = None
+        self,
+        skill_id: str,
+        *,
+        approved: bool,
+        absorbed_into: str | None = None,
+        absorbed_into_version: int | None = None,
+        absorbed_into_body_hash: str | None = None,
     ) -> bool:
         """`ArchiveProposal` 승인/거부(`POST /skills/{id}/archive-decision`). 승인
         시 archived로 전이 + `absorbed_into` frontmatter 기록, 거부 시 변경 없음.
-        반환: 실제로 전이가 일어났으면 True(스킬이 없거나 이미 archived면 False)."""
+        반환: 실제로 전이가 일어났으면 True(스킬이 없거나 이미 archived면 False).
+        `absorbed_into`가 지정되면 target의 active 상태와 proposal version/body hash를
+        검증한다. 대체(umbrella) 승인보다 흡수(archive)가 먼저 적용되거나 다른
+        patch가 target을 차지한 경우 ConflictError(409)."""
         ...
 
     def set_state(self, skill_id: str, state: SkillState) -> None: ...

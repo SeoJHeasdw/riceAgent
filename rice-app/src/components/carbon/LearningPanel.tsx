@@ -204,6 +204,12 @@ const SuggestionCard: React.FC<{
       : s.payload.from_version === 0
         ? t('learning.suggestionVersionNew')
         : t('learning.suggestionVersionUpgrade', { from: s.payload.from_version, to: s.payload.to_version });
+  const isCreation = s.kind === 'create' || s.payload.from_version === 0;
+  const descriptionValue = isCreation ? s.payload.description : s.payload.new_description;
+  const tagsValue = isCreation ? s.payload.tags : s.payload.new_tags;
+  const showDescription = s.kind !== 'archive' && (isCreation || s.payload.new_description !== undefined);
+  const showTags = s.kind !== 'archive' && (isCreation || s.payload.new_tags !== undefined);
+  const showMetadata = showDescription || showTags;
   return (
     <div className="bg-layer-01 border border-border-subtle-01 rounded-lg p-3">
       <div className="flex items-start gap-2.5">
@@ -220,6 +226,44 @@ const SuggestionCard: React.FC<{
               ? s.payload.reason ?? s.payload.changelog
               : renderChangelog(s.payload.changelog, s.payload.from_version === 0, wrapT(t))}
           </div>
+          {showMetadata && (
+            <div className="mt-2 rounded-md border border-border-subtle-01 bg-background/50 px-2.5 py-2 text-caption-01">
+              <div className="mb-1.5 font-semibold text-text-secondary">
+                {t('message.patchMetadataTitle')}
+              </div>
+              {showDescription && (
+                <div>
+                  <span className="text-text-helper">
+                    {t(isCreation ? 'message.patchMetadataDescription' : 'message.patchMetadataNewDescription')}
+                  </span>
+                  <div className="mt-0.5 whitespace-pre-wrap break-words font-mono text-text-primary">
+                    {descriptionValue || t('message.patchMetadataEmpty')}
+                  </div>
+                </div>
+              )}
+              {showTags && (
+                <div className={showDescription ? 'mt-1.5' : ''}>
+                  <span className="text-text-helper">
+                    {t(isCreation ? 'message.patchMetadataTags' : 'message.patchMetadataNewTags')}
+                  </span>
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {(tagsValue ?? []).length > 0 ? (
+                      (tagsValue ?? []).map((tag, index) => (
+                        <span
+                          key={`${tag}-${index}`}
+                          className="max-w-full break-all rounded border border-border-subtle-01 bg-layer-02 px-1.5 py-0.5 font-mono text-text-primary"
+                        >
+                          {tag}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="font-mono text-text-helper">{t('message.patchMetadataNoTags')}</span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           <div className="flex items-center gap-2 mt-1.5 text-caption-01 text-text-helper">
             <span className="inline-flex items-center gap-1">
               <Icon name="renew" size={11} className="opacity-70" />

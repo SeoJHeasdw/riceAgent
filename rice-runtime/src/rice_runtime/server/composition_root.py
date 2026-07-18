@@ -50,6 +50,31 @@ from .session.session_manager import SessionManager
 log = logging.getLogger("rice.composition")
 
 
+def review_token_budgets(config: Config) -> tuple[int, int]:
+    """Return one review call's live (input, output) token limits.
+
+    Ollama shares a physical ``num_ctx`` between prompt and generation.  Keep a
+    small estimator margin and reduce the output reservation on 4K/8K models so
+    the fixed review prompt/tool schema still has a viable input window.  SaaS
+    providers use the independently configured caps.
+    """
+    learning = config.learning
+    input_budget = max(0, int(learning.review_request_max_tokens))
+    output_budget = max(1, int(learning.review_output_max_tokens))
+    provider = config.provider
+    num_ctx = max(0, int(provider.num_ctx or 0))
+    if provider.kind != "ollama" or num_ctx <= 0:
+        return input_budget, output_budget
+
+    # 32K -> 8K output / 1K margin; 8K -> 2K / 512; 4K -> 1K / 256.
+    # Below ~4K the full review protocol may still be impossible; the engine
+    # detects that before provider invocation and leaves an auditable failed job.
+    output_budget = min(output_budget, max(512, num_ctx // 4))
+    margin = min(1_024, max(256, num_ctx // 16))
+    input_budget = min(input_budget, max(0, num_ctx - output_budget - margin))
+    return input_budget, output_budget
+
+
 @dataclass
 class Container:
     """The wired object graph. Held by `app.py`; passed to routes."""
@@ -255,12 +280,23 @@ def build_container(
             log.warning("tool catalog enumeration failed for skill verifier", exc_info=True)
         return names
 
+    learning_cfg = config_store.config.learning
+    review_input_budget, review_output_budget = review_token_budgets(config_store.config)
+
+    def _resolve_review_token_budgets() -> tuple[int, int]:
+        # PUT /settings can switch provider/num_ctx without rebuilding the
+        # container. Recompute at each review call just like resolve_provider().
+        return review_token_budgets(config_store.config)
+
     learning_impl = LearningService(
         db,
-        config_store.config.learning,
+        learning_cfg,
         paths,
         resolve_provider=resolve_provider,
         resolve_tool_names=_known_tool_names,
+        review_request_token_budget=review_input_budget,
+        review_output_token_budget=review_output_budget,
+        resolve_review_token_budgets=_resolve_review_token_budgets,
     )
     # crash 복구: 이전 프로세스가 'running' 으로 남긴 리뷰 잡을 pending 으로 —
     # 안 하면 그 잡은 영구히 재수확되지 않는다(단일 프로세스라 부팅 시점 running 은
