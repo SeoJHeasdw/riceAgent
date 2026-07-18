@@ -18,7 +18,8 @@ Registered builtin modules (add new ones here — one place):
                   편집) + create_workbook (.xlsx 생성, 수식 로컬 평가 포함) +
                   create_document (.docx); 전부 requires_approval=True
   terminal_tool — terminal (shell command execution; requires_approval=True)
-  web_tools     — fetch_url (public web page → readable text; SSRF-guarded)
+  web_tools     — fetch_url (public web page → readable text; SSRF-guarded) +
+                  web_search (DuckDuckGo HTML — 키 없는 {title,url,snippet} 검색)
   vision_tools  — vision_analyze (이미지를 도구 결과에 첨부 → provider 이미지
                   블록으로 모델이 직접 본다; 비전 모델 필요)
   subagent_tools — delegate_subagent (parallel focused worker threads)
@@ -27,7 +28,7 @@ Registered builtin modules (add new ones here — one place):
                   주입됐을 때만 등록된다
 
 `build_subagent_toolset(paths, learning=None)`는 sub-agent 워커에게 주는 격리
-부분집합이다 — read-only(read_file/list_dir/search_files/fetch_url)에, learning이
+부분집합이다 — read-only(read_file/list_dir/search_files/fetch_url/web_search)에, learning이
 배선되면 스킬 온디맨드 로딩(skill_search/skill_view)이 더해진다. 일반 쓰기·셸·
 재위임은 뺀다(워커는 승인 게이트 밖에서 돈다); 산출물 쓰기는 별도의 thread 격리
 `write_scratch`(file_tools.scratch_tool_factory)가 담당한다.
@@ -47,7 +48,7 @@ if TYPE_CHECKING:
     from ...learning.interfaces import ILearningService
     from ..subagents import SubAgentRunner
 
-_SUBAGENT_TOOL_NAMES = ("read_file", "list_dir", "search_files", "fetch_url")
+_SUBAGENT_TOOL_NAMES = ("read_file", "list_dir", "search_files", "fetch_url", "web_search")
 # learning 배선 시 워커에 추가되는 스킬 도구 — propose_skill은 제외한다(사용자
 # 가시 효과를 스테이징하므로 메인 스트림의 카드 흐름 밖에서 돌면 안 된다).
 _SUBAGENT_SKILL_TOOLS = ("skill_search", "skill_view", "skill_resource")

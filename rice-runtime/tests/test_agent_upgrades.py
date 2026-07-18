@@ -189,7 +189,7 @@ def test_fetch_url_rejects_local_and_private_hosts():
 
 def test_subagent_toolset_is_read_only_subset(tmp_path):
     names = {spec.name for spec, _ in build_subagent_toolset(RicePaths.from_env(tmp_path))}
-    assert names == {"read_file", "list_dir", "search_files", "fetch_url"}
+    assert names == {"read_file", "list_dir", "search_files", "fetch_url", "web_search"}
 
 
 class _ToolLoopProvider:
@@ -247,7 +247,7 @@ async def test_subagent_loop_executes_read_only_tools_then_reports(tmp_path):
     assert result.tools_used == ("read_file",)
     assert result.findings == ("the note says hello",)
     # 1라운드는 도구를 광고하고, 도구 결과가 2라운드 문맥에 실린다
-    assert {t.name for t in provider.calls[0]["tools"]} == {"read_file", "list_dir", "search_files", "fetch_url"}
+    assert {t.name for t in provider.calls[0]["tools"]} == {"read_file", "list_dir", "search_files", "fetch_url", "web_search"}
     tool_msg = next(m for m in provider.calls[1]["messages"] if m.role == "tool")
     assert "hello" in tool_msg.content and tool_msg.metadata["tool_call_id"] == "c1"
 

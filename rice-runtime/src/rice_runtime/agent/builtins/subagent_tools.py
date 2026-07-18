@@ -62,7 +62,7 @@ def tools(runner: "SubAgentRunner") -> list[tuple[ToolSpec, BuiltinTool]]:
                     "items": {"type": "string"},
                     "description": (
                         "Optional whitelist narrowing the sub-agent's tools for this task "
-                        "(e.g. ['fetch_url'] for web-only research). Omit for the full set."
+                        "(e.g. ['web_search', 'fetch_url'] for web-only research). Omit for the full set."
                     ),
                 },
                 "wait_for_previous": {

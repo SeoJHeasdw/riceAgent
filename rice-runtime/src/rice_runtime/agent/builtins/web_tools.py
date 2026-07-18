@@ -1,4 +1,5 @@
-"""Builtin web tool: fetch_url — read the public web as clean, pageable text.
+"""Builtin web tools: fetch_url(공개 웹 → 깨끗한 pageable 텍스트) + web_search
+(DuckDuckGo HTML — 키 없는 구조화 검색).
 
 리서치형 작업("이 문서 읽고 요약해줘", "공식 문서 확인해줘")의 기본기. connector
 없이도 에이전트가 공개 웹을 읽을 수 있게 한다. 읽기 전용이므로 승인 게이트는
@@ -26,6 +27,45 @@
   - include_links=true면 본문 링크(절대 URL + 앵커 텍스트)를 수집해 돌려준다 —
     크롤링/후속 항행용.
 
+2026-07-18 v3 — web_search 추가 + 함정 진단:
+
+  - **fetch_url로 검색엔진 URL을 긁는 패턴은 구조적으로 실패한다** — 검색엔진은
+    JS 없는 클라이언트에 결과를 주지 않는다(200 + 빈 껍데기). 실제 세션에서 소형
+    모델이 google.com/search를 fetch하고(48자 껍데기), 네이버 검색 URL을 지어내
+    404를 받았다(2026-07-18 당진 세션). 도구 표면에 검색이 없으면 모델은 검색
+    URL을 즉흥 조작한다 — 그래서 web_search를 빌트인으로 추가한다.
+  - web_search: DuckDuckGo HTML 엔드포인트(html.duckduckgo.com/html) — API 키
+    없이 {title, url, snippet} 구조화 결과. 리다이렉트 래퍼(uddg) 해제, 광고
+    (duckduckgo.com/y.js 경유) 필터, 중복 URL 제거.
+  - fetch_url 진단 강화: HTML인데 추출 텍스트가 없으면 "JS 앱 껍데기"를 error로
+    알리고, 검색엔진형 URL(q=/query= + search 경로)이 껍데기를 돌려주면
+    web_search로 안내하는 hint를 싣는다.
+  - SSRF 보강: getaddrinfo가 IP로 해석하는 숫자형 호스트 리터럴
+    (http://2130706433/, 0x7f000001, 127.1)을 거절한다.
+  - 보일러플레이트 과잉 수정: <form>이 스킵 대상이어서 form이 본문 전체를 감싸는
+    사이트(구형 ASP.NET 등)가 통째로 비워지던 문제 — form 제거(버튼/셀렉트는 유지).
+  - include_links 캐시 수정: 링크가 0개인 페이지가 캐시를 영원히 못 타던 문제
+    (links 비어있음 ≠ 링크 미수집 — links_collected 플래그로 구분).
+
+  소형 모델 위생(§hygiene) — 프론티어 모델은 잡음 섞인 웹 텍스트를 스스로 걸러내지만
+  소형 모델은 잡음이 많으면 오염된다(사용자 원칙: 쓰레기만 있는 페이지면 차라리
+  명시적 실패가 낫다). 그래서 fetch_url이 반환하는 텍스트 자체를 도구 수준에서
+  정제한다:
+  - **본문 스코핑**: <main>/<article>/role="main" 영역이 충분한 텍스트(≥300자)를
+    담고 있으면 그 영역만 반환한다 — 헤더/사이드바/댓글 위젯을 구조적으로 배제.
+  - **링크 밀집 라인 제거**: 앵커 텍스트 비중 ≥80%인 짧은 라인(<80자)은 내비게이션/
+    링크팜 행이다 — 본문에서 버린다(제목/인용은 예외). 링크 자체가 필요하면
+    include_links 채널이 따로 있다 — 본문과 항행 데이터를 분리한다. 같은 원칙을
+    표 행에도 적용한다: 빈 셀뿐인 행과 앵커가 대부분인 짧은 행(표로 짠 메뉴 —
+    네이버 블로그 등 레이아웃 테이블)은 버리고, 데이터 표는 남긴다.
+  - **숨김 텍스트 스킵**: hidden/aria-hidden 속성과 접근성 숨김 클래스(blind·u_vc
+    — 네이버·다음 관례, sr-only 등 범용)의 내용은 화면에 없는 텍스트다 — 버린다.
+  - **저품질 명시 실패**: 정제 후 텍스트가 200자 미만인 HTML은 error를 세운다
+    ("failed source — try another URL") — 모델이 빈약한 조각을 사실처럼 쓰는 것보다
+    실패로 알고 다른 소스로 옮기는 편이 낫다.
+  - **기본 반환량 축소**: max_chars 기본 20k→12k — 로컬 소형 모델의 컨텍스트 예산
+    보호(긴 문서는 어차피 페이지네이션으로 이어 읽는다).
+
 §SSRF: http(s) 스킴만 허용하고 localhost/사설 대역 호스트는 이름/리터럴 수준에서
 거절한다(런타임 API가 127.0.0.1에 떠 있다 — RUNTIME_DESIGN §10.1). DNS 재바인딩
 까지 막는 완전한 방어는 아니지만(개인용 로컬 에이전트 위협 모델), 명백한 표적은
@@ -40,15 +80,21 @@ import json
 import re
 import time
 from html.parser import HTMLParser
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import parse_qs, quote_plus, urljoin, urlsplit
 
 from ...core.types import ToolSpec
 from ..tool_dispatch import BuiltinTool
 
 _MAX_FETCH_BYTES = 1024 * 1024  # 응답 바디 수신 상한(스트리밍 컷)
-_DEFAULT_MAX_CHARS = 20_000
+_DEFAULT_MAX_CHARS = 12_000  # 소형 모델 컨텍스트 예산 — 긴 문서는 페이지네이션
 _MIN_MAX_CHARS = 1_000
 _MAX_MAX_CHARS = 60_000
+
+# §hygiene — 소형 모델 오염 방지 임계값들
+_MAIN_MIN_CHARS = 300  # main/article 스코핑을 채택하는 최소 본문량
+_LINK_LINE_RATIO = 0.8  # 이 이상이 앵커 텍스트인 라인은 내비/링크팜 행
+_LINK_LINE_MAX_CHARS = 80  # 링크 밀집 판정을 적용하는 라인 길이 상한
+_MIN_CONTENT_CHARS = 200  # 정제 후 이보다 짧은 HTML은 "실패한 소스"로 보고
 _ERROR_BODY_CHARS = 2_000  # 4xx/5xx 본문 발췌 상한 — 에러 페이지의 힌트만
 _MAX_REDIRECTS = 5
 _MAX_LINKS = 40
@@ -85,7 +131,13 @@ def _reject_private_host(host: str | None) -> None:
     try:
         addr = ipaddress.ip_address(lowered.strip("[]"))
     except ValueError:
-        return  # not an IP literal — public hostname
+        # 정식 IP 표기는 아니지만 getaddrinfo가 inet_aton 규칙으로 IP로 해석하는
+        # 숫자형 리터럴(2130706433, 0x7f000001, 127.1)은 사설 여부를 판별할 수
+        # 없으므로 통째로 거절한다 — 전부 숫자/점/16진 프리픽스로만 된 호스트는
+        # 유효한 공개 도메인일 수 없다(TLD는 알파벳 필수).
+        if re.fullmatch(r"0x[0-9a-f]+|[0-9.]+", lowered):
+            raise ValueError(f"refusing ambiguous numeric host: {host}")
+        return  # public hostname
     if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
         raise ValueError(f"refusing to fetch private address: {host}")
 
@@ -94,10 +146,35 @@ def _reject_private_host(host: str | None) -> None:
 
 # 실행/표현 리소스 — 텍스트 아님.
 _SKIP_TAGS = {"script", "style", "noscript", "template", "svg", "canvas", "iframe", "object", "embed"}
-# 보일러플레이트 — 본문이 아니라 사이트 뼈대(readability-lite).
-_BOILERPLATE_TAGS = {"nav", "aside", "footer", "form", "button", "select", "dialog"}
+# 보일러플레이트 — 본문이 아니라 사이트 뼈대(readability-lite). form은 여기 넣지
+# 않는다: 구형 ASP.NET처럼 본문 전체를 <form>으로 감싸는 사이트가 통째로 비워진다.
+# 대신 form UI 텍스트의 실체인 label/legend는 스킵한다(검색창 안내문 등).
+_BOILERPLATE_TAGS = {"nav", "aside", "footer", "button", "select", "dialog", "label", "legend"}
 _HEADINGS = {"h1": 1, "h2": 2, "h3": 3, "h4": 4, "h5": 5, "h6": 6}
 _FLUSH_TAGS = {"p", "div", "section", "article", "main", "header", "figure", "figcaption", "dt", "dd"}
+# §hygiene — 이 태그(또는 role="main")가 충분한 본문을 담고 있으면 그 영역만 쓴다.
+_MAIN_TAGS = {"main", "article"}
+# §hygiene — 시각적으로 숨겨진 텍스트(스크린리더 전용/DOM 잔재)는 본문이 아니다.
+# blind/u_vc는 네이버·다음 계열, 나머지는 범용 접근성 관례 클래스.
+_HIDDEN_CLASS_TOKENS = {
+    "blind", "u_vc", "sr-only", "sr_only", "visually-hidden", "visuallyhidden",
+    "screen_out", "hidden", "a11y-hidden",
+}
+# 내용이 없는 void 태그 — 숨김 영역 추적을 열면 안 된다(닫는 태그가 없다).
+_VOID_TAGS = {
+    "img", "br", "hr", "input", "meta", "link", "source", "track", "wbr",
+    "area", "base", "col", "embed",
+}
+
+
+def _is_hidden(attrs: list) -> bool:
+    """시각적으로 숨겨진 요소인가 — hidden 속성, aria-hidden, 접근성 숨김 클래스."""
+    for k, v in attrs:
+        if k == "hidden" or (k == "aria-hidden" and v == "true"):
+            return True
+        if k == "class" and v and _HIDDEN_CLASS_TOKENS & set(v.split()):
+            return True
+    return False
 
 
 class _MarkdownExtractor(HTMLParser):
@@ -119,6 +196,7 @@ class _MarkdownExtractor(HTMLParser):
         # table state (단일 레벨 — 중첩 표는 평탄화)
         self._cell: list[str] | None = None
         self._row: list[str] | None = None
+        self._row_anchor: list[str] = []  # §hygiene: 행 내 앵커 텍스트(레이아웃 표 판정)
         self._row_is_header = False
         self._table_header_done = False
         # metadata
@@ -131,13 +209,43 @@ class _MarkdownExtractor(HTMLParser):
         self.links: list[dict] = []
         self._seen_links: set[str] = set()
         self._anchor: dict | None = None
+        # 임베디드 프레임 src — 본문이 통째로 iframe 안에 있는 래퍼 페이지
+        # (네이버 블로그 등)에서 실제 콘텐츠 URL을 알려주는 유일한 단서.
+        self.frames: list[str] = []
+        # §hygiene: 링크 밀집 라인 판정용 — 링크 수집 여부와 무관하게 항상 모은다.
+        self._anchor_open = 0
+        self._anchor_buf: list[str] = []
+        # §hygiene: main/article 스코핑 — 본문 영역의 라인 구간을 기록한다.
+        self._main_tag: str | None = None
+        self._main_depth = 0
+        self._main_start = 0
+        self.main_ranges: list[tuple[int, int]] = []
+        # §hygiene: 숨김 텍스트 영역(blind/sr-only/aria-hidden/hidden 속성) 추적.
+        self._hidden_tag: str | None = None
+        self._hidden_depth = 0
 
     # ── line assembly ────────────────────────────────────────────────
     def _flush(self) -> None:
         text = " ".join("".join(self._inline).split())
+        # 앵커 길이도 공백 정규화 후 비교한다 — 마크업 들여쓰기 공백이 비율을
+        # 희석해 순수 링크 행이 본문으로 새는 것을 막는다. 파트는 공백으로 잇는다:
+        # 연속된 앵커들("메뉴 바로가기""본문 바로가기") 사이 공백이 text에는 있는데
+        # 앵커 합계에서 빠지면 비율이 문턱 아래로 샌다.
+        anchor_len = len(" ".join(" ".join(self._anchor_buf).split()))
         self._inline.clear()
+        self._anchor_buf.clear()
         prefix, self._prefix = self._prefix, ""
         if not text:
+            return
+        # §hygiene: 앵커 텍스트가 대부분인 짧은 라인 = 내비게이션/링크팜 행 —
+        # 본문이 아니다(소형 모델 오염원). 링크가 필요하면 include_links 채널이
+        # 따로 있다. 제목/인용은 링크여도 문서 구조라 남긴다.
+        if (
+            len(text) < _LINK_LINE_MAX_CHARS
+            and not prefix.startswith("#")
+            and not self._quote
+            and anchor_len >= len(text) * _LINK_LINE_RATIO
+        ):
             return
         line = prefix + text
         if self._quote:
@@ -149,15 +257,38 @@ class _MarkdownExtractor(HTMLParser):
     # ── tags ─────────────────────────────────────────────────────────
     def handle_starttag(self, tag: str, attrs: list) -> None:
         if tag in _SKIP_TAGS or tag in _BOILERPLATE_TAGS:
+            if tag == "iframe" and len(self.frames) < 5:
+                src = next((v for k, v in attrs if k == "src" and v), "")
+                u = urljoin(self._base, src) if src else ""
+                if u.startswith(("http://", "https://")) and u not in self.frames:
+                    self.frames.append(u)
             self._skip += 1
             return
         if self._skip:
             return
+        # §hygiene: 숨김 텍스트 영역 — 안쪽은 전부 무시한다(같은 태그 중첩은 깊이로).
+        if self._hidden_tag is not None:
+            if tag == self._hidden_tag:
+                self._hidden_depth += 1
+            return
+        if tag not in _VOID_TAGS and _is_hidden(attrs):
+            self._hidden_tag, self._hidden_depth = tag, 1
+            return
+        # §hygiene: 본문 영역 추적 — 첫 main-ish 태그가 영역을 열고, 같은 태그의
+        # 중첩은 깊이로 균형을 맞춘다(role="main"인 div의 내부 div들 포함).
+        if self._main_tag is not None:
+            if tag == self._main_tag:
+                self._main_depth += 1
+        elif tag in _MAIN_TAGS or ("role", "main") in attrs:
+            self._flush()
+            self._main_tag, self._main_depth = tag, 1
+            self._main_start = len(self._lines)
         if tag == "title":
             self._in_title = True
         elif tag == "meta":
             a = dict(attrs)
-            if (a.get("name") or a.get("property")) in ("description", "og:description") and not self.description:
+            keys = (a.get("name"), a.get("property"))
+            if not self.description and ("description" in keys or "og:description" in keys):
                 self.description = " ".join(str(a.get("content") or "").split())[:300]
         elif tag == "br":
             self._flush()
@@ -186,12 +317,14 @@ class _MarkdownExtractor(HTMLParser):
             self._table_header_done = False
         elif tag == "tr":
             self._row = []
+            self._row_anchor = []
             self._row_is_header = False
         elif tag in ("td", "th"):
             self._cell = []
             if tag == "th":
                 self._row_is_header = True
         elif tag == "a":
+            self._anchor_open += 1
             href = next((v for k, v in attrs if k == "href" and v), "")
             if self._collect and href:
                 self._anchor = {"href": href, "parts": []}
@@ -205,6 +338,19 @@ class _MarkdownExtractor(HTMLParser):
             return
         if self._skip:
             return
+        if self._hidden_tag is not None:
+            if tag == self._hidden_tag and self._hidden_depth:
+                self._hidden_depth -= 1
+                if self._hidden_depth == 0:
+                    self._hidden_tag = None
+            return
+        # §hygiene: 본문 영역 닫힘 — 깊이가 0이 되면 라인 구간을 확정한다.
+        if self._main_tag is not None and tag == self._main_tag and self._main_depth:
+            self._main_depth -= 1
+            if self._main_depth == 0:
+                self._flush()
+                self.main_ranges.append((self._main_start, len(self._lines)))
+                self._main_tag = None
         if tag == "title":
             self._in_title = False
         elif tag in _HEADINGS or tag == "li" or tag in _FLUSH_TAGS:
@@ -232,13 +378,25 @@ class _MarkdownExtractor(HTMLParser):
                 self._row.append(" ".join("".join(self._cell).split()))
             self._cell = None
         elif tag == "tr":
-            if self._row:
-                self._lines.append("| " + " | ".join(self._row) + " |")
+            # §hygiene: 빈 셀뿐인 행(레이아웃 표 뼈대)과 앵커 텍스트가 대부분인
+            # 짧은 행(표로 짠 링크 메뉴 — 네이버 블로그 등)은 본문이 아니다.
+            row = self._row or []
+            row_text = " ".join(c for c in row if c)
+            anchor_len = len(" ".join(" ".join(self._row_anchor).split()))
+            is_link_menu = (
+                len(row_text) < _LINK_LINE_MAX_CHARS
+                and anchor_len >= len(row_text) * _LINK_LINE_RATIO
+            )
+            if row_text and not is_link_menu:
+                self._lines.append("| " + " | ".join(row) + " |")
                 if self._row_is_header and not self._table_header_done:
-                    self._lines.append("|" + "---|" * len(self._row))
+                    self._lines.append("|" + "---|" * len(row))
                     self._table_header_done = True
             self._row = None
+            self._row_anchor = []
         elif tag == "a":
+            if self._anchor_open:
+                self._anchor_open -= 1
             anchor, self._anchor = self._anchor, None
             if anchor is not None and len(self.links) < _MAX_LINKS:
                 url = urljoin(self._base, anchor["href"])
@@ -248,25 +406,42 @@ class _MarkdownExtractor(HTMLParser):
                     self.links.append({"url": url, "text": text})
 
     def handle_data(self, data: str) -> None:
-        if self._skip:
+        if self._skip or self._hidden_tag is not None:
             return
         if self._in_title:
             self.title += data
         elif self._cell is not None:
             self._cell.append(data)
+            if self._anchor_open:
+                self._row_anchor.append(data)
         elif self._pre:
             self._pre_buf.append(data)
         else:
             self._inline.append(data)
+            if self._anchor_open:
+                self._anchor_buf.append(data)
             if self._anchor is not None:
                 self._anchor["parts"].append(data)
 
     def text(self) -> str:
         self._flush()
+        if self._main_tag is not None and self._main_depth:
+            # 미닫힘 main 영역(파손 마크업) — 문서 끝까지를 구간으로 확정
+            self.main_ranges.append((self._main_start, len(self._lines)))
+            self._main_tag = None
         self.title = " ".join(self.title.split())[:300]
+        # §hygiene: main/article 영역이 충분한 본문을 담고 있으면 그 영역만 쓴다 —
+        # 헤더/사이드바/댓글 위젯을 구조 수준에서 배제(소형 모델 오염 방지).
+        lines = self._lines
+        if self.main_ranges:
+            picked: list[str] = []
+            for s, e in self.main_ranges:
+                picked.extend(lines[s:e])
+            if sum(len(line) for line in picked) >= _MAIN_MIN_CHARS:
+                lines = picked
         # 연속 빈 줄 1개로 압축
         out: list[str] = []
-        for line in self._lines:
+        for line in lines:
             if line == "" and (not out or out[-1] == ""):
                 continue
             out.append(line)
@@ -279,7 +454,10 @@ class _MarkdownExtractor(HTMLParser):
 class _Document:
     """추출이 끝난 fetch 결과 — 캐시에 담기는 단위."""
 
-    __slots__ = ("url", "status", "content_type", "title", "description", "text", "links", "error")
+    __slots__ = (
+        "url", "status", "content_type", "title", "description", "text",
+        "links", "links_collected", "error",
+    )
 
     def __init__(
         self,
@@ -291,6 +469,7 @@ class _Document:
         description: str = "",
         text: str = "",
         links: list[dict] | None = None,
+        links_collected: bool = False,
         error: str = "",
     ) -> None:
         self.url = url
@@ -300,6 +479,9 @@ class _Document:
         self.description = description
         self.text = text
         self.links = links or []
+        # 링크 수집을 *시도*했는지 — links가 비어 있어도 재다운로드가 필요 없음을
+        # 캐시가 알 수 있게 한다(빈 links만으로는 미수집과 구분 불가).
+        self.links_collected = links_collected
         self.error = error
 
 
@@ -332,9 +514,10 @@ async def _request_once(client, url: str) -> tuple[int, dict, bytes, str]:
         return response.status_code, dict(response.headers), bytes(body), str(response.url)
 
 
-async def _fetch_document(url: str, *, collect_links: bool, transport=None) -> _Document:
-    """리다이렉트를 수동으로 따라가며(홉마다 SSRF 가드) 문서를 받아 추출한다.
-    일시 장애는 유한 재시도. 4xx/5xx는 예외 없이 error 필드로 구조화한다."""
+async def _http_get(url: str, *, transport=None) -> tuple[int, dict, bytes, str]:
+    """리다이렉트를 수동으로 따라가는 GET — 홉마다 SSRF 가드, 일시 장애는 유한
+    재시도. (status, headers, body, final_url) 반환; 4xx/5xx도 여기서는 데이터다.
+    fetch_url(→추출)과 web_search(→결과 파싱)가 공유하는 전송 계층."""
     import httpx  # noqa: PLC0415 - optional dependency by design
 
     timeout = httpx.Timeout(_READ_TIMEOUT_S, connect=_CONNECT_TIMEOUT_S)
@@ -373,15 +556,25 @@ async def _fetch_document(url: str, *, collect_links: bool, transport=None) -> _
                 if not current.startswith(("http://", "https://")):
                     raise ValueError(f"refusing non-http redirect target: {current}")
                 continue
-            return _extract(current, status, headers, body, collect_links=collect_links)
+            return status, headers, body, current
         raise ValueError(f"too many redirects (> {_MAX_REDIRECTS}): {url}")
+
+
+async def _fetch_document(url: str, *, collect_links: bool, transport=None) -> _Document:
+    status, headers, body, final_url = await _http_get(url, transport=transport)
+    return _extract(final_url, status, headers, body, collect_links=collect_links)
+
+
+def _header_charset(headers: dict) -> str | None:
+    content_type = (headers.get("content-type") or "").lower()
+    if "charset=" in content_type:
+        return content_type.split("charset=", 1)[1].split(";")[0].strip().strip("\"'")
+    return None
 
 
 def _extract(url: str, status: int, headers: dict, body: bytes, *, collect_links: bool) -> _Document:
     content_type = (headers.get("content-type") or "").lower()
-    charset = None
-    if "charset=" in content_type:
-        charset = content_type.split("charset=", 1)[1].split(";")[0].strip()
+    charset = _header_charset(headers)
     mime = content_type.split(";", 1)[0].strip()
 
     is_html = "html" in mime or (not mime and body[:256].lstrip()[:1] == b"<")
@@ -390,11 +583,13 @@ def _extract(url: str, status: int, headers: dict, body: bytes, *, collect_links
 
     title = description = ""
     links: list[dict] = []
+    frames: list[str] = []
     if is_html:
         extractor = _MarkdownExtractor(base_url=url, collect_links=collect_links)
         extractor.feed(_decode(body, charset))
         text = extractor.text()
         title, description, links = extractor.title, extractor.description, extractor.links
+        frames = extractor.frames
     elif is_json:
         raw = _decode(body, charset)
         try:
@@ -408,7 +603,7 @@ def _extract(url: str, status: int, headers: dict, body: bytes, *, collect_links
         text = ""
         size_kb = len(body) / 1024
         return _Document(
-            url=url, status=status, content_type=mime,
+            url=url, status=status, content_type=mime, links_collected=collect_links,
             error=f"unsupported content type for text extraction: {mime or 'unknown'} ({size_kb:.0f} KB)",
         )
 
@@ -416,9 +611,28 @@ def _extract(url: str, status: int, headers: dict, body: bytes, *, collect_links
     if status >= 400:
         error = f"HTTP {status}"
         text = text[:_ERROR_BODY_CHARS]  # 에러 페이지는 힌트 발췌만
+    elif is_html and not text:
+        # 200인데 추출 텍스트 0 — 정적 HTML엔 아무것도 없는 JS 앱 껍데기이거나,
+        # 본문 전체가 iframe 안에 있는 래퍼 페이지(네이버 블로그 등). 침묵하면
+        # 모델이 "빈 페이지"로 오해한다; 도구가 상황과 다음 수를 데이터로 말한다.
+        if frames:
+            error = (
+                "page body is empty — the content lives inside an embedded frame; "
+                "fetch the frame URL instead: " + " , ".join(frames[:3])
+            )
+        else:
+            error = "page has no extractable text (JavaScript-rendered app shell) — fetch_url cannot read it"
+    elif is_html and len(text) < _MIN_CONTENT_CHARS:
+        # §hygiene: 정제 후에도 본문이 빈약한 페이지 — 소형 모델이 이 조각을
+        # 사실처럼 쓰는 것보다 실패한 소스로 알고 다른 URL로 옮기는 편이 낫다.
+        error = (
+            f"page yielded only {len(text)} chars of readable text after cleanup — "
+            "likely menus/boilerplate or a JS-rendered page; treat this as a failed "
+            "source and try another URL"
+        )
     return _Document(
-        url=url, status=status, content_type=mime, title=title,
-        description=description, text=text, links=links, error=error,
+        url=url, status=status, content_type=mime, title=title, description=description,
+        text=text, links=links, links_collected=collect_links, error=error,
     )
 
 
@@ -433,8 +647,8 @@ def _cache_get(url: str, *, need_links: bool) -> _Document | None:
     if time.monotonic() > expires:
         _cache.pop(url, None)
         return None
-    if need_links and not doc.links:
-        return None  # 링크 없이 캐시된 문서 — 링크 요청은 다시 받아온다
+    if need_links and not doc.links_collected:
+        return None  # 링크 수집 없이 캐시된 문서 — 링크 요청은 다시 받아온다
     return doc
 
 
@@ -445,6 +659,18 @@ def _cache_put(url: str, doc: _Document) -> None:
         oldest = min(_cache, key=lambda k: _cache[k][0])
         _cache.pop(oldest, None)
     _cache[url] = (time.monotonic() + _CACHE_TTL_S, doc)
+
+
+# 검색엔진 결과 URL 감지 — fetch_url이 껍데기를 받았을 때 web_search로 안내한다.
+_SEARCH_QUERY_KEYS = frozenset({"q", "query", "wd", "search_query"})
+_SHELL_TEXT_CHARS = 200  # 이보다 짧으면 "결과 없는 껍데기"로 본다
+
+
+def _looks_like_search_page(url: str) -> bool:
+    parts = urlsplit(url)
+    if not _SEARCH_QUERY_KEYS & set(parse_qs(parts.query)):
+        return False
+    return "search" in parts.path.lower() or "search" in (parts.hostname or "").lower()
 
 
 async def _fetch_url_impl(args: dict, *, transport=None) -> dict:
@@ -486,6 +712,16 @@ async def _fetch_url_impl(args: dict, *, transport=None) -> dict:
         result["description"] = doc.description
     if doc.error:
         result["error"] = doc.error
+    if (
+        doc.status == 200
+        and total < _SHELL_TEXT_CHARS
+        and (_looks_like_search_page(url) or _looks_like_search_page(doc.url))
+    ):
+        result["hint"] = (
+            "this is a search-engine results URL, but search engines do not serve "
+            "results to non-JS clients — use the web_search tool instead of "
+            "fetching search URLs"
+        )
     if include_links:
         result["links"] = doc.links
     if from_cache:
@@ -493,11 +729,141 @@ async def _fetch_url_impl(args: dict, *, transport=None) -> dict:
     return result
 
 
+# ── web_search (DuckDuckGo HTML — keyless) ────────────────────────────────────
+#
+# html.duckduckgo.com/html 은 JS 없이 정적 HTML로 결과를 주는 몇 안 남은 무료
+# 엔드포인트다(API 키 불요). 마크업(result__a / result__snippet 클래스)은 수년째
+# 안정적이다. 결과 링크는 duckduckgo.com/l/?uddg=<인코딩된 목적지> 래퍼를 쓰므로
+# 해제해서 실제 URL을 돌려준다; 광고는 duckduckgo.com/y.js 경유라 해제 단계에서
+# 자연히 걸러진다.
+
+_SEARCH_ENDPOINT = "https://html.duckduckgo.com/html/"
+_DEFAULT_SEARCH_RESULTS = 8
+_MAX_SEARCH_RESULTS = 20
+_MAX_QUERY_CHARS = 200  # 소형 모델이 문장 통째로 넣어도 검색이 깨지지 않게 컷
+_SNIPPET_CHARS = 300
+_TITLE_CHARS = 120
+
+
+def _unwrap_ddg_href(href: str) -> str | None:
+    """DDG 결과 링크 → 실제 목적지 URL. 광고/내부 링크는 None."""
+    if href.startswith("//"):
+        href = "https:" + href
+    if not href.startswith(("http://", "https://")):
+        return None
+    parts = urlsplit(href)
+    host = (parts.hostname or "").lower()
+    if host == "duckduckgo.com" or host.endswith(".duckduckgo.com"):
+        if parts.path == "/l/":
+            target = (parse_qs(parts.query).get("uddg") or [""])[0]
+            if target.startswith(("http://", "https://")):
+                return target
+        return None  # y.js 광고 트래킹 등 내부 링크
+    return href
+
+
+class _DdgResultParser(HTMLParser):
+    """DDG HTML 결과 페이지 → [{title, url, snippet}] — 트리 없는 클래스 훅 파서."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.results: list[dict] = []
+        self._entry: dict | None = None
+        self._field = ""  # 지금 채우는 필드(title/snippet)
+        self._bucket: list[str] | None = None
+        self._end_tag = ""  # bucket을 닫는 태그
+        self._depth = 0  # 같은 태그 중첩(스니펫 안의 <a> 등) 대비
+        self._seen: set[str] = set()
+
+    def handle_starttag(self, tag: str, attrs: list) -> None:
+        if self._bucket is not None:
+            if tag == self._end_tag:
+                self._depth += 1
+            return
+        a = dict(attrs)
+        cls = a.get("class") or ""
+        if tag == "a" and "result__a" in cls:
+            self._finalize()
+            url = _unwrap_ddg_href(a.get("href") or "")
+            if url and url not in self._seen:
+                self._seen.add(url)
+                self._entry = {"title": "", "url": url, "snippet": ""}
+                self._open("title", tag)
+        elif "result__snippet" in cls and self._entry is not None and not self._entry["snippet"]:
+            self._open("snippet", tag)
+
+    def _open(self, field: str, tag: str) -> None:
+        self._field, self._bucket, self._end_tag, self._depth = field, [], tag, 0
+
+    def handle_endtag(self, tag: str) -> None:
+        if self._bucket is None or tag != self._end_tag:
+            return
+        if self._depth:
+            self._depth -= 1
+            return
+        text = " ".join("".join(self._bucket).split())
+        if self._entry is not None:
+            limit = _TITLE_CHARS if self._field == "title" else _SNIPPET_CHARS
+            self._entry[self._field] = text[:limit]
+        self._bucket = None
+
+    def handle_data(self, data: str) -> None:
+        if self._bucket is not None:
+            self._bucket.append(data)
+
+    def _finalize(self) -> None:
+        if self._entry is not None and self._entry["title"]:
+            self.results.append(self._entry)
+        self._entry = None
+
+    def close(self) -> None:
+        super().close()
+        self._finalize()
+
+
+async def _web_search_impl(args: dict, *, transport=None) -> dict:
+    query = " ".join(str(args.get("query") or "").split())[:_MAX_QUERY_CHARS]
+    if not query:
+        raise ValueError("query must be a non-empty string")
+    n = args.get("max_results")
+    n = int(n) if isinstance(n, (int, float)) else _DEFAULT_SEARCH_RESULTS
+    n = max(1, min(n, _MAX_SEARCH_RESULTS))
+
+    url = _SEARCH_ENDPOINT + "?q=" + quote_plus(query)
+    status, headers, body, _final = await _http_get(url, transport=transport)
+    out: dict = {"query": query, "results": []}
+    if status >= 400:
+        out["error"] = (
+            f"search endpoint returned HTTP {status} — wait and retry, or fetch a "
+            "known site directly with fetch_url"
+        )
+        return out
+
+    parser = _DdgResultParser()
+    parser.feed(_decode(body, _header_charset(headers)))
+    parser.close()
+    out["results"] = parser.results[:n]
+    if not out["results"]:
+        out["error"] = (
+            "no results parsed from the search page — the engine may be "
+            "rate-limiting; rephrase the query and retry, or fetch a known site "
+            "directly with fetch_url"
+        )
+    return out
+
+
 def _make_fetch() -> BuiltinTool:
     async def fetch_url(args: dict) -> object:
         return await _fetch_url_impl(args)
 
     return fetch_url
+
+
+def _make_search() -> BuiltinTool:
+    async def web_search(args: dict) -> object:
+        return await _web_search_impl(args)
+
+    return web_search
 
 
 def tools() -> list[tuple[ToolSpec, BuiltinTool]]:
@@ -508,14 +874,16 @@ def tools() -> list[tuple[ToolSpec, BuiltinTool]]:
                 description=(
                     "Fetch a public web page (http/https) and return its readable text — "
                     "HTML is converted to markdown-ish text with headings, lists, tables "
-                    "and code blocks preserved; JSON is pretty-printed. Use for looking up "
-                    "documentation, articles, or any URL the user mentions. Long pages are "
-                    "paged: when `truncated` is true, call again with `start_index` = "
-                    "`next_start` to continue reading (re-reads hit a short-lived cache, "
-                    "not the network). Set `include_links` to also get the page's links "
-                    "(absolute URL + anchor text) for follow-up navigation. HTTP errors "
-                    "(404 etc.) come back as a result with `error` set — adjust the URL "
-                    "instead of retrying blindly."
+                    "and code blocks preserved; JSON is pretty-printed. Use for reading "
+                    "documentation, articles, or any URL the user mentions. To FIND pages, "
+                    "use the web_search tool first — do not fetch search-engine URLs "
+                    "(google.com/search etc.); they return empty JS shells to non-JS "
+                    "clients. Long pages are paged: when `truncated` is true, call again "
+                    "with `start_index` = `next_start` to continue reading (re-reads hit "
+                    "a short-lived cache, not the network). Set `include_links` to also "
+                    "get the page's links (absolute URL + anchor text) for follow-up "
+                    "navigation. HTTP errors (404 etc.) come back as a result with "
+                    "`error` set — adjust the URL instead of retrying blindly."
                 ),
                 parameters={
                     "type": "object",
@@ -523,7 +891,7 @@ def tools() -> list[tuple[ToolSpec, BuiltinTool]]:
                         "url": {"type": "string", "description": "Absolute http(s) URL to fetch."},
                         "max_chars": {
                             "type": "integer",
-                            "description": "Max characters of text to return in this call (default 20000).",
+                            "description": "Max characters of text to return in this call (default 12000).",
                         },
                         "start_index": {
                             "type": "integer",
@@ -540,5 +908,38 @@ def tools() -> list[tuple[ToolSpec, BuiltinTool]]:
                 is_web_tool=True,
             ),
             _make_fetch(),
+        ),
+        (
+            ToolSpec(
+                name="web_search",
+                description=(
+                    "Search the web and get structured results — a list of "
+                    "{title, url, snippet}. Use this FIRST whenever you need to find "
+                    "pages, facts, places, or sources you don't have a URL for; then "
+                    "read promising results with fetch_url. Never construct "
+                    "search-engine URLs (google.com/search, naver, bing) for "
+                    "fetch_url — they return no readable text. Keep queries short "
+                    "(2-6 keywords), in the language of the content you want. If "
+                    "`error` is set with no results, rephrase once or fall back to "
+                    "fetching a site you already know."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Search keywords (short; content language).",
+                        },
+                        "max_results": {
+                            "type": "integer",
+                            "description": "Max results to return (default 8, max 20).",
+                        },
+                    },
+                    "required": ["query"],
+                },
+                source="builtin",
+                is_web_tool=True,
+            ),
+            _make_search(),
         ),
     ]

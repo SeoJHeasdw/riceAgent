@@ -4,7 +4,8 @@ Sub-agents are exposed to the main model as a builtin tool. The main agent can
 spawn several focused workers in one tool-use round; the scheduler can run those
 workers in parallel, and the next main LLM call synthesizes their results.
 
-2026-07-04: 워커에게 read-only 도구(read_file/list_dir/search_files/fetch_url)를
+2026-07-04: 워커에게 read-only 도구(read_file/list_dir/search_files/fetch_url,
+2026-07-18부터 web_search 포함)를
 주는 미니 ReAct 루프가 됐다. 이전의 "제공된 컨텍스트만 요약" 워커는 컨텍스트
 격리 효과가 없었다 — 메인 에이전트가 파일 원문을 읽어 넘겨야 했으므로 오염은
 메인에서 이미 발생한 뒤였다. 이제 워커가 직접 읽고, 메인은 구조화 결과만 본다.
@@ -16,7 +17,7 @@ workers in parallel, and the next main LLM call synthesizes their results.
                 워커가 절차 전문을 온디맨드로 당긴다 — 메인 루프의 하이브리드
                 주입(인덱스 → top-K → skill_view)과 같은 철학, 같은 핸들러.
   도구 주입     delegate_subagent의 `tools` 화이트리스트로 메인 모델이 워커의
-                도구 표면을 태스크에 맞게 좁힌다(웹 전용 리서치엔 fetch_url만).
+                도구 표면을 태스크에 맞게 좁힌다(웹 전용 리서치엔 web_search/fetch_url만).
                 미지의 이름은 무시하고, 교집합이 비면 전체 셋으로 폴백(fail-soft).
   아티팩트 채널  워커는 write_scratch로 격리 영역(.subagent/<thread>/)에만 긴
                 산출물(초안·표·추출문)을 파일로 남긴다. 요약은 메인 컨텍스트로,
