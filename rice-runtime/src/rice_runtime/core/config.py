@@ -196,6 +196,15 @@ class LearningConfig:
     candidate_eval_cost_tolerance: float = 0.5
     # 롤아웃/심판 한 호출의 출력 토큰 상한 (폭주 방어).
     candidate_eval_output_max_tokens: int = 1_024
+    # 심판 양방향 일관성 검사: 같은 pairing 을 좌우를 바꿔 두 번 심판하고 불일치는
+    # tie 로 접는다 — LLM 심판의 최대 노이즈원(위치 편향)을 표본 단위에서 상쇄.
+    # 심판 호출 2배 비용이지만 롤아웃보다 싸다 — 기본 켜짐.
+    candidate_eval_judge_consistency: bool = True
+    # ── LearningEpisode 독립 엔티티 (learning/episode.py, §10.5 완결) ──
+    # learning_episodes 보존 행 수 상한 — 매 턴 1행씩 쌓이므로 삽입 시 오래된
+    # 행부터 잘라낸다. 0 이면 에피소드 기록 비활성(전사의 evidence/proposal
+    # 경로는 이 값과 무관하게 동작한다).
+    learning_episode_cap: int = 500
 
 
 @dataclass(frozen=True)

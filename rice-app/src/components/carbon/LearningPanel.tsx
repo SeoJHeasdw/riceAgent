@@ -4,7 +4,7 @@ import { Icon, Tag } from '../ui';
 import type { IconName } from '../ui/Icon';
 import { useLearning } from '../../lib/learning/LearningContext';
 import { renderChangelog, wrapT, type Proposal, type ProposalKind } from '../../lib/learningData';
-import type { SkillSuggestion } from '../../lib/types';
+import type { SkillCandidate, SkillSuggestion } from '../../lib/types';
 import { api } from '../../lib/api';
 import { localizeLearningWarning } from '../../lib/learningWarnings';
 import { TransparencyPanel } from './TransparencyPanel';
@@ -306,6 +306,157 @@ const SuggestionCard: React.FC<{
   );
 };
 
+// ── 승격 대기(candidate) 카드 — baseline-vs-candidate 평가 게이트(§10.6) 실배선 ──
+const CANDIDATE_STATUS_TAG: Record<SkillCandidate['status'], 'gray' | 'blue' | 'green' | 'red' | 'yellow'> = {
+  pending: 'blue',
+  running: 'blue',
+  promoted: 'green',
+  discarded: 'yellow',
+  expired: 'gray',
+  failed: 'red',
+};
+
+const pct = (v: number | null | undefined): string =>
+  v == null ? '—' : `${Math.round(v * 100)}%`;
+
+const CandidateCard: React.FC<{
+  c: SkillCandidate;
+  busy: boolean;
+  onEvaluate: () => void;
+  onDecide: (approved: boolean) => void;
+}> = ({ c, busy, onEvaluate, onDecide }) => {
+  const { t } = useTranslation('chat');
+  // i18next 타입드 키 — 동적 문자열 조회 대신 리터럴 키 사전으로 번역한다.
+  const statusLabel: Record<SkillCandidate['status'], string> = {
+    pending: t('learning.candidateStatusPending'),
+    running: t('learning.candidateStatusRunning'),
+    promoted: t('learning.candidateStatusPromoted'),
+    discarded: t('learning.candidateStatusDiscarded'),
+    expired: t('learning.candidateStatusExpired'),
+    failed: t('learning.candidateStatusFailed'),
+  };
+  const reasonLabel = (r: string): string => {
+    switch (r) {
+      case 'success_regression':
+        return t('learning.candidateReasonSuccess');
+      case 'cost_regression':
+        return t('learning.candidateReasonCost');
+      case 'judge_preference_regression':
+        return t('learning.candidateReasonJudge');
+      default:
+        return r;
+    }
+  };
+  const versionText =
+    c.baseline_version === 0
+      ? t('learning.suggestionVersionNew')
+      : t('learning.suggestionVersionUpgrade', { from: c.baseline_version, to: c.baseline_version + 1 });
+  const report = c.report;
+  const evidence = report?.evidence;
+  // 결정 가능 상태(§10.6): pending/failed 만 수동 결정, running 은 평가 종료 대기.
+  const decidable = c.status === 'pending' || c.status === 'failed';
+  const evaluable = c.status === 'pending';
+  return (
+    <div className="bg-layer-01 border border-border-subtle-01 rounded-lg p-3">
+      <div className="flex items-start gap-2.5">
+        <div className="w-6 h-6 flex-shrink-0 flex items-center justify-center rounded-md bg-layer-02">
+          <Icon name="growth" size={14} className="text-link-primary" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5">
+            <span className="text-body-short-01 font-semibold text-text-primary truncate">{c.skill_id}</span>
+            <span className="text-caption-01 text-text-helper font-mono flex-shrink-0">{versionText}</span>
+            <span className="ml-auto flex-shrink-0">
+              <Tag type={CANDIDATE_STATUS_TAG[c.status]} size="sm">{statusLabel[c.status]}</Tag>
+            </span>
+          </div>
+          <div className="text-caption-01 text-text-helper mt-1 leading-snug">
+            {c.status === 'pending' || c.status === 'running'
+              ? t('learning.candidateAwaitingEval')
+              : null}
+            {c.payload.changelog
+              ? renderChangelog(c.payload.changelog, c.baseline_version === 0, wrapT(t))
+              : null}
+          </div>
+          {/* 평가 리포트 요약 — 판정(성공률 델타)과 그 판정의 증거 강도(합의율·재생율)
+              를 함께 보여준다: promote 라는 결론만큼 결론의 신뢰도도 사용자 정보다. */}
+          {report?.baseline && report?.candidate && (
+            <div className="mt-2 rounded-md border border-border-subtle-01 bg-background/50 px-2.5 py-2 text-caption-01">
+              <div className="font-mono text-text-primary">
+                {t('learning.candidateReportLine', {
+                  base: pct(report.baseline.success_rate),
+                  cand: pct(report.candidate.success_rate),
+                })}
+                <span className="text-text-helper">
+                  {' · '}
+                  {t('learning.candidateReportWins', {
+                    wins: report.candidate.wins,
+                    ties: report.candidate.ties,
+                    losses: report.candidate.losses,
+                  })}
+                </span>
+              </div>
+              {evidence && (
+                <div className="mt-1 text-text-helper">
+                  {t('learning.candidateEvidenceLine', {
+                    pairings: evidence.pairings ?? 0,
+                    agree: pct(evidence.judge_agreement_rate),
+                    grounded: pct(evidence.grounded_tool_result_rate),
+                  })}
+                </div>
+              )}
+              {(report.reasons?.length ?? 0) > 0 && (
+                <div className="mt-1 inline-flex items-center gap-1 text-support-warning">
+                  <Icon name="warning" size={11} />
+                  {report.reasons!.map(reasonLabel).join(' · ')}
+                </div>
+              )}
+            </div>
+          )}
+          {c.status === 'failed' && (
+            <div className="mt-1.5 inline-flex items-center gap-1 text-caption-01 text-support-warning">
+              <Icon name="warning" size={11} /> {t('learning.candidateEvalFailedNote')}
+            </div>
+          )}
+          {(evaluable || decidable) && (
+            <div className="flex items-center gap-1.5 mt-2.5">
+              {evaluable && (
+                <button
+                  onClick={onEvaluate}
+                  disabled={busy}
+                  className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-caption-01 font-semibold bg-interactive text-white hover:bg-interactive-hover transition-colors disabled:opacity-50"
+                >
+                  <Icon name="renew" size={13} className={busy ? 'animate-spin' : ''} />
+                  {busy ? t('learning.candidateEvaluateBusy') : t('learning.candidateEvaluate')}
+                </button>
+              )}
+              {decidable && (
+                <>
+                  <button
+                    onClick={() => onDecide(true)}
+                    disabled={busy}
+                    title={t('learning.candidatePromoteTitle')}
+                    className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-caption-01 text-text-secondary hover:bg-layer-hover-01 hover:text-text-primary transition-colors disabled:opacity-50"
+                  >
+                    <Icon name="check" size={13} /> {t('learning.candidatePromote')}
+                  </button>
+                  <button
+                    onClick={() => onDecide(false)}
+                    disabled={busy}
+                    className="h-7 px-2.5 rounded-md text-caption-01 text-text-secondary hover:bg-layer-hover-01 transition-colors disabled:opacity-50"
+                  >
+                    {t('learning.candidateDiscard')}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpenConversation, onNavigate }) => {
   const { t } = useTranslation('chat');
   const {
@@ -315,6 +466,9 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpe
     proposals,
     setProposals,
     suggestions,
+    candidates,
+    evaluateCandidate,
+    decideCandidate,
     decideSuggestion,
     discoverNow,
     myPlugins,
@@ -336,6 +490,8 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpe
   // 제안함 결정/발굴 진행 상태 — 발굴은 LLM 1회 호출이라 느릴 수 있다.
   const [decidingId, setDecidingId] = useState<string | null>(null);
   const [discovering, setDiscovering] = useState(false);
+  // candidate 평가/결정 진행 상태 — 평가는 LLM 다수 호출이라 오래 걸린다.
+  const [candidateBusyId, setCandidateBusyId] = useState<string | null>(null);
   // 학습 투명성 모달 — 컨텍스트 렌더·격리/차단 메모리·되돌리기.
   const [transparencyOpen, setTransparencyOpen] = useState(false);
 
@@ -362,6 +518,40 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpe
     const added = await discoverNow();
     setDiscovering(false);
     showFlash(added > 0 ? t('learning.flashDiscoverFound', { count: added }) : t('learning.flashDiscoverNone'));
+  };
+
+  const handleCandidateEvaluate = async (c: SkillCandidate) => {
+    if (candidateBusyId) return;
+    setCandidateBusyId(c.id);
+    const updated = await evaluateCandidate(c.id);
+    setCandidateBusyId(null);
+    if (!updated) {
+      showFlash(t('learning.candidateFlashEvalFailed'));
+      return;
+    }
+    showFlash(
+      updated.status === 'promoted'
+        ? t('learning.candidateFlashPromoted', { id: c.skill_id })
+        : updated.status === 'discarded'
+          ? t('learning.candidateFlashDiscarded', { id: c.skill_id })
+          : t('learning.candidateFlashEvalPending'),
+    );
+  };
+
+  const handleCandidateDecision = async (c: SkillCandidate, approved: boolean) => {
+    if (candidateBusyId) return;
+    setCandidateBusyId(c.id);
+    const ok = await decideCandidate(c.id, approved);
+    setCandidateBusyId(null);
+    if (!ok) {
+      showFlash(t('learning.flashDecideFailed'));
+      return;
+    }
+    showFlash(
+      approved
+        ? t('learning.candidateFlashPromoted', { id: c.skill_id })
+        : t('learning.candidateFlashDiscarded', { id: c.skill_id }),
+    );
   };
 
   // accept a loop proposal → mutate real state so it lands in My Skills too
@@ -482,6 +672,46 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpe
             )}
           </div>
         </div>
+
+        {/* candidate 승격 게이트(§10.6) — 승인됐지만 baseline-vs-candidate 평가를
+            아직 통과하지 못한 후보들 + 최근 판정(리포트). 게이트가 꺼져 있으면
+            서버가 빈 배열을 주므로 섹션 전체가 숨는다. */}
+        {(() => {
+          const undecided = candidates.filter((c) =>
+            c.status === 'pending' || c.status === 'running' || c.status === 'failed',
+          );
+          const decided = candidates
+            .filter((c) => c.status === 'promoted' || c.status === 'discarded' || c.status === 'expired')
+            .slice(0, 3);
+          if (undecided.length === 0 && decided.length === 0) return null;
+          return (
+            <div className="border-b border-border-subtle-01 border-l-2 border-l-interactive/70 bg-interactive/[0.04]">
+              <div className="flex items-center gap-2 px-4 pt-3.5 pb-2">
+                <Icon name="growth" size={16} className="text-link-primary" />
+                <span className="text-caption-01 font-semibold uppercase tracking-wider text-text-secondary">
+                  {t('learning.sectionCandidates')}
+                </span>
+                <span className="ai-label">
+                  <span className="ai-label__text">AI</span>
+                </span>
+                {undecided.length > 0 && (
+                  <span className="ml-auto text-caption-01 text-text-helper font-mono">{undecided.length}</span>
+                )}
+              </div>
+              <div className="px-4 pb-3.5 flex flex-col gap-2">
+                {[...undecided, ...decided].map((c) => (
+                  <CandidateCard
+                    key={c.id}
+                    c={c}
+                    busy={candidateBusyId === c.id}
+                    onEvaluate={() => void handleCandidateEvaluate(c)}
+                    onDecide={(approved) => void handleCandidateDecision(c, approved)}
+                  />
+                ))}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* loop proposals — pending decisions the learning loop surfaced */}
         {(proposals.length > 0 || flash) && (

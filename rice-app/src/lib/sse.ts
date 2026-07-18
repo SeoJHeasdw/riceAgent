@@ -23,6 +23,7 @@ const STREAM_EVENT_TYPES: ReadonlySet<string> = new Set<SSEEventType>([
   'message',
   'memory_written',
   'skill_patched',
+  'skill_candidate_staged',
   'done',
   'error',
   'tool_approval_required',

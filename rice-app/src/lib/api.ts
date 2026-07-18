@@ -10,6 +10,7 @@ import type {
   PlatformFileResponse,
   PlatformPublishPayload,
   SkillSuggestion,
+  SkillCandidate,
   LearningEvent,
   RuntimeMemory,
 } from './types';
@@ -349,6 +350,25 @@ class ApiClient {
   /** 크로스세션 반복 패턴 발굴(수동 트리거) — LLM 1회 호출, 결과는 제안함으로 */
   discoverSkills(): Promise<ApiResponse<{ scanned_sessions: number; suggestions: SkillSuggestion[] }>> {
     return this.send('POST', '/skills/discover');
+  }
+
+  // ── candidate 승격 게이트 (LEARNING_LOOP §10.6) ──
+  /** 승인됐지만 baseline-vs-candidate 평가 전/중/후인 후보 목록(리포트 포함) */
+  getSkillCandidates(): Promise<ApiResponse<SkillCandidate[]>> {
+    return this.get<SkillCandidate[]>('/skills/candidates');
+  }
+  /** 후보 즉시 평가(수동 트리거) — LLM 호출 다수라 느리다(호출측이 로딩 표시).
+   *  통과 시 승격까지 끝난 갱신된 후보 행을 돌려준다. */
+  evaluateSkillCandidate(candidateId: string): Promise<ApiResponse<SkillCandidate>> {
+    return this.send('POST', `/skills/candidates/${candidateId}/evaluate`);
+  }
+  /** 후보 수동 승격/폐기 — 평가를 기다리지 않는 사용자 오버라이드(스킬은 사용자
+   *  소유; provider 오프라인·평가 실패의 탈출구). */
+  decideSkillCandidate(
+    candidateId: string,
+    approved: boolean,
+  ): Promise<ApiResponse<{ applied: boolean; version: number | null; status: string }>> {
+    return this.send('POST', `/skills/candidates/${candidateId}/decision`, { approved });
   }
   /** 학습 감사 로그 — 제안/승인/거부/타임아웃/메모리 기록의 영속 이력 */
   getLearningEvents(limit = 100): Promise<ApiResponse<LearningEvent[]>> {

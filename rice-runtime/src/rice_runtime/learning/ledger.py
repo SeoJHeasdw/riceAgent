@@ -27,6 +27,7 @@ from datetime import datetime, timedelta, timezone
 
 from ..core.storage.sqlite import Database
 from ..core.types import new_id, now_iso
+from .episode import merge_tool_transcripts
 
 log = logging.getLogger("rice.learning.ledger")
 
@@ -189,6 +190,17 @@ class LearningLedger:
                 counts[version_key] = counts.get(version_key, 0) + int(count)
         merged["friction_by_skill_version"] = friction_by_version
         merged["turns"] = int(existing.get("turns") or 0) + int(incoming.get("turns") or 1)
+        # 도구 전사(LearningEpisode 발판): 시간순 이어붙이되 상한에서 오래된 호출
+        # 부터 버린다 — watermark 와 달리 전사는 replay 충실도가 목적이라 최근 우선.
+        merged["tool_transcript"] = merge_tool_transcripts(
+            existing.get("tool_transcript"), incoming.get("tool_transcript")
+        )
+        # 에피소드 인과 링크: 병합된 잡이 덮는 턴들의 learning_episodes 행 id 합집합.
+        episode_ids = list(existing.get("episode_ids") or [])
+        episode_ids.extend(
+            e for e in (incoming.get("episode_ids") or []) if e not in episode_ids
+        )
+        merged["episode_ids"] = episode_ids[-50:]
         return merged
 
     def enqueue_review_job(

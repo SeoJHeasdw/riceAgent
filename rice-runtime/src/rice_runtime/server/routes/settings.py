@@ -273,3 +273,17 @@ async def learning_events(limit: int = 100, c: Container = Depends(get_container
     영속 이력. '루프가 실제로 무엇을 배우고 무엇이 기각됐는가'를 UI가 보여줄 수
     있게 하는 원천(편집가능·감사가능·롤백 원칙의 감사 축)."""
     return {"success": True, "data": c.learning.learning_events(min(max(limit, 1), 500))}
+
+
+@router.get("/learning/episodes")
+async def learning_episodes(
+    limit: int = 50, session_id: str | None = None, c: Container = Depends(get_container)
+):
+    """LearningEpisode 목록 (LEARNING_LOOP §10.5 완결) — 턴 1개 = 에피소드 1행:
+    outcome(success/corrected/failure/aborted) + judgment(결정적 신호 근거) +
+    episode(도구 전사·관여 스킬 버전). 리뷰 잡 evidence 의 episode_ids 가 이
+    행들을 가리킨다."""
+    return {
+        "success": True,
+        "data": c.learning.list_episodes(min(max(limit, 1), 200), session_id),
+    }

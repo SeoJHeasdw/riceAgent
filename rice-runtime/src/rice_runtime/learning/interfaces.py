@@ -117,6 +117,11 @@ class PatchProposal:
     # 메타데이터라 SSE payload 에는 싣지 않고 제안함 payload 에는 실린다(제안함
     # 경유 승인도 같은 평가를 받아야 하므로). 빈 튜플 = 평가 시 paraphrase 생성만.
     seed_prompts: tuple[str, ...] = ()
+    # 같은 구간의 도구 호출/결과 전사(learning/episode.py 정제본) — candidate
+    # 평가의 trace-grounded replay 원천(EVAL §10.2). seed_prompts 와 동일하게
+    # 평가 전용 메타데이터(SSE 제외, 제안함 payload 포함). 빈 튜플 = 재생 없이
+    # 중립 시뮬레이션만.
+    tool_transcript: tuple[dict, ...] = ()
 
 
 # An effect is either an immediate notification (memory) or a proposal that the
@@ -394,6 +399,13 @@ class ILearningService(Protocol):
 
     def learning_events(self, limit: int = 100) -> list[dict]:
         """학습 감사 로그 (GET /learning/events) — 제안/결정/적용/메모리 기록."""
+        ...
+
+    def list_episodes(self, limit: int = 50, session_id: str | None = None) -> list[dict]:
+        """LearningEpisode 목록 (GET /learning/episodes, §10.5 완결) — 턴 1개 =
+        에피소드 1행: outcome(success/corrected/failure/aborted) + judgment(신호
+        근거) + episode(도구 전사·관여 스킬 버전). 리뷰 잡 evidence 의
+        episode_ids 가 이 행들을 가리킨다(인과 링크)."""
         ...
 
     def record_context_renders(self, session_id: str, renders: list[dict]) -> None:

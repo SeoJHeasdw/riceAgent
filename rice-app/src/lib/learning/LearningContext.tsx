@@ -7,7 +7,13 @@ import {
   type SkillDetail,
   type UserSignal,
 } from '../learningData';
-import type { Skill as MarketSkill, Plugin as MarketPlugin, SkillSuggestion, SkillPatchProposedData } from '../types';
+import type {
+  Skill as MarketSkill,
+  Plugin as MarketPlugin,
+  SkillSuggestion,
+  SkillCandidate,
+  SkillPatchProposedData,
+} from '../types';
 import {
   installedSkillId,
   marketSkillToOwned,
@@ -56,6 +62,15 @@ interface LearningContextValue {
   refreshSuggestions: () => Promise<void>;
   /** 제안함 항목 승인/거부 → 런타임 적용 + 목록/스킬 동기화 */
   decideSuggestion: (id: string, approved: boolean, editedBody?: string) => Promise<boolean>;
+
+  /** candidate 승격 게이트(§10.6) — 승인됐지만 평가 전/중/후인 후보(리포트 포함) */
+  candidates: SkillCandidate[];
+  /** 후보 목록 재조회 (GET /skills/candidates) */
+  refreshCandidates: () => Promise<void>;
+  /** 후보 즉시 평가(LLM 다수 호출 — 느림). 성공 시 갱신된 후보를 돌려준다. */
+  evaluateCandidate: (id: string) => Promise<SkillCandidate | null>;
+  /** 후보 수동 승격/폐기(평가 오버라이드). 승격 적용 시 스킬 목록도 동기화. */
+  decideCandidate: (id: string, approved: boolean) => Promise<boolean>;
   /** 크로스세션 패턴 발굴(수동) — 새로 추가된 제안 수를 돌려준다 */
   discoverNow: () => Promise<number>;
   /** 신호 제거 — 런타임 메모리(mem_*)면 DELETE /memories/{id}까지 배선(위생) */
@@ -192,6 +207,7 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [myPlugins, setMyPlugins] = useState<MyPlugin[]>([]);
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [suggestions, setSuggestions] = useState<SkillSuggestion[]>([]);
+  const [candidates, setCandidates] = useState<SkillCandidate[]>([]);
   // 콜백(refresh/decide) 내부에서 최신 suggestions·해소집합을 deps 없이 읽기 위한 ref 미러.
   // deps에 넣으면 콜백 → 컨텍스트 value → hydrate effect가 연쇄 재실행되므로 ref로 우회한다.
   const suggestionsRef = useRef<SkillSuggestion[]>([]);
@@ -245,6 +261,44 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       return [...keptMirrors, ...server];
     });
   }, []);
+
+  // candidate 승격 게이트(§10.6) — 게이트가 꺼져 있으면 서버가 빈 배열을 주므로
+  // 섹션이 자연히 숨는다(off 상태의 렌더 분기를 프론트가 따로 알 필요 없음).
+  const refreshCandidates = useCallback(async () => {
+    const res = await api.getSkillCandidates();
+    if (!res.success || !res.data) return;
+    setCandidates(res.data);
+  }, []);
+
+  const evaluateCandidate = useCallback(
+    async (id: string): Promise<SkillCandidate | null> => {
+      const res = await api.evaluateSkillCandidate(id);
+      if (!res.success || !res.data) {
+        // 409(이미 평가 중/결정됨) 등 — 서버 상태로 재동기화해 낡은 버튼을 걷는다.
+        await refreshCandidates();
+        return null;
+      }
+      const updated = res.data;
+      setCandidates((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+      if (updated.status === 'promoted') void loadSkills();
+      return updated;
+    },
+    [loadSkills, refreshCandidates],
+  );
+
+  const decideCandidate = useCallback(
+    async (id: string, approved: boolean): Promise<boolean> => {
+      const res = await api.decideSkillCandidate(id, approved);
+      if (!res.success) {
+        await refreshCandidates();
+        return false;
+      }
+      await refreshCandidates();
+      if (approved && res.data?.applied) void loadSkills();
+      return true;
+    },
+    [loadSkills, refreshCandidates],
+  );
 
   // 라이브 파킹 제안을 제안함에 즉시 미러(안전망, Self-Improvement v3). 서버는
   // 무응답 타임아웃/연결끊김 시에만 inbox로 옮기지만(§9.2), 세션을 옮기면 채팅 카드를
@@ -385,19 +439,19 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     };
 
     // 첫 hydrate가 끝나면(성공/실패 무관) 로딩 플래그를 내려 빈상태/스켈레톤을 전환한다.
-    void Promise.allSettled([loadSkills(), loadMemories(), loadPlugins(), refreshSuggestions()]).then(
-      () => setHydrating(false),
-    );
+    void Promise.allSettled([
+      loadSkills(), loadMemories(), loadPlugins(), refreshSuggestions(), refreshCandidates(),
+    ]).then(() => setHydrating(false));
     const unsub = api.onEnabledChange((enabled) => {
       if (enabled) {
         setHydrating(true);
-        void Promise.allSettled([loadSkills(), loadMemories(), loadPlugins(), refreshSuggestions()]).then(
-          () => setHydrating(false),
-        );
+        void Promise.allSettled([
+          loadSkills(), loadMemories(), loadPlugins(), refreshSuggestions(), refreshCandidates(),
+        ]).then(() => setHydrating(false));
       }
     });
     return unsub;
-  }, [loadSkills, refreshSuggestions]);
+  }, [loadSkills, refreshSuggestions, refreshCandidates]);
 
   // 제안함 항목 승인/거부 — 승인이 적용되면(runtime이 create/patch/archive 수행)
   // 스킬 목록을 재동기화해 MySkills/패널이 즉시 새 버전을 보여주게 한다.
@@ -419,16 +473,24 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         }
         markResolved(target.approval_id);
         setSuggestions((prev) => prev.filter((s) => s.id !== id));
-        if (approved) void loadSkills();
+        // 승인이 candidate 격리로 귀결됐을 수 있다(candidate_eval_enabled, §10.6)
+        // — 두 목록을 함께 동기화한다(게이트 꺼짐이면 candidates는 빈 배열 no-op).
+        if (approved) {
+          void loadSkills();
+          void refreshCandidates();
+        }
         return true;
       }
       const res = await api.decideSkillSuggestion(id, approved, editedBody);
       if (!res.success) return false;
       setSuggestions((prev) => prev.filter((s) => s.id !== id));
-      if (approved) void loadSkills();
+      if (approved) {
+        void loadSkills();
+        void refreshCandidates();
+      }
       return true;
     },
-    [loadSkills, refreshSuggestions, markResolved],
+    [loadSkills, refreshSuggestions, refreshCandidates, markResolved],
   );
 
   // 크로스세션 발굴(수동 트리거) — LLM 1회 호출이라 느릴 수 있다(호출측이 로딩 표시).
@@ -469,6 +531,7 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setMyPlugins([]);
     setProposals([]);
     setSuggestions([]);
+    setCandidates([]);
   }, []);
 
   // install(plugin) = 마켓 → 나의 플러그인 materialize. marketId 기준 멱등(중복 설치 방지).
@@ -501,6 +564,10 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       proposals,
       setProposals,
       suggestions,
+      candidates,
+      refreshCandidates,
+      evaluateCandidate,
+      decideCandidate,
       mirrorParkedProposal,
       dropParkedMirror,
       resolvedApprovals,
@@ -515,7 +582,7 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       panelScrollRef,
       resetAll,
     }),
-    [hydrating, skills, signals, installed, details, myPlugins, proposals, suggestions, mirrorParkedProposal, dropParkedMirror, resolvedApprovals, refreshSuggestions, decideSuggestion, discoverNow, removeSignal, installSkillFromMarket, installPluginFromMarket, highlightedSkill, jumpToSkill, resetAll],
+    [hydrating, skills, signals, installed, details, myPlugins, proposals, suggestions, candidates, refreshCandidates, evaluateCandidate, decideCandidate, mirrorParkedProposal, dropParkedMirror, resolvedApprovals, refreshSuggestions, decideSuggestion, discoverNow, removeSignal, installSkillFromMarket, installPluginFromMarket, highlightedSkill, jumpToSkill, resetAll],
   );
 
   return <LearningCtx.Provider value={value}>{children}</LearningCtx.Provider>;

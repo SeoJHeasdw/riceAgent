@@ -14,7 +14,7 @@ import { defaultModelSettings } from '../lib/mockData';
 import { RUN_SKILL_EVENT, NEW_CHAT_EVENT, openCommandPalette } from '../lib/commandBridge';
 import { api } from '../lib/api';
 import { sseClient } from '../lib/sse';
-import type { ApprovalMode, PatchTrigger, PendingApproval, PlanUpdatedEventData, ToolApprovalRequiredData, SkillPatchProposedData, MemoryWrittenEventData, ErrorEventData, SSEEvent } from '../lib/types';
+import type { ApprovalMode, PatchTrigger, PendingApproval, PlanUpdatedEventData, ToolApprovalRequiredData, SkillPatchProposedData, SkillCandidateStagedEventData, MemoryWrittenEventData, ErrorEventData, SSEEvent } from '../lib/types';
 import { CompanionCloudIcon, Icon, Kbd, ResizeHandle, ConfirmDialog, Tooltip, Toggle } from '../components/ui';
 import type { IconName } from '../components/ui/Icon';
 import { FileViewerProvider } from '../lib/fileViewer/FileViewerProvider';
@@ -998,7 +998,7 @@ const ChatTaskProgress = () => (
 );
 
 function ChatScreen({ active = true }: { active?: boolean }) {
-  const { jumpToSkill, setSkills, setDetails, panelScrollRef, refreshSuggestions, mirrorParkedProposal, dropParkedMirror, resolvedApprovals } = useLearning();
+  const { jumpToSkill, setSkills, setDetails, panelScrollRef, refreshSuggestions, refreshCandidates, mirrorParkedProposal, dropParkedMirror, resolvedApprovals } = useLearning();
   const navigate = useNavigate();
   const toast = useToast();
   const { t } = useTranslation('chat');
@@ -1755,6 +1755,17 @@ function ChatScreen({ active = true }: { active?: boolean }) {
     }
   };
 
+  const handleSkillCandidateStaged = (d: SkillCandidateStagedEventData) => {
+    // 승인이 즉시 적용 대신 candidate 격리로 귀결됨(candidate_eval_enabled, §10.6).
+    // "적용됨"이 아니라 "평가 대기"를 정직하게 알리고, 학습 패널의 승격 대기
+    // 섹션이 이 후보를 보여주도록 목록을 동기화한다.
+    toast.notify({
+      message: t('learning.candidateStagedNotice', { id: d.skill_id }),
+      duration: 5000,
+    });
+    void refreshCandidates();
+  };
+
   // "이 대화를 스킬로 저장" — 명시적 사용자 트리거 (Phase C, learn_prompt.py 이식).
   // /learning-review와 달리 게이트 없이 항상 시도한다. 같은 이벤트 어휘를 공유하므로
   // 렌더링은 위의 shared handler 3종을 그대로 재사용 — 이 함수는 스트림을 열고
@@ -1777,6 +1788,9 @@ function ChatScreen({ active = true }: { active?: boolean }) {
           handleSkillPatchProposed(e.data as SkillPatchProposedData, sid);
         } else if (e.type === 'skill_patched') {
           handleSkillPatched(e.data as { skill_id: string; version: number });
+        } else if (e.type === 'skill_candidate_staged') {
+          proposed = true;
+          handleSkillCandidateStaged(e.data as SkillCandidateStagedEventData);
         } else if (e.type === 'done' && !proposed) {
           toast.notify({ message: t('learn.nothingFound'), duration: 3000 });
         } else if (e.type === 'error') {
@@ -1892,6 +1906,8 @@ function ChatScreen({ active = true }: { active?: boolean }) {
         handleSkillPatchProposed(e.data as SkillPatchProposedData, sessionId);
       } else if (e.type === 'skill_patched') {
         handleSkillPatched(e.data as { skill_id: string; version: number });
+      } else if (e.type === 'skill_candidate_staged') {
+        handleSkillCandidateStaged(e.data as SkillCandidateStagedEventData);
       } else if (e.type === 'done') {
         // NOTE: no sealAnswer() here — let the typewriter finish its tail smoothly
         // after the network is done (that trailing type-out is the desired feel).
@@ -1925,6 +1941,7 @@ function ChatScreen({ active = true }: { active?: boolean }) {
               if (re.type === 'memory_written') handleMemoryWritten(re.data as MemoryWrittenEventData);
               else if (re.type === 'skill_patch_proposed') handleSkillPatchProposed(re.data as SkillPatchProposedData, sid);
               else if (re.type === 'skill_patched') handleSkillPatched(re.data as { skill_id: string; version: number });
+              else if (re.type === 'skill_candidate_staged') handleSkillCandidateStaged(re.data as SkillCandidateStagedEventData);
             },
           });
         }

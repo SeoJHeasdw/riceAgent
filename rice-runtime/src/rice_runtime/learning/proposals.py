@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import logging
 
+from .episode import sanitize_tool_transcript
 from .interfaces import PatchProposal, PatchTrigger
 from .skill import guard as skill_guard
 from .skill.patch import build_diff
@@ -153,6 +154,7 @@ def make_create_proposal(
     derived_from_external: bool = False,
     evidence_message_ids: tuple[str, ...] = (),
     seed_prompts: tuple[str, ...] = (),
+    tool_transcript: tuple[dict, ...] = (),
 ) -> PatchProposal | None:
     """신규 스킬 제안(from_version=0). 이름 규약(kebab)·크기·시크릿 가드를 여기서
     일괄 적용한다. 이름이 규약 위반이면 None — LLM/에이전트가 이상한 이름을 주는
@@ -191,6 +193,7 @@ def make_create_proposal(
         derived_from_external=derived_from_external,
         evidence_message_ids=evidence_message_ids,
         seed_prompts=sanitize_seed_prompts(seed_prompts),
+        tool_transcript=sanitize_tool_transcript(tool_transcript),
     )
 
 
@@ -224,6 +227,7 @@ def make_patch_proposal(
     new_description: str | None = None,
     new_tags: tuple[str, ...] | None = None,
     seed_prompts: tuple[str, ...] = (),
+    tool_transcript: tuple[dict, ...] = (),
 ) -> PatchProposal | None:
     """기존 스킬 개선 제안. 실질 변경이 없으면(diff 빈 줄 + 메타데이터 변경 없음)
     None — 빈 제안 카드로 사용자를 방해하지 않는다.
@@ -274,6 +278,7 @@ def make_patch_proposal(
         new_description=desc_change,
         new_tags=tags_change,
         seed_prompts=sanitize_seed_prompts(seed_prompts),
+        tool_transcript=sanitize_tool_transcript(tool_transcript),
     )
 
 
@@ -297,4 +302,5 @@ def proposal_to_payload(p: PatchProposal) -> dict:
         "new_description": p.new_description,
         "new_tags": list(p.new_tags) if p.new_tags is not None else None,
         "seed_prompts": list(p.seed_prompts),
+        "tool_transcript": [dict(r) for r in p.tool_transcript],
     }

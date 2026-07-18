@@ -38,6 +38,7 @@ from ...prompts.review import (
 from ..interfaces import LearningEffect, MemoryWritten, PatchProposal
 from ..ledger import LearningLedger
 from ..memory.store import MemoryStore
+from ..episode import extract_tool_transcript
 from ..proposals import make_create_proposal, make_patch_proposal
 from ..skill import guard as skill_guard
 from ..skill.store import SkillStore
@@ -357,17 +358,19 @@ class ReviewEngine:
             raise ReviewLLMError(f"review LLM call failed ({origin}): {exc}") from exc
 
         # candidate 평가(§10.6)의 held-out 과제 원천 — 리뷰가 본 구간의 실제 사용자
-        # 발화(최근 것 우선). 정규화/scrub 은 proposal 빌더(sanitize_seed_prompts)가
-        # 최종 적용한다.
+        # 발화(최근 것 우선) + 도구 전사(trace-grounded replay 원천). 정규화/scrub
+        # 은 proposal 빌더(sanitize_seed_prompts/sanitize_tool_transcript)가 최종
+        # 적용한다.
         seed_prompts = tuple(
             m.content for m in review_history if m.role == "user" and m.content.strip()
         )[-3:]
+        tool_transcript = tuple(extract_tool_transcript(review_history))
 
         effects: list[LearningEffect] = []
         for call in calls:
             effect = self._to_effect(
                 session_id, call, external=external, evidence_ids=evidence_ids,
-                seed_prompts=seed_prompts,
+                seed_prompts=seed_prompts, tool_transcript=tool_transcript,
             )
             if effect is None:
                 continue
@@ -496,15 +499,18 @@ class ReviewEngine:
         external: bool = False,
         evidence_ids: tuple[str, ...] = (),
         seed_prompts: tuple[str, ...] = (),
+        tool_transcript: tuple[dict, ...] = (),
     ) -> LearningEffect | None:
         args = call.arguments if isinstance(call.arguments, dict) else {}
         if call.tool_name == "propose_skill_create":
             return self._skill_create_effect(
-                args, external=external, evidence_ids=evidence_ids, seed_prompts=seed_prompts
+                args, external=external, evidence_ids=evidence_ids,
+                seed_prompts=seed_prompts, tool_transcript=tool_transcript,
             )
         if call.tool_name == "propose_skill_patch":
             return self._skill_patch_effect(
-                args, external=external, evidence_ids=evidence_ids, seed_prompts=seed_prompts
+                args, external=external, evidence_ids=evidence_ids,
+                seed_prompts=seed_prompts, tool_transcript=tool_transcript,
             )
         if call.tool_name == "propose_memory_write":
             return self._memory_effect(session_id, args, external=external, evidence_ids=evidence_ids)
@@ -518,6 +524,7 @@ class ReviewEngine:
         external: bool = False,
         evidence_ids: tuple[str, ...] = (),
         seed_prompts: tuple[str, ...] = (),
+        tool_transcript: tuple[dict, ...] = (),
     ) -> PatchProposal | None:
         name = str(args.get("name") or "").strip()
         body = str(args.get("body") or "")
@@ -550,6 +557,7 @@ class ReviewEngine:
             derived_from_external=external,
             evidence_message_ids=evidence_ids,
             seed_prompts=seed_prompts,
+            tool_transcript=tool_transcript,
         )
 
     def _skill_patch_effect(
@@ -559,6 +567,7 @@ class ReviewEngine:
         external: bool = False,
         evidence_ids: tuple[str, ...] = (),
         seed_prompts: tuple[str, ...] = (),
+        tool_transcript: tuple[dict, ...] = (),
     ) -> PatchProposal | None:
         skill_id = str(args.get("skill_id") or "").strip()
         new_body = str(args.get("new_body") or "")
@@ -590,6 +599,7 @@ class ReviewEngine:
             new_description=str(raw_new_desc) if raw_new_desc else None,
             new_tags=tuple(str(t) for t in raw_new_tags) if isinstance(raw_new_tags, (list, tuple)) else None,
             seed_prompts=seed_prompts,
+            tool_transcript=tool_transcript,
         )
 
     def _memory_effect(

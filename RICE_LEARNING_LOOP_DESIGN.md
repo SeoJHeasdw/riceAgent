@@ -643,9 +643,21 @@ nudge 카운터를 초기화한다. claim은 오래된 잡 우선이고 retry/fi
 - ~~**candidate 상태 + baseline-vs-candidate 평가**~~ — **2026-07-19 구현 완료,
   §10.6.** 평가 하네스 재설계(시뮬레이션 롤아웃 + LLM 심판)를 포함하며, 방법론
   정본은 [RICE_LEARNING_EVAL.md](RICE_LEARNING_EVAL.md) §10.
-- **완전한 LearningEpisode** — 도구 호출 인자/결과 전사, 성공/중단/사용자 수정
-  판정까지 담는 독립 엔티티. §10.1의 watermark가 스키마 진화 없이 그 방향으로
-  확장 가능한 발판이다(evidence JSON에 필드 추가 = 순수 추가).
+- ~~**완전한 LearningEpisode**~~ — **2026-07-19 완결.** 두 단계로 이행됐다:
+  (1) 도구 전사(이름/인자/성패/결과, scrub·상한 정제)가 `learning/episode.py` 로
+  실체화되어 잡 evidence(`tool_transcript`)와 `PatchProposal.tool_transcript` 에
+  실린다 — candidate 평가의 trace-grounded replay(EVAL §10.2)의 원천.
+  (2) **독립 엔티티화 + 판정**(`learning_episodes`, migration 0018): 턴 1개 =
+  에피소드 1행. `outcome`(success/corrected/failure/aborted — signals.py 의
+  결정적 신호 기반, corrected 가 "사용자 수정" 축이고 aborted > corrected >
+  failure > success 우선순위) + `judgment`(신호 근거·도구 호출 수·관여 스킬·
+  발화 발췌 — 판정이 휴리스틱임을 근거와 함께 정직하게 노출) + `episode`(전사·
+  스킬 버전 맵). aborted 턴도 기록된다 — 중단도 판정이며, 기록은 관찰일 뿐
+  학습 반영이 아니라 fail-closed(제안 폐기·잡 미생성)와 충돌하지 않는다.
+  리뷰 잡 evidence 의 `episode_ids` 가 병합을 넘어 턴 단위 기록을 가리키고
+  (인과 링크), `GET /learning/episodes` 로 조회한다. 보존은
+  `learning_episode_cap`(기본 500, 0=off) 상한의 최근 우선 — 장기 감사는
+  learning_events 몫.
 - **proposal group 트랜잭션** — consolidation의 umbrella+archive들을 하나의
   승인 단위로 묶는 것. §10.4의 순서 가드가 데이터 손실은 이미 막으므로,
   UI/계약 변경이 필요한 그룹화는 후속 순수 추가.
@@ -699,3 +711,12 @@ HITL 승인(카드 resolve_proposal / 제안함 decide_suggestion)
   version+hash 순서 가드가 이미 그 경로의 안전을 소유한다.
 - **ledger 이벤트**: `candidate_staged/promoted/discarded/expired/eval_failed` —
   폐기도 리포트와 함께 남는다(증거 없는 폐기는 증발과 같다).
+
+**커버리지·증거력 보강 (2026-07-19 2차)**: 평가의 두 약점을 같은 날 닫았다 —
+(1) **trace-grounded replay**: 제안을 낳은 구간의 실제 도구 전사
+(`learning/episode.py`, LearningEpisode 발판)를 롤아웃이 재생해, 중립 승인
+시뮬레이션이 못 보던 "도구 결과 내용에 따른 분기(진단→대응)"를 록화된 현실의
+범위 안에서 관찰한다. (2) **심판 양방향 일관성 + 증거 강도 블록**: 같은 pairing
+을 좌우 스왑으로 두 번 심판해 불일치를 tie 로 접고(위치 편향의 표본 단위 상쇄),
+리포트가 `evidence`(합의율·재생율·표본 수·분산)로 판정의 신뢰도 자체를 계량한다.
+상세는 EVAL §10.2-10.3.

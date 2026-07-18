@@ -3,14 +3,21 @@
 한 arm(baseline 또는 candidate)의 한 과제 실행: 메인 에이전트 루프를 흉내낸
 bounded 미니 루프를 돌리되, **도구는 절대 실제로 실행하지 않는다** — 평가가
 사용자 파일·외부 세계에 부작용을 내면 안 되고(eval/runner.py 의 격리 원칙),
-어떤 도구가 올지 스킬마다 다르므로 mock 시퀀스를 미리 쓸 수도 없다. 모든 도구
-호출에는 동일한 중립 승인 결과가 돌아가고, 관찰 대상은 "모델이 어떤 절차를
-어떤 순서로 밟으려 했고 최종적으로 뭐라고 답했는가"다.
+어떤 도구가 올지 스킬마다 다르므로 mock 시퀀스를 미리 쓸 수도 없다.
 
-이 시뮬레이션의 증거력 한계는 명시적이다(LEARNING_EVAL §10): 도구 결과 내용에
-따라 갈리는 분기(진단→대응)는 여기서 관찰되지 않는다. 그 대신 결정적이고
-부작용이 없으며, 두 arm 이 완전히 동일한 환경을 본다 — baseline-vs-candidate
-비교의 단일 변인 통제(스킬 블록만 다름)는 성립한다.
+도구 결과는 두 단계로 답한다 (EVAL §10.2 trace-grounded replay):
+
+  1. **재생(grounded)**: 제안을 낳은 실제 세션의 도구 전사(learning/episode.py)
+     에서 같은 이름의 기록을 **기록 순서대로 소진**하며 그 결과를 그대로 돌려준다
+     — 모델이 실제 세션에서 봤던 내용(정제·절단본)이므로 "도구 결과 내용에 따라
+     갈리는 분기(진단→대응)"가 록화된 현실의 범위 안에서 관찰된다. 같은 이름의
+     기록을 다 쓰면 마지막 기록을 반복한다(읽기형 도구의 안정 상태 가정).
+  2. **중립 승인(ungrounded)**: 전사에 없는 도구는 이전과 같은 중립 승인 결과.
+
+두 arm 은 같은 전사·같은 도구 표면을 본다 — 단일 변인(스킬 블록) 통제는 그대로다.
+grounded/ungrounded 비율은 RolloutResult 로 노출되어 리포트의 증거 강도
+(`grounded_tool_result_rate`)가 된다: 재생이 하나도 없던 평가와 대부분 재생이던
+평가는 같은 "simulated" 라도 증거력이 다르다 — 그 차이를 숨기지 않는다.
 """
 
 from __future__ import annotations
@@ -22,7 +29,7 @@ from typing import Sequence
 from ...agent.providers.interfaces import ILLMProvider
 from ...core.types import Message, ToolSpec
 
-# 시뮬레이션 환경의 유일한 도구 결과 — 두 arm·모든 도구에 동일하게 돌아간다.
+# 전사에 없는 도구의 중립 승인 결과 — 두 arm·모든 미기록 도구에 동일하게 돌아간다.
 SIMULATED_TOOL_RESULT = json.dumps(
     {"ok": True, "simulated": True, "note": "executed in evaluation sandbox"},
     ensure_ascii=False,
@@ -39,6 +46,35 @@ class RolloutResult:
     tool_calls: tuple[dict, ...] = ()  # [{"name": str, "arguments": dict}, ...]
     llm_calls: int = 0
     output_chars: int = 0  # 답변 + 도구 인자 총 문자수 (비용 대리 지표)
+    grounded_calls: int = 0  # 전사 재생으로 답한 도구 호출 수 (증거 강도 신호)
+
+
+class _TranscriptReplayer:
+    """도구 이름별 기록 큐 — 기록 순서 소진 후 마지막 반복.
+
+    인자 유사도 매칭 대신 기록 순서를 따르는 이유: 전사의 순서는 환경의 시간적
+    진실("get status → pending, 다시 get status → ready")이고, 평가 롤아웃의 같은
+    이름 반복 호출이 그 진행을 따라가는 것이 유사도 휴리스틱보다 결정적이고
+    설명 가능하다."""
+
+    def __init__(self, transcript: Sequence[dict]) -> None:
+        self._by_name: dict[str, list[dict]] = {}
+        for record in transcript or ():
+            name = str(record.get("name") or "")
+            if name:
+                self._by_name.setdefault(name, []).append(record)
+        self._cursor: dict[str, int] = {}
+
+    def reply(self, tool_name: str) -> tuple[str, bool, bool]:
+        """→ (결과 content, ok, grounded). 기록이 없으면 중립 승인."""
+        records = self._by_name.get(tool_name)
+        if not records:
+            return SIMULATED_TOOL_RESULT, True, False
+        index = min(self._cursor.get(tool_name, 0), len(records) - 1)
+        self._cursor[tool_name] = index + 1
+        record = records[index]
+        content = str(record.get("result") or "") or SIMULATED_TOOL_RESULT
+        return content, bool(record.get("ok", True)), True
 
 
 def build_sandbox_tool_specs(tool_names: Sequence[str]) -> tuple[ToolSpec, ...]:
@@ -65,15 +101,18 @@ async def run_rollout(
     system_prompt: str,
     task_prompt: str,
     tools: Sequence[ToolSpec] = (),
+    replay_transcript: Sequence[dict] = (),
     max_steps: int = 5,
     max_output_tokens: int | None = None,
 ) -> RolloutResult:
     """bounded 미니 루프 1회. provider 예외는 그대로 전파한다 — 호출자
     (harness)가 CandidateEvalError 로 번역해 재시도 계약을 태운다."""
     messages: list[Message] = [Message(role="user", content=task_prompt)]
+    replayer = _TranscriptReplayer(replay_transcript)
     observed_calls: list[dict] = []
     llm_calls = 0
     output_chars = 0
+    grounded = 0
     final_text = ""
 
     for _ in range(max(1, max_steps)):
@@ -107,15 +146,17 @@ async def run_rollout(
             Message(role="assistant", content=step_text, tool_calls=tuple(step_calls))
         )
         for call in step_calls:
+            content, ok, was_grounded = replayer.reply(call.tool_name)
+            grounded += 1 if was_grounded else 0
             messages.append(
                 Message(
                     role="tool",
-                    content=SIMULATED_TOOL_RESULT,
+                    content=content,
                     metadata={
                         "tool_call_id": call.id,
                         "tool_name": call.tool_name,
                         "tool_source": "builtin",
-                        "ok": True,
+                        "ok": ok,
                     },
                 )
             )
@@ -126,4 +167,5 @@ async def run_rollout(
         tool_calls=tuple(observed_calls),
         llm_calls=llm_calls,
         output_chars=output_chars,
+        grounded_calls=grounded,
     )

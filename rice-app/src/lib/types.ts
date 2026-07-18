@@ -178,6 +178,15 @@ export interface SkillPatchedEventData {
   skill_id: string;
   version: number;
 }
+/** 승인이 즉시 적용 대신 candidate 격리로 귀결됨 (candidate_eval_enabled 켜짐,
+ * LEARNING_LOOP §10.6). skill_patched 대신 발행된다 — "적용됨"과 "평가 대기"는
+ * 다른 사건. 이후 승격/폐기는 백그라운드라 GET /skills/candidates 로 관찰한다. */
+export interface SkillCandidateStagedEventData {
+  skill_id: string;
+  candidate_id: string;
+  /** 0 = 신규 생성(baseline 없음) */
+  baseline_version: number;
+}
 export interface ErrorEventData {
   error_code: string;
   message: string;
@@ -265,6 +274,59 @@ export interface SkillSuggestion {
   decided_at: string | null;
 }
 
+// ── candidate 승격 게이트 (LEARNING_LOOP §10.6, GET /skills/candidates) ──
+/** 평가 리포트의 arm(baseline/candidate) 별 집계 (LEARNING_EVAL §10). */
+export interface SkillCandidateArmMetrics {
+  success_rate: number;
+  avg_llm_calls: number;
+  avg_output_chars: number;
+  wins: number;
+  losses: number;
+  ties: number;
+}
+/** 평가 리포트 — 판정 + 그 판정의 신뢰도(evidence). 폐기돼도 리포트는 남는다. */
+export interface SkillCandidateReport {
+  verdict?: 'promote' | 'discard';
+  reasons?: string[];
+  version?: number;
+  forced?: boolean;
+  error?: string;
+  mode?: string;
+  rubric?: string[];
+  baseline?: SkillCandidateArmMetrics;
+  candidate?: SkillCandidateArmMetrics;
+  evidence?: {
+    pairings?: number;
+    held_out_tasks?: number;
+    paraphrase_tasks?: number;
+    judge_consistency_checked?: boolean;
+    judge_agreement_rate?: number | null;
+    grounded_tool_result_rate?: number | null;
+    tool_calls_observed?: number;
+    success_stddev?: { baseline?: number; candidate?: number };
+  };
+}
+/** 승인됐지만 아직 baseline-vs-candidate 평가를 통과하지 못한 제안 1건.
+ * payload 는 제안함과 같은 어휘(+ 평가 전용 seed_prompts/tool_transcript). */
+export interface SkillCandidate {
+  id: string;
+  created_at: string;
+  skill_id: string;
+  kind: 'create' | 'patch';
+  status: 'pending' | 'running' | 'promoted' | 'discarded' | 'expired' | 'failed';
+  baseline_version: number;
+  baseline_body_hash: string | null;
+  payload: SkillSuggestion['payload'] & {
+    seed_prompts?: string[];
+    tool_transcript?: unknown[];
+    edited_body?: string;
+  };
+  attempts: number;
+  claimed_at: string | null;
+  decided_at: string | null;
+  report: SkillCandidateReport | null;
+}
+
 /** 학습 감사 로그 한 줄 (GET /learning/events) */
 export interface LearningEvent {
   id: string;
@@ -297,6 +359,7 @@ export type SSEEvent =
   | { type: 'message'; data: MessageEventData }
   | { type: 'memory_written'; data: MemoryWrittenEventData }
   | { type: 'skill_patched'; data: SkillPatchedEventData }
+  | { type: 'skill_candidate_staged'; data: SkillCandidateStagedEventData }
   | { type: 'done'; data: Record<string, never> }
   | { type: 'error'; data: ErrorEventData }
   // control events

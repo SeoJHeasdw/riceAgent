@@ -74,6 +74,7 @@ Electron main process
 | **POST** | **`/skills/candidates/{cid}/evaluate`** | **candidate 1건 즉시 평가(수동 트리거 — 백그라운드는 `candidate_eval_interval_seconds` 틱). LLM 호출 다수라 느린 일반 REST(로딩 표시 필요). 통과 시 승격(apply_patch)까지 완료 후 갱신된 행 반환. pending 아니면 409** |
 | **POST** | **`/skills/candidates/{cid}/decision`** | **candidate 수동 승격/폐기 `{approved}` — 평가를 기다리지 않는 사용자 오버라이드(스킬은 사용자 소유; provider 오프라인·평가 실패의 탈출구). pending/failed에서만 가능(running은 409), 승격 시 baseline 충돌이면 409. `{applied, version, status}` 반환** |
 | **GET** | **`/learning/events?limit=`** | **학습 감사 로그 — 제안/승인/거부/타임아웃/메모리 기록의 영속 이력 (learning_events) — LEARNING_LOOP §9** |
+| **GET** | **`/learning/episodes?limit=&session_id=`** | **LearningEpisode 목록(2026-07-19, LEARNING_LOOP §10.5 완결) — 턴 1개 = 에피소드 1행: `{id, session_id, from/through_message_id, outcome(success\|corrected\|failure\|aborted), judgment(결정적 신호 근거), episode(도구 전사·관여 스킬 버전)}`. 리뷰 잡 evidence의 `episode_ids`가 이 행들을 가리킨다. 보존 상한 `learning_episode_cap`(기본 500)** |
 | **GET** | **`/eval/impact`** | **학습효과(cold/warm) 리포트 — LEARNING_EVAL §6.3 정본. 프론트는 이 엔드포인트를 우선 호출하고, 실패 시 번들 시드를 폴백으로 사용한다** |
 | GET | `/plugins` | 설치된 플러그인 목록 |
 | PATCH | `/plugins/{id}/enabled` | 플러그인 활성화/비활성화 |
@@ -122,7 +123,7 @@ Electron main process
 8. `done` - 응답 완료
 9. `error` - 오류 발생 (error_code, message). 모델 호출의 사용자 조치 가능 오류는 `provider.ollama_unreachable`·`provider.model_not_found`·`provider.auth_failed`·`provider.quota_exceeded` 네 안정 코드로 전달한다.
 
-> **`skill_candidate_staged`(skill_id, candidate_id, baseline_version) — 2026-07-19 순수 추가(조건부 10번째 스트림 이벤트).** `candidate_eval_enabled`(기본 off)가 켜진 경우에만, 스킬 제안 승인이 즉시 적용 대신 candidate 격리로 귀결됐을 때 `skill_patched` **대신** 발행된다 — "적용됨"과 "평가 대기"는 다른 사건이다(LEARNING_LOOP §10.6). 이후의 승격/폐기는 백그라운드에서 일어나므로 SSE가 아니라 `GET /skills/candidates`·`GET /learning/events`로 관찰한다(승격되면 `GET /skills`의 version이 오른다). 구형 클라이언트는 미지 타입을 드랍하므로(sse.ts) 하위호환 — 게이트가 꺼져 있으면(기본) 이 이벤트는 절대 발행되지 않고 스트림은 기존 9종 그대로다.
+> **`skill_candidate_staged`(skill_id, candidate_id, baseline_version) — 2026-07-19 순수 추가(조건부 10번째 스트림 이벤트).** `candidate_eval_enabled`(기본 off)가 켜진 경우에만, 스킬 제안 승인이 즉시 적용 대신 candidate 격리로 귀결됐을 때 `skill_patched` **대신** 발행된다 — "적용됨"과 "평가 대기"는 다른 사건이다(LEARNING_LOOP §10.6). 이후의 승격/폐기는 백그라운드에서 일어나므로 SSE가 아니라 `GET /skills/candidates`·`GET /learning/events`로 관찰한다(승격되면 `GET /skills`의 version이 오른다). 구형 클라이언트는 미지 타입을 드랍하므로(sse.ts) 하위호환 — 게이트가 꺼져 있으면(기본) 이 이벤트는 절대 발행되지 않고 스트림은 기존 9종 그대로다. **프론트 배선(같은 날)**: rice-app 은 이 이벤트를 토스트("평가 통과 후 반영")로 알리고 학습 패널의 **승격 대기(candidates) 섹션**(LearningPanel — 후보 목록·평가 리포트 요약(성공률 델타·심판 합의율·전사 재생율)·지금 평가/바로 승격/폐기)을 재동기화한다.
 
 > **`tool_call` bridge 표현 계약**: abort 없이 결과까지 도달한 bridge 실행은 public
 > SSE에서 wrapper의 outer `tool_call_id`를 유지한 요청 대상 이름·인자의 `tool_call`

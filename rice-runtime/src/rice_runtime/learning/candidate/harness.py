@@ -105,6 +105,7 @@ class CandidateEvalHarness:
         max_steps: int = 5,
         cost_tolerance: float = 0.5,
         output_max_tokens: int = 1_024,
+        judge_consistency: bool = True,
     ) -> None:
         self._resolve_provider = resolve_provider
         # (skill_id, body, version) → 시스템 프롬프트 스킬 블록. 서비스가 실제
@@ -118,6 +119,11 @@ class CandidateEvalHarness:
         self._max_steps = max(1, max_steps)
         self._cost_tolerance = max(0.0, cost_tolerance)
         self._output_max_tokens = max(64, output_max_tokens)
+        # 심판 양방향 일관성(EVAL §10.3): 같은 pairing 을 좌우를 바꿔 두 번
+        # 심판하고, 두 판정이 다르면 tie 로 접는다 — 위치 편향을 표본 평균이
+        # 아니라 표본 단위에서 상쇄한다. 심판 호출이 2배가 되지만 롤아웃보다
+        # 싸고, LLM 심판의 최대 노이즈원을 직접 제거한다.
+        self._judge_consistency = bool(judge_consistency)
 
     # ── public entrypoint ────────────────────────────────────────────────────
     async def evaluate(
@@ -130,9 +136,13 @@ class CandidateEvalHarness:
         description: str = "",
         seed_prompts: Sequence[str] = (),
         changelog: str = "",
+        tool_transcript: Sequence[dict] = (),
     ) -> CandidateVerdict:
         """baseline_body=None 은 신규 생성 후보 — baseline arm 은 스킬 없이 돈다
-        (cold-vs-warm ablation, LEARNING_EVAL §3 과 같은 축)."""
+        (cold-vs-warm ablation, LEARNING_EVAL §3 과 같은 축).
+
+        `tool_transcript`: 제안을 낳은 실제 세션의 도구 전사(learning/episode.py
+        정제본) — 롤아웃의 trace-grounded replay 원천. 두 arm 이 같은 전사를 본다."""
         provider = self._resolve_provider()
         if getattr(provider, "name", "") == "echo":
             raise CandidateEvalError("no real provider available for candidate eval")
@@ -143,7 +153,9 @@ class CandidateEvalHarness:
         )
 
         # 두 arm 이 같은 도구 표면(합집합)을 본다 — 표면 차이가 스킬 차이와
-        # 교락되지 않게. 카탈로그 리졸버가 있으면 실재 도구로 한정한다.
+        # 교락되지 않게. 카탈로그 리졸버가 있으면 본문 참조는 실재 도구로
+        # 한정하되, 전사에 있는 도구는 실제로 실행됐던 것이므로 무조건 포함한다.
+        transcript = [r for r in tool_transcript if isinstance(r, dict) and r.get("name")]
         ref_names = list(
             dict.fromkeys(tool_call_refs(candidate_body) + tool_call_refs(baseline_body or ""))
         )
@@ -153,7 +165,8 @@ class CandidateEvalHarness:
                 ref_names = [n for n in ref_names if n in known]
             except Exception:  # noqa: BLE001 — 카탈로그 실패는 검사 스킵으로 강등
                 log.warning("tool catalog resolve failed for candidate eval", exc_info=True)
-        sandbox_tools = build_sandbox_tool_specs(ref_names)
+        surface_names = list(dict.fromkeys(ref_names + [str(r["name"]) for r in transcript]))
+        sandbox_tools = build_sandbox_tool_specs(surface_names)
 
         baseline_block = (
             self._render_skill_block(skill_id, baseline_body, baseline_version)
@@ -175,6 +188,10 @@ class CandidateEvalHarness:
         base_chars: list[int] = []
         cand_chars: list[int] = []
         wins = losses = ties = 0
+        grounded_total = 0
+        tool_calls_total = 0
+        judge_agreements = 0
+        judge_checked = 0
 
         try:
             for t_index, task in enumerate(tasks):
@@ -184,6 +201,7 @@ class CandidateEvalHarness:
                         system_prompt=baseline_system,
                         task_prompt=task.prompt,
                         tools=sandbox_tools,
+                        replay_transcript=transcript,
                         max_steps=self._max_steps,
                         max_output_tokens=self._output_max_tokens,
                     )
@@ -192,28 +210,33 @@ class CandidateEvalHarness:
                         system_prompt=candidate_system,
                         task_prompt=task.prompt,
                         tools=sandbox_tools,
+                        replay_transcript=transcript,
                         max_steps=self._max_steps,
                         max_output_tokens=self._output_max_tokens,
                     )
+                    grounded_total += base_run.grounded_calls + cand_run.grounded_calls
+                    tool_calls_total += len(base_run.tool_calls) + len(cand_run.tool_calls)
+
                     # 좌우 은닉 + 결정적 스왑: 짝수 (task+run) 에서 candidate=A.
+                    # 일관성 검사가 켜져 있으면 같은 pairing 을 반대 방향으로 한 번
+                    # 더 심판하고, 불일치는 tie 로 접는다(표본 단위 위치 편향 상쇄).
                     candidate_is_a = (t_index + run_index) % 2 == 0
-                    judged = await self._judge(
-                        provider,
-                        task_prompt=task.prompt,
-                        rubric=rubric,
-                        a=cand_run if candidate_is_a else base_run,
-                        b=base_run if candidate_is_a else cand_run,
+                    c_rate, b_rate2, outcome, agreement, judge_reason = (
+                        await self._judge_consensus(
+                            provider,
+                            task_prompt=task.prompt,
+                            rubric=rubric,
+                            cand_run=cand_run,
+                            base_run=base_run,
+                            candidate_is_a=candidate_is_a,
+                        )
                     )
-                    rubric_size = max(1, len(rubric))
-                    a_rate = min(rubric_size, max(0, judged["a_criteria_met"])) / rubric_size
-                    b_rate = min(rubric_size, max(0, judged["b_criteria_met"])) / rubric_size
-                    c_rate, b_rate2 = (a_rate, b_rate) if candidate_is_a else (b_rate, a_rate)
-                    winner = judged["winner"]
-                    cand_won = winner == ("A" if candidate_is_a else "B")
-                    base_won = winner == ("B" if candidate_is_a else "A")
-                    wins += 1 if cand_won else 0
-                    losses += 1 if base_won else 0
-                    ties += 1 if winner == "tie" else 0
+                    if agreement is not None:
+                        judge_checked += 1
+                        judge_agreements += 1 if agreement else 0
+                    wins += 1 if outcome == "candidate" else 0
+                    losses += 1 if outcome == "baseline" else 0
+                    ties += 1 if outcome == "tie" else 0
 
                     cand_success.append(c_rate)
                     base_success.append(b_rate2)
@@ -228,14 +251,14 @@ class CandidateEvalHarness:
                             "run": run_index,
                             "prompt": task.prompt[:200],
                             "candidate_is_a": candidate_is_a,
-                            "winner": (
-                                "candidate" if cand_won else "baseline" if base_won else "tie"
-                            ),
+                            "winner": outcome,
+                            "judge_agreement": agreement,
                             "candidate_criteria_rate": round(c_rate, 4),
                             "baseline_criteria_rate": round(b_rate2, 4),
                             "candidate_tool_calls": [c["name"] for c in cand_run.tool_calls],
                             "baseline_tool_calls": [c["name"] for c in base_run.tool_calls],
-                            "judge_reason": str(judged.get("reason") or "")[:300],
+                            "grounded_calls": base_run.grounded_calls + cand_run.grounded_calls,
+                            "judge_reason": judge_reason[:300],
                         }
                     )
         except CandidateEvalError:
@@ -265,7 +288,7 @@ class CandidateEvalHarness:
             reasons.append("judge_preference_regression")
 
         report = {
-            "schema_version": 1,
+            "schema_version": 2,
             "mode": "simulated_rollout",
             "skill_id": skill_id,
             "baseline_version": baseline_version,
@@ -276,6 +299,26 @@ class CandidateEvalHarness:
             "baseline": _metrics_dict(base_metrics),
             "candidate": _metrics_dict(cand_metrics),
             "per_task": per_task,
+            # 증거 강도(EVAL §10.3) — 판정만이 아니라 그 판정을 얼마나 믿을 수
+            # 있는지도 리포트의 일부다. grounded 0% 의 promote 와 90% 의 promote
+            # 는 같은 verdict 라도 다른 증거다.
+            "evidence": {
+                "pairings": len(cand_success),
+                "held_out_tasks": sum(1 for t in tasks if t.kind == "held_out"),
+                "paraphrase_tasks": sum(1 for t in tasks if t.kind == "paraphrase"),
+                "judge_consistency_checked": self._judge_consistency,
+                "judge_agreement_rate": (
+                    round(judge_agreements / judge_checked, 4) if judge_checked else None
+                ),
+                "grounded_tool_result_rate": (
+                    round(grounded_total / tool_calls_total, 4) if tool_calls_total else None
+                ),
+                "tool_calls_observed": tool_calls_total,
+                "success_stddev": {
+                    "baseline": _stddev(base_success),
+                    "candidate": _stddev(cand_success),
+                },
+            },
             "verdict": "promote" if not reasons else "discard",
             "reasons": list(reasons),
         }
@@ -368,6 +411,60 @@ class CandidateEvalHarness:
         return {"paraphrases": paraphrases[:paraphrase_count], "rubric": rubric}
 
     # ── judge ────────────────────────────────────────────────────────────────
+    async def _judge_consensus(
+        self,
+        provider: ILLMProvider,
+        *,
+        task_prompt: str,
+        rubric: list[str],
+        cand_run: RolloutResult,
+        base_run: RolloutResult,
+        candidate_is_a: bool,
+    ) -> tuple[float, float, str, bool | None, str]:
+        """→ (candidate 충족률, baseline 충족률, outcome, 합의 여부, 사유).
+
+        outcome ∈ {"candidate", "baseline", "tie"}. 일관성 검사가 켜져 있으면
+        좌우를 바꿔 두 번 심판하고: 두 방향 모두 같은 쪽 우세일 때만 그 쪽 승,
+        불일치는 tie(위치 편향/노이즈로 간주 — 승격 게이트는 회귀 방지이므로
+        tie 는 통과 쪽으로 작동한다). 충족률은 두 방향의 평균."""
+        rubric_size = max(1, len(rubric))
+
+        def _orient(judged: dict, cand_is_a: bool) -> tuple[float, float, str]:
+            a = min(rubric_size, max(0, judged["a_criteria_met"])) / rubric_size
+            b = min(rubric_size, max(0, judged["b_criteria_met"])) / rubric_size
+            c_rate, o_rate = (a, b) if cand_is_a else (b, a)
+            winner = judged["winner"]
+            if winner == "tie":
+                return c_rate, o_rate, "tie"
+            cand_label = "A" if cand_is_a else "B"
+            return c_rate, o_rate, "candidate" if winner == cand_label else "baseline"
+
+        first = await self._judge(
+            provider,
+            task_prompt=task_prompt,
+            rubric=rubric,
+            a=cand_run if candidate_is_a else base_run,
+            b=base_run if candidate_is_a else cand_run,
+        )
+        c1, b1, o1 = _orient(first, candidate_is_a)
+        reason = str(first.get("reason") or "")
+        if not self._judge_consistency:
+            return c1, b1, o1, None, reason
+
+        second = await self._judge(
+            provider,
+            task_prompt=task_prompt,
+            rubric=rubric,
+            a=base_run if candidate_is_a else cand_run,
+            b=cand_run if candidate_is_a else base_run,
+        )
+        c2, b2, o2 = _orient(second, not candidate_is_a)
+        agreement = o1 == o2
+        outcome = o1 if agreement else "tie"
+        if not agreement:
+            reason = f"judge disagreement ({o1} vs {o2}) → tie"
+        return (c1 + c2) / 2, (b1 + b2) / 2, outcome, agreement, reason
+
     async def _judge(
         self,
         provider: ILLMProvider,
@@ -427,6 +524,14 @@ class CandidateEvalHarness:
         if data is None:
             raise CandidateEvalError("structured eval call returned no JSON object")
         return data
+
+
+def _stddev(values: list[float]) -> float:
+    n = len(values)
+    if n <= 1:
+        return 0.0
+    mean = sum(values) / n
+    return round((sum((v - mean) ** 2 for v in values) / n) ** 0.5, 4)
 
 
 def _aggregate(

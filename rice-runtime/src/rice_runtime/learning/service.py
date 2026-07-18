@@ -53,6 +53,13 @@ from .candidate import CandidateEvalError, CandidateEvalHarness, CandidateStore
 from .curator.consolidate import ConsolidationEngine
 from .curator.curator import Curator
 from .discovery import DiscoveryEngine
+from .episode import (
+    EpisodeStore,
+    build_turn_judgment,
+    extract_tool_transcript,
+    judge_turn_outcome,
+    sanitize_tool_transcript,
+)
 from .interfaces import (
     ArchiveProposal,
     CandidateStaged,
@@ -345,6 +352,9 @@ class LearningService(ILearningService):
             if resolve_provider is not None
             else None
         )
+        # LearningEpisode 독립 엔티티(§10.5, 0018) — 턴 1개 = 에피소드 1행.
+        # observe() 가 기록하고 GET /learning/episodes 가 읽는다.
+        self._episodes = EpisodeStore(db, cap=config.learning_episode_cap)
         # candidate 승격 게이트 (§10.6): store 는 무조건 배선(목록/수동 결정은
         # provider 없이도 동작해야 한다), harness 는 provider 필요. 게이트 자체는
         # config.candidate_eval_enabled 로 켠다 — 꺼져 있으면 승인은 기존 그대로
@@ -361,6 +371,7 @@ class LearningService(ILearningService):
                 max_steps=config.candidate_eval_max_steps,
                 cost_tolerance=config.candidate_eval_cost_tolerance,
                 output_max_tokens=config.candidate_eval_output_max_tokens,
+                judge_consistency=config.candidate_eval_judge_consistency,
             )
             if resolve_provider is not None
             else None
@@ -828,10 +839,13 @@ class LearningService(ILearningService):
             (m.content for m in reversed(learning_history) if m.role == "user"), ""
         ) or ""
         user_tokens = lexical.tokens(user_text)
-        friction_turn = not outcome.aborted and (
-            has_correction_signal(f"{outcome.final_message}\n{user_text}")
-            or has_failure_signal(f"{outcome.final_message}\n{user_text}")
-        )
+        # 교정/실패 신호는 분리 유지한다 — friction(관여 스킬 힌트)은 완주 턴만
+        # 보지만, 에피소드 판정(§10.5 성공/중단/사용자 수정)은 신호 자체를 근거로
+        # 남긴다(aborted 턴 포함).
+        signal_text = f"{outcome.final_message}\n{user_text}"
+        correction_sig = has_correction_signal(signal_text)
+        failure_sig = has_failure_signal(signal_text)
+        friction_turn = not outcome.aborted and (correction_sig or failure_sig)
 
         for skill_id in dict.fromkeys(outcome.injected_skill_ids):
             try:
@@ -860,12 +874,59 @@ class LearningService(ILearningService):
                     # 턴을 깨지 않도록 (fail-safe 우선).
                     pass
 
+        # ── LearningEpisode 기록 (§10.5 완결, 0018) — 턴 1개 = 에피소드 1행.
+        # aborted 턴 **포함**: 중단도 판정이다(제안/리뷰 잡과 달리 기록은 관찰일
+        # 뿐 학습 반영이 아니므로 fail-closed 원칙과 충돌하지 않는다). 전사도
+        # 중단 전까지 실행된 실제 도구 활동이라 남긴다.
+        turn_transcript = sanitize_tool_transcript(extract_tool_transcript(learning_history))
+        injected_versions = self._snapshot_versions(
+            tuple(dict.fromkeys(outcome.injected_skill_ids)),
+            dict(outcome.injected_skill_versions),
+        )
+        episode_id = self._episodes.record(
+            session_id=outcome.session_id,
+            from_message_id=next(
+                (m.id for m in reversed(learning_history) if m.role == "user"),
+                learning_history[0].id if learning_history else None,
+            ),
+            through_message_id=learning_history[-1].id if learning_history else None,
+            outcome=judge_turn_outcome(
+                aborted=outcome.aborted,
+                correction_signal=correction_sig,
+                failure_signal=failure_sig,
+            ),
+            judgment=build_turn_judgment(
+                aborted=outcome.aborted,
+                correction_signal=correction_sig,
+                failure_signal=failure_sig,
+                tool_calls=outcome.tool_calls_made,
+                engaged_skills=tuple(engaged),
+                user_text=user_text,
+            ),
+            episode={
+                "tool_transcript": [dict(r) for r in turn_transcript],
+                "injected_skills": injected_versions,
+                "viewed_skills": dict(viewed),
+                "engaged_skills": list(engaged),
+            },
+        )
+
         # ② 미드턴 스테이징 드레인 (T5)
         staged = self._staged.pop(outcome.session_id, [])
         if outcome.aborted:
             # 중단된 턴의 제안은 폐기 (fail-closed). 리뷰 잡도 만들지 않는다 —
             # 사용자가 버린 턴을 학습 리뷰가 다시 들추지 않는다.
             return effects
+        # 이 턴의 도구 전사 — 리뷰 잡 evidence(감사)와 candidate 평가의
+        # trace-grounded replay(§10.6/EVAL §10.2) 두 소비자가 쓴다. 스테이징은
+        # 미드턴이라 히스토리 접근이 없었으므로 여기서 뒤늦게 붙인다.
+        if turn_transcript:
+            staged = [
+                replace(p, tool_transcript=turn_transcript)
+                if isinstance(p, PatchProposal) and not p.tool_transcript
+                else p
+                for p in staged
+            ]
         effects.extend(staged)
 
         # ③ 서버 소유 리뷰 잡 영속화: tool_calls_made는 이제 프론트가
@@ -879,13 +940,12 @@ class LearningService(ILearningService):
             outcome.tool_calls_made,
             self._turn_evidence(
                 learning_history,
-                injected_versions=self._snapshot_versions(
-                    tuple(dict.fromkeys(outcome.injected_skill_ids)),
-                    dict(outcome.injected_skill_versions),
-                ),
+                injected_versions=injected_versions,
                 viewed_versions=dict(viewed),
                 engaged=tuple(engaged),
                 friction=friction_turn,
+                tool_transcript=turn_transcript,
+                episode_ids=(episode_id,) if episode_id else (),
             ),
         )
 
@@ -913,6 +973,8 @@ class LearningService(ILearningService):
         viewed_versions: dict[str, int],
         engaged: tuple[str, ...],
         friction: bool,
+        tool_transcript: tuple[dict, ...] = (),
+        episode_ids: tuple[str, ...] = (),
     ) -> dict:
         """learning_jobs.evidence 한 턴 분 — 병합은 ledger._merge_evidence 몫.
 
@@ -953,6 +1015,11 @@ class LearningService(ILearningService):
             "friction_by_skill_version": friction_by_version,
             "friction_turns": 1 if friction else 0,
             "turns": 1,
+            # LearningEpisode(§10.5): 이 구간의 도구 호출/결과 전사(정제본) —
+            # 감사 + candidate replay 의 원천 — 와 독립 엔티티(learning_episodes)
+            # 로의 인과 링크. 순수 추가 필드라 스키마 진화 없음(0016 확장 원칙).
+            "tool_transcript": [dict(r) for r in tool_transcript],
+            "episode_ids": list(episode_ids),
         }
 
     def apply_patch(
@@ -1519,8 +1586,11 @@ class LearningService(ILearningService):
                     },
                 )
             baseline_hash = body_fingerprint(current.body)
-        # seed 는 어떤 경로로 왔든 최종 저장 전 다시 정규화한다(구형 payload 방어).
+        # seed/전사는 어떤 경로로 왔든 최종 저장 전 다시 정규화한다(구형 payload 방어).
         payload["seed_prompts"] = list(sanitize_seed_prompts(payload.get("seed_prompts") or ()))
+        payload["tool_transcript"] = [
+            dict(r) for r in sanitize_tool_transcript(payload.get("tool_transcript") or ())
+        ]
         candidate_id = self._candidates.add(
             skill_id=skill_id,
             kind="create" if from_version == 0 else "patch",
@@ -1652,6 +1722,7 @@ class LearningService(ILearningService):
                 ),
                 seed_prompts=tuple(payload.get("seed_prompts") or ()),
                 changelog=str(payload.get("changelog") or ""),
+                tool_transcript=tuple(payload.get("tool_transcript") or ()),
             )
         except CandidateEvalError as exc:
             requeued = self._candidates.retry(
@@ -1944,6 +2015,10 @@ class LearningService(ILearningService):
 
     def learning_events(self, limit: int = 100) -> list[dict]:
         return self._ledger.events(limit)
+
+    def list_episodes(self, limit: int = 50, session_id: str | None = None) -> list[dict]:
+        """LearningEpisode 목록 (GET /learning/episodes) — 턴 단위 판정+전사."""
+        return self._episodes.list(limit, session_id)
 
     def record_context_renders(self, session_id: str, renders: list[dict]) -> None:
         """컨텍스트 렌더 감사 — 턴당 1개 ledger 이벤트로 영속화.

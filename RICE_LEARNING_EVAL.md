@@ -260,22 +260,26 @@ UI는 이 스키마에만 의존한다. 디자인 단계엔 **시드 fixture**�
 
 **단일 변인 통제**(§3의 원칙 유지): 두 arm(baseline/candidate)은 같은 provider·같은 scaffold 프롬프트·같은 도구 표면(두 본문의 참조 도구 **합집합** — 한쪽만 아는 도구가 있으면 표면 차이가 스킬 차이와 교락된다)을 보고, 다른 것은 **주입된 스킬 블록 하나**다(실전 주입 렌더러 `_render_skills`를 그대로 태워 배포 표면과 동일). 신규 생성 후보는 baseline arm이 스킬 없이 돈다 — §3 cold/warm과 같은 축.
 
-### 10.2 시뮬레이션 롤아웃 — 정직성 경계
+### 10.2 시뮬레이션 롤아웃 — trace-grounded replay (2026-07-19 보강)
 
-`learning/candidate/rollout.py`: 메인 루프를 흉내낸 bounded 미니 루프(기본 5스텝)를 돌리되 **도구는 절대 실제로 실행하지 않는다**. 모든 도구 호출에 동일한 중립 승인 결과가 돌아가고, 관찰 대상은 "모델이 어떤 절차를 어떤 순서로 밟으려 했고 최종적으로 뭐라고 답했는가"다.
+`learning/candidate/rollout.py`: 메인 루프를 흉내낸 bounded 미니 루프(기본 5스텝)를 돌리되 **도구는 절대 실제로 실행하지 않는다**. 도구 결과는 두 단계로 답한다:
 
-**한계를 명시한다**(리포트에 `mode: "simulated_rollout"` 고정): 도구 결과 *내용*에 따라 갈리는 분기(진단→대응)는 관찰되지 않는다. 얻는 것은 (1) 부작용 제로 — 평가가 사용자 파일·외부 세계를 건드리지 않는다, (2) 결정성 — 환경 노이즈 없음, (3) 공정성 — 두 arm이 완전히 동일한 환경. "시뮬레이션이라 증거가 아니다"가 아니라 "이 증거는 절차·응답 품질 축을 커버하고 환경 반응 축은 커버하지 않는다"가 정확한 서술이다. 환경 반응 축은 완전한 LearningEpisode(LEARNING_LOOP §10.5 후속)의 몫.
+1. **재생(grounded)**: 제안을 낳은 실제 세션의 **도구 전사**(`learning/episode.py` — 도구 이름/인자/성패/결과의 scrub·상한 정제본, LearningEpisode 발판)에서 같은 이름의 기록을 **기록 순서대로 소진**하며 그 결과를 그대로 돌려준다. 전사의 결과는 모델이 실제 세션에서 봤던 렌더 그대로이므로, **도구 결과 내용에 따라 갈리는 분기(진단→대응)가 록화된 현실의 범위 안에서 관찰된다** — 초판 시뮬레이션이 커버하지 못했던 환경 반응 축의 개방. 같은 이름의 기록을 다 쓰면 마지막 기록을 반복(읽기형 도구의 안정 상태 가정). 전사의 원천: 리뷰 엔진이 제안 시점에 리뷰 구간에서 추출(`PatchProposal.tool_transcript`), T5 미드턴 제안은 턴 종료 드레인에서 부착, 리뷰 잡 evidence(`tool_transcript` 필드, 병합 시 최근 우선 cap 20)에도 감사용으로 영속.
+2. **중립 승인(ungrounded)**: 전사에 없는 도구는 동일한 중립 승인 결과.
+
+**한계를 계량한다**(리포트 `mode: "simulated_rollout"` + `evidence.grounded_tool_result_rate`): 재생율 0%의 평가와 90%의 평가는 같은 verdict라도 증거력이 다르다 — 그 차이를 리포트가 숨기지 않는다. 전사 밖의 미록화 분기는 여전히 관찰 불가(완전한 LearningEpisode의 잔여 몫). 얻는 것: (1) 부작용 제로, (2) 결정성 — 재생은 기록 순서 기반이라 환경 노이즈 없음, (3) 공정성 — 두 arm이 같은 전사·같은 도구 표면(본문 참조 ∪ 전사 이름 합집합)을 본다.
 
 ### 10.3 심판과 판정 — 회귀 방지 게이트
 
 - **rubric**: 과제 생성 호출이 seed에서 2-4개의 관찰 가능한 성공 기준을 도출한다(스킬/버전 언급 금지 — 과제 성공을 기술하지, 스킬 사용을 기술하지 않는다). 생성 실패 시 held-out만으로 강등(+기록), seed가 아예 없으면 infra 실패로 재시도.
-- **pairwise 심판**: 과제마다 두 전사를 A/B로 **은닉**하고 rubric 충족 수를 센다. 좌우는 (task, run) 인덱스로 결정적으로 스왑 — 위치 편향이 평균에서 상쇄된다. 구조화 출력(response_schema·think=False·temp 0.1 — 소형 모델 안정화 레시피).
+- **pairwise 심판 + 양방향 일관성**(2026-07-19 보강): 과제마다 두 전사를 A/B로 **은닉**하고 rubric 충족 수를 센다. `candidate_eval_judge_consistency`(기본 켜짐)면 같은 pairing을 **좌우를 바꿔 두 번** 심판한다: 두 방향 모두 같은 쪽 우세일 때만 승패, 불일치는 tie — LLM 심판의 최대 노이즈원(위치 편향)을 표본 평균이 아니라 **표본 단위에서 상쇄**한다(항상 A를 고르는 극단 편향 심판도 전 pairing tie로 접혀 가짜 회귀/가짜 승리를 못 만든다 — 테스트로 고정). 충족률은 두 방향 평균, 합의율은 `evidence.judge_agreement_rate`로 리포트에 남는다. 구조화 출력(response_schema·think=False·temp 0.1 — 소형 모델 안정화 레시피).
 - **판정 = 회귀 조건 검사** (LEARNING_LOOP §10.5 문구의 "성공률·비용·회귀 조건"):
   - `success_regression`: candidate rubric 충족률 평균 < baseline
   - `cost_regression`: 출력량이 상대 허용율(기본 +50%) **과** 절대 하한(+2,000자)을 모두 초과 — 상대만 쓰면 짧은 출력에서 몇십 자 차이가 오탐된다
   - `judge_preference_regression`: 심판이 일관되게 baseline 우세(candidate 무승·유패)
   - 위반 0건 → promote. **tie는 통과다** — 사용자가 이미 동의한 변경이므로 이 게이트의 일은 개선 증명이 아니라 회귀 방지이고, 폐기 쪽에 보수 편향을 걸면 정상 개선이 심판 노이즈로 계속 좌초한다.
 - **실패 구분**(LEARNING_LOOP §10.3 원칙): provider/infra 실패는 `CandidateEvalError` → attempts 재시도(기본 2회), 소진 시 failed로 **보존**(수동 결정 가능). 회귀 검출은 정상 판정(discarded)이며 리포트와 함께 남는다.
+- **증거 강도 블록**(2026-07-19 보강, `report.evidence`): 판정만이 아니라 그 판정을 얼마나 믿을 수 있는지도 리포트의 일부다 — `pairings`, held-out/paraphrase 과제 수, `judge_agreement_rate`(양방향 합의율), `grounded_tool_result_rate`(전사 재생율), `tool_calls_observed`, arm별 `success_stddev`. 프론트/사용자는 promote라는 결론과 그 결론의 표본 크기·합의도·근거율을 함께 본다.
 
 ### 10.4 노브·API (요약 — wire 정본은 CONTRACTS)
 
