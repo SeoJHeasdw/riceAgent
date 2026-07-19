@@ -252,6 +252,8 @@ export function runtimePluginToMyPlugin(p: {
   skill_names?: string[];
   source?: string;
   author?: string;
+  risk_flags?: string[];
+  agent_names?: string[];
 }): MyPlugin {
   const builtin = p.source === 'builtin';
   return {
@@ -270,6 +272,8 @@ export function runtimePluginToMyPlugin(p: {
     knowledge: [],
     permissions: (p.required_connectors ?? []).map((c) => ({ name: c, mode: 'needs_connection' as const })),
     examples: [],
+    riskFlags: p.risk_flags ?? [],
+    agentNames: p.agent_names ?? [],
   };
 }
 

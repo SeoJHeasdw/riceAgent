@@ -86,7 +86,7 @@ interface LearningContextValue {
    * 마켓 플러그인을 "나의 플러그인"으로 materialize 한다 — 플러그인 설치의 학습-store 측 배선.
    * marketId 기준 멱등. 소유 id(inst-…)를 돌려준다. (installSkillFromMarket 와 대칭)
    */
-  installPluginFromMarket: (market: MarketPlugin, options?: { enabled?: boolean }) => string;
+  installPluginFromMarket: (market: MarketPlugin, options?: { enabled?: boolean; riskFlags?: string[] }) => string;
 
   /** Skill id currently highlighted in the panel (after a chat "jump") */
   highlightedSkill: string | null;
@@ -389,7 +389,7 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           type RtPlugin = {
             id: string; name: string; version: string; enabled: boolean;
             required_connectors?: string[]; skill_count?: number; skill_names?: string[]; description?: string;
-            source?: string; author?: string;
+            source?: string; author?: string; risk_flags?: string[]; agent_names?: string[];
           };
           type RtConnector = { connector_type: string; status: string };
           const installed = rt.data as unknown as RtPlugin[];
@@ -429,6 +429,9 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                 // stable code — 렌더 시 plugins:myPlugins.updated* 키로 번역
                 source: p.source === 'builtin' ? 'builtin' : fromMarket.source,
                 updated: p.source === 'builtin' ? 'plugin_updated_builtin' : fromMarket.updated,
+                riskFlags: p.risk_flags ?? [],
+                // 카탈로그는 agents 개념이 없다 — 런타임 조회가 유일한 소스.
+                agentNames: p.agent_names ?? [],
               });
             }
             return decoratePermissions(runtimePluginToMyPlugin(p));
@@ -535,18 +538,32 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, []);
 
   // install(plugin) = 마켓 → 나의 플러그인 materialize. marketId 기준 멱등(중복 설치 방지).
-  const installPluginFromMarket = useCallback((market: MarketPlugin, options?: { enabled?: boolean }): string => {
-    const id = installedPluginId(market.id);
-    const enabled = options?.enabled ?? true;
-    const myPlugin = {
-      ...marketPluginToMyPlugin(market),
-      enabled,
-      // stable code — 렌더 시점에 plugins:myPlugins.updatedJustInstalled / updatedNeedsConnector 로 번역
-      updated: enabled ? 'plugin_updated_just_installed' : 'plugin_updated_needs_connector',
-    };
-    setMyPlugins((prev) => (prev.some((p) => p.id === id) ? prev : [myPlugin, ...prev]));
-    return id;
-  }, []);
+  const installPluginFromMarket = useCallback(
+    (market: MarketPlugin, options?: { enabled?: boolean; riskFlags?: string[] }): string => {
+      const id = installedPluginId(market.id);
+      const enabled = options?.enabled ?? true;
+      const riskFlags = options?.riskFlags ?? [];
+      const myPlugin = {
+        ...marketPluginToMyPlugin(market),
+        enabled,
+        // stable code — 렌더 시점에 plugins:myPlugins.updatedJustInstalled / updatedNeedsConnector 로 번역.
+        // 위험 플래그로 비활성 설치된 경우는 커넥터 문제가 아니다 — 사유는 위험 배지가 전달한다.
+        updated:
+          enabled || riskFlags.length ? 'plugin_updated_just_installed' : 'plugin_updated_needs_connector',
+        riskFlags,
+      };
+      setMyPlugins((prev) => {
+        const index = prev.findIndex((p) => p.id === id);
+        if (index === -1) return [myPlugin, ...prev];
+        // 재설치 결과는 동일 id 항목에도 반영해야 한다. 종전 멱등 처리는 행
+        // 자체를 그대로 둬 risky→clean 재설치 후에도 UI가 위험/비활성으로
+        // 남았다(런타임 DB는 이미 flags 해제+재활성 상태).
+        return prev.map((p, i) => (i === index ? myPlugin : p));
+      });
+      return id;
+    },
+    [],
+  );
 
   const value = useMemo<LearningContextValue>(
     () => ({

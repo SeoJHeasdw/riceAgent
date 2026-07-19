@@ -23,7 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
-from ..core.types import InjectedSkill, ToolCall, ToolResult, ToolSpec
+from ..core.types import InjectedSkill, PluginAgent, ToolCall, ToolResult, ToolSpec
 
 
 @dataclass(frozen=True)
@@ -35,7 +35,14 @@ class PluginInfo:
     enabled: bool
     required_connectors: tuple[str, ...] = ()  # connector_type list (CONTRACTS §2.1)
     skill_count: int = 0
+    # 스킬(두 레이아웃) + 커맨드(":" 네임스페이스) 이름 — bundle.display_skill_names.
     skill_names: tuple[str, ...] = ()
+    # agents/*.md 페르소나 이름 — delegate_subagent(agent=...) 로 위임 가능(2026-07-19).
+    agent_names: tuple[str, ...] = ()
+    # 설치 시 위험 스캔 결과 — "<skill_name>:<label>" (core/guard.py 안정 코드,
+    # 로케일 문장은 프론트 learningWarnings.ts). 비어있으면 깨끗. 플래그가 있는
+    # 플러그인은 enabled=False 로 설치되고 활성화는 사용자 판단(CONTRACTS §2.3).
+    risk_flags: tuple[str, ...] = ()
     # ``builtin`` plugins are package assets and may only be enabled/disabled.
     source: str = "installed"
     author: str = ""
@@ -80,10 +87,16 @@ class IPluginLoader(Protocol):
         ...
 
     def injected_skills(self) -> list[InjectedSkill]:
-        """Active SKILL.md bundles from enabled plugins. The orchestrator feeds
-        these into learning.prefetch as `extra_skills` — they ride the same
-        relevance pipeline (index → top-K full body → skill_view) as learned
-        skills instead of being injected wholesale."""
+        """Active SKILL.md bundles + commands/*.md from enabled plugins. The
+        orchestrator feeds these into learning.prefetch as `extra_skills` — they
+        ride the same relevance pipeline (index → top-K full body → skill_view)
+        as learned skills instead of being injected wholesale."""
+        ...
+
+    def injected_agents(self) -> list[PluginAgent]:
+        """Specialist worker personas from enabled plugins' `agents/*.md`.
+        Consumed by agent/subagents.py: `delegate_subagent(agent=<name>)` swaps
+        the worker's system prompt for the persona body (2026-07-19)."""
         ...
 
     async def invoke(self, call: ToolCall, owner_id: str | None = None) -> ToolResult:

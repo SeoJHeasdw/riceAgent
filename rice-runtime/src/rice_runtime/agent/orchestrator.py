@@ -215,7 +215,7 @@ class Orchestrator:
         approvals: IApprovalGate,
         transcript: ITranscript,
         builtins: dict[str, BuiltinTool] | None = None,
-        builtin_specs: tuple[ToolSpec, ...] = (),
+        builtin_specs: tuple[ToolSpec, ...] | Callable[[], tuple[ToolSpec, ...]] = (),
         token_calibrator: TokenCalibrator | None = None,
         workspace: WorkspaceLocation | None = None,
     ) -> None:
@@ -564,5 +564,9 @@ class Orchestrator:
         """The builtin catalog advertised to the LLM. Empty unless the composition
         root injects `builtins=` (name→handler) + `builtin_specs=` (the matching
         ToolSpecs). Kept as a method so wiring can supply specs without touching
-        the loop."""
-        return self._builtin_specs_catalog
+        the loop. Callable 형태도 받는다(2026-07-19): delegate_subagent 스펙이
+        활성 플러그인의 에이전트 페르소나를 광고하므로, composition root 가
+        매 턴 재평가되는 라이브 카탈로그 클로저를 넘길 수 있어야 한다 — 핸들러
+        dict(self._builtins)는 이름 기준이라 스펙 재생성과 무관하게 안정적이다."""
+        catalog = self._builtin_specs_catalog
+        return catalog() if callable(catalog) else catalog

@@ -7,6 +7,7 @@ import { useResizable } from '../hooks/useResizable';
 import { useLearning } from '../lib/learning/LearningContext';
 import { api } from '../lib/api';
 import { connectorIdForScope, type MyPlugin } from '../lib/learningData';
+import { localizeRiskLabel } from '../lib/learningWarnings';
 
 /**
  * MyPluginsScreen ("나의 플러그인") — management screen for installed plugins.
@@ -20,6 +21,14 @@ const FILTER_CODES = ['all', 'active', 'has_update', 'inactive'] as const;
 type Filter = (typeof FILTER_CODES)[number];
 
 const hasUpdate = (p: MyPlugin) => !!p.update;
+const hasRisk = (p: MyPlugin) => (p.riskFlags?.length ?? 0) > 0;
+
+/** 설치 스캔 플래그 "<skill_name>:<label>" → { skill, label }. 라벨 코드에는
+ *  콜론이 없으므로 마지막 콜론 기준으로 가른다(스킬 이름의 콜론 허용). */
+const splitRiskFlag = (flag: string): { skill: string; label: string } => {
+  const i = flag.lastIndexOf(':');
+  return i === -1 ? { skill: '', label: flag } : { skill: flag.slice(0, i), label: flag.slice(i + 1) };
+};
 
 const SectionLabel: React.FC<{ children: React.ReactNode; right?: React.ReactNode }> = ({ children, right }) => (
   <div className="flex items-center mb-2.5">
@@ -65,6 +74,8 @@ function renderSource(source: string, t: ReturnType<typeof useTranslation<'plugi
 const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) => {
   const navigate = useNavigate();
   const { t } = useTranslation('plugins');
+  // 위험 라벨 로케일 문장은 chat 네임스페이스(learning.risk*) — learningWarnings.ts 공유
+  const { t: tChat } = useTranslation('chat');
   const { myPlugins, setMyPlugins } = useLearning();
   const [tab, setTab] = useState<PluginTab>('skills');
   const [connectorDialogOpen, setConnectorDialogOpen] = useState(false);
@@ -114,6 +125,10 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
     [t('myPlugins.metaAuthor'),   plugin.author],
     [t('myPlugins.metaUpdated'),  renderUpdated(plugin.updated, t)],
   ];
+  if (plugin.agentNames?.length) {
+    // agents/*.md 페르소나 — 모델이 위임 작업(delegate)에서 전문 워커로 쓴다.
+    meta.push([t('myPlugins.metaAgents'), plugin.agentNames.join(', ')]);
+  }
 
   return (
     <>
@@ -144,6 +159,11 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
                   {t('myPlugins.tagInactive')}
                 </Tag>
               )}
+              {hasRisk(plugin) && (
+                <Tag type="red" size="sm">
+                  {t('myPlugins.tagRisk')}
+                </Tag>
+              )}
             </div>
             <p className="mt-1.5 text-body-short-01 leading-5 text-text-secondary">{plugin.summary}</p>
           </div>
@@ -157,6 +177,29 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
             />
           </div>
         </div>
+
+        {/* install-time risk scan flags — 설치 스캐너(core/guard.py)가 SKILL.md에서
+            찾은 위험 신호. 런타임이 비활성으로 설치했고, 활성화는 사용자 판단. */}
+        {hasRisk(plugin) && (
+          <div className="mt-4 rounded-xl border border-support-warning/30 bg-support-warning/10 px-3 py-2.5">
+            <div className="flex items-center gap-2">
+              <Icon name="warning" size={16} className="text-support-warning flex-shrink-0" />
+              <span className="text-body-short-01 font-semibold text-text-primary">{t('myPlugins.riskTitle')}</span>
+            </div>
+            <ul className="mt-1.5 flex flex-col gap-0.5 pl-6">
+              {plugin.riskFlags!.map((flag, i) => {
+                const { skill, label } = splitRiskFlag(flag);
+                return (
+                  <li key={i} className="text-caption-01 leading-4 text-text-secondary">
+                    {skill && <span className="font-mono text-text-helper">{skill} · </span>}
+                    {localizeRiskLabel(label, tChat)}
+                  </li>
+                );
+              })}
+            </ul>
+            <p className="mt-1.5 pl-6 text-caption-01 leading-4 text-text-helper">{t('myPlugins.riskNote')}</p>
+          </div>
+        )}
 
         {/* update available — sits right under the plugin description */}
         {plugin.update && !plugin.builtin && (
@@ -542,6 +585,11 @@ function MyPluginsScreen() {
                   {hasUpdate(p) && (
                     <Tag type="purple" size="sm">
                       {t('myPlugins.updateButton')}
+                    </Tag>
+                  )}
+                  {hasRisk(p) && (
+                    <Tag type="red" size="sm">
+                      {t('myPlugins.tagRisk')}
                     </Tag>
                   )}
                 </div>

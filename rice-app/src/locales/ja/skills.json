@@ -17,6 +17,8 @@
     "toastDownloading": "ダウンロード中",
     "toastInstalling": "インストール中",
     "toastInstallDone": "インストール済み",
+    "toastInstallFailed": "インストールに失敗しました",
+    "toastRiskFlagged": "{{name}}にリスク信号が検出されました — マイスキルで本文を確認してください",
     "toastUninstalled": "{{name}}が削除されました",
     "toastSponsored": "{{author}}に{{amount}} BPをスポンサーしました",
     "toastPublished": "{{name}}をマーケットに公開しました",

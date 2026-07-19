@@ -17,6 +17,8 @@
     "toastDownloading": "다운로드 중",
     "toastInstalling": "설치 중",
     "toastInstallDone": "설치 완료",
+    "toastInstallFailed": "설치에 실패했습니다",
+    "toastRiskFlagged": "{{name}}에서 위험 신호가 감지됐습니다 — 나의 스킬에서 본문을 확인하세요",
     "toastUninstalled": "{{name}}이(가) 제거되었습니다",
     "toastSponsored": "{{author}}에게 {{amount}} BP를 후원했습니다",
     "toastPublished": "{{name}}을(를) 마켓에 게시했어요",

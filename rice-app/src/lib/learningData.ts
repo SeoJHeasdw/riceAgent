@@ -745,6 +745,14 @@ export interface MyPlugin {
   examples: string[];
   /** 제공사가 지식·스킬을 갱신했을 때 표시되는 사용 가능한 새 버전 */
   update?: PluginUpdate;
+  /**
+   * 설치 시 위험 스캔 결과 — "<skill_name>:<label>" (라벨은 scan_risks 안정 코드,
+   * localizeRiskLabel이 로케일 문장으로 푼다). 비어있으면 깨끗. 플래그가 있으면
+   * 런타임이 비활성으로 설치하며, 활성화는 사용자 판단.
+   */
+  riskFlags?: string[];
+  /** 플러그인 agents/*.md 페르소나 이름 — 모델이 위임 작업에서 전문 워커로 쓴다. */
+  agentNames?: string[];
 }
 
 // ── Connectors (linked external accounts / data sources) ─────────

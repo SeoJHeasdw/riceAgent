@@ -27,6 +27,9 @@ export interface InstallArtifactResult {
   id: string;
   enabled: boolean;
   missingConnectors: string[];
+  /** 설치 시 위험 스캔 플래그 — "<skill_name>:<label>". 플래그가 있는 플러그인은
+   *  런타임이 비활성으로 설치한다(활성화는 사용자 판단, CONTRACTS §2.3). */
+  riskFlags: string[];
 }
 
 export interface MarketplaceContextValue {
@@ -231,11 +234,14 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
           checksum: dl?.checksum,
         });
         if (!res.success) throw new Error(res.error || 'artifact install failed');
-        const data = (res.data ?? {}) as { id?: string; enabled?: boolean; missing_connectors?: string[] };
+        const data = (res.data ?? {}) as {
+          id?: string; enabled?: boolean; missing_connectors?: string[]; risk_flags?: string[];
+        };
         result = {
           id: data.id ?? (type === 'plugin' ? runtimePluginIdForMarketId(id) : runtimeSkillIdForMarketId(id)),
           enabled: data.enabled ?? true,
           missingConnectors: data.missing_connectors ?? [],
+          riskFlags: data.risk_flags ?? [],
         };
       } catch (err) {
         console.error('platform artifact install failed', err);
@@ -249,6 +255,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
         id: type === 'plugin' ? runtimePluginIdForMarketId(id) : runtimeSkillIdForMarketId(id),
         enabled: true,
         missingConnectors: [],
+        riskFlags: [],
       };
     }
     if (type === 'skill') {

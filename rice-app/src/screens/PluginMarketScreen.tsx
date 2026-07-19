@@ -104,13 +104,21 @@ function PluginMarketScreen() {
     }
 
     const installResult = await installArtifact(plugin.id, 'plugin');
+    if (!installResult) {
+      job.done('error', t('toastInstallFailed'));
+      return;
+    }
     // 설치를 "나의 플러그인"에도 즉시 반영 (스킬의 installSkillFromMarket 와 대칭).
-    installPluginFromMarket(plugin, { enabled: installResult?.enabled ?? true });
-    if (installResult?.missingConnectors.length) {
-      job.done('success', t('toastInstallDone'));
+    installPluginFromMarket(plugin, {
+      enabled: installResult.enabled,
+      riskFlags: installResult.riskFlags,
+    });
+    job.done('success', t('toastInstallDone'));
+    if (installResult.riskFlags.length) {
+      // 위험 스캔 플래그 — 런타임이 비활성으로 설치했다. 상세는 나의 플러그인 배지에.
+      showToast(t('toastRiskFlagged', { name: plugin.name }), 'warning');
+    } else if (installResult.missingConnectors.length) {
       showToast(t('toastNeedsConnector', { name: plugin.name }), 'warning');
-    } else {
-      job.done('success', t('toastInstallDone'));
     }
     // The toast lingers, then animates itself out automatically.
   };

@@ -87,6 +87,36 @@ divergence가 tail에서만 일어나 이전 반복까지의 프리픽스가 캐
                   재파싱 제거). 정리: 빌트인으로 승격된 플러그인의 과거 설치본은
                   부팅 시 reconcile_builtin_shadows가 제거한다(카탈로그 새도잉
                   때문에 UI/remove 어느 쪽으로도 지울 수 없던 유령 설치본).
+              2d''. 설치 시 위험 스캔(2026-07-19): market artifact 의 SKILL.md
+                  (frontmatter 포함 원문, plugin 두 레이아웃 + skill artifact)는
+                  설치 시 core/guard.py::scan_risks 를 통과한다 — 종전엔 벤더
+                  플러그인이 신뢰 가정으로 실렸고 주입 시 SKILL_TRUST_NOTE·도구
+                  승인 게이트만이 방어선이었다(guard 가 learning 소속이라 execution
+                  이 import 할 수 없던 문제는 guard 의 core/ 승격으로 해소, 심
+                  유지). 플래그("<skill>:<label>")는 installed_artifacts.risk_flags
+                  (migration 0019)에 영속되고, 플래그 있는 plugin 은 enabled=0 으로
+                  설치된다 — 경고 확인 후 활성화는 사용자 판단(HITL). skill 은
+                  MySkills 에서 본문 검수·수정이 가능하므로 플래그만 하고 설치를
+                  막지 않는다(학습 경로의 "스킬=플래그, memory=차단" 정책과 정합).
+                  plugin 번들의 읽기 실패 파일은 unreadable_skill_file 로 플래그
+                  (스캔 불능≠깨끗); skill artifact의 정본 SKILL.md 자체가 UTF-8로
+                  읽히지 않으면 MySkills 검수도 불가능하므로 유효하지 않은 artifact로
+                  설치를 거부한다. plugin은 영구 경로가 아닌 staging tree에서 먼저
+                  스캔하고, DB upsert와 전체 트리 교체를 한 rollback 경계로 묶는다 —
+                  재설치에서 삭제된 구버전 프롬프트 파일이 남거나 기존 enabled 행이
+                  잠깐 미검사 새 트리를 가리키는 창이 없다.
+                  빌트인 플러그인(패키지 자산·읽기전용)은 스캔 대상이 아니다.
+                  스캔 범위는 2d''' 소비 확장과 함께 commands/·agents/ 까지다.
+              2d'''. commands/agents 소비(2026-07-19 — 종전 "시장 호환성 표기일 뿐
+                  미소비" 해소): `commands/**/*.md`(Claude Code 슬래시 커맨드)는
+                  "사용자 호출 절차"라 스킬과 동형 — InjectedSkill(tags 에
+                  "command", 이름=파일 stem·중첩은 `<dir>:<stem>`)로 같은 관련도
+                  파이프라인을 탄다(explicit-first 정렬이 이름 언급에 주입 슬롯을
+                  준다). `agents/*.md`는 서브에이전트 페르소나로 소비된다(§6).
+                  레이아웃 워커는 plugin/bundle.py 단일 소유(loader·builtin 카탈로그
+                  공유 — skill_names 에 커맨드 포함, agent_names 신설). frontmatter
+                  파싱 메커니즘은 core/frontmatter.py 로 승격(store.py 와 loader 의
+                  의도적 파서 중복 해소 — PyYAML + 블록 스칼라/대시 리스트 폴백).
               2e. 메모리: 최근 facts 기본 8개 + 현재 쿼리 FTS5 매칭 기본 5개.
                   quarantined 메모리는 승인 전까지 주입하지 않는다.
               2f. SKILL_GUIDANCE + 자동 주입 스킬 본문 + 스킬 index + 메모리 +
@@ -673,6 +703,22 @@ fake는 영향이 없다.
   죽어도 이미 남긴 아티팩트는 보고). 승인 게이트를 우회하지 않는 이유: 쓰기는
   dot-디렉토리(리스팅에 안 잡힘) 안으로만 가능하고, 사용자 가시 영역으로의
   승격은 메인 에이전트의 승인 게이트 도구가 담당한다.
+
+**플러그인 에이전트 페르소나 (2026-07-19)** — 활성 플러그인의 `agents/*.md`
+(Claude Code 서브에이전트 형식: frontmatter name/description + 본문=시스템
+프롬프트)가 `delegate_subagent(agent=<name>)` 의 전문 워커 페르소나로 소비된다
+(`plugins.injected_agents` → `SubAgentRunner.resolve_agents`, stat 시그니처 캐싱).
+페르소나가 지정되면 워커 시스템 프롬프트의 **역할부만** 그 본문으로 바뀌고, 보고
+계약(JSON 구조·정직한 confidence)은 페르소나와 무관하게 항상 붙는다 — 메인 모델의
+결과 소비 계약은 페르소나가 바꿀 수 없는 불변식. 타 하니스 전제의 도구 이름을
+흉내내지 않도록 "실제 제공된 도구만 쓰라"는 노트를 페르소나 뒤에 덧붙인다. 미지의
+이름은 기본 역할로 fail-soft 진행하되 가용 목록을 `open_questions` 로 보고한다
+(도구 화이트리스트와 같은 원칙). 결과에는 `persona` 필드가 실려 "누구로서
+판단했는가"가 감사 가능하다. 가용 페르소나는 `delegate_subagent` 스펙의 `agent`
+파라미터 설명에 이름+첫 문장으로 광고되며(상한 8), composition root 의 라이브
+빌트인 카탈로그 클로저가 매 턴 스펙을 재생성해 플러그인 설치/토글이 재시작 없이
+반영된다(Orchestrator `builtin_specs` 는 callable 도 받는다 — 핸들러 dict 는 이름
+기준이라 스펙 재생성과 무관).
 
 ---
 

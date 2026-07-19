@@ -17,6 +17,8 @@
     "toastDownloading": "Downloading",
     "toastInstalling": "Installing",
     "toastInstallDone": "Installed",
+    "toastInstallFailed": "Installation failed",
+    "toastRiskFlagged": "Risk signals were detected in {{name}} — review the skill body in My Skills",
     "toastUninstalled": "{{name}} has been removed",
     "toastSponsored": "Sponsored {{author}} with {{amount}} BP",
     "toastPublished": "Published {{name}} to the market",

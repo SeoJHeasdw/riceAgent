@@ -105,10 +105,18 @@ function SkillMarketScreen() {
       job.update({ progress: i });
     }
 
-    await installArtifact(skill.id, 'skill');
+    const installResult = await installArtifact(skill.id, 'skill');
+    if (!installResult) {
+      job.done('error', t('market.toastInstallFailed'));
+      return;
+    }
     // 학습 store에 소유 인스턴스로 materialize (origin:installed, upstream 기록).
     installSkillFromMarket(skill);
     job.done('success', t('market.toastInstallDone'));
+    if (installResult.riskFlags.length) {
+      // 위험 스캔 플래그 — 스킬은 설치를 막지 않는다(나의 스킬에서 본문 검수 가능).
+      showToast(t('market.toastRiskFlagged', { name: skill.name }), 'warning');
+    }
     // The toast lingers, then animates itself out automatically.
   };
 

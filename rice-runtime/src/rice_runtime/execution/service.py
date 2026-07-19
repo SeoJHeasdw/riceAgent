@@ -14,7 +14,7 @@ from typing import Any
 
 from ..core.paths import RicePaths
 from ..core.storage.sqlite import Database
-from ..core.types import InjectedSkill, ToolCall, ToolResult
+from ..core.types import InjectedSkill, PluginAgent, ToolCall, ToolResult
 from .interfaces import IPluginLoader, ISandbox, PluginInfo, SandboxResult
 from .plugin.loader import PluginLoader
 from .plugin.builtin import BuiltinPluginCatalog
@@ -74,6 +74,9 @@ class PluginLoaderService(IPluginLoader):
 
     def injected_skills(self) -> list[InjectedSkill]:
         return self._impl.injected_skills()
+
+    def injected_agents(self) -> list[PluginAgent]:
+        return self._impl.injected_agents()
 
     async def invoke(self, call: ToolCall, owner_id: str | None = None) -> ToolResult:
         # IPluginLoader 계약과 동일하게 owner_id 를 그대로 전달한다 — 이 facade 가

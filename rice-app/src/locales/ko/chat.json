@@ -284,6 +284,7 @@
     "riskReverseShell": "리버스 셸 패턴",
     "riskSshKeyPersistence": "SSH 키 영속화 (authorized_keys 추가)",
     "riskHiddenCharacters": "숨김 문자(zero-width) 포함",
+    "riskUnreadableSkillFile": "읽을 수 없는 스킬 파일 (검사 불가)",
     "changelogNewSkill": "신규 스킬 제안",
     "changelogImprovement": "개선 제안",
     "changelogConsolidation": "통합 정리 제안",

@@ -54,7 +54,7 @@ from typing import TYPE_CHECKING, cast
 from ..core.config import ContextConfig
 from ..core.model_json import extract_json_object
 from ..core.tokens import TokenCalibrator
-from ..core.types import Message, ToolCall, ToolSpec, new_id
+from ..core.types import Message, PluginAgent, ToolCall, ToolSpec, new_id
 from .context_manager import ConversationContextManager
 from .interfaces import ITranscript, TurnView
 from .providers.interfaces import ILLMProvider
@@ -72,11 +72,17 @@ _SUBAGENT_TEMPERATURE = 0.6
 # 태스크 관련 스킬 인덱스 상한 — 워커 프롬프트는 얇게 유지한다.
 _SKILL_INDEX_LIMIT = 5
 
-_SUBAGENT_SYSTEM = (
+# 역할부와 보고 계약부를 분리한다(2026-07-19 페르소나 지원): 플러그인 agents/*.md
+# 페르소나가 지정되면 역할부만 그 본문으로 바뀌고, 보고 계약(JSON 구조·정직한
+# confidence)은 페르소나와 무관하게 항상 붙는다 — 메인 모델의 결과 소비 계약은
+# 페르소나가 바꿀 수 없는 불변식이다.
+_SUBAGENT_ROLE = (
     "You are a focused RICE sub-agent. Work only on the delegated task.\n"
     "You may call the provided read-only tools (read files, list directories, "
     "search, fetch web pages) to gather evidence — as many rounds as you need. "
-    "When you have enough evidence, stop calling tools and give your final report.\n\n"
+    "When you have enough evidence, stop calling tools and give your final report."
+)
+_SUBAGENT_CONTRACT = (
     "Your final message must be a single JSON object:\n"
     "{\n"
     '  "findings": ["each concrete finding as one sentence"],\n'
@@ -87,6 +93,14 @@ _SUBAGENT_SYSTEM = (
     "}\n"
     "Set confidence honestly: high only when the evidence is something you read "
     "directly; low when you had to assume or extrapolate."
+)
+_SUBAGENT_SYSTEM = f"{_SUBAGENT_ROLE}\n\n{_SUBAGENT_CONTRACT}"
+# 페르소나 본문에 덧붙는 실행 환경 노트 — 페르소나는 Claude Code 등 다른 하니스를
+# 전제로 쓰였을 수 있어, 실제 도구 표면은 여기(RICE 워커)의 것임을 명시한다.
+_PERSONA_TOOL_NOTE = (
+    "You are running as a RICE sub-agent: only the tools actually provided in "
+    "this conversation are available — ignore any tool names in the instructions "
+    "above that are not offered here."
 )
 
 # 도구 가용성에 따라 붙는 시스템 프롬프트 노트 — 없는 도구를 언급하면 소형 모델이
@@ -117,6 +131,9 @@ class SubAgentResult:
     summary: str
     truncated: bool = False
     # ── provenance ───────────────────────────────────────────────
+    # 실제 적용된 페르소나(플러그인 agents/*.md 이름) — 요청했지만 못 찾았으면 ""
+    # 이고, 사유는 open_questions 로 보고된다(감사: "누구로서 판단했는가").
+    persona: str = ""
     tools_used: tuple[str, ...] = ()  # 워커가 실제 호출한 도구 이름들(중복 제거, 순서 유지)
     findings: tuple[str, ...] = ()
     evidence: tuple[str, ...] = ()
@@ -134,6 +151,7 @@ class SubAgentResult:
             "task": self.task,
             "summary": self.summary,
             "truncated": self.truncated,
+            "persona": self.persona,
             "tools_used": list(self.tools_used),
             "findings": list(self.findings),
             "evidence": list(self.evidence),
@@ -164,6 +182,7 @@ class SubAgentRunner:
         tools: Sequence[tuple[ToolSpec, BuiltinTool]] = (),
         learning: "ILearningService | None" = None,
         scratch_tool_factory: Callable[[str], tuple[ToolSpec, BuiltinTool]] | None = None,
+        resolve_agents: Callable[[], Sequence[PluginAgent]] | None = None,
     ) -> None:
         self._resolve_provider = resolve_provider
         self._transcript = transcript
@@ -178,6 +197,20 @@ class SubAgentRunner:
         # thread별 write_scratch 도구를 만드는 팩토리(builtins.file_tools) — 러너는
         # 파일시스템을 모른다(storage-agnostic 유지).
         self._scratch_factory = scratch_tool_factory
+        # 플러그인 agents/*.md 페르소나 스냅샷(2026-07-19) — composition root 가
+        # plugins.injected_agents 를 넘긴다(활성 플러그인 기준 라이브 조회).
+        self._resolve_agents = resolve_agents
+
+    def available_personas(self) -> tuple[PluginAgent, ...]:
+        """활성 플러그인의 워커 페르소나 목록 — delegate 도구 스펙 렌더와 run()의
+        해석이 공유한다. 조회 실패는 빈 목록(fail-soft — 페르소나 없음 ≠ 위임 불능)."""
+        if self._resolve_agents is None:
+            return ()
+        try:
+            return tuple(self._resolve_agents())
+        except Exception:  # noqa: BLE001 — 페르소나 조회 실패가 위임을 깨면 안 된다
+            log.warning("plugin agent lookup failed", exc_info=True)
+            return ()
 
     def _limit(self) -> asyncio.Semaphore:
         # 첫 실행 시점의 config로 고정 — 라이브 변경은 재시작 후 적용(세마포어를
@@ -241,6 +274,7 @@ class SubAgentRunner:
         turn_view: TurnView | None = None,
         tool_names: Sequence[str] = (),
         web_search_enabled: bool = True,
+        agent: str = "",
     ) -> SubAgentResult:
         thread_id = new_id("sub")
         history = self._transcript.history(session_id)
@@ -253,7 +287,26 @@ class SubAgentRunner:
         tool_specs, tool_handlers = self._compose_tools(
             thread_id, tool_names, web_search_enabled=web_search_enabled
         )
-        system = _SUBAGENT_SYSTEM
+        # 페르소나 해석(2026-07-19): 이름이 매칭되면 역할부를 페르소나 본문으로
+        # 교체한다(보고 계약은 불변). 미지의 이름은 기본 역할로 fail-soft 진행하되
+        # 그 사실을 open_questions 로 보고해 메인 모델이 이름을 교정할 수 있게
+        # 한다(도구 화이트리스트의 "오타가 워커를 벙어리로 만들면 안 된다" 원칙).
+        persona_name = ""
+        persona_miss = ""
+        role = _SUBAGENT_ROLE
+        requested = str(agent or "").strip()
+        if requested:
+            personas = self.available_personas()
+            match = next((p for p in personas if p.name == requested), None)
+            if match is not None:
+                persona_name = match.name
+                role = f"{match.body.strip()}\n\n{_PERSONA_TOOL_NOTE}"
+            else:
+                known = ", ".join(p.name for p in personas) or "none"
+                persona_miss = f"unknown agent persona '{requested}' — available: {known}"
+                log.warning("sub-agent persona %r not found (available: %s)", requested, known)
+        extra_questions: tuple[str, ...] = (persona_miss,) if persona_miss else ()
+        system = f"{role}\n\n{_SUBAGENT_CONTRACT}"
         if "write_scratch" in tool_handlers:
             system += _SCRATCH_NOTE
         if "skill_view" in tool_handlers:
@@ -324,9 +377,10 @@ class SubAgentRunner:
                 task=task,
                 summary="Sub-agent timed out before completing.",
                 truncated=True,
+                persona=persona_name,
                 tools_used=tuple(dict.fromkeys(tools_used)),
                 confidence="unknown",
-                open_questions=("timed out — no findings were produced",),
+                open_questions=(*extra_questions, "timed out — no findings were produced"),
                 # timeout 전에 남긴 산출물은 디스크에 살아 있다 — 부분 성과도 보고.
                 artifacts=tuple(dict.fromkeys(artifacts)),
             )
@@ -338,7 +392,9 @@ class SubAgentRunner:
                 thread_id=thread_id,
                 task=task,
                 summary="Sub-agent completed without producing text.",
+                persona=persona_name,
                 tools_used=used,
+                open_questions=extra_questions,
                 artifacts=kept_artifacts,
             )
         if len(raw) > max_chars:
@@ -353,9 +409,11 @@ class SubAgentRunner:
                 task=task,
                 summary=raw,
                 truncated=truncated,
+                persona=persona_name,
                 tools_used=used,
                 findings=(raw,) if raw else (),
                 confidence="unknown",
+                open_questions=extra_questions,
                 structured=False,
                 artifacts=kept_artifacts,
             )
@@ -365,7 +423,7 @@ class SubAgentRunner:
         confidence = str(data.get("confidence") or "").lower()
         if confidence not in _CONFIDENCE_VALUES:
             confidence = "unknown"
-        open_questions = _str_tuple(data.get("open_questions"))
+        open_questions = (*extra_questions, *_str_tuple(data.get("open_questions")))
         next_action = str(data.get("recommended_next_action") or "").strip()
         summary_lines = list(findings) or [raw]
         if next_action:
@@ -375,6 +433,7 @@ class SubAgentRunner:
             task=task,
             summary="\n".join(summary_lines),
             truncated=truncated,
+            persona=persona_name,
             tools_used=used,
             findings=findings,
             evidence=evidence,

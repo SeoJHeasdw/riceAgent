@@ -18,7 +18,7 @@ from rice_runtime.agent.providers.interfaces import ProviderCapabilities, Provid
 from rice_runtime.agent.subagents import SubAgentRunner
 from rice_runtime.core.config import ContextConfig
 from rice_runtime.core.paths import RicePaths
-from rice_runtime.core.types import ToolCall
+from rice_runtime.core.types import PluginAgent, ToolCall
 
 
 class _EmptyTranscript:
@@ -74,7 +74,7 @@ def _report(**overrides) -> str:
     return json.dumps(base)
 
 
-def _runner(tmp_path, provider, *, learning=None, with_scratch=True) -> SubAgentRunner:
+def _runner(tmp_path, provider, *, learning=None, with_scratch=True, agents=None) -> SubAgentRunner:
     paths = RicePaths.from_env(tmp_path)
     return SubAgentRunner(
         resolve_provider=lambda: provider,
@@ -83,6 +83,7 @@ def _runner(tmp_path, provider, *, learning=None, with_scratch=True) -> SubAgent
         tools=build_subagent_toolset(paths, learning=learning),
         learning=learning,
         scratch_tool_factory=scratch_tool_factory(paths) if with_scratch else None,
+        resolve_agents=(lambda: agents) if agents is not None else None,
     )
 
 
@@ -235,6 +236,9 @@ async def test_delegate_subagent_passes_tool_whitelist(tmp_path):
     captured = {}
 
     class _RunnerStub:
+        def available_personas(self):
+            return ()  # delegate_spec 이 스펙 렌더 시 조회한다(페르소나 광고)
+
         async def run(self, **kwargs):
             captured.update(kwargs)
 
@@ -249,3 +253,84 @@ async def test_delegate_subagent_passes_tool_whitelist(tmp_path):
     await handler({"task": "t", "tools": ["fetch_url", 3]}, session_id="s9")
     assert captured["tool_names"] == ("fetch_url", "3")
     assert captured["session_id"] == "s9"
+
+
+# ── plugin agent personas (2026-07-19 — plugins' agents/*.md 소비) ────────────
+
+_REVIEWER = PluginAgent(
+    agent_id="plugin:plugin:demo:agent:skill-reviewer",
+    name="skill-reviewer",
+    description="Reviews skills for quality. Trigger on review requests with long examples.",
+    body="You are a meticulous skill reviewer. Check descriptions and steps.",
+    plugin_id="plugin:demo",
+)
+
+
+async def test_persona_swaps_worker_role_but_keeps_report_contract(tmp_path):
+    provider = _ScriptedProvider([(_report(), [])])
+    runner = _runner(tmp_path, provider, agents=[_REVIEWER])
+
+    result = await runner.run(session_id="s1", task="review the deploy skill", agent="skill-reviewer")
+
+    system = provider.calls[0]["system"]
+    # 역할부는 페르소나 본문으로 바뀌고,
+    assert system.startswith("You are a meticulous skill reviewer.")
+    assert "focused RICE sub-agent" not in system
+    # 보고 계약(JSON 구조)은 페르소나가 있어도 항상 붙는다(불변식).
+    assert '"findings"' in system and '"confidence"' in system
+    # 페르소나가 전제하는 타 하니스 도구를 흉내내지 않게 실제 도구 표면을 명시.
+    assert "only the tools actually provided" in system
+    assert result.persona == "skill-reviewer"
+    assert result.open_questions == ()
+
+
+async def test_unknown_persona_falls_back_and_reports(tmp_path):
+    provider = _ScriptedProvider([(_report(), [])])
+    runner = _runner(tmp_path, provider, agents=[_REVIEWER])
+
+    result = await runner.run(session_id="s1", task="t", agent="no-such-agent")
+
+    # fail-soft: 기본 역할로 진행하고,
+    assert provider.calls[0]["system"].startswith("You are a focused RICE sub-agent.")
+    assert result.persona == ""
+    # 메인 모델이 이름을 교정할 수 있게 가용 목록을 보고한다.
+    assert any("no-such-agent" in q and "skill-reviewer" in q for q in result.open_questions)
+
+
+async def test_delegate_spec_advertises_live_personas(tmp_path):
+    from rice_runtime.agent.builtins.subagent_tools import delegate_spec
+
+    provider = _ScriptedProvider([])
+    with_personas = delegate_spec(_runner(tmp_path, provider, agents=[_REVIEWER]))
+    agent_param = with_personas.parameters["properties"]["agent"]["description"]
+    # 이름 + 첫 문장만 광고된다(긴 트리거 예시 블록은 스펙에 싣지 않는다).
+    assert "'skill-reviewer'" in agent_param
+    assert "Reviews skills for quality." in agent_param
+    assert "Trigger on review requests" not in agent_param
+
+    without = delegate_spec(_runner(tmp_path, provider, agents=[]))
+    assert "None are currently available" in without.parameters["properties"]["agent"]["description"]
+
+
+async def test_delegate_subagent_passes_agent_name(tmp_path):
+    from rice_runtime.agent.builtins.subagent_tools import tools as subagent_tools
+
+    captured: dict = {}
+
+    class _RunnerStub:
+        def available_personas(self):
+            return ()
+
+        async def run(self, **kwargs):
+            captured.update(kwargs)
+
+            class _R:
+                @staticmethod
+                def to_dict():
+                    return {"ok": True}
+
+            return _R()
+
+    _, handler = subagent_tools(_RunnerStub())[0]
+    await handler({"task": "t", "agent": "skill-reviewer"}, session_id="s1")
+    assert captured["agent"] == "skill-reviewer"

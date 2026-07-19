@@ -16,6 +16,7 @@ from pathlib import Path
 from ...core.errors import ValidationError
 from ...core.paths import RicePaths
 from ..interfaces import PluginInfo
+from . import bundle
 
 log = logging.getLogger("rice.execution.builtin_plugins")
 
@@ -47,13 +48,9 @@ class BuiltinPluginCatalog:
                 )
                 name = str(manifest["name"])
                 plugin_id = f"plugin:{name}"
-                skills_dir = plugin_dir / "skills"
-                flat_skills = sorted(skills_dir.glob("*.md"))
-                nested_skills = sorted(skills_dir.glob("*/SKILL.md"))
-                skill_names = tuple(
-                    [path.stem for path in flat_skills]
-                    + [path.parent.name for path in nested_skills]
-                )
+                # 스킬(두 레이아웃) + 커맨드 — 레이아웃 규칙은 bundle 이 단일 소유
+                # (2026-07-19 commands 소비와 함께 loader 와의 중복 수집 해소).
+                skill_names = bundle.display_skill_names(plugin_dir)
                 author = manifest.get("author", {}) or {}
                 author_name = author.get("name", "") if isinstance(author, dict) else author
                 info = PluginInfo(
@@ -64,6 +61,7 @@ class BuiltinPluginCatalog:
                     enabled=True,
                     skill_count=len(skill_names),
                     skill_names=skill_names,
+                    agent_names=tuple(p.stem for p in bundle.agent_paths(plugin_dir)),
                     source=BUILTIN_PLUGIN_SOURCE,
                     author=str(author_name or ""),
                 )

@@ -234,6 +234,26 @@ class InjectedSkill:
 
 
 @dataclass(frozen=True)
+class PluginAgent:
+    """A specialist sub-agent persona shipped in a plugin's `agents/*.md`
+    (2026-07-19 — commands/agents 소비). `body` is the markdown body after
+    frontmatter and becomes the worker's system prompt when the main model
+    delegates with `delegate_subagent(agent=<name>)`. `description` keeps the
+    author's full trigger guidance (may be long — Claude Code style examples);
+    enumeration surfaces (tool spec, UI) must shorten it themselves.
+
+    InjectedSkill 과 같은 이유로 core 에 산다: 생산자(execution/plugin loader)와
+    소비자(agent/subagents)가 다른 모듈이라, 직접 import 금지선을 넘지 않는
+    공용 타입 바닥이 여기뿐이다."""
+
+    agent_id: str  # "plugin:<plugin_id>:agent:<name>" — 충돌 없는 감사용 식별자
+    name: str
+    description: str
+    body: str
+    plugin_id: str = ""
+
+
+@dataclass(frozen=True)
 class MemoryItem:
     kind: Literal["fact", "preference"]
     content: str

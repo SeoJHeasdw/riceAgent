@@ -284,6 +284,7 @@
     "riskReverseShell": "reverse-shell pattern",
     "riskSshKeyPersistence": "SSH key persistence (appends authorized_keys)",
     "riskHiddenCharacters": "contains hidden (zero-width) characters",
+    "riskUnreadableSkillFile": "unreadable skill file (could not be scanned)",
     "changelogNewSkill": "New skill proposal",
     "changelogImprovement": "Improvement proposal",
     "changelogConsolidation": "Consolidation proposal",

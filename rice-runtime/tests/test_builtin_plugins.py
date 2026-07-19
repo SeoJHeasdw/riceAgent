@@ -30,6 +30,12 @@ BUILTIN_SKILLS = {
     "plugin-structure",
     "skill-development",
 }
+# commands/*.md 도 InjectedSkill 로 소비된다(2026-07-19) — plugin-dev 의 슬래시
+# 커맨드 1종이 스킬 표면에 합류한다.
+BUILTIN_COMMANDS = {"create-plugin"}
+BUILTIN_SURFACE = BUILTIN_SKILLS | BUILTIN_COMMANDS
+# agents/*.md 는 delegate_subagent 페르소나로 소비된다(2026-07-19).
+BUILTIN_AGENTS = {"agent-creator", "plugin-validator", "skill-reviewer"}
 
 
 def _fresh_paths() -> RicePaths:
@@ -55,8 +61,9 @@ def test_catalog_loads_plugin_dev_from_package_assets():
     assert info.name == "plugin-dev"
     assert info.source == BUILTIN_PLUGIN_SOURCE
     assert info.enabled is True
-    assert info.skill_count == 7
-    assert set(info.skill_names) == BUILTIN_SKILLS
+    assert info.skill_count == len(BUILTIN_SURFACE)
+    assert set(info.skill_names) == BUILTIN_SURFACE
+    assert set(info.agent_names) == BUILTIN_AGENTS
     assert catalog.asset_path(BUILTIN_ID).is_relative_to(Path(__file__).parents[1] / "src")
     assert not (paths.plugins / BUILTIN_ID).exists()
 
@@ -75,9 +82,17 @@ def test_loader_injects_builtin_skills_and_disable_hides_them():
     paths = _fresh_paths()
     loader = _loader(paths)
 
-    assert BUILTIN_SKILLS == {s.name for s in loader.injected_skills()}
+    assert BUILTIN_SURFACE == {s.name for s in loader.injected_skills()}
+    # 커맨드 유래 항목은 tags 로 구분되고("command"), 본문·설명이 실려 있다.
+    commands = [s for s in loader.injected_skills() if "command" in s.tags]
+    assert {c.name for c in commands} == BUILTIN_COMMANDS
+    assert all(c.body and c.description for c in commands)
+    # agents/*.md → 페르소나. 비활성화하면 스킬·페르소나 둘 다 사라진다.
+    assert BUILTIN_AGENTS == {a.name for a in loader.injected_agents()}
+    assert all(a.body.strip() for a in loader.injected_agents())
     loader.set_enabled(BUILTIN_ID, False)
     assert loader.injected_skills() == []
+    assert loader.injected_agents() == []
 
 
 @pytest.mark.asyncio

@@ -326,6 +326,8 @@ requires:
 - manifest `version` 은 YAML 숫자(`1.0`)로 와도 문자열로 정규화(과거: ValidationError).
 - skill artifact의 정본 `SKILL.md`는 설치 시 **평면 `~/.rice/skills/<name>.md`** 로 정규화되어 기존 학습 루프 주입·lifecycle 대상이 된다. 함께 든 번들 파일은 `~/.rice/skills/<name>/` 아래 원래 상대경로로 보존되며, 관리 UI와 `skill_resource`가 `SKILL.md`를 루트로 한 하나의 가상 저장소처럼 노출한다.
 - plugin 의 `skills/<sub>/SKILL.md`(표준 레이아웃)도 주입 대상에 포함(과거: 평면 `*.md` 만). platform tarball의 최상위 `<artifact_id>/` 폴더는 runtime 설치 시 벗겨 `~/.rice/plugins/plugin:<name>/skills/...` 로 정규화한다.
+- **commands/agents 소비(2026-07-19)**: `commands/**/*.md` 는 InjectedSkill(tags 에 `command`, 이름=stem·중첩은 `<dir>:<stem>`)로 스킬과 같은 관련도 파이프라인을 타고, `agents/*.md` 는 `delegate_subagent(agent=<name>)` 의 워커 페르소나가 된다(AGENT_EXECUTION §2 2d'''·§6). `GET /plugins` 의 `skill_names` 는 커맨드를 포함하며 **`agent_names`** 필드가 추가됐다.
+- **설치 시 위험 스캔(2026-07-19)**: 설치되는 SKILL.md·commands·agents md 원문(frontmatter 포함)은 `core/guard.py::scan_risks` 를 통과하고, 플래그는 `installed_artifacts.risk_flags`(migration 0019, JSON 배열 `"<name>:<label>"`)에 영속된다. 설치 응답과 `GET /plugins` 의 각 항목에 **`risk_flags`** 필드가 실린다(라벨은 안정 코드 — 로케일 문장은 앱 learningWarnings.ts). 플래그가 있는 **plugin 은 `enabled=false` 로 설치**되며(응답의 `enabled` 로 확인), 활성화는 경고를 본 사용자의 `PATCH /plugins/{id}/enabled` 판단이다. skill artifact 는 플래그만 하고 설치를 막지 않는다(MySkills 검수 가능). plugin 번들의 읽기 실패 파일은 `unreadable_skill_file` 라벨로 플래그된다(정본 SKILL.md 자체가 UTF-8로 읽히지 않는 skill artifact는 검수 불가능한 invalid artifact로 설치 거부). plugin은 staging tree에서 먼저 스캔하고 DB upsert+전체 트리 교체를 같은 rollback 경계로 수행하므로 재설치에서 제거된 구버전 파일이 남지 않는다.
 
 ### 6.4 Plugin 활성화 게이트 (§4.4 실행)
 - `PATCH /plugins/{id}/enabled` (enable): `requires.connectors` 가 **모두 연결돼 있지 않으면 422** 로 차단(과거: 무검증 → 도구 실행 시 조용히 실패).

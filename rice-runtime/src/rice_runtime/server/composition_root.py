@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Callable
 
 from ..agent.builtins import build_builtin_tools, build_subagent_toolset, scratch_tool_factory
+from ..agent.builtins import subagent_tools
 from ..agent.interfaces import IAgent, IApprovalGate, ISessionTitler
 from ..agent.orchestrator import Orchestrator
 from ..agent.planner import START_PLAN_SPEC, UPDATE_PLAN_SPEC
@@ -37,6 +38,7 @@ from ..core.errors import ProviderError
 from ..core.events import EventBus
 from ..core.paths import RicePaths, WorkspaceLocation
 from ..core.storage.sqlite import Database
+from ..core.types import ToolSpec
 from ..core.tokens import TokenCalibrator
 from ..execution.interfaces import IPluginLoader
 from ..execution.service import ChildProcessSandbox, PluginLoaderService
@@ -323,8 +325,20 @@ def build_container(
         # 태스크 관련 스킬 인덱스 렌더용 + thread 격리 아티팩트 채널(write_scratch).
         learning=learning,
         scratch_tool_factory=scratch_tool_factory(paths),
+        # 플러그인 agents/*.md 페르소나(2026-07-19) — delegate_subagent(agent=...)
+        # 가 워커 시스템 프롬프트로 소비한다. 활성 플러그인 기준 라이브 조회.
+        resolve_agents=plugins.injected_agents,
     )
     builtin_specs, builtins = build_builtin_tools(paths, learning=learning, subagents=subagents)
+
+    def live_builtin_specs() -> tuple[ToolSpec, ...]:
+        """매 턴 재평가되는 빌트인 카탈로그 — delegate_subagent 스펙만 라이브로
+        갈아끼운다(활성 플러그인의 페르소나 광고가 설치/토글을 재시작 없이 따라
+        가게). 핸들러는 이름 기준 dict 라 스펙 재생성의 영향을 받지 않는다."""
+        return tuple(
+            subagent_tools.delegate_spec(subagents) if spec.name == "delegate_subagent" else spec
+            for spec in builtin_specs
+        )
 
     # ── session titler (names a new chat from its opening exchange, post-answer) ─
     # Decoupled from the store via two callables, so it binds to neither seam.
@@ -350,7 +364,7 @@ def build_container(
         approvals=approvals,
         transcript=sessions,
         builtins=builtins,
-        builtin_specs=builtin_specs,
+        builtin_specs=live_builtin_specs,
         token_calibrator=token_calibrator,
         workspace=workspace_location,
     )

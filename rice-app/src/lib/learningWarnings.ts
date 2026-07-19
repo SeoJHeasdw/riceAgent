@@ -40,6 +40,8 @@ const RISK_LABEL_KEYS: Record<string, string> = {
   reverse_shell: 'learning.riskReverseShell',
   ssh_key_persistence: 'learning.riskSshKeyPersistence',
   hidden_characters: 'learning.riskHiddenCharacters',
+  // 설치 스캔 전용(execution/plugin/loader.py) — 파일을 읽지 못해 검사 불가.
+  unreadable_skill_file: 'learning.riskUnreadableSkillFile',
 };
 
 /** Risk label code → locale text. Also used by TransparencyPanel for the

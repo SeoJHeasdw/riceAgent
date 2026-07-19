@@ -15,10 +15,9 @@ WHY: The loader is the "install + serve" half of the plugin subsystem.
     (LEARNING_LOOP §2). We need the *same* SKILL.md frontmatter fields:
     name, version, description, state, tags — and the body content.
 
-    WHY not import learning's parser: CONVENTIONS §0 / §2 forbid cross-module
-    concrete imports. We therefore embed a minimal parser here.
-    # NOTE(agent): If learning's SKILL.md parser ever moves to core/ it can
-    # replace this minimal duplicate. Until then, keep both in sync.
+    Parsing mechanics are shared with learning through core/frontmatter.py;
+    execution keeps only its permissive field mapping (missing/malformed fields
+    fall back safely instead of importing learning's stricter semantics).
 
   list_tools():
     For each enabled plugin, surface its declared tools as ToolSpec objects
@@ -35,7 +34,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import re
 import shutil
 import tarfile
 import tempfile
@@ -43,18 +41,40 @@ from pathlib import Path
 from typing import Any
 
 from ...core.errors import NotFoundError, ValidationError
+from ...core.frontmatter import dump_yaml, split_frontmatter
+from ...core.guard import VALID_SKILL_NAME, scan_risks
 from ...core.paths import RicePaths
 from ...core.storage.sqlite import Database
-from ...core.types import InjectedSkill, ToolCall, ToolResult, ToolSpec, new_id, now_iso
+from ...core.types import (
+    InjectedSkill,
+    PluginAgent,
+    ToolCall,
+    ToolResult,
+    ToolSpec,
+    new_id,
+    now_iso,
+)
 from ..interfaces import ISandbox, PluginInfo, SandboxResult
+from . import bundle
 from .manifest import ArtifactManifest, parse_manifest
 from .registry import PluginRegistry
 from .builtin import BUILTIN_PLUGIN_SOURCE, BuiltinPluginCatalog
 
 log = logging.getLogger("rice.execution.plugin_loader")
 
+_INSTALL_UPSERT_SQL = """
+    INSERT INTO installed_artifacts
+      (id, type, name, version, source, installed_at, enabled, risk_flags)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      version=excluded.version,
+      installed_at=excluded.installed_at,
+      enabled=excluded.enabled,
+      risk_flags=excluded.risk_flags
+"""
 
-# ─── minimal SKILL.md parser (mirrors learning/skill/store.py) ───────────────
+
+# ─── SKILL.md field mapping (parsing mechanics live in core/frontmatter.py) ──
 
 def _parse_skill_md_minimal(text: str) -> dict[str, Any]:
     """Extract frontmatter fields + body from a SKILL.md file.
@@ -62,65 +82,27 @@ def _parse_skill_md_minimal(text: str) -> dict[str, Any]:
     Returns a dict with keys: name, version, description, state, tags, body.
     Raises nothing — missing fields get safe defaults. This is intentionally
     permissive because we don't validate learning-generated skills; we just
-    surface them.
-
-    # NOTE(agent): This is a minimal duplicate of learning/skill/store.py's
-    # parse_skill_md. If a shared SKILL.md parser ever moves to core/, replace
-    # this with that import. Keep field names in sync.
+    surface them. 파싱 메커니즘은 core/frontmatter.py 공용(2026-07-19 — 종전의
+    store.py 와의 의도적 중복 해소); 여기는 관대한 기본값 매핑만 남는다.
     """
-    if not text.startswith("---"):
-        return {"name": "", "version": 1, "description": "", "state": "active", "tags": [], "body": text}
-
-    parts = text.split("---", 2)
-    if len(parts) < 3:
-        return {"name": "", "version": 1, "description": "", "state": "active", "tags": [], "body": text}
-
-    fm_raw = parts[1].strip()
-    body = parts[2].strip()
-
-    # Minimal YAML-like key-value parse (no full YAML dep needed here).
-    # Only handles flat keys, simple list values, and block scalars (SKILL.md
-    # frontmatter is deliberately simple — LEARNING_LOOP §2).
-    fm: dict[str, Any] = {}
-    in_list_key: str | None = None
-    in_block_key: str | None = None
-    for line in fm_raw.splitlines():
-        line = line.rstrip()
-        if in_block_key is not None:
-            # `description: |` / `>` block scalar — Claude Code 스킬에서 흔한
-            # 형식. 들여쓰인 연속 줄을 한 문자열로 합친다(빈 줄은 블록 유지).
-            # 이전 파서는 이걸 리스트 대기 상태로 오인해 빈 값으로 만들었다.
-            if not line:
-                continue
-            if line.startswith((" ", "\t")):
-                joined = f"{fm[in_block_key]} {line.strip()}".strip()
-                fm[in_block_key] = joined
-                continue
-            in_block_key = None
-        if not line:
-            in_list_key = None
-            continue
-        if line.startswith("  - ") and in_list_key:
-            fm.setdefault(in_list_key, []).append(line[4:].strip())
-            continue
-        if ":" in line:
-            k, _, v = line.partition(":")
-            k = k.strip()
-            v = v.strip()
-            if v.startswith("[") and v.endswith("]"):
-                # Inline list: [a, b, c]
-                fm[k] = [item.strip().strip('"').strip("'") for item in v[1:-1].split(",") if item.strip()]
-                in_list_key = None
-            elif v in ("|", ">", "|-", ">-", "|+", ">+"):
-                fm[k] = ""
-                in_block_key = k
-                in_list_key = None
-            elif v == "":
-                in_list_key = k
-                fm[k] = []
-            else:
-                fm[k] = v
-                in_list_key = None
+    try:
+        parsed = split_frontmatter(text)
+    except Exception:  # noqa: BLE001 — 외부 plugin YAML 손상은 파일 단위 fail-soft
+        # loader 의 기존 무의존 미니 파서는 malformed YAML 에서도 절대 예외를
+        # 내지 않았다. 공용 PyYAML 경로로 승격한 뒤 parser error 가 설치 전체나
+        # 매 턴 injected_skills()를 깨는 회귀를 막고, 원문은 body 로 보존한다.
+        log.warning("plugin markdown frontmatter is malformed; using safe defaults")
+        parsed = None
+    if parsed is None:
+        return {
+            "name": "",
+            "version": 1,
+            "description": "",
+            "state": "active",
+            "tags": [],
+            "body": text,
+        }
+    fm, body = parsed
 
     version_raw = fm.get("version", 1)
     try:
@@ -131,13 +113,27 @@ def _parse_skill_md_minimal(text: str) -> dict[str, Any]:
         # contract. Plugin revisions are immutable here, so use revision 1.
         version = 1
 
+    # description 은 인덱스/도구 스펙 렌더에 실리므로 한 줄로 정규화한다(블록
+    # 스칼라·멀티라인 YAML 값 대비 — 종전 미니 파서의 공백 join 과 동일 결과).
+    description = " ".join(str(fm.get("description") or "").split())
+
+    tags_raw = fm.get("tags") or []
+    if isinstance(tags_raw, (list, tuple)):
+        tags = [str(t) for t in tags_raw if str(t).strip()]
+    elif isinstance(tags_raw, str) and tags_raw.strip():
+        # 관대한 loader 계약: 잘못된 scalar tags 도 문자 단위로 쪼개지지 않게
+        # 한 항목으로 취급한다(종전 list("plugin") 회귀 방지).
+        tags = [tags_raw.strip()]
+    else:
+        tags = []
+
     return {
-        "name": str(fm.get("name", "")),
+        "name": str(fm.get("name") or ""),
         "version": version,
-        "description": str(fm.get("description", "")),
-        "state": str(fm.get("state", "active")),
-        "tags": list(fm.get("tags", [])),
-        "body": body,
+        "description": description,
+        "state": str(fm.get("state") or "active"),
+        "tags": tags,
+        "body": body.strip(),
     }
 
 
@@ -148,18 +144,49 @@ def _canonicalize_skill_md(text: str, name: str) -> str:
     (read/write/lifecycle 일관성). 시장 artifact 의 frontmatter 가 다르거나 없으면
     여기서 교정한다 — 다른 frontmatter 필드(description/tags 등)는 보존한다.
     """
-    if not text.lstrip().startswith("---"):
-        # frontmatter 없음 → 최소 frontmatter 로 감싼다.
-        return f"---\nname: {name}\nversion: 1\ndescription: \"\"\nstate: active\n---\n{text}"
-    parts = text.split("---", 2)
-    if len(parts) < 3:
-        return f"---\nname: {name}\nversion: 1\ndescription: \"\"\nstate: active\n---\n{text}"
-    fm = parts[1]
-    if re.search(r"(?m)^\s*name\s*:", fm):
-        fm = re.sub(r"(?m)^(\s*name\s*:).*$", rf"\1 {name}", fm, count=1)
+    try:
+        parsed = split_frontmatter(text)
+    except Exception as exc:
+        raise ValidationError(f"skill artifact frontmatter is not valid YAML: {exc}") from exc
+    if parsed is None:
+        # frontmatter 없음 → 최소 frontmatter 로 감싼다. 문서 중간의 --- 블록은
+        # core parser 계약상 frontmatter가 아니므로 원문 body에 그대로 보존된다.
+        fm: dict[str, Any] = {
+            "name": name,
+            "version": 1,
+            "description": "",
+            "state": "active",
+        }
+        body = text
     else:
-        fm = f"\nname: {name}" + fm
-    return "---" + fm + "---" + parts[2]
+        fm, body = parsed
+        fm = dict(fm)
+        fm["name"] = name
+    body_sep = "" if body.startswith(("\n", "\r")) else "\n"
+    return f"---\n{dump_yaml(fm)}---{body_sep}{body}"
+
+
+def _stat_signature(paths: list[Path]) -> tuple | None:
+    """파일 목록의 (경로, mtime, size) 시그니처 — 캐시 무효화 판별용.
+    stat 실패는 None(캐시 우회 — 이후 파싱이 개별 방어)."""
+    try:
+        return tuple((str(p), p.stat().st_mtime_ns, p.stat().st_size) for p in paths)
+    except OSError:
+        return None
+
+
+def _parse_risk_flags(raw: object) -> tuple[str, ...]:
+    """installed_artifacts.risk_flags(JSON 배열) → tuple. 손상/구버전 값은 빈 튜플
+    — 표시용 메타라 조용한 복구가 맞다(설치 게이트는 이미 지나갔다)."""
+    if not raw or not isinstance(raw, str):
+        return ()
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return ()
+    if not isinstance(parsed, list):
+        return ()
+    return tuple(str(f) for f in parsed)
 
 
 def _resolved_within(base: Path, target: Path) -> Path:
@@ -202,6 +229,8 @@ class PluginLoader:
         # 됐다. 시그니처는 SKILL.md 파일들의 (경로, mtime, size) — 번들 리소스
         # 목록은 SKILL.md 변경 시에만 재수집된다(설치본은 사실상 불변이라 충분).
         self._skills_cache: dict[str, tuple[tuple, list[InjectedSkill]]] = {}
+        # injected_agents() 파싱 캐시 — 같은 원리, agents/*.md 시그니처 기준.
+        self._agents_cache: dict[str, tuple[tuple, list[PluginAgent]]] = {}
 
     # ── tool / skill surface ─────────────────────────────────────────────────
 
@@ -257,7 +286,8 @@ class PluginLoader:
     _RESOURCE_LIST_MAX = 24
 
     def injected_skills(self) -> list[InjectedSkill]:
-        """SKILL.md bundles from enabled plugins → InjectedSkill (CONTRACTS §2.2).
+        """SKILL.md bundles + commands from enabled plugins → InjectedSkill
+        (CONTRACTS §2.2).
 
         Walks `~/.rice/plugins/<plugin_id>/skills/*.md` for each enabled plugin.
         Only `state: active` skills surface (an author shipping a draft/archived
@@ -266,29 +296,33 @@ class PluginLoader:
         skills (learning.prefetch: index → top-K full body → skill_view) instead
         of being dumped wholesale into the system prompt.
 
+        `commands/*.md`(Claude Code 슬래시 커맨드 형식)도 같은 파이프라인을 탄다
+        (2026-07-19 — 종전엔 시장 호환성 표기일 뿐 미소비였다): 커맨드는 "사용자
+        호출 절차"라 RICE 의 스킬과 동형이고, explicit-first 정렬 덕에 이름 언급
+        ("/create-plugin", "create-plugin 해줘")이 주입 슬롯을 얻는다. 이름은
+        파일 stem(중첩은 `<dir>:<stem>` — Claude Code 네임스페이스 관례),
+        tags=("command",) 로 출처를 표시한다. Claude Code 전용 frontmatter
+        (allowed-tools 등)는 RICE 도구와 무관하므로 싣지 않는다.
+
         표준 레이아웃(`skills/<sub>/SKILL.md`)의 형제 파일들(references/,
         examples/, scripts/)은 `resource_dir`/`resources`로 실어 `skill_resource`
         도구가 온디맨드로 열 수 있게 한다 — 본문이 "see references/x.md"라고
         지시해도 파일 도구는 워크스페이스에 갇혀 있어 닿을 수 없던 간극의 해소.
 
-        매 턴 호출되므로(prefetch) SKILL.md stat 시그니처로 캐싱한다 — 내용이
-        안 변한 플러그인은 재독·재파싱 없이 이전 결과를 그대로 쓴다.
+        매 턴 호출되므로(prefetch) SKILL.md+commands stat 시그니처로 캐싱한다 —
+        내용이 안 변한 플러그인은 재독·재파싱 없이 이전 결과를 그대로 쓴다.
         """
         skills: list[InjectedSkill] = []
         for info in self._list_enabled_plugin_infos():
-            skills_dir = self._plugin_dir(info) / "skills"
-            if not skills_dir.is_dir():
-                continue
+            plugin_dir = self._plugin_dir(info)
             # Both layouts (CONTRACTS §2.2): flat `skills/*.md` AND the standard
             # `skills/<sub>/SKILL.md`. v1 버그#10: only flat *.md was scanned, so the
             # standard subdir layout (which platform/registry.py supports) was dropped.
-            md_paths = sorted(skills_dir.glob("*.md")) + sorted(skills_dir.glob("*/SKILL.md"))
-            try:
-                signature = tuple(
-                    (str(p), p.stat().st_mtime_ns, p.stat().st_size) for p in md_paths
-                )
-            except OSError:
-                signature = None  # stat 실패 → 캐시 우회, 아래 파싱이 개별 방어
+            md_paths = bundle.skill_md_paths(plugin_dir)
+            command_paths = bundle.command_paths(plugin_dir)
+            if not md_paths and not command_paths:
+                continue
+            signature = _stat_signature(md_paths + command_paths)
             cached = self._skills_cache.get(info.id)
             if signature is not None and cached is not None and cached[0] == signature:
                 skills.extend(cached[1])
@@ -299,7 +333,7 @@ class PluginLoader:
                     text = md_path.read_text(encoding="utf-8")
                     fm = _parse_skill_md_minimal(text)
                     if not fm["name"]:
-                        fm["name"] = md_path.stem if md_path.name != "SKILL.md" else md_path.parent.name
+                        fm["name"] = bundle.skill_name_for(md_path)
                     if fm["state"] != "active":
                         continue
                     resource_dir, resources = self._skill_resources(md_path)
@@ -318,10 +352,97 @@ class PluginLoader:
                     )
                 except (OSError, ValueError):
                     continue
+            for md_path in command_paths:
+                try:
+                    text = md_path.read_text(encoding="utf-8")
+                    fm = _parse_skill_md_minimal(text)
+                    name = bundle.command_name(plugin_dir, md_path)
+                    parsed.append(
+                        InjectedSkill(
+                            skill_id=f"plugin:{info.id}:command:{name}",
+                            name=name,
+                            version=int(fm["version"]),
+                            body=fm["body"],
+                            description=fm["description"],
+                            tags=("command", *fm["tags"]),
+                            source="plugin",
+                        )
+                    )
+                except (OSError, ValueError):
+                    continue
             if signature is not None:
                 self._skills_cache[info.id] = (signature, parsed)
             skills.extend(parsed)
         return skills
+
+    def injected_agents(self) -> list[PluginAgent]:
+        """`agents/*.md` from enabled plugins → PluginAgent (2026-07-19).
+
+        에이전트 md 는 Claude Code 서브에이전트 형식(frontmatter name/description
+        + 본문=시스템 프롬프트)이다. RICE 에서는 delegate_subagent 의 페르소나로
+        소비된다(agent/subagents.py): 메인 모델이 `agent=<name>` 으로 위임하면
+        워커 시스템 프롬프트가 이 body 로 바뀐다 — 종전엔 시장 호환성 표기일 뿐
+        미소비였다. 같은 이름이 여러 플러그인에 있으면 활성 목록 순서의 첫
+        매칭이 이긴다(도구 이름 충돌과 같은 first-match 규칙).
+
+        skills 캐시와 같은 원리로 stat 시그니처 캐싱한다(delegate 도구 스펙
+        렌더가 매 턴 부른다).
+        """
+        agents: list[PluginAgent] = []
+        for info in self._list_enabled_plugin_infos():
+            agents.extend(self._agents_for_plugin(info.id, self._plugin_dir(info)))
+        return agents
+
+    def _agents_for_plugin(self, plugin_id: str, plugin_dir: Path) -> list[PluginAgent]:
+        """한 플러그인의 실제 소비 가능한 페르소나를 파싱한다.
+
+        enabled 필터는 호출자가 소유한다. 그래서 list_plugins()도 이 함수를 써서
+        frontmatter name 우선 규칙이 반영된 정확한 agent_names 를 표시할 수 있다.
+        이름은 스킬과 같은 bounded kebab-case 규약만 허용한다 — 매 턴 도구 스펙에
+        실리는 새 프롬프트 표면이라 임의 길이/제어문자 이름을 광고하지 않는다.
+        """
+        md_paths = bundle.agent_paths(plugin_dir)
+        if not md_paths:
+            return []
+        signature = _stat_signature(md_paths)
+        cached = self._agents_cache.get(plugin_id)
+        if signature is not None and cached is not None and cached[0] == signature:
+            return cached[1]
+
+        parsed: list[PluginAgent] = []
+        for md_path in md_paths:
+            try:
+                text = md_path.read_text(encoding="utf-8")
+                fm = _parse_skill_md_minimal(text)
+                declared = str(fm["name"] or "").strip()
+                fallback = md_path.stem
+                name = declared if VALID_SKILL_NAME.fullmatch(declared) else fallback
+                if not VALID_SKILL_NAME.fullmatch(name):
+                    log.warning("plugin agent with invalid name skipped: %s", md_path)
+                    continue
+                if declared and declared != name:
+                    log.warning(
+                        "plugin agent %s has invalid frontmatter name %r; using filename %r",
+                        md_path,
+                        declared,
+                        fallback,
+                    )
+                if not fm["body"].strip():
+                    continue  # 본문 없는 에이전트는 페르소나가 성립하지 않는다
+                parsed.append(
+                    PluginAgent(
+                        agent_id=f"plugin:{plugin_id}:agent:{name}",
+                        name=name,
+                        description=fm["description"],
+                        body=fm["body"],
+                        plugin_id=plugin_id,
+                    )
+                )
+            except (OSError, ValueError):
+                continue
+        if signature is not None:
+            self._agents_cache[plugin_id] = (signature, parsed)
+        return parsed
 
     @classmethod
     def _skill_resources(cls, md_path: Path) -> tuple[str, tuple[str, ...]]:
@@ -408,7 +529,7 @@ class PluginLoader:
         """All installed plugins (enabled + disabled)."""
         builtin_ids = self._builtin_plugins.ids() if self._builtin_plugins else frozenset()
         rows = self._db.query_all(
-            "SELECT id, name, version, enabled FROM installed_artifacts WHERE type = 'plugin'"
+            "SELECT id, name, version, enabled, risk_flags FROM installed_artifacts WHERE type = 'plugin'"
         )
         infos: list[PluginInfo] = []
         for r in rows:
@@ -419,6 +540,7 @@ class PluginLoader:
             description = ""
             skill_count = 0
             skill_names: tuple[str, ...] = ()
+            agent_names: tuple[str, ...] = ()
             if manifest_path.exists():
                 try:
                     raw = json.loads(manifest_path.read_text())
@@ -426,15 +548,13 @@ class PluginLoader:
                     required_connectors = tuple(
                         str(c) for c in (raw.get("requires", {}).get("connectors", []) or [])
                     )
-                    skills_dir = self._paths.plugins / r["id"] / "skills"
-                    if skills_dir.is_dir():
-                        flat_skills = sorted(skills_dir.glob("*.md"))
-                        nested_skills = sorted(skills_dir.glob("*/SKILL.md"))
-                        skill_names = tuple(
-                            [path.stem for path in flat_skills]
-                            + [path.parent.name for path in nested_skills]
-                        )
-                        skill_count = len(skill_names)
+                    # 스킬(두 레이아웃) + 커맨드(":" 네임스페이스) — bundle 이 규칙 소유.
+                    plugin_dir = self._paths.plugins / r["id"]
+                    skill_names = bundle.display_skill_names(plugin_dir)
+                    skill_count = len(skill_names)
+                    agent_names = tuple(
+                        a.name for a in self._agents_for_plugin(r["id"], plugin_dir)
+                    )
                 except (OSError, json.JSONDecodeError):
                     pass
             infos.append(
@@ -447,6 +567,8 @@ class PluginLoader:
                     required_connectors=required_connectors,
                     skill_count=skill_count,
                     skill_names=skill_names,
+                    agent_names=agent_names,
+                    risk_flags=_parse_risk_flags(r["risk_flags"]),
                 )
             )
         builtins = self._builtin_plugins.list() if self._builtin_plugins else []
@@ -469,11 +591,23 @@ class PluginLoader:
         Steps:
           ① Validate and parse the manifest dict.
           ② Verify sha256 checksum of the file at `path` (fail-closed on mismatch).
-          ③ Place the artifact:
+          ③ Unpack plugin artifacts into an isolated staging tree and risk-scan
+             every prompt surface there; malformed/unreadable files never reach
+             an enabled install by accident.
+          ④ Place the artifact:
                plugin → ~/.rice/plugins/plugin:<name>/ (tree + rice-artifact.json)
                skill  → ~/.rice/skills/<name>.md (FLAT — so SkillStore.list()/prefetch
                         inject it like a learned skill; v1 버그#3 교정).
-          ④ Record in `installed_artifacts` (enabled=1 by default).
+             Plugin replacement and its DB upsert share one rollback boundary, so
+             removed files from an older version cannot survive a re-install.
+          ⑤ Risk-scan skill artifact SKILL.md contents (core/guard.py::scan_risks —
+             market artifact 는 외부 콘텐츠이므로 신뢰 가정으로 싣지 않는다).
+             플래그는 installed_artifacts.risk_flags 에 영속되고, 플래그가 있는
+             **plugin 은 enabled=0 으로 설치**된다 — 프롬프트 주입 표면이 되기
+             전에 사용자가 경고를 보고 직접 활성화해야 한다(HITL). skill 은
+             MySkills 에서 본문을 직접 검수·수정할 수 있으므로 플래그+경고만
+             한다(학습 경로의 "스킬=플래그, memory=차단" 정책과 정합).
+          ⑥ Record in `installed_artifacts`.
         """
         parsed = parse_manifest(manifest)
         if parsed.type == "plugin" and self._builtin_plugins:
@@ -482,30 +616,66 @@ class PluginLoader:
 
         artifact_id = f"{parsed.type}:{parsed.name}"
         if parsed.type == "plugin":
-            await self._install_plugin(path, parsed, manifest)
+            # 영구 설치 경로에 닿기 전에 완전한 트리를 staging 에 만들고 스캔한다.
+            # 기존 디렉토리에 copytree(dirs_exist_ok=True)로 덧씌우면 새 버전에서
+            # 삭제된 구버전 SKILL.md가 남아 clean reinstall이 영원히 위험 플래그를
+            # 지우지 못했고, 스캔 전 잠깐 기존 enabled 행이 새 파일을 가리킬 수도
+            # 있었다. DB 트랜잭션 락 안에서 트리 교체까지 수행해 그 창을 닫는다.
+            dest = _resolved_within(
+                self._paths.plugins, self._paths.plugins / f"plugin:{parsed.name}"
+            )
+            staged = await self._stage_plugin(path, parsed, manifest)
+            backup_root: Path | None = None
+            swapped = False
+            try:
+                risk_flags = self._scan_plugin_skill_risks(staged)
+                enabled = not risk_flags
+                params = self._install_record_params(
+                    artifact_id, parsed, enabled=enabled, risk_flags=risk_flags
+                )
+                with self._db.transaction() as conn:
+                    conn.execute(_INSTALL_UPSERT_SQL, params)
+                    backup_root = self._swap_plugin_tree(staged, dest)
+                    swapped = True
+            except BaseException:
+                # commit 실패까지 포함해 DB가 이전 행으로 롤백되면 파일도 이전
+                # 트리로 되돌린다. 신규 설치였다면 새 dest를 제거한다.
+                if swapped:
+                    self._restore_plugin_tree(dest, backup_root)
+                raise
+            else:
+                if backup_root is not None:
+                    shutil.rmtree(backup_root, ignore_errors=True)
+            finally:
+                shutil.rmtree(staged, ignore_errors=True)
+            # 재설치 시 이전 파싱 무효화(스킬·커맨드·에이전트 캐시 모두)
+            self._skills_cache.pop(artifact_id, None)
+            self._agents_cache.pop(artifact_id, None)
         else:
-            await self._install_skill(path, parsed)
-
-        # Record in DB (upsert by id — re-install overwrites).
-        self._db.execute(
-            """
-            INSERT INTO installed_artifacts (id, type, name, version, source, installed_at, enabled)
-            VALUES (?, ?, ?, ?, ?, ?, 1)
-            ON CONFLICT(id) DO UPDATE SET
-              version=excluded.version,
-              installed_at=excluded.installed_at,
-              enabled=1
-            """,
-            (artifact_id, parsed.type, parsed.name, parsed.version, "market", now_iso()),
-        )
+            risk_flags = await self._install_skill(path, parsed)
+            enabled = True
+            self._db.execute(
+                _INSTALL_UPSERT_SQL,
+                self._install_record_params(
+                    artifact_id, parsed, enabled=enabled, risk_flags=risk_flags
+                ),
+            )
+        if risk_flags:
+            log.warning(
+                "artifact %s installed with risk flags: %s%s",
+                artifact_id,
+                ", ".join(risk_flags),
+                " (plugin disabled until user enables it)" if not enabled else "",
+            )
 
         return PluginInfo(
             id=artifact_id,
             name=parsed.name,
             version=parsed.version,
             description=parsed.description,
-            enabled=True,
+            enabled=enabled,
             required_connectors=parsed.required_connectors,
+            risk_flags=tuple(risk_flags),
         )
 
     async def remove(self, artifact_id: str) -> None:
@@ -530,6 +700,8 @@ class PluginLoader:
             _resolved_within(self._paths.skills, self._paths.skills / f"{name}.usage.json").unlink(missing_ok=True)
             shutil.rmtree(_resolved_within(self._paths.skills, self._paths.skills / name), ignore_errors=True)  # .history dir
         self._db.execute("DELETE FROM installed_artifacts WHERE id = ?", (artifact_id,))
+        self._skills_cache.pop(artifact_id, None)
+        self._agents_cache.pop(artifact_id, None)
 
     # ── boot hygiene ──────────────────────────────────────────────────────────
 
@@ -559,6 +731,7 @@ class PluginLoader:
                 # 안전하지만, rmtree 직전 검증은 관례로 유지한다.
                 shutil.rmtree(_resolved_within(self._paths.plugins, stale_dir), ignore_errors=True)
             self._skills_cache.pop(plugin_id, None)
+            self._agents_cache.pop(plugin_id, None)
             removed += 1
         if removed:
             log.info("reconciled %d builtin-shadowed plugin install(s)", removed)
@@ -566,23 +739,126 @@ class PluginLoader:
 
     # ── internal helpers ──────────────────────────────────────────────────────
 
-    async def _install_plugin(self, path: str, parsed: ArtifactManifest, manifest: dict[str, Any]) -> None:
-        """Place a plugin tree under ~/.rice/plugins/plugin:<name>/ + manifest.json."""
-        dest = _resolved_within(self._paths.plugins, self._paths.plugins / f"plugin:{parsed.name}")
-        dest.mkdir(parents=True, exist_ok=True)
-        await self._unpack(path, dest)
-        self._flatten_single_package_root(dest, parsed.name)
-        (dest / "rice-artifact.json").write_text(
-            json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    @staticmethod
+    def _install_record_params(
+        artifact_id: str,
+        parsed: ArtifactManifest,
+        *,
+        enabled: bool,
+        risk_flags: list[str],
+    ) -> tuple[Any, ...]:
+        return (
+            artifact_id,
+            parsed.type,
+            parsed.name,
+            parsed.version,
+            "market",
+            now_iso(),
+            1 if enabled else 0,
+            json.dumps(risk_flags, ensure_ascii=False),
         )
 
-    async def _install_skill(self, path: str, parsed: ArtifactManifest) -> None:
+    async def _stage_plugin(
+        self, path: str, parsed: ArtifactManifest, manifest: dict[str, Any]
+    ) -> Path:
+        """완전한 plugin tree를 설치 루트 안 숨김 staging 디렉토리에 만든다."""
+        self._paths.plugins.mkdir(parents=True, exist_ok=True)
+        staged = Path(
+            tempfile.mkdtemp(prefix=".rice-plugin-stage-", dir=str(self._paths.plugins))
+        )
+        try:
+            await self._unpack(path, staged)
+            self._flatten_single_package_root(staged, parsed.name)
+            (staged / "rice-artifact.json").write_text(
+                json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            return staged
+        except BaseException:
+            shutil.rmtree(staged, ignore_errors=True)
+            raise
+
+    def _swap_plugin_tree(self, staged: Path, dest: Path) -> Path | None:
+        """staged를 dest로 교체하고, 기존 트리가 있으면 복구용 컨테이너 반환."""
+        backup_root: Path | None = None
+        previous: Path | None = None
+        if dest.exists():
+            backup_root = Path(
+                tempfile.mkdtemp(prefix=".rice-plugin-backup-", dir=str(self._paths.plugins))
+            )
+            previous = backup_root / "previous"
+            dest.rename(previous)
+        try:
+            staged.rename(dest)
+        except BaseException:
+            if previous is not None and previous.exists():
+                previous.rename(dest)
+            if backup_root is not None:
+                shutil.rmtree(backup_root, ignore_errors=True)
+            raise
+        return backup_root
+
+    @staticmethod
+    def _restore_plugin_tree(dest: Path, backup_root: Path | None) -> None:
+        """트리 교체 뒤 DB commit이 실패했을 때 파일시스템도 이전 상태로 롤백."""
+        if dest.exists():
+            shutil.rmtree(dest, ignore_errors=True)
+        if backup_root is None:
+            return
+        previous = backup_root / "previous"
+        if previous.exists():
+            previous.rename(dest)
+        shutil.rmtree(backup_root, ignore_errors=True)
+
+    def _scan_plugin_skill_risks(self, plugin_dir: Path) -> list[str]:
+        """설치된 플러그인 트리의 프롬프트 표면 md 전체를 위험 스캔한다.
+
+        대상은 주입/실행 표면이 되는 세 디렉토리 전부다(2026-07-19 commands/
+        agents 소비와 함께 확장): ① skills 의 두 레이아웃(flat `skills/*.md` +
+        표준 `skills/<sub>/SKILL.md`), ② `commands/**/*.md`(InjectedSkill 로
+        주입), ③ `agents/*.md`(워커 **시스템 프롬프트**가 된다 — 가장 민감한
+        표면). frontmatter 를 포함한 **원문 전체**를 스캔한다 — description/
+        tags 도 인덱스·프롬프트에 실리므로 본문만으로는 숨은 문자·주입 문구를
+        놓친다. 반환 형식은 `"<name>:<label>"` (라벨은 core/guard.py 안정 코드 —
+        로케일 문장은 프론트 몫), 이름은 각 소비 경로의 이름 규칙과 동일하게
+        정한다. 읽기 실패한 파일은 건너뛰지 않고 플래그한다(스캔 불능을
+        깨끗함으로 오인하지 않는다 — fail-closed 방향)."""
+        flags: list[str] = []
+
+        def scan_file(md_path: Path, fallback: str) -> None:
+            try:
+                text = md_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                flags.append(f"{fallback}:unreadable_skill_file")
+                return
+            name = _parse_skill_md_minimal(text).get("name") or fallback
+            flags.extend(f"{name}:{label}" for label in scan_risks(text))
+
+        for md_path in bundle.skill_md_paths(plugin_dir):
+            scan_file(md_path, bundle.skill_name_for(md_path))
+        for md_path in bundle.command_paths(plugin_dir):
+            # 커맨드는 frontmatter name 이 없는 게 보통 — 경로 유래 이름으로 귀속.
+            flags_name = bundle.command_name(plugin_dir, md_path)
+            try:
+                text = md_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                flags.append(f"{flags_name}:unreadable_skill_file")
+                continue
+            flags.extend(f"{flags_name}:{label}" for label in scan_risks(text))
+        for md_path in bundle.agent_paths(plugin_dir):
+            scan_file(md_path, md_path.stem)
+        return flags
+
+    async def _install_skill(self, path: str, parsed: ArtifactManifest) -> list[str]:
         """Install SKILL.md plus its repository-style bundled resources.
 
         The canonical definition remains the flat ``<name>.md`` so SkillStore.list()
         and injection stay backwards compatible. Sibling references/scripts are
         copied to ``skills/<name>/`` where SkillStore exposes them as one virtual
         repository and ``skill_resource`` can read them.
+
+        Returns risk-scan flags (`"<name>:<label>"`) for the installed SKILL.md —
+        market 스킬은 학습 HITL 없이 SkillStore 주입 경로에 바로 들어가므로,
+        설치 응답에 경고로 실어 사용자가 본문을 검수하게 한다(플래그, 비차단).
         """
         staging = Path(tempfile.mkdtemp(prefix="rice-skill-install-"))
         try:
@@ -592,8 +868,14 @@ class PluginLoader:
                 raise ValidationError(
                     f"skill artifact '{parsed.name}' has no SKILL.md to install"
                 )
-            md_text = md_path.read_text(encoding="utf-8")
-            md_text = _canonicalize_skill_md(md_text, parsed.name)
+            raw_md_text = md_path.read_text(encoding="utf-8")
+            # 반드시 canonicalize 전 **시장 원문 전체**를 스캔한다. manifest name과
+            # 맞추며 frontmatter name을 교체한 뒤 스캔하면, 공격자가 원래 name
+            # 필드에 숨긴 주입 문구/zero-width 문자가 검사 전에 사라진다.
+            risk_flags = [
+                f"{parsed.name}:{label}" for label in scan_risks(raw_md_text)
+            ]
+            md_text = _canonicalize_skill_md(raw_md_text, parsed.name)
             self._paths.skills.mkdir(parents=True, exist_ok=True)
             target = _resolved_within(self._paths.skills, self._paths.skills / f"{parsed.name}.md")
             target.write_text(md_text, encoding="utf-8")
@@ -615,6 +897,7 @@ class PluginLoader:
                     dest = _resolved_within(bundle_root, bundle_root / rel)
                     dest.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(resource, dest)
+            return risk_flags
         finally:
             shutil.rmtree(staging, ignore_errors=True)
 
@@ -644,16 +927,16 @@ class PluginLoader:
         Expected format: "sha256-<hex>". Empty checksum is only allowed when
         the manifest also has an empty checksum (i.e., dev/test installs).
         """
+        file_path = Path(path)
+        if not file_path.exists():
+            raise ValidationError(f"artifact file not found: {path}")
+
         if not parsed.checksum:
             # NOTE(agent): Empty checksum is allowed for dev/test installs only.
             # Production market installs always include a checksum. Accepting
             # empty-checksum manifests here enables integration tests without
             # real archive files.
             return
-
-        file_path = Path(path)
-        if not file_path.exists():
-            raise ValidationError(f"artifact file not found: {path}")
 
         expected_hex = parsed.checksum.removeprefix("sha256-")
         actual_hex = hashlib.sha256(file_path.read_bytes()).hexdigest()
@@ -668,19 +951,16 @@ class PluginLoader:
         """Unpack a .tar.gz artifact or copy a plain file/directory."""
         src = Path(path)
         if not src.exists():
-            return  # checksum already validated existence
+            raise ValidationError(f"artifact file not found: {path}")
 
         # is_tarfile() opens the path → raises IsADirectoryError on a dir. Guard so
         # directory sources fall through to copytree (dev/local installs).
         if src.is_file() and tarfile.is_tarfile(str(src)):
             with tarfile.open(str(src), "r:gz") as tf:
-                # NOTE(agent): tarfile.extractall with filter="data" is the
-                # safe extraction mode (Python 3.12+ default). On 3.11- it
-                # silently does nothing for the filter kwarg.
-                try:
-                    tf.extractall(path=str(dest), filter="data")  # type: ignore[call-arg]
-                except TypeError:
-                    tf.extractall(path=str(dest))
+                # 프로젝트 최소 Python은 3.13 — data filter를 반드시 적용한다.
+                # 미지원 런타임에서 무필터 extractall로 폴백하면 traversal/symlink
+                # 방어를 조용히 잃으므로 fail-closed가 맞다.
+                tf.extractall(path=str(dest), filter="data")
         elif src.is_dir():
             # Directory source (local dev install)
             shutil.copytree(str(src), str(dest), dirs_exist_ok=True)

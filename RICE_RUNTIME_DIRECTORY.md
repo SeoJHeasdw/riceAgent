@@ -67,7 +67,7 @@ rice-runtime/                                # 배포물 ② : 로컬 단일 프
 │   │   │                                    #     연결 안 된 Connector tool 제외, 예산 초과 시 bridge+관련도 스포트라이트로 폴딩(AGENT_EXECUTION §5.2, RUNTIME_DESIGN 2.1)
 │   │   ├── orchestrator.py                  #   얇은 조율: learning/connector/execution 호출
 │   │   ├── effect_surfacing.py              #   LearningEffect→SSE(+HITL), 메인 턴과 /learning-review·/learn이 공유
-│   │   ├── subagents.py                     #   focused sub-agent runner (delegate_subagent builtin의 실행체) — 격리 미니 ReAct 루프 + 스킬 인덱스 주입 + tools 화이트리스트 + write_scratch 아티팩트 채널(2026-07-10 v2)
+│   │   ├── subagents.py                     #   focused sub-agent runner (delegate_subagent builtin의 실행체) — 격리 미니 ReAct 루프 + 스킬 인덱스 주입 + tools 화이트리스트 + write_scratch 아티팩트 채널(2026-07-10 v2) + 플러그인 agents/*.md 페르소나(agent= 파라미터, 역할부만 교체·보고 계약 불변, 2026-07-19)
 │   │   ├── titler.py                        #   세션 제목 생성 (post-turn, 논블로킹 — /learning-review·/learn과 같은 트리거 지점 패턴)
 │   │   ├── builtins/                        #   등록 도구: read_file/write_file/edit_file/list_dir/search_files, terminal, fetch_url(v3 — markdown 추출·DNS검증+IP pinning SSRF·재시도·페이지네이션·링크·JS껍데기/iframe 진단 + §hygiene 소형모델 위생: 문장/사실밀도 기반 main/article 스코핑·링크팜/숨김CSS·ARIA/class-id 비본문/레이아웃표 제거·challenge/paywall/반복 위젯/저엔트로피 명시실패(no-echo·no-cache)·짧은 고밀도 공지/반복 사실레코드 보존·bounded JSON-LD 폴백·1MB 수신컷 가시화·기본 12k자) + web_search(2026-07-18 — DuckDuckGo HTML/Lite 키리스 검색·광고 컨테이너 제거·URL 추적 정규화; 검색엔진 URL을 fetch하던 소형 모델 함정 해소), vision_analyze, skill_search/skill_view/propose_skill, delegate_subagent, create_*/edit_presentation; workspace.py는 경로 샌드박스 helper, write_scratch는 sub-agent 전용(thread 격리)
 │   │   │   └── office/                      #   ★ 2026-07-05/06(+07-10 v2) — create_presentation/edit_presentation/create_workbook/create_document 빌트인, stdlib-only OOXML 라이터(sandbox 미적용 — RUNTIME_DESIGN 5장)
@@ -100,7 +100,8 @@ rice-runtime/                                # 배포물 ② : 로컬 단일 프
 │   │   ├── interfaces.py                    #   IPluginLoader / ISandbox (Protocol)
 │   │   ├── service.py                       #   PluginLoaderService + ChildProcessSandbox 와이어링 파사드(composition_root 진입점)
 │   │   ├── plugin/                          # ▣ #7
-│   │   │   ├── loader.py                    #   manifest 파싱·스킬 주입·자체 실행 도구(entrypoint.tools, dotted module.func) 라우팅
+│   │   │   ├── loader.py                    #   manifest 파싱·스킬/커맨드 주입(injected_skills)·에이전트 페르소나(injected_agents)·자체 실행 도구(entrypoint.tools, dotted module.func) 라우팅 + 설치 시 staging 위험 스캔(core/guard.py::scan_risks, skills+commands+agents → installed_artifacts.risk_flags, 플래그 plugin은 enabled=0 설치)·DB와 전체 트리 교체 rollback 정합
+│   │   │   ├── bundle.py                    #   ★ 신규(2026-07-19) — 번들 레이아웃 워커(skills 두 레이아웃·commands `:`네임스페이스·agents) 단일 소유 — loader·builtin 카탈로그 공유
 │   │   │   ├── manifest.py                  #   requires.connectors 등 검증
 │   │   │   └── registry.py
 │   │   ├── sandbox/                         # ▣ #8 (plugin 자체 실행 도구의 자식 프로세스 sandbox)
@@ -124,7 +125,7 @@ rice-runtime/                                # 배포물 ② : 로컬 단일 프
 │   │   │   ├── lifecycle.py                 #   상태전이(active→stale→archived) + curator 통합 archive
 │   │   │   ├── patch.py                     #   diff 산출(build_diff)만 — patch 저작 판단은 review/engine.py
 │   │   │   ├── usage.py                     #   use/view/patch 카운터 + 관측된 도구 사용 빈도(tools dict, 상한 40개)
-│   │   │   ├── guard.py                     #   크기 상한 + 시크릿 스크러빙 + 위협 패턴 스캔(scan_risks — 프롬프트 인젝션·시스템프롬프트 override·자격증명 유출·파괴적 쉘·역쉘·SSH 키 영속성 등) + 스킬 이름 규약
+│   │   │   ├── guard.py                     #   core/guard.py 재수출 심(2026-07-19 승격) — 학습 경로 적용 지점 문서 보존. 패턴 추가/수정은 core/guard.py에서
 │   │   │   ├── relevance.py                 #   ★ 신규(2026-07-06/07) — 결정론적 스킬 관련도 스코어러(`core/lexical.py` 사다리 공유). 상위(임계 3.0, 최대 2개)만 자동 본문주입, 나머지는 인덱스+온디맨드 skill_view
 │   │   │   ├── verifier.py                  #   ★ 신규(2026-07-07) — 스킬 승격 검증 게이트(결정론 lint, LLM 재채점 없음). fail=객관적 무결성(빈 본문·펜스 미폐합 등), warn=판단항목(thin-body·no-steps·unknown-tool 등). stage_proposal·screen·apply_patch/create/update 3중 관문
 │   │   │   ├── builtin.py                   #   ★ 신규(2026-07-05) — 패키지 동봉 빌트인 스킬 카탈로그(예약 네임스페이스, active/archived 토글만 허용, 패치·삭제·롤백 불가)
@@ -164,8 +165,10 @@ rice-runtime/                                # 배포물 ② : 로컬 단일 프
 │   └── core/                                # ▣ (#14 암묵) 공용 인프라 — 모듈 간 직접 import 금지선
 │       ├── storage/
 │       │   ├── sqlite.py                    #   WAL 모드·연결 풀
-│       │   └── migrations/                  #   0001~0014(0009 결번 — 미배포 프로토타입이라 과거 파일을 직접 고쳐 병합한 흔적, [[system-authority]] 원칙)
+│       │   └── migrations/                  #   0001~0019(0009 결번 — 미배포 프로토타입이라 과거 파일을 직접 고쳐 병합한 흔적, [[system-authority]] 원칙; 0019=installed_artifacts.risk_flags)
 │       ├── events.py                        #   in-process 이벤트 버스(모듈 간 결합 완화) — 단일 파일, 디렉토리 아님
+│       ├── guard.py                         #   ★ 신규(2026-07-19) — 콘텐츠 안전 검사 공용 메커니즘(시크릿 스크러빙+scan_risks). learning/skill/guard.py에서 승격 — 플러그인 설치 스캔(execution)도 쓰게 되면서 core가 유일한 자리(정책은 소비자 몫: 스킬=플래그, memory=차단, plugin 설치=플래그+비활성)
+│       ├── frontmatter.py                   #   ★ 신규(2026-07-19) — 마크다운 frontmatter 파싱/직렬화 공용 메커니즘(PyYAML+블록스칼라·대시리스트 폴백). store.py·plugin loader의 의도적 파서 중복 해소(필드 의미론은 각 소비자 소유)
 │       ├── lexical.py                       #   ★ 신규(2026-07-07) — 결정론적 매칭 사다리(exact→substring→char-bigram fuzzy→ko→en 의도어 확장). tool_dispatch·skill relevance가 공유. 시멘틱(임베딩) 매칭은 8GB 바닥사양 로컬 제품 트레이드오프상 의도적 미채택
 │       ├── model_json.py                    #   프로바이더 JSON 응답 파싱 공용 헬퍼
 │       ├── tokens.py                        #   CJK 인식 토큰 추정 휴리스틱 + TokenCalibrator(실측 보정)

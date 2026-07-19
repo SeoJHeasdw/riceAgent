@@ -26,20 +26,22 @@ WHY: 스킬은 파일시스템에 사는 첫-클래스 아티팩트다. 마켓 a
 plugin 제공 스킬과 호환된다 (CONTRACTS §2.2). SQLite 에 넣지 않는 이유는 사용자가
 직접 편집할 수 있게 하기 위함이다 (RUNTIME_DESIGN §3).
 
-frontmatter 파싱에 PyYAML을 사용한다. PyYAML이 없으면 최소 파서(정규식)로 폴백한다.
-의존성은 optional로 선언되어 있으므로 지연 import로 처리한다 (CONVENTIONS §2).
+frontmatter 파싱/직렬화 메커니즘은 core/frontmatter.py 가 소유한다(2026-07-19
+승격 — execution/plugin/loader.py 와의 의도적 파서 중복 해소). 여기는 SKILL.md
+필드 의미론(name 필수, state enum, 타입 강제)만 남는다.
 """
 
 from __future__ import annotations
 
 import os
-import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from ...core.errors import NotFoundError, ValidationError
+from ...core.frontmatter import dump_yaml as _dump_yaml
+from ...core.frontmatter import split_frontmatter
 from ...core.paths import RicePaths
 from ...core.types import now_iso
 
@@ -72,72 +74,7 @@ class SkillData:
     enabled: bool = True
 
 
-# ── frontmatter 파싱 ──────────────────────────────────────────────────────────
-
-_FM_DELIM = re.compile(r"^---\s*$", re.MULTILINE)
-
-
-def _parse_yaml(text: str) -> dict[str, Any]:
-    """YAML 문자열 → dict. PyYAML 없으면 최소 파서로 폴백."""
-    try:
-        import yaml  # optional dep; lazy import (CONVENTIONS §2)
-        return yaml.safe_load(text) or {}
-    except ImportError:
-        return _minimal_yaml_parse(text)
-
-
-def _dump_yaml(data: dict[str, Any]) -> str:
-    """dict → YAML 문자열. PyYAML 없으면 최소 직렬화로 폴백."""
-    try:
-        import yaml
-        return yaml.dump(data, allow_unicode=True, sort_keys=False, default_flow_style=False)
-    except ImportError:
-        return _minimal_yaml_dump(data)
-
-
-def _minimal_yaml_parse(text: str) -> dict[str, Any]:
-    """PyYAML 없이 쓸 수 있는 최소 파서. key: value 형식만 처리한다.
-    NOTE(agent): 중첩 YAML, 멀티라인, 앵커 등은 처리 불가. MVP에서 frontmatter는
-    단순 평탄 구조만 쓰므로 충분하다고 판단 (CONVENTIONS §7 fail-closed).
-    """
-    result: dict[str, Any] = {}
-    for line in text.splitlines():
-        if ":" not in line:
-            continue
-        key, _, val = line.partition(":")
-        key = key.strip()
-        val = val.strip()
-        if not key:
-            continue
-        # 리스트 형식: [a, b, c]
-        if val.startswith("[") and val.endswith("]"):
-            inner = val[1:-1]
-            result[key] = [v.strip().strip("'\"") for v in inner.split(",") if v.strip()]
-        elif val.isdigit():
-            result[key] = int(val)
-        elif val.lower() in ("true", "false"):
-            result[key] = val.lower() == "true"
-        elif val in ("null", "~", ""):
-            result[key] = None
-        else:
-            result[key] = val.strip("'\"")
-    return result
-
-
-def _minimal_yaml_dump(data: dict[str, Any]) -> str:
-    """PyYAML 없이 쓸 수 있는 최소 직렬화."""
-    lines = []
-    for k, v in data.items():
-        if v is None:
-            lines.append(f"{k}: null")
-        elif isinstance(v, list):
-            items = ", ".join(str(i) for i in v)
-            lines.append(f"{k}: [{items}]")
-        elif isinstance(v, bool):
-            lines.append(f"{k}: {'true' if v else 'false'}")
-        else:
-            lines.append(f"{k}: {v}")
-    return "\n".join(lines) + "\n"
+# ── frontmatter 파싱 (메커니즘은 core/frontmatter.py — 여기는 필드 의미론) ────
 
 
 def parse_skill_md(text: str) -> SkillData:
@@ -145,12 +82,13 @@ def parse_skill_md(text: str) -> SkillData:
 
     첫 번째 ---...--- 블록을 frontmatter로 인식한다. 없으면 ValidationError.
     """
-    parts = _FM_DELIM.split(text, maxsplit=2)
-    if len(parts) < 3:
+    try:
+        parsed = split_frontmatter(text)
+    except Exception as exc:  # PyYAML parser errors → stable domain error
+        raise ValidationError(f"SKILL.md frontmatter is not valid YAML: {exc}") from exc
+    if parsed is None:
         raise ValidationError("SKILL.md must start with YAML frontmatter delimited by ---")
-    # parts[0] = '' (frontmatter 앞), parts[1] = frontmatter, parts[2] = body
-    fm_raw, body = parts[1], parts[2]
-    fm = _parse_yaml(fm_raw)
+    fm, body = parsed
 
     name = fm.get("name")
     if not name or not isinstance(name, str):
