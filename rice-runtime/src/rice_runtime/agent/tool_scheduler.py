@@ -77,6 +77,19 @@ class ToolScheduler:
         queue: asyncio.Queue[tuple[str, int, SSEEvent | ToolResult]] = asyncio.Queue()
         semaphore = asyncio.Semaphore(_MAX_PARALLEL_TOOLS)
 
+        def record_queued_results() -> None:
+            # abort 직전에 이미 완료돼 큐에 실린 결과는 버리지 않고 기록한다 —
+            # 부작용이 이미 난 도구(파일 쓰기 등)를 "tool cancelled"로 남기면
+            # 다음 턴의 모델이 실제 상태를 오판한다. 이벤트는 버려도 된다
+            # (중단된 턴의 SSE는 더 흘릴 곳이 없다).
+            while True:
+                try:
+                    kind, index, item = queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                if kind == "result":
+                    result.results[batch[index].call.id] = item  # type: ignore[assignment]
+
         async def worker(index: int, req: ScheduledToolRequest) -> None:
             try:
                 async with semaphore:
@@ -95,6 +108,7 @@ class ToolScheduler:
                 if abort.is_set():
                     for task in tasks:
                         task.cancel()
+                    record_queued_results()
                     for req in batch:
                         result.results.setdefault(req.call.id, ToolResult(req.call.id, ok=False, error="tool cancelled"))
                     return
@@ -109,6 +123,14 @@ class ToolScheduler:
                     await asyncio.gather(queue_task, return_exceptions=True)
                     for task in tasks:
                         task.cancel()
+                    # FIRST_COMPLETED 는 두 태스크가 함께 done 으로 돌아올 수 있다 —
+                    # queue_task 가 이미 항목을 꺼냈다면(cancel 은 no-op) 그 항목은
+                    # 큐에서 소비된 뒤라, 여기서 챙기지 않으면 영원히 유실된다.
+                    if queue_task.done() and not queue_task.cancelled() and queue_task.exception() is None:
+                        kind, index, item = queue_task.result()
+                        if kind == "result":
+                            result.results[batch[index].call.id] = item  # type: ignore[assignment]
+                    record_queued_results()
                     for req in batch:
                         result.results.setdefault(req.call.id, ToolResult(req.call.id, ok=False, error="tool cancelled"))
                     return

@@ -293,7 +293,13 @@ class Orchestrator:
         self._active[session_id] = asyncio.Event()
         try:
             history = self._transcript.history(session_id)
-            last_user = next((m for m in reversed(history) if m.role == "user"), None)
+            # synthetic user 넛지(empty/narration/plan_reconcile)는 히스토리에
+            # 영속되는 role="user" 메시지다 — 걸러야 실제 사용자 질문을 찾는다
+            # (라우트의 delete_after 절단 기준과 같은 규칙).
+            last_user = next(
+                (m for m in reversed(history) if m.role == "user" and not m.metadata.get("synthetic")),
+                None,
+            )
             if last_user is None:
                 yield ev_error("no_user_message", "재생성할 사용자 메시지가 없습니다.")
                 yield ev_done()
@@ -317,6 +323,9 @@ class Orchestrator:
         """Steps 2–7 of a turn (prefetch → assemble → loop → persist → observe →
         surface), shared by run_turn and regenerate. The user message is assumed
         already persisted as the tail of history."""
+        # setdefault → clear 순서가 계약이다: abort_and_drain timeout 등으로 이전
+        # 턴의 set 된 이벤트가 잔류해도, 재사용 전 clear 가 새 턴의 즉시 abort 를
+        # 막는다. 순서를 뒤집으면(clear 후 setdefault) 이 방어가 깨진다.
         abort = self._aborts.setdefault(session_id, asyncio.Event())
         abort.clear()
         # Apply a queued workspace relocation at this turn boundary. This

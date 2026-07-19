@@ -27,7 +27,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Sequence
 
 from ..core.config import AgentConfig
@@ -307,7 +307,12 @@ class AgentLoop:
         tool_calls_made = 0
         final_text = ""
         # 이 턴의 사용자 요청 — 플래너와 TurnView(서브에이전트 라이브 컨텍스트)가 공유.
-        user_message = next((m.content for m in reversed(messages) if m.role == "user"), "")
+        # synthetic user 넛지는 제외 — 히스토리에 영속되는 role="user"라, 안 거르면
+        # 플래너가 넛지 문구를 이 턴의 질문으로 오인할 수 있다(regenerate 경로와 동일 규칙).
+        user_message = next(
+            (m.content for m in reversed(messages) if m.role == "user" and not m.metadata.get("synthetic")),
+            "",
+        )
 
         # ── PLAN: 의도 파악 + 필요 시 계획 수립 (fail-soft — 실패해도 턴 진행) ──
         plan_state: PlanState | None = None
@@ -344,12 +349,10 @@ class AgentLoop:
         silent_tool_rounds = 0
         narration_nudges = 0
         while True:
-            if iteration >= self._effective_max_iterations(ctx, plan_state):
+            max_iterations = self._effective_max_iterations(ctx, plan_state)
+            if iteration >= max_iterations:
                 # budget exhausted without a clean stop
-                yield ev_error(
-                    "max_iterations",
-                    f"turn exceeded {self._effective_max_iterations(ctx, plan_state)} iterations",
-                )
+                yield ev_error("max_iterations", f"turn exceeded {max_iterations} iterations")
                 break
             iteration += 1
             if abort.is_set():
@@ -555,9 +558,14 @@ class AgentLoop:
                     yield ev_plan_updated(plan_state.plan)
                     # 강제 종결 스냅샷을 마지막 어시스턴트 메시지 metadata에도 싣는다 —
                     # 리로드가 "진행 중처럼 보이는" 이전 스냅샷으로 복원되던 한계
-                    # (AGENT_EXECUTION §3.4의 알려진 한계) 해소. metadata dict는
-                    # frozen Message에서도 가변이라 append 이후 부착이 안전하다.
-                    messages[-1].metadata["plan"] = plan_state.plan.to_dict()
+                    # (AGENT_EXECUTION §3.4의 알려진 한계) 해소. frozen Message의
+                    # metadata dict를 제자리 변경하지 않고 replace로 재생성한다 —
+                    # 밖으로 공유된 참조(TurnView 스냅샷 등)가 변경을 관찰하는 일이
+                    # 없도록 불변식을 지킨다.
+                    messages[-1] = replace(
+                        messages[-1],
+                        metadata={**messages[-1].metadata, "plan": plan_state.plan.to_dict()},
+                    )
                 if reconcile_final_text is not None:
                     # 답은 넛지 시점에 이미 확정·전송됐다 — 재전송하면 클라이언트에
                     # 중복 버블이 생긴다. 이번 라운드의 재작성 본문은 위에서 억제됐다.
@@ -695,7 +703,11 @@ class AgentLoop:
                     log.warning("reconcile round left steps open — auto-closing remainder as skipped")
                     plan_state.reconcile_abandoned()
                     yield ev_plan_updated(plan_state.plan)
-                    messages[-1].metadata["plan"] = plan_state.plan.to_dict()
+                    # frozen Message 불변식 유지 — 위의 강제 종결 경로와 같은 이유.
+                    messages[-1] = replace(
+                        messages[-1],
+                        metadata={**messages[-1].metadata, "plan": plan_state.plan.to_dict()},
+                    )
                 final_text = reconcile_final_text
                 break
 

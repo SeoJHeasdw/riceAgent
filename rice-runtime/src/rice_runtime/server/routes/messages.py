@@ -240,8 +240,14 @@ async def regenerate(
     # Drop the stale assistant turn (everything after the last user message) so the
     # re-run replaces it rather than appending a second answer. 절단 기준은 그 사용자
     # 메시지의 고유 id(rowid) — ts 절단은 같은 밀리초의 assistant 응답을 남긴다.
+    # 런타임이 주입한 synthetic user 넛지(empty/narration/plan_reconcile)는 role만
+    # user 라 걸러야 한다 — 안 거르면 넛지 문구를 "마지막 질문"으로 오인해 그
+    # 앞의 스테일 도구 라운드까지 살아남는다.
     history = c.sessions.history(session_id)
-    last_user = next((m for m in reversed(history) if m.role == "user"), None)
+    last_user = next(
+        (m for m in reversed(history) if m.role == "user" and not m.metadata.get("synthetic")),
+        None,
+    )
     if last_user is None:
         raise ConflictError("nothing to regenerate", code="session.nothing_to_regenerate")
     c.sessions.delete_after_message(session_id, last_user.id)

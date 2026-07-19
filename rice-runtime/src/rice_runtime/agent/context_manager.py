@@ -252,6 +252,11 @@ class ConversationContextManager:
             )
             return RenderedContext(system_prompt, tuple(messages), stats)
 
+        # 형태 캐시 위생은 매 렌더 수행한다 — 체크포인트 시점에만 하면, 예산을
+        # 오래 안 넘는 세션에서 regenerate 절단으로 사라진 메시지의 동결 형태가
+        # 무기한 잔류한다(세션 상태는 턴을 넘어 산다). 현재 트랜스크립트에 있는
+        # id는 건드리지 않으므로 동결(프리픽스 캐시) 불변식은 그대로다.
+        self._prune_forms(messages)
         managed, masked_ids, distilled_ids = self._manage_messages(messages)
         checkpoint = self._state.checkpoint
 
@@ -267,7 +272,6 @@ class ConversationContextManager:
             managed, masked_ids, distilled_ids = self._manage_messages(messages, refresh=True)
             checkpoint = self._build_checkpoint(system_prompt, tuple(managed))
             self._state.checkpoint = checkpoint
-            self._prune_forms(messages)
 
         visible = _apply(managed, checkpoint)
         visible, orphan_ids = self._drop_orphaned_tool_prefix(visible)
@@ -454,10 +458,13 @@ class ConversationContextManager:
         )
 
     def _prune_forms(self, messages: Sequence[Message]) -> None:
-        """체크포인트 시점의 캐시 위생 — 현재 트랜스크립트에 없는 id(재생성으로
-        잘린 메시지 등)의 동결 형태를 걷어낸다."""
+        """캐시 위생 — 현재 트랜스크립트에 없는 id(재생성으로 잘린 메시지 등)의
+        동결 형태를 걷어낸다. 매 렌더 호출된다: 평상시(stale 없음)엔 삭제가
+        일어나지 않아 기존 dict와 동결 형태가 그대로 유지된다."""
         keep = {m.id for m in messages}
-        self._state.forms = {k: v for k, v in self._state.forms.items() if k in keep}
+        stale = [k for k in self._state.forms if k not in keep]
+        for k in stale:
+            del self._state.forms[k]
 
     @staticmethod
     def _drop_orphaned_tool_prefix(

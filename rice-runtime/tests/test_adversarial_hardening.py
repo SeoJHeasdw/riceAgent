@@ -88,6 +88,35 @@ async def test_regenerate_busy_does_not_destroy_transcript():
 
 
 @pytest.mark.asyncio
+async def test_regenerate_cut_ignores_synthetic_user_nudges():
+    """런타임이 주입한 synthetic user 넛지(empty/narration/plan_reconcile)는 role만
+    user 다 — 절단 기준으로 오인하면 넛지 문구가 "마지막 질문"이 되어 그 앞의
+    스테일 도구 라운드까지 살아남는다(적대 리뷰 2026-07-19 H3). 절단은 실제
+    사용자 메시지 기준이어야 한다."""
+    from rice_runtime.server.routes.messages import regenerate
+
+    c = build_container(RuntimeArgs(), paths=_fresh_paths())
+    try:
+        s = c.sessions.create()
+        real = Message(role="user", content="진짜 질문")
+        c.sessions.append(s.id, real)
+        c.sessions.append(s.id, Message(role="assistant", content="", metadata={"thinking": ""}))
+        c.sessions.append(
+            s.id, Message(role="user", content="넛지", metadata={"synthetic": "empty_nudge"})
+        )
+        c.sessions.append(s.id, Message(role="assistant", content="낡은 답"))
+
+        resp = await regenerate(s.id, c)
+        await resp.body_iterator.aclose()  # 스트림은 소비하지 않는다 — 절단만 검증
+        history = c.sessions.history(s.id)
+        # 실제 사용자 메시지 이후가 전부 잘렸다 — 넛지·스테일 라운드가 남지 않는다.
+        assert [m.role for m in history] == ["user"]
+        assert history[-1].id == real.id
+    finally:
+        c.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_delete_session_drains_active_turn():
     """DELETE /sessions 는 진행 중 턴을 abort+drain 한 뒤 지운다 — 턴 꼬리의
     append/observe 가 삭제된 세션에 쓰다 죽지 않는다."""

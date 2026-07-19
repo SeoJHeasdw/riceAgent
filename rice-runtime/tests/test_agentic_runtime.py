@@ -345,6 +345,42 @@ async def test_tool_scheduler_parallel_batch_observes_abort_while_waiting():
     assert batch.results["b"].error == "tool cancelled"
 
 
+@pytest.mark.asyncio
+async def test_tool_scheduler_abort_preserves_completed_tool_result():
+    """abort 직전에 이미 완료돼 큐에 실린 결과는 "tool cancelled"로 덮이지 않는다 —
+    부작용이 이미 난 도구(파일 쓰기 등)를 취소로 기록하면 다음 턴의 모델이 실제
+    상태를 오판한다(적대 리뷰 2026-07-19 C2)."""
+    from rice_runtime.core.types import ToolResult, ev_tool_call
+
+    class MixedDispatcher:
+        async def dispatch(self, session_id, call, spec):
+            if call.id == "slow":
+                while True:
+                    await asyncio.sleep(1)
+            yield ev_tool_call(call)
+
+        async def result_for(self, call):
+            return ToolResult(call.id, ok=True, result={"done": True})
+
+    scheduler = ToolScheduler(MixedDispatcher())  # type: ignore[arg-type]
+    batch = ToolBatchResult()
+    requests = (
+        ScheduledToolRequest(ToolCall(tool_name="fast", arguments={}, id="fast"), _spec("fast")),
+        ScheduledToolRequest(ToolCall(tool_name="slow", arguments={}, id="slow"), _spec("slow")),
+    )
+    abort = asyncio.Event()
+    gen = scheduler.schedule("s1", requests, batch, abort)
+    first = await gen.__anext__()  # fast의 tool_call 이벤트 — 결과는 아직 큐에 있다
+    assert first.type.value == "tool_call"
+    await asyncio.sleep(0.05)  # 제너레이터가 멈춘 사이 fast 워커가 결과를 큐에 넣는다
+    abort.set()
+    async for _ in gen:
+        pass
+
+    assert batch.results["fast"].ok is True  # 완료된 결과가 유실되지 않았다
+    assert batch.results["slow"].error == "tool cancelled"
+
+
 class _ToolThenFinalProvider:
     name = "fake"
 
