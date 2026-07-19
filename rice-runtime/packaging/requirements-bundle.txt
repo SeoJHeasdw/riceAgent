@@ -1,0 +1,4 @@
+# Build on the same OS and CPU architecture as the installer target. Runtime
+# dependencies come from pyproject.toml; installing PyInstaller first also puts
+# setuptools in a fresh Python 3.13 venv before the local project is built.
+pyinstaller==6.21.0

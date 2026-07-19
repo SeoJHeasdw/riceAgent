@@ -87,7 +87,7 @@ class ChildProcessSandbox(ISandbox):
         coroutine in `asyncio.wait_for` does NOT kill the subprocess: cancelling
         `communicate()` leaves the child running as an orphan.)
         """
-        args = child_script_args()
+        args = child_script_args(sys_path or ())
         kwargs = make_child_kwargs(extra_path=sys_path)
         # asyncio subprocess: stdin/stdout are async streams.
         # start_new_session(POSIX): 자식을 전용 프로세스 그룹으로 분리한다 — 종료

@@ -12,28 +12,29 @@ files:
   - package.json
   - node_modules/**/*
 
+# Native PyInstaller bundle prepared on the same OS/architecture as Electron.
+# Installed users do not need Python; the interpreter and site-packages live in
+# <resources>/rice-runtime.
+extraResources:
+  - from: runtime-dist/${platform}-${arch}/rice-runtime
+    to: rice-runtime
+    filter:
+      - "**/*"
+
 # macOS configuration
 mac:
   target:
-    - target: dmg
-      arch:
-        - x64
-        - arm64
-    - target: zip
-      arch:
-        - x64
-        - arm64
+    - dmg
+    - zip
   category: public.app-category.developer-tools
-  icon: build/icon.icns
+  artifactName: ${productName}-${version}-${arch}.${ext}
   hardenedRuntime: true
   gatekeeperAssess: false
   entitlements: build/entitlements.mac.plist
-  entitlementsInherit: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.inherit.plist
 
 dmg:
   title: ${productName} ${version}
-  icon: build/icon.icns
-  background: build/background.png
   window:
     width: 540
     height: 380
@@ -49,15 +50,8 @@ dmg:
 # Windows configuration
 win:
   target:
-    - target: nsis
-      arch:
-        - x64
-        - ia32
-    - target: zip
-      arch:
-        - x64
-        - ia32
-  icon: build/icon.ico
+    - nsis
+    - zip
   artifactName: ${productName}-${version}-${arch}.${ext}
 
 nsis:
@@ -72,21 +66,16 @@ nsis:
 # Linux configuration
 linux:
   target:
-    - target: AppImage
-      arch:
-        - x64
-        - arm64
-    - target: deb
-      arch:
-        - x64
-        - arm64
+    - AppImage
+    - deb
   category: Development
-  icon: build/icons
+  artifactName: ${productName}-${version}-${arch}.${ext}
   synopsis: Runtime-Integrated Conversational Environment
   description: RICE is a desktop application for interacting with AI agents powered by MCP tools and plugins.
   maintainer: RICE Team
 
-# Publishing configuration (disabled by default)
+# Publishing is intentionally opt-in. CI uploads build artifacts without
+# pretending that example.com is a real update endpoint.
 publish: null
 
 # Compression

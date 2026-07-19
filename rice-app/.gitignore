@@ -8,7 +8,11 @@ dist/
 dist-electron/
 release/
 build/
+!build/
+!build/*.plist
 out/
+.runtime-build/
+runtime-dist/
 
 # Development
 .vscode/*

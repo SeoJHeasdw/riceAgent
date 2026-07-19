@@ -12,6 +12,7 @@ let runtimeManager: RuntimeManager | null = null;
 
 // Main window instance
 let mainWindow: BrowserWindow | null = null;
+let shutdownInProgress = false;
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 
@@ -90,11 +91,15 @@ app.on('window-all-closed', () => {
   }
 });
 
-app.on('before-quit', async () => {
-  // Cleanup runtime manager
-  if (runtimeManager) {
-    await runtimeManager.shutdown();
-  }
+app.on('before-quit', (event) => {
+  // Electron does not await async event listeners. Prevent the first quit,
+  // reap the Python child, then allow a second quit event through.
+  if (shutdownInProgress) return;
+  event.preventDefault();
+  shutdownInProgress = true;
+  void (runtimeManager?.shutdown() ?? Promise.resolve())
+    .catch((err) => console.error('[main] runtime shutdown failed:', err))
+    .finally(() => app.quit());
 });
 
 // IPC Handlers

@@ -41,7 +41,7 @@ from rice_runtime.execution.interfaces import PluginInfo, SandboxResult
 from rice_runtime.execution.plugin.loader import PluginLoader, _parse_skill_md_minimal
 from rice_runtime.execution.plugin.manifest import ArtifactManifest, parse_manifest
 from rice_runtime.execution.plugin.registry import PluginRegistry
-from rice_runtime.execution.sandbox.ipc import decode_response, encode_request, encode_response
+from rice_runtime.execution.sandbox.ipc import child_script_args, decode_response, encode_request, encode_response
 from rice_runtime.execution.sandbox.policy import scrub_env
 from rice_runtime.execution.sandbox.runner import ChildProcessSandbox
 from rice_runtime.execution.service import NoopSandbox, PluginLoaderService
@@ -173,6 +173,19 @@ class TestIpc:
         ok, result, error = decode_response(raw)
         assert ok is False
         assert error == "boom"
+
+    def test_frozen_worker_relaunches_runtime_with_explicit_plugin_paths(self, monkeypatch):
+        monkeypatch.setattr(sys, "frozen", True, raising=False)
+        monkeypatch.setattr(sys, "executable", "/opt/rice/rice-runtime")
+        args = child_script_args(["/tmp/plugin-a", "/tmp/plugin-b"])
+        assert args == [
+            "/opt/rice/rice-runtime",
+            "--sandbox-worker",
+            "--sandbox-path",
+            "/tmp/plugin-a",
+            "--sandbox-path",
+            "/tmp/plugin-b",
+        ]
 
 
 # ── ChildProcessSandbox (subprocess —수용 기준 #1, #2, #3) ──────────────────

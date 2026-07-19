@@ -13,6 +13,12 @@ export interface RuntimeStatus {
   token?: string;
 }
 
+interface RuntimeCommand {
+  cmd: string;
+  args: string[];
+  sourceTree: boolean;
+}
+
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** Ask the OS for a free TCP port (bind :0, read it back, release). */
@@ -39,8 +45,9 @@ function findFreePort(): Promise<number> {
  *
  * Command resolution (first match wins):
  *   1. env `RICE_RUNTIME_BIN`            — explicit executable path
- *   2. `<runtimeDir>/.venv/bin/rice-runtime` (POSIX) / `Scripts\rice-runtime.exe` (Win)
- *   3. `python3 -m rice_runtime` with cwd=<runtimeDir> (PYTHONPATH=src)
+ *   2. packaged `<resources>/rice-runtime/rice-runtime[.exe]` (PyInstaller)
+ *   3. dev `<runtimeDir>/.venv/bin/rice-runtime` (POSIX) / `Scripts\rice-runtime.exe` (Win)
+ *   4. dev `python3 -m rice_runtime` with cwd=<runtimeDir> (PYTHONPATH=src)
  * where <runtimeDir> = env `RICE_RUNTIME_DIR` → (dev) `<repo>/rice-runtime`
  *   → (packaged) `<resources>/rice-runtime`.
  *
@@ -69,24 +76,32 @@ export class RuntimeManager {
   }
 
   /** (command, args) to launch, given the chosen port + token. */
-  private resolveCommand(dir: string, port: number, token: string): { cmd: string; args: string[] } {
+  private resolveCommand(dir: string, port: number, token: string): RuntimeCommand {
     const common = ['--port', String(port), '--token', token];
 
     const explicit = process.env.RICE_RUNTIME_BIN;
-    if (explicit && existsSync(explicit)) return { cmd: explicit, args: common };
+    if (explicit && existsSync(explicit)) return { cmd: explicit, args: common, sourceTree: false };
+
+    if (app.isPackaged) {
+      const bundled = path.join(dir, process.platform === 'win32' ? 'rice-runtime.exe' : 'rice-runtime');
+      if (!existsSync(bundled)) {
+        throw new Error(`bundled rice-runtime executable is missing: ${bundled}`);
+      }
+      return { cmd: bundled, args: common, sourceTree: false };
+    }
 
     const venvBin = process.platform === 'win32'
       ? path.join(dir, '.venv', 'Scripts', 'rice-runtime.exe')
       : path.join(dir, '.venv', 'bin', 'rice-runtime');
-    if (existsSync(venvBin)) return { cmd: venvBin, args: common };
+    if (existsSync(venvBin)) return { cmd: venvBin, args: common, sourceTree: false };
 
     // Fallback: module run via python (PYTHONPATH=src set in spawn env).
     const py = process.platform === 'win32' ? 'python' : 'python3';
-    return { cmd: py, args: ['-m', 'rice_runtime', ...common] };
+    return { cmd: py, args: ['-m', 'rice_runtime', ...common], sourceTree: true };
   }
 
   /** Poll /health until the runtime answers (or timeout). */
-  private async waitForHealth(port: number, timeoutMs = 20000): Promise<boolean> {
+  private async waitForHealth(port: number, timeoutMs = 30000): Promise<boolean> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       if (!this.process || this.process.exitCode !== null) return false; // child died
@@ -110,18 +125,25 @@ export class RuntimeManager {
     const dir = this.runtimeDir();
     const port = await findFreePort();
     const token = crypto.randomBytes(24).toString('hex');
-    const { cmd, args } = this.resolveCommand(dir, port, token);
+    const { cmd, args, sourceTree } = this.resolveCommand(dir, port, token);
 
-    console.log(`[RuntimeManager] Starting: ${cmd} ${args.join(' ')} (cwd=${dir})`);
+    // Never print the one-shot bearer token into application logs.
+    console.log(`[RuntimeManager] Starting: ${cmd} --port ${port} --token <redacted> (cwd=${dir})`);
+    const childEnv: NodeJS.ProcessEnv = {
+      ...process.env,
+      PYTHONUNBUFFERED: '1',
+    };
+    if (sourceTree) childEnv.PYTHONPATH = path.join(dir, 'src');
+    if (app.isPackaged && !childEnv.RICE_HOME) {
+      // Keep mutable state in the app's per-user data directory, never beside
+      // the signed/read-only installation under Program Files or an .app.
+      childEnv.RICE_HOME = path.join(app.getPath('userData'), 'runtime');
+    }
     this.process = spawn(cmd, args, {
       cwd: dir,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
-        // module-run fallback needs the package importable from src/
-        PYTHONPATH: path.join(dir, 'src'),
-        PYTHONUNBUFFERED: '1',
-      },
+      env: childEnv,
+      windowsHide: true,
     });
 
     this.process.stdout?.on('data', (d) => console.log(`[runtime] ${String(d).trimEnd()}`));

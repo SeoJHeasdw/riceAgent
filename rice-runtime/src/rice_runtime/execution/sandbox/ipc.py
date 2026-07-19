@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
 
@@ -105,10 +107,60 @@ def make_child_script() -> str:
     )
 
 
-def child_script_args() -> list[str]:
+def run_frozen_child_worker(extra_path: Sequence[str] = ()) -> None:
+    """Run one sandbox request inside a recursively spawned frozen runtime.
+
+    In a PyInstaller bundle ``sys.executable`` is the ``rice-runtime``
+    bootloader, not a general-purpose Python interpreter, so ``-c`` cannot be
+    used.  The parent launches the same executable with ``--sandbox-worker``;
+    the CLI calls this function, which preserves the JSON-line protocol used by
+    the normal source-tree worker.
+
+    ``extra_path`` is passed explicitly instead of trusting the parent process'
+    ``PYTHONPATH``.  This keeps the frozen worker able to import an installed
+    user plugin while retaining the sandbox's deny-by-default environment.
+    """
+    from .policy import apply_resource_limits
+
+    apply_resource_limits()
+    for raw_path in reversed(tuple(extra_path)):
+        plugin_path = str(Path(raw_path).resolve())
+        if plugin_path not in sys.path:
+            sys.path.insert(0, plugin_path)
+
+    raw = sys.stdin.readline()
+    try:
+        entrypoint, payload = decode_request(raw)
+        if entrypoint == "__sleep__":
+            import time
+
+            time.sleep(float(payload.get("seconds", 10)))
+            result: Any = "slept"
+        elif "." in entrypoint:
+            import importlib
+
+            module_name, function_name = entrypoint.rsplit(".", 1)
+            module = importlib.import_module(module_name)
+            function = getattr(module, function_name)
+            result = function(**payload) if payload else function()
+        else:
+            result = eval(entrypoint, {"payload": payload})  # noqa: S307 - isolated child by contract
+        sys.stdout.buffer.write(encode_response(True, result))
+    except Exception as exc:  # noqa: BLE001 - errors cross the IPC envelope
+        sys.stdout.buffer.write(encode_response(False, None, str(exc)))
+    sys.stdout.buffer.flush()
+
+
+def child_script_args(extra_path: Sequence[str] = ()) -> list[str]:
     """CLI args to pass to `subprocess.Popen` to run the embedded child script.
 
-    Uses the *same* Python interpreter as the parent (sys.executable) so the
-    sandbox worker is always on the same Python version.
+    Source installs use the same Python interpreter as the parent. Frozen
+    installs recursively launch the bundled runtime's private worker mode,
+    because their ``sys.executable`` is not a Python command-line interpreter.
     """
+    if getattr(sys, "frozen", False):
+        args = [sys.executable, "--sandbox-worker"]
+        for plugin_path in extra_path:
+            args.extend(("--sandbox-path", str(plugin_path)))
+        return args
     return [sys.executable, "-c", make_child_script()]
