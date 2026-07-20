@@ -12,10 +12,6 @@
 
 ## 1. Learning Loop 개요
 
-![RICE learning loop architecture](diagrams/RICE_learning_loop.png)
-
-> 편집용 PUML: [learning-loop.puml](diagrams/learning-loop.puml). 전체 의존성까지 펼친 상세 맵은 [RICE_ALL_learning_loop_architecture.png](diagrams/RICE_ALL_learning_loop_architecture.png) / [PUML](diagrams/RICE_ALL_learning_loop_architecture.puml)에 보관한다.
-
 ```
 경험(대화)  →  축적(skill 생성 / memory 기록)  →  재사용(다음 턴 주입)  →  개선(patch · §5.2)
    ▲                                                                              │

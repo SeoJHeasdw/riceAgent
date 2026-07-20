@@ -32,10 +32,6 @@ divergence가 tail에서만 일어나 이전 반복까지의 프리픽스가 캐
 
 ---
 
-![RICE one-turn orchestration architecture](diagrams/RICE_orchstrate_architecture.png)
-
-> 편집용 PUML: [agent-workflow.puml](diagrams/agent-workflow.puml). 전체 의존성까지 펼친 상세 맵은 [RICE_ALL_orchstrate_architecture.png](diagrams/RICE_ALL_orchstrate_architecture.png) / [PUML](diagrams/RICE_ALL_orchstrate_architecture.puml)에 보관한다.
-
 ## 1. 한 턴의 전체 파이프라인
 
 `POST /sessions/{id}/messages` → `Orchestrator.run_turn()` (agent/orchestrator.py).
