@@ -2352,8 +2352,9 @@ function MySkillsScreen() {
   /** 수동 "스킬 정리" (LEARNING_LOOP_DESIGN 5.1 데모 경로 · POST /skills/curate).
    *  큐레이터의 시간 규칙을 지금 즉시 재적용한다: 각 스킬의 idleDays(미사용 일수)로
    *  있어야 할 상태(3일↑ stale, 7일↑ archived)를 계산해, 현재 상태와 어긋난 스킬을 전이.
-   *  복귀(→active)는 실제 사용 시 idleDays 가 리셋되며 일어나므로, 정리는 "내려가는"
-   *  전이(active→stale→archived)만 적용한다. 각 전이는 "N일 미사용" 사유와 함께 보고. */
+   *  복귀(→active)는 실제 관여 시 자동으로, 또는 사용자가 활성으로 재확인할 때
+   *  일어난다. 정리는 "내려가는" 전이(active→stale→archived)만 적용한다.
+   *  각 전이는 "N일 미사용" 사유와 함께 보고. */
   const curateSkills = () => {
     if (curating) return;
     setCurating(true);

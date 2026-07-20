@@ -146,7 +146,16 @@ patch로 표현되고(`from_version=0`), `skill_patch_proposed`가 diff 카드�
 상태: `active → stale → archived` (RUNTIME_DESIGN 4장과 동일).
 
 **전이 규칙(curator, `learning/curator/`)**:
-- 자동(규칙): `last_used_at` 경과 기준 — ★ 데모 설정 stale 3일 / archive 7일
+- 자동(규칙): freshness 경과 기준 — ★ 데모 설정 stale 3일 / archive 7일
+  - freshness = `max(last_used_at, updated_at, created_at)`. 실제 사용·본문 편집·생성·
+    사용자의 명시적 재활성화가 시계를 리셋하며, curator 자체의 상태 전이는 리셋하지 않는다.
+  - `active`와 `stale`은 모두 검색·인덱스·관련도 기반 전문 주입 대상이다. `stale`은
+    비활성이 아니라 재확인 경고이며, 완주한 턴에서 실제 관여가 확인되면 자동으로
+    `active`에 복귀한다. 단순 노출(injected)은 복귀나 `last_used_at` 갱신 근거가 아니다.
+  - MySkills에서 사용자가 stale→active를 선택하면 freshness만 리셋한다. 실제 사용이
+    아니므로 `use`와 `last_used_at`은 꾸미지 않는다.
+  - `archived`와 수동 `inactive`(`enabled=false`)는 검색·주입 대상이 아니며, inactive는
+    curator가 자동 전이하거나 다시 켜지 않는다.
   - ⚠️ 일(day) 단위는 짧은 데모에서 자동 전이가 **관찰되지 않음** → 시연은 수동 트리거로 한다
 - 수동: ChatScreen/MySkills의 "스킬 정리" 버튼 → `POST /skills/curate` 즉시 실행 (데모 경로)
 - 사용량 기반 전이는 **향후 고도화로 연기** — 지금은 시간 규칙(자동) + 수동 "스킬 정리"만.

@@ -113,7 +113,8 @@ export interface Skill {
    */
   state?: 'active' | 'stale' | 'archived';
   /**
-   * 마지막 사용 후 경과일 (last_used_at 기준, LEARNING_LOOP_DESIGN 5.1).
+   * 마지막 lifecycle 활동 후 경과일 (freshness_at 기준, LEARNING_LOOP_DESIGN 5.1).
+   * 실제 사용뿐 아니라 편집·생성·사용자의 명시적 재활성화가 freshness를 리셋한다.
    * 큐레이터 시간 규칙의 입력: 3일 이상 → stale, 7일 이상 → archived.
    * state 는 마지막 큐레이션 결과이고 idleDays 는 실제 경과 시간이라, 둘이
    * 어긋나 있으면("3일 지났는데 아직 active") "스킬 정리"가 전이를 발생시킨다.

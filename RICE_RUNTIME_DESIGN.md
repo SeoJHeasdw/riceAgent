@@ -143,6 +143,9 @@ Gemini CLI Scheduler의 상태 머신 전체를 옮기지는 않는다. RICE는 
 - 생성 트리거: `ReviewGate`/`ReviewEngine` 사후 리뷰, 명시적 `/learn`, 미드턴 `propose_skill` 도구. 시스템 프롬프트 가이드는 모델 행동을 유도하지만 저장 경로 자체는 승인 기반 도구/리뷰 파이프라인이 담당한다.
 - 텔레메트리: use/view/patch 카운터 + 사이드카 JSON (Hermes 검증과 동일 패턴)
 - 상태 전이(transition): active → stale → archived — **stale 3일 / archive 7일** (설정으로 노출)
+  - `stale`은 경고가 붙은 사용 가능 상태로 검색·관련도 주입을 계속하며, 실제 관여 시
+    active로 자동 복귀한다. 사용자의 수동 재활성화도 freshness 시계만 리셋한다(use는 불변).
+    archived 및 수동 inactive만 검색·주입에서 제외한다.
   - ⚠️ 일(day) 단위 주기로 설정하면 짧은 데모에서는 자동 전이를 확인할 수 없음 → 시연은 수동 "스킬 정리"로 한다
 - Curator: 자동 전이(규칙) + 수동 "스킬 정리" 트리거
 - **개선(patch)** — 상태 전이와 **별개 관심사**다. 주입된 스킬의 절차가 틀리거나 낡으면 에이전트가 **개선안을 제안** → 사용자 승인(HITL) 후 본문 교체 + version++ + 이전 버전 `~/.rice/skills/<name>/.history/v<N>.md` 보관(롤백·diff). **무단 자동 수정 없음.** 메커니즘 정본은 [RICE_LEARNING_LOOP_DESIGN.md](RICE_LEARNING_LOOP_DESIGN.md) 5.2, 승인 전송은 5장(HITL 승인 메커니즘), 계약(`skill_patch_proposed`·`skill_patched`·`/skills/{id}/patch|history|rollback`)은 [RICE_CONTRACTS.md](RICE_CONTRACTS.md) 1.2·1.3.

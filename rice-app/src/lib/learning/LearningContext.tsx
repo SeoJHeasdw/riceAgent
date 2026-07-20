@@ -113,7 +113,9 @@ function originFromSource(source: string | null | undefined): Skill['origin'] {
  * runtime GET /skills 응답(SkillSummary.__dict__) → learningData.Skill 변환.
  *
  * runtime 스킬은 kebab-case name을 id로 쓴다. version은 정수(예: 3 → "v3").
- * idleDays는 last_used_at에서 계산 (없으면 undefined).
+ * idleDays는 서버 lifecycle clock(freshness_at)에서 계산한다. 실제 사용 시각인
+ * last_used_at과 분리되어, 수동 재활성화가 use 텔레메트리를 꾸미지 않으면서도
+ * stale/archive 시계를 정상적으로 리셋할 수 있다.
  */
 function runtimeSkillToLearning(s: {
   id: string;
@@ -128,10 +130,17 @@ function runtimeSkillToLearning(s: {
   routing_miss?: number;
   patch: number;
   last_used_at: string | null;
+  freshness_at?: string | null;
   source?: string | null;
   enabled?: boolean;
 }): Skill {
+  const freshnessAt = s.freshness_at ?? s.last_used_at;
   const idleDays = (() => {
+    if (!freshnessAt) return undefined;
+    const ms = Date.now() - new Date(freshnessAt).getTime();
+    return Math.floor(ms / 86_400_000);
+  })();
+  const usedDays = (() => {
     if (!s.last_used_at) return undefined;
     const ms = Date.now() - new Date(s.last_used_at).getTime();
     return Math.floor(ms / 86_400_000);
@@ -140,11 +149,11 @@ function runtimeSkillToLearning(s: {
   const useTrend: string =
     s.use === 0
       ? 'trend_not_used_yet'
-      : idleDays == null
+      : usedDays == null
         ? 'trend_in_use'
-        : idleDays === 0
+        : usedDays === 0
           ? 'trend_used_today'
-          : `trend_days_ago:${idleDays}`;
+          : `trend_days_ago:${usedDays}`;
   return {
     id: s.id,
     name: s.name,
@@ -154,7 +163,7 @@ function runtimeSkillToLearning(s: {
     friction: s.friction ?? 0,
     routingMiss: s.routing_miss ?? 0,
     trend: useTrend,
-    enabled: s.state === 'active' && (s.enabled ?? true),
+    enabled: s.state !== 'archived' && (s.enabled ?? true),
     hot: s.use > 10,
     patches: s.patch,
     command: s.name, // runtime id(kebab) = slash command
@@ -235,6 +244,7 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         state: 'active' | 'stale' | 'archived'; tags: string[];
         use: number; injected?: number; friction?: number; routing_miss?: number;
         patch: number; last_used_at: string | null; source?: string | null;
+        freshness_at?: string | null;
         enabled?: boolean;
       };
       const raw = res.data as RuntimeSkill[];

@@ -37,9 +37,34 @@ def _parse_iso(ts: str | None) -> datetime.datetime | None:
     if not ts:
         return None
     try:
-        return datetime.datetime.fromisoformat(ts.rstrip("Z"))
+        parsed = datetime.datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+        return parsed
     except ValueError:
         return None
+
+
+def freshness_at(skill: SkillData, last_used_at: str | None = None) -> str | None:
+    """Return the lifecycle clock exposed to management clients.
+
+    Actual use, an edit, creation, or an explicit user reactivation all make a
+    skill fresh.  Automatic lifecycle transitions deliberately do not.  Keep
+    this calculation beside ``compute_transition`` so the UI and curator cannot
+    silently disagree about how many idle days have elapsed.
+    """
+    refs = [
+        parsed
+        for parsed in (
+            _parse_iso(last_used_at),
+            _parse_iso(skill.updated_at),
+            _parse_iso(skill.created_at),
+        )
+        if parsed is not None
+    ]
+    if not refs:
+        return None
+    return max(refs).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def compute_transition(
@@ -67,16 +92,11 @@ def compute_transition(
     _now = now or datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 
     # 사용·수정·생성 중 가장 최근 신호를 기준으로 삼는다(어떤 활동이든 신선도로 인정).
-    candidates = [
-        _parse_iso(last_used_at),
-        _parse_iso(skill.updated_at),
-        _parse_iso(skill.created_at),
-    ]
-    refs = [c for c in candidates if c is not None]
-    if not refs:
+    ref_at = freshness_at(skill, last_used_at)
+    ref = _parse_iso(ref_at)
+    if ref is None:
         # NOTE(agent): 기준 날짜가 없으면 전이하지 않는다 (fail-closed).
         return None
-    ref = max(refs)
 
     elapsed_days = (_now - ref).total_seconds() / 86400
 
@@ -112,6 +132,21 @@ class SkillLifecycle:
             skill.state = state
             skill.enabled = True
         skill.updated_at = now_iso()
+        self._store.write(skill)
+
+    def transition_state(self, name: str, state: SkillState) -> None:
+        """Apply an automatic lifecycle transition without faking activity.
+
+        Unlike a user action through ``set_state``, a curator transition must
+        preserve both ``updated_at`` (the freshness clock) and ``enabled`` (the
+        user's injection preference).  Otherwise active→stale would restart the
+        archive timer, and a disabled skill could be silently re-enabled.
+        """
+        if state not in _VALID_STATES:
+            from ...core.errors import ValidationError
+            raise ValidationError(f"Unknown skill state {state!r}")
+        skill = self._store.read(name)
+        skill.state = state
         self._store.write(skill)
 
     def archive_with_absorption(self, name: str, absorbed_into: str | None) -> None:

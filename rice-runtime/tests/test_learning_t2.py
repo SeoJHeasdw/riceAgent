@@ -225,6 +225,16 @@ class TestComputeTransition:
         skill = self._skill("active", days_ago=1)
         assert compute_transition(skill, stale_after_days=3, archive_after_days=7) is None
 
+    def test_mixed_iso_timezone_forms_are_supported(self):
+        skill = self._skill("active", days_ago=10)
+        # imported sidecars may use an explicit UTC offset while SKILL.md uses Z.
+        assert compute_transition(
+            skill,
+            stale_after_days=3,
+            archive_after_days=7,
+            last_used_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        ) is None
+
     def test_active_to_stale_when_old_enough(self):
         skill = self._skill("active", days_ago=4)
         assert compute_transition(skill, stale_after_days=3, archive_after_days=7) == "stale"
@@ -282,6 +292,20 @@ class TestSkillLifecycle:
         with pytest.raises(NotFoundError):
             self._lifecycle.rollback("rb2", 99)
 
+    def test_automatic_transition_preserves_freshness_and_enabled(self):
+        """Curator 전이는 활동이 아니며 사용자의 injection off도 덮지 않는다."""
+        skill = _make_skill("auto-state")
+        skill.enabled = False
+        original_updated_at = skill.updated_at
+        self._store.write(skill)
+
+        self._lifecycle.transition_state("auto-state", "stale")
+
+        transitioned = self._store.read("auto-state")
+        assert transitioned.state == "stale"
+        assert transitioned.enabled is False
+        assert transitioned.updated_at == original_updated_at
+
 
 # ── Curator 테스트 ────────────────────────────────────────────────────────────
 
@@ -308,6 +332,24 @@ class TestCurator:
         transitions = dict(result.transitioned)
         assert "stale-me" in transitions
         assert transitions["stale-me"] == "stale"
+
+    def test_curate_transition_does_not_restart_archive_clock(self):
+        """8일 미사용 스킬은 active→stale 전이가 freshness를 꾸미지 않으므로
+        다음 sweep에서 곧바로 stale→archived가 된다(7일은 총 미사용 기간)."""
+        self._store.write(self._old_skill("old-enough", "active", days_ago=8))
+        first = self._curator.curate()
+        second = self._curator.curate()
+        assert dict(first.transitioned)["old-enough"] == "stale"
+        assert dict(second.transitioned)["old-enough"] == "archived"
+
+    def test_curate_never_changes_manually_disabled_skill(self):
+        skill = self._old_skill("disabled-skill", "active", days_ago=30)
+        skill.enabled = False
+        self._store.write(skill)
+        assert self._curator.curate().transitioned == ()
+        stored = self._store.read("disabled-skill")
+        assert stored.state == "active"
+        assert stored.enabled is False
 
     def test_curate_transitions_old_stale_to_archived(self):
         self._store.write(self._old_skill("archive-me", "stale", days_ago=10))
@@ -384,6 +426,17 @@ class TestLearningServiceT2:
         assert detail is not None
         assert detail.state == "stale"
 
+    def test_manual_reactivation_resets_freshness_without_faking_use(self):
+        self._write_skill("confirm-skill", "stale")
+        self._svc.set_state("confirm-skill", "active")
+        detail = self._svc.get_skill("confirm-skill")
+        assert detail is not None
+        assert detail.state == "active"
+        assert detail.use == 0
+        assert detail.last_used_at is None
+        assert detail.freshness_at is not None
+        assert detail.freshness_at != "2024-01-01T00:00:00Z"
+
     def test_apply_patch_reject_returns_none(self):
         self._write_skill("patch-skill")
         result = self._svc.apply_patch("patch-skill", approved=False)
@@ -443,6 +496,12 @@ class TestLearningServiceT2:
         injected = [s.skill_id for s in result.skills]
         assert "active-sk" in injected
 
+    def test_prefetch_auto_injects_relevant_stale_skill(self):
+        """stale은 경고 상태일 뿐, active와 같은 관련도 게이트를 타는 사용 가능 상태다."""
+        self._write_skill("stale-sk", "stale")
+        result = self._svc.prefetch("sess1", "run the stale-sk test")
+        assert "stale-sk" in [s.skill_id for s in result.skills]
+
     def test_prefetch_indexes_irrelevant_skill_instead_of_injecting(self):
         """무관한 쿼리('hello')엔 전문을 주입하지 않고 짧은 인덱스로만 싣는다
         (inject-all-active 폐기 — 관련 없는 스킬 본문이 매 턴 들어가지 않는다)."""
@@ -476,11 +535,21 @@ class TestLearningServiceT2:
         assert results and results[0]["name"] == "alpha-report"
         assert results[0]["score"] > 0
 
+    def test_search_skills_includes_stale(self):
+        self._write_skill("stale-report", "stale")
+        results = self._svc.search_skills("stale-report")
+        assert results and results[0]["name"] == "stale-report"
+
     def test_view_skill_body_returns_body_and_bumps_view(self):
         self._write_skill("view-body-sk", "active")
         out = self._svc.view_skill_body("sess1", "view-body-sk")
         assert "Do thing A" in out["body"]
         assert UsageStore(self._paths).read("view-body-sk").view == 1
+
+    def test_view_skill_body_allows_stale(self):
+        self._write_skill("stale-body-sk", "stale")
+        out = self._svc.view_skill_body("sess1", "stale-body-sk")
+        assert "Do thing A" in out["body"]
 
     def test_view_skill_body_rejects_archived(self):
         self._write_skill("off-sk", "archived")
@@ -498,6 +567,35 @@ class TestLearningServiceT2:
         )
         await self._svc.observe(outcome)
         assert UsageStore(self._paths).read("viewed-sk").use == 1
+
+    @pytest.mark.asyncio
+    async def test_engaged_stale_skill_reactivates(self):
+        self._write_skill("returning-sk", "stale")
+        self._svc.view_skill_body("sess1", "returning-sk")
+        outcome = TurnOutcome(
+            session_id="sess1", final_message="done", history=(),
+            tool_calls_made=0, injected_skill_ids=(),
+        )
+        await self._svc.observe(outcome)
+        detail = self._svc.get_skill("returning-sk")
+        assert detail is not None
+        assert detail.state == "active"
+        assert detail.use == 1
+        assert detail.last_used_at is not None
+
+    @pytest.mark.asyncio
+    async def test_exposed_but_unengaged_stale_skill_stays_stale(self):
+        self._write_skill("still-stale", "stale")
+        outcome = TurnOutcome(
+            session_id="sess1", final_message="done", history=(),
+            tool_calls_made=0, injected_skill_ids=("still-stale",),
+        )
+        await self._svc.observe(outcome)
+        detail = self._svc.get_skill("still-stale")
+        assert detail is not None
+        assert detail.state == "stale"
+        assert detail.use == 0
+        assert detail.last_used_at is None
 
     @pytest.mark.asyncio
     async def test_observe_counts_exposure_not_use_for_injected_only(self):

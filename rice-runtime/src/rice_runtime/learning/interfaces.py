@@ -157,6 +157,9 @@ class SkillSummary:
     view: int = 0
     patch: int = 0
     last_used_at: str | None = None
+    # Lifecycle clock: max(last_used_at, content/user-state updated_at, created_at).
+    # Kept separate from last_used_at so manual reactivation does not fabricate use.
+    freshness_at: str | None = None
     enabled: bool = True
     # 텔레메트리 정직화: 노출/마찰/발견성 결함 카운터 — use 와 분리.
     # friction은 현재 version 범위이며, lifetime use와의 같은 기간 분모인

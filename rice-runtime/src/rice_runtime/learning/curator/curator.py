@@ -55,6 +55,10 @@ class Curator:
             # rules must never silently rewrite their state.
             if (skill.source or "").startswith("plugin:"):
                 continue
+            # inactive는 state=active + enabled=False인 사용자 소유 상태다. 시간
+            # 규칙이 사용자의 명시적 off를 덮거나 stale 전이로 다시 켜면 안 된다.
+            if not skill.enabled:
+                continue
             last_used_at = (
                 self._usage_store.read(skill.name).last_used_at if self._usage_store else None
             )
@@ -67,7 +71,7 @@ class Curator:
             if new_state is None:
                 continue
             try:
-                self._lifecycle.set_state(skill.name, new_state)
+                self._lifecycle.transition_state(skill.name, new_state)
                 transitioned.append((skill.name, new_state))
             except Exception:
                 # NOTE(agent): set_state 실패는 조용히 건너뛴다. 개별 파일 오류가

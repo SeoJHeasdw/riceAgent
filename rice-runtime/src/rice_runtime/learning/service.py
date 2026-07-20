@@ -11,7 +11,7 @@ Implementation status per task batch:
   T2 (done): skill/store.py + skill/usage.py + skill/lifecycle.py
              + curator/curator.py — 스킬 CRUD, usage 카운터, 상태 전이.
              list_skills, get_skill, history, rollback, set_state, curate 구현.
-             prefetch: active 스킬 전부 token budget 내에서 주입.
+             prefetch: active/stale 스킬을 관련도·token budget 내에서 주입.
   T3 (superseded by review engine, see below): observe() 는 한때 스킬 생성/patch도
              정규식으로 직접 산출했으나(truncation 본문/note-append 본문 — 품질이 나빴다),
              그 판단력을 통째로 learning/review/engine.py(LLM 기반, 비동기 `/learning-review`
@@ -95,7 +95,7 @@ from .skill.verifier import VerificationReport, tool_call_refs, verify_candidate
 from .skill.analysis import AnalysisStore, SkillAnalysisData, effective_status
 from .skill.analyzer import SkillAnalyzer
 from .skill.builtin import BuiltinSkillCatalog
-from .skill.lifecycle import SkillLifecycle
+from .skill.lifecycle import SkillLifecycle, freshness_at
 from .skill.relevance import AUTO_INJECT_THRESHOLD, auto_inject_eligible, score_skills
 from .skill.store import SkillData, SkillStore, serialize_skill_md
 from .skill.usage import UsageStore
@@ -392,17 +392,21 @@ class LearningService(ILearningService):
         )
 
     # ── skill collection + relevance (hybrid injection) ───────────────────────
-    def _active_skills(self) -> list[SkillData]:
-        """Active 스킬 전체(빌트인 + 사용자). 빌트인 이름은 예약이라 동명 사용자
-        파일은 숨긴다(list_skills와 동일 규칙). prefetch 와 search_skills 의 공통 원천.
+    def _injectable_skills(self) -> list[SkillData]:
+        """주입 가능한 스킬 전체(빌트인 + active/stale 사용자 스킬).
 
-        enabled=False(UI 비활성) 스킬은 state=active여도 주입에서 제외한다."""
+        stale은 비활성이 아니라 재확인 경고 상태다. active와 동일한 관련도·예산
+        게이트를 통과해야 전문 주입되며, archived/inactive만 제외한다. 빌트인 이름은
+        예약이라 동명 사용자 파일은 숨긴다(list_skills와 동일 규칙). prefetch와
+        search_skills의 공통 원천이다.
+
+        enabled=False(UI 비활성) 스킬은 state와 무관하게 주입에서 제외한다."""
         builtin_names = self._builtin_skills.names()
         skills = [s for s in self._builtin_skills.list() if s.state == "active" and s.enabled]
         skills += [
             s
             for s in self._skill_store.list()
-            if s.state == "active" and s.enabled and s.name not in builtin_names
+            if s.state in ("active", "stale") and s.enabled and s.name not in builtin_names
         ]
         return skills
 
@@ -448,7 +452,7 @@ class LearningService(ILearningService):
             재매칭 없이도 유지된다 — 후속 지시("이어서 해줘")가 라우터에 안
             걸려도 태스크 중간에 절차가 증발하지 않는다. 상한과 별도로 예산만
             차지한다(신규 주입을 밀어내지 않음).
-          - 나머지 active 스킬은 **짧은 인덱스**(이름 + 한 줄 설명, 관련도순)로만
+          - 나머지 active/stale 스킬은 **짧은 인덱스**(이름 + 한 줄 설명, 관련도순)로만
             실려서 모델이 `skill_view` 로 온디맨드로 당길 수 있다.
           - `extra_skills`(plugin SKILL.md 번들)도 **같은 파이프라인**을 탄다 —
             전량 주입이 아니라 스코어링→예산→인덱스→skill_view. 동명 학습
@@ -458,14 +462,14 @@ class LearningService(ILearningService):
           - FTS5-matched memories (K = config.prefetch_fts_top_k) for the query
           - Skill-creation guidance string + user preferences (T5)
         """
-        all_active = self._active_skills()
-        learned_names = {s.name for s in all_active}
+        all_injectable = self._injectable_skills()
+        learned_names = {s.name for s in all_injectable}
         extras = [s for s in extra_skills if s.name and s.name not in learned_names]
         # 온디맨드 레지스트리 갱신 — 인덱스에 실린 plugin 스킬을 skill_search/
         # skill_view 가 찾을 수 있어야 인덱스가 거짓말이 아니게 된다.
         self._extra_skills = {s.name: s for s in extras}
         self._last_query[session_id] = user_message
-        candidates: list = all_active + extras
+        candidates: list = all_injectable + extras
         by_name = {s.name: s for s in candidates}
         ranked = score_skills(user_message, candidates)
         rank_order = {s.name: i for i, s in enumerate(ranked)}
@@ -570,11 +574,11 @@ class LearningService(ILearningService):
 
     # ── on-demand skill loading (skill_search / skill_view 빌트인 백엔드) ───────
     def search_skills(self, query: str, limit: int = 8) -> list[dict]:
-        """`skill_search` 빌트인의 백엔드 — active 스킬을 쿼리로 랭킹해 반환한다.
+        """`skill_search` 빌트인의 백엔드 — active/stale 스킬을 랭킹해 반환한다.
         점수>0 매칭을 우선하되, 하나도 없으면 상위 몇 개를 그대로 보여준다(모델이
         무엇이 있는지라도 알도록). 본문은 싣지 않는다 — 그건 skill_view의 몫.
         plugin 스킬(_extra_skills)도 후보에 포함 — 인덱스에 실렸으면 찾을 수 있어야 한다."""
-        learned = self._active_skills()
+        learned = self._injectable_skills()
         learned_names = {s.name for s in learned}
         extras = [s for s in self._extra_skills.values() if s.name not in learned_names]
         ranked = score_skills(query, learned + extras)
@@ -623,7 +627,7 @@ class LearningService(ILearningService):
         워커는 자기 컨텍스트에 본문이 없을 수 있다) 소형 모델의 중복 호출 루프를
         끊는다. 라우터가 못 맞춘 수동 로딩은 routing_miss 로 계측한다."""
         skill = self._read_any_skill(skill_id)
-        if skill is None or skill.state != "active":
+        if skill is None or not skill.enabled or skill.state not in ("active", "stale"):
             # store 에 없으면 plugin 스킬 레지스트리 폴백 — 인덱스가 광고한 이름은
             # 항상 열려야 한다. usage sidecar 는 store 스킬 전용이라 건드리지 않고,
             # 조회 귀속(viewed)만 provenance id 로 기록한다.
@@ -863,6 +867,16 @@ class LearningService(ILearningService):
                         continue
                     engaged.append(skill_id)
                     self._usage_store.increment_use(skill_id)
+                    # stale은 경고 상태이지 편도 비활성 상태가 아니다. 실제 관여가
+                    # 증명된 완주 턴에서만 active로 자동 복귀한다. 단순 노출은 위의
+                    # injected 카운터만 올리므로 freshness를 오염시키지 않는다.
+                    stored_skill = self._read_any_skill(skill_id)
+                    if (
+                        stored_skill is not None
+                        and stored_skill.state == "stale"
+                        and not (stored_skill.source or "").startswith("plugin:")
+                    ):
+                        self._lifecycle.transition_state(skill_id, "active")
                     if turn_tools:
                         # 도구 귀속은 여전히 턴 단위 실행 로그다 — 다만 이제
                         # 관여 근거가 있는 스킬에만 남는다(설명 가치가 있는 것만).
@@ -1190,7 +1204,7 @@ class LearningService(ILearningService):
         tags: tuple[str, ...] = (),
         current_body: str | None = None,
     ) -> VerificationReport:
-        """verify_candidate에 서비스가 아는 문맥(active 스킬 이름들, 도구 카탈로그)을
+        """verify_candidate에 서비스가 아는 문맥(주입 가능 스킬 이름들, 도구 카탈로그)을
         모아 넘기는 어댑터. 카탈로그 조회 실패는 해당 검사 스킵으로 강등한다 —
         검증 인프라 문제가 제안/승격 흐름을 깨면 안 된다."""
         known: set[str] | None = None
@@ -1199,7 +1213,7 @@ class LearningService(ILearningService):
                 known = set(self._resolve_tool_names())
             except Exception:  # noqa: BLE001
                 log.warning("tool catalog resolve failed — skipping tool-existence check", exc_info=True)
-        existing = [s.name for s in self._active_skills() if s.name != name]
+        existing = [s.name for s in self._injectable_skills() if s.name != name]
         return verify_candidate(
             name=name,
             body=body,
@@ -2339,6 +2353,7 @@ class LearningService(ILearningService):
                     view=usage.view,
                     patch=usage.patch,
                     last_used_at=usage.last_used_at,
+                    freshness_at=freshness_at(skill, usage.last_used_at),
                     enabled=skill.enabled,
                     injected=usage.injected,
                     friction=usage.friction,
@@ -2375,6 +2390,7 @@ class LearningService(ILearningService):
             view=usage.view,
             patch=usage.patch,
             last_used_at=usage.last_used_at,
+            freshness_at=freshness_at(skill, usage.last_used_at),
             enabled=skill.enabled,
             injected=usage.injected,
             friction=usage.friction,

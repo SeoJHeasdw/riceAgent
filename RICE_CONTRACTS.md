@@ -56,11 +56,11 @@ Electron main process
 | GET | `/sessions/{id}/messages?cursor=` | 과거 메시지 페이지네이션 (히스토리 로드) |
 | POST | `/sessions/{id}/regenerate` | 응답 재생성 (ChatScreen) — **경로 정정(2026-07-08)**: `msg_id` 세그먼트 없음, 과거 문서 오기 — 코드·프론트 모두 이 경로 |
 | ~~GET~~ | ~~`/sessions/{id}/export?format=md\|json`~~ | **미구현** — 코드에 없음(2026-07-08 확인) |
-| GET | `/skills` | 스킬 목록 + 상태/사용 통계 (learning loop 가시화용). **빌트인 스킬(`source:"builtin"`, 앱과 함께 배포·읽기 전용)도 포함된다** |
+| GET | `/skills` | 스킬 목록 + 상태/사용 통계 (learning loop 가시화용). `last_used_at`(실제 관여)과 `freshness_at`(사용·편집·생성·수동 재활성화 중 최신 시각)을 분리해 반환한다. **빌트인 스킬(`source:"builtin"`, 앱과 함께 배포·읽기 전용)도 포함된다** |
 | GET | `/skills/{id}` | 스킬 상세 (내용 · version · tags · usage — MySkillsScreen) |
 | **POST** | **`/skills/{id}/analysis/refresh`** | **스킬 "설명" 사이드카 재생성(LLM 1회, 실패 시 휴리스틱 폴백) — UI 전용, 권한/실행 판단과 무관(2026-07-08 반영)** |
 | POST | `/skills/curate` | 수동 "스킬 정리" 트리거. **`?mode=rules\|consolidate`**(기본 `rules`, 하위호환) — `consolidate`는 규칙 전이 + LLM 통합 제안(있으면) 반환, LEARNING_LOOP §5.1 |
-| PATCH | `/skills/{id}/state` | 스킬 상태 전환 (archive, activate). **빌트인은 active/archived(활성/비활성)만 허용 — 그 외 전이·PUT·DELETE·rollback은 422** |
+| PATCH | `/skills/{id}/state` | 스킬 상태 전환 (archive, activate). stale→active 수동 재활성화는 freshness를 리셋하지만 실제 `use`/`last_used_at`은 올리지 않는다. **빌트인은 active/archived(활성/비활성)만 허용 — 그 외 전이·PUT·DELETE·rollback은 422** |
 | **POST** | **`/skills/{id}/patch`** | **스킬 개선(patch) *또는* 신규 생성(from_version=0) 제안 응답 (approve/reject/edited_body) — LEARNING_LOOP 5.2·§4** |
 | **POST** | **`/skills/{id}/archive-decision`** | **curator 통합의 정리(prune) 제안 응답 (approved, absorbed_into?) — approval_id 파킹 없음, LEARNING_LOOP §5.1** |
 | **POST** | **`/skills/{id}/consolidate-decision`** | **curator 통합의 병합(umbrella patch/create) 제안 응답 (approved, proposed_body?, description?, tags?) — approval_id 파킹 없음, LEARNING_LOOP §5.1** |
