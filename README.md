@@ -1,7 +1,8 @@
 # RICE 설계 문서
 
-> RICE: 사용자 경험을 축적하며 학습·진화하는 개인 에이전트 + 내부 마켓 생태계 (IBM 내부용 데스크톱 앱)
-> Claude Desktop · Hermes Agent를 벤치마킹한 애플리케이션
+> RICE: 일하며 만든 업무 방식을 재사용 가능한 자산으로 축적하고, 검증된 자산을 조직 실행으로 확장하는 AI 업무 시스템 (IBM 내부용 데스크톱 앱)
+> Agent는 업무 수행 인터페이스, Skill은 업무 자산의 기술 단위, Learning Loop는 자산 후보의 발견·재사용·개선을 돕는 내부 엔진이다.
+> Claude Desktop · Hermes Agent를 실행 경험과 learning loop의 참조 모델로 삼는다.
 
 ## 사전 준비 (Prerequisites)
 
