@@ -88,6 +88,20 @@ export function marketSkillToOwned(m: MarketSkill): { skill: OwnedSkill; detail:
 /** 소유 스킬을 공개했을 때의 마켓 id — ownedId 기준이라 재공개해도 중복되지 않는다. */
 export const publishedMarketId = (ownedId: string) => `pub-${ownedId}`;
 
+/** 마켓 화면에서 사용자가 직접 올린 항목인지 판별한다.
+ *
+ * - `skill-user-*`: Skill Market 업로드 마법사에서 바로 게시한 스킬
+ * - `pub-*`: 나의 스킬에서 공유한 스킬
+ *
+ * 이 항목들의 "제거"는 설치 해제가 아니라 마켓에서 내리기여야 한다.
+ */
+export const isUserPublishedMarketId = (marketId: string) =>
+  marketId.startsWith('skill-user-') || marketId.startsWith('pub-');
+
+/** `pub-<ownedId>`에서 소유 스킬 id를 복원한다. 업로드 마법사 항목은 소유본이 없어 null. */
+export const ownedSkillIdFromPublishedMarketId = (marketId: string): string | null =>
+  marketId.startsWith('pub-') ? marketId.slice('pub-'.length) : null;
+
 /**
  * 소유 스킬 → 마켓 Skill 로 materialize (publish/재공유 방향, install의 역).
  * 설치형(다운로드)을 재공유하면 origin 작가를 forkedFrom 으로 남겨 attribution을 유지한다.

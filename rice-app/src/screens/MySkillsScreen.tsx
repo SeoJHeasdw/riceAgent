@@ -2155,6 +2155,7 @@ const SkillDetailView: React.FC<{
         onClose={() => setConfirmDelete(false)}
         onConfirm={() => {
           setSkills((a) => a.filter((x) => x.id !== skillId));
+          if (skill.shared) unpublishSkill(publishedMarketId(skillId));
           void api.deleteSkill(skillId);
           setConfirmDelete(false);
         }}
