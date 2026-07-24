@@ -46,7 +46,12 @@ class Database:
             conn.execute("PRAGMA journal_mode = WAL;")
             conn.execute("PRAGMA synchronous = NORMAL;")
         self._conn = conn
-        self._run_migrations()
+        try:
+            self._run_migrations()
+        except BaseException:
+            conn.close()
+            self._conn = None
+            raise
         return self
 
     def close(self) -> None:
@@ -106,11 +111,27 @@ class Database:
                 "CREATE TABLE IF NOT EXISTS schema_migrations ("
                 "  version TEXT PRIMARY KEY, applied_at TEXT DEFAULT (datetime('now')))"
             )
+            self.raw.commit()
             applied = {r["version"] for r in self.raw.execute("SELECT version FROM schema_migrations")}
             for sql_file in sorted(MIGRATIONS_DIR.glob("*.sql")):
                 version = sql_file.stem
                 if version in applied:
                     continue
-                self.raw.executescript(sql_file.read_text(encoding="utf-8"))
-                self.raw.execute("INSERT INTO schema_migrations(version) VALUES (?)", (version,))
-                self.raw.commit()
+                # ``executescript`` commits any pending transaction before it
+                # starts. Put BEGIN/marker/COMMIT inside the script so the schema
+                # change and its version record are one atomic unit. Migration
+                # files must therefore not contain transaction control statements.
+                version_literal = version.replace("'", "''")
+                script = (
+                    "BEGIN IMMEDIATE;\n"
+                    f"{sql_file.read_text(encoding='utf-8')}\n"
+                    "INSERT INTO schema_migrations(version) "
+                    f"VALUES ('{version_literal}');\n"
+                    "COMMIT;\n"
+                )
+                try:
+                    self.raw.executescript(script)
+                except BaseException:
+                    if self.raw.in_transaction:
+                        self.raw.rollback()
+                    raise

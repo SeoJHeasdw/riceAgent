@@ -1,6 +1,6 @@
 """learning/ledger.py — 학습 루프의 자기 이력 저장소 (Self-Improvement v3).
 
-두 테이블을 소유한다(0012_learning_ledger.sql):
+두 테이블을 소유한다:
 
   1. **learning_events** — 제안/결정/적용/메모리 기록의 append-only 감사 로그.
      이 기록이 루프의 "메타학습" 원천이다: 같은 스킬에 대한 반복 거부를 세어
@@ -55,7 +55,8 @@ class LearningLedger:
 
         The service treats the sentinel as an invalid evidence boundary and
         terminally fails the claimed job.  Returning ``None`` is reserved for
-        genuine pre-0016 legacy rows, which intentionally allow full history.
+        legacy rows created before evidence capture, which intentionally allow
+        full history.
         """
         if not raw:
             return None
@@ -150,7 +151,7 @@ class LearningLedger:
     # ── review jobs (server-owned post-turn review) ───────────────
     @staticmethod
     def _merge_evidence(existing: dict | None, incoming: dict | None) -> dict | None:
-        """리뷰 잡 병합 시 evidence watermark 합성 (0016 헤더의 병합 규칙).
+        """리뷰 잡 병합 시 evidence watermark 합성.
 
         from은 보존(가장 오래된 미리뷰 지점), through는 갱신, 스킬→버전 목록은
         합집합 — 한 구간에서 스킬이 v3으로 관여한 뒤 v4로 패치돼 또 관여했으면

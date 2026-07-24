@@ -4,7 +4,7 @@ WHY: The `installed_artifacts` table records *what* is installed; this module
 tracks *whether* it is active (enabled). Separating state from the loader keeps
 install/remove logic clean and lets routes toggle a plugin without re-loading it.
 
-enabled state is stored in the DB column `enabled` (added in migration 0002).
+enabled state is stored in the DB column `enabled`.
 `PluginRegistry` is a thin wrapper so service.py doesn't embed raw SQL.
 """
 

@@ -8,7 +8,7 @@
   1. learning_jobs.evidence["tool_transcript"] — 잡 수명의 구간 기록.
   2. candidate 평가의 trace-grounded replay (§10.6 / EVAL §10.2).
 
-  **엔티티(entity) 층** — `learning_episodes` 테이블(0018): 턴 1개 = 에피소드
+  **엔티티(entity) 층** — `learning_episodes` 테이블: 턴 1개 = 에피소드
   1행. 잡이 병합·소비돼도 턴 단위 판정(success/corrected/failure/aborted)과
   관찰 본문이 독립적으로 남는다. 판정은 signals.py 의 결정적 신호 기반 —
   휴리스틱임을 숨기지 않고 judgment JSON 에 근거를 함께 남긴다.
@@ -131,7 +131,7 @@ def judge_turn_outcome(
 
 
 class EpisodeStore:
-    """learning_episodes CRUD — 턴 1개 = 에피소드 1행 (0018 헤더가 정본).
+    """learning_episodes CRUD — 턴 1개 = 에피소드 1행 (LEARNING_LOOP §10.5).
 
     모든 쓰기는 best-effort 다: 에피소드 기록 실패가 턴을 깨면 안 된다
     (usage 카운터·ledger 와 동일한 fail-safe 원칙)."""

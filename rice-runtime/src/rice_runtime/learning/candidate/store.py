@@ -4,7 +4,7 @@
 머신. 스킬 파일에는 절대 닿지 않는다 — promoted 전이를 결정하는 것은 서비스
 (LearningService._promote_candidate)이고, 여기는 행의 CRUD 와 원자 전이만 있다.
 
-상태 전이 (0017 헤더가 정본):
+상태 전이:
   pending ──claim──▶ running ──finish──▶ promoted | discarded | expired | failed
   running ──retry(상한 미만)──▶ pending
   부팅 시 running 고아는 pending 으로 복구된다(learning_jobs 와 동일 근거 —

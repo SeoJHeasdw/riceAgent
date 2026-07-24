@@ -352,7 +352,7 @@ class LearningService(ILearningService):
             if resolve_provider is not None
             else None
         )
-        # LearningEpisode 독립 엔티티(§10.5, 0018) — 턴 1개 = 에피소드 1행.
+        # LearningEpisode 독립 엔티티(§10.5) — 턴 1개 = 에피소드 1행.
         # observe() 가 기록하고 GET /learning/episodes 가 읽는다.
         self._episodes = EpisodeStore(db, cap=config.learning_episode_cap)
         # candidate 승격 게이트 (§10.6): store 는 무조건 배선(목록/수동 결정은
@@ -888,7 +888,7 @@ class LearningService(ILearningService):
                     # 턴을 깨지 않도록 (fail-safe 우선).
                     pass
 
-        # ── LearningEpisode 기록 (§10.5 완결, 0018) — 턴 1개 = 에피소드 1행.
+        # ── LearningEpisode 기록 (§10.5 완결) — 턴 1개 = 에피소드 1행.
         # aborted 턴 **포함**: 중단도 판정이다(제안/리뷰 잡과 달리 기록은 관찰일
         # 뿐 학습 반영이 아니므로 fail-closed 원칙과 충돌하지 않는다). 전사도
         # 중단 전까지 실행된 실제 도구 활동이라 남긴다.
@@ -946,7 +946,7 @@ class LearningService(ILearningService):
         # ③ 서버 소유 리뷰 잡 영속화: tool_calls_made는 이제 프론트가
         #    세어 보내는 값이 아니라 서버가 턴 종료 시점에 직접 기록하는 값이다.
         #    /learning-review(또는 스케줄러 sweep)가 이 잡을 claim해서 실행한다.
-        #    evidence watermark(0016): "이 구간에서 어떤 스킬 버전이 관여했는가"를
+        #    evidence watermark: "이 구간에서 어떤 스킬 버전이 관여했는가"를
         #    턴 종료 시점에 고정한다 — 리뷰 시점의 전역 스냅샷으로는 재구성 불가
         #    (그 사이 스킬이 패치되거나 카탈로그 정렬이 바뀐다).
         self._ledger.enqueue_review_job(
@@ -1031,7 +1031,7 @@ class LearningService(ILearningService):
             "turns": 1,
             # LearningEpisode(§10.5): 이 구간의 도구 호출/결과 전사(정제본) —
             # 감사 + candidate replay 의 원천 — 와 독립 엔티티(learning_episodes)
-            # 로의 인과 링크. 순수 추가 필드라 스키마 진화 없음(0016 확장 원칙).
+            # 로의 인과 링크. 순수 추가 필드라 별도 스키마 진화는 없다.
             "tool_transcript": [dict(r) for r in tool_transcript],
             "episode_ids": list(episode_ids),
         }

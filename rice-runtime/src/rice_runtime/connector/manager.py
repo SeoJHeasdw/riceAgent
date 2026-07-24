@@ -52,7 +52,7 @@ class ConnectorManager:
         self._flows: dict[str, OAuthFlow] = flows or {d.connector_type: OAuthFlow(d) for d in descriptors()}
         self._custom = custom
         # 진행 중 OAuth 세션(state → connector_id + PKCE code_verifier)은
-        # oauth_pending_states 테이블(0011)에 영속화한다 — begin_connect 와 브라우저
+        # oauth_pending_states 테이블에 영속화한다 — begin_connect 와 브라우저
         # 콜백 사이에 런타임이 재시작해도 로그인이 이어진다. 만료(15분)·one-shot 소비는
         # begin_connect/complete_oauth 가 SQL 로 강제한다.
 
@@ -242,8 +242,8 @@ class ConnectorManager:
     async def delete(self, connector_id: str) -> None:
         """connector 레코드 삭제 + 키체인 항목 정리 + 저장된 도구 권한 정리.
 
-        connector_tool_permissions 는 FK 가 없어(로컬 MCP 도 같은 테이블을 쓰기 위해
-        의도적으로 뺐다 — 0008 참고) cascade 삭제가 안 되므로 여기서 명시적으로 정리한다.
+        connector_tool_permissions 는 FK 가 없어(로컬 MCP의 local:<name>에는
+        connectors 행이 없다) cascade 삭제가 안 되므로 여기서 명시적으로 정리한다.
         """
         self._keychain.delete(connector_id)
         self._db.execute("DELETE FROM connectors WHERE id = ?", (connector_id,))

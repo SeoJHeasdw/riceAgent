@@ -461,8 +461,9 @@ v2까지의 루프는 "무엇을 배울까"는 잘 판단했지만 **"내 제안
 기억하지 못했다.** 제안→결정은 in-memory 파킹(`IApprovalGate`)에만 존재해
 재시작·타임아웃과 함께 증발했고, 그 결과: 거부된 제안이 다음 리뷰에서 그대로
 재등장할 수 있었고, 타임아웃된 제안(= 자리 비움)은 소멸했으며, 시스템의 학습
-행동 전체가 감사 불가능했다. v3는 이 구멍을 두 개의 영속 테이블(state.db,
-`0012_learning_ledger.sql`)로 닫는다. 구현: `learning/ledger.py::LearningLedger`.
+행동 전체가 감사 불가능했다. v3는 이 구멍을 state.db의 두 영속 테이블
+(`learning_events`, `skill_suggestions`)로 닫는다. 구현:
+`learning/ledger.py::LearningLedger`.
 
 ### 9.1 learning_events — append-only 감사 로그
 
@@ -558,7 +559,7 @@ tool 결과는 이름만)를 놓고 LLM 1회 호출로 2회+ 반복 패턴을 �
 
 ### 10.1 evidence watermark — 감사 가능한 구간 고정 + 카탈로그 우선순위 hint
 
-리뷰 잡(learning_jobs, `0016_learning_job_evidence.sql`)에 **evidence(JSON)** 를
+리뷰 잡(`learning_jobs`)에 **evidence(JSON)** 를
 부착한다: 관찰 구간의 메시지 워터마크(`from_message_id`/`through_message_id`),
 그 구간에서 주입/조회/관여된 스킬과 **실제 주입·조회 시점의 버전 목록**,
 버전별 friction 턴 수(`friction_by_skill_version`).
@@ -670,7 +671,7 @@ nudge 카운터를 초기화한다. claim은 오래된 잡 우선이고 retry/fi
 ### 10.6 candidate 승격 게이트 — baseline-vs-candidate 평가 (2026-07-19, §10.5 1번 이행)
 
 > 코드: `learning/candidate/`(store·rollout·harness), `prompts/candidate_eval.py`,
-> 마이그레이션 `0017_skill_candidates.sql`. 평가 방법론 정본은
+> 영속 테이블 `skill_candidates`. 평가 방법론 정본은
 > [RICE_LEARNING_EVAL.md](RICE_LEARNING_EVAL.md) §10 — 여기는 루프 통합만 기술.
 
 지금까지 루프는 안전한 제안·승인·적용과 인과 증거 보존(§10.1)까지는 견고했지만

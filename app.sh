@@ -57,6 +57,9 @@ fi
 echo "▶ Vite + Electron 기동 중..."
 (
   cd "$APP_DIR"
+  # VS Code/Codex 같은 Electron 기반 호스트가 이 값을 넘기면 자식 Electron도
+  # Node 호환 모드로 떠서 BrowserWindow를 만들지 않고 즉시 종료한다.
+  unset ELECTRON_RUN_AS_NODE
   export NODE_ENV=development
   export RICE_RUNTIME_DIR="$RUNTIME_DIR"
   exec npx vite --config vite.config.ts

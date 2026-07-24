@@ -297,7 +297,7 @@ class TestCompleteOAuth:
     @pytest.mark.asyncio
     async def test_complete_oauth_survives_runtime_restart(self):
         """begin_connect 와 브라우저 콜백 사이에 런타임이 재시작해도(새 서비스 인스턴스)
-        pending state 가 DB(oauth_pending_states, 0011)에 있어 로그인이 이어진다.
+        pending state 가 DB(oauth_pending_states)에 있어 로그인이 이어진다.
         같은 state 는 one-shot 으로 소비돼 두 번째 교환(replay)은 거부된다."""
         mock_token_resp = {
             "access_token": "at", "refresh_token": "rt", "expires_in": 3600,
@@ -336,7 +336,7 @@ class TestCompleteOAuth:
 
     @pytest.mark.asyncio
     async def test_complete_oauth_expired_state_rejected(self):
-        """15분 넘게 방치된 pending state 는 만료로 거부된다(0011 TTL)."""
+        """15분 넘게 방치된 pending state 는 만료로 거부된다."""
         with patch.dict("os.environ", {
             "RICE_GMAIL_CLIENT_ID": "cid",
             "RICE_GMAIL_CLIENT_SECRET": "csecret",
@@ -1026,7 +1026,7 @@ class TestToolPermissions:
             self._svc.set_tool_permission("c1", "create_draft", "maybe")
 
     def test_set_permission_for_local_mcp_connector_id_does_not_raise(self):
-        """connector_tool_permissions 는 connectors(id) FK 가 없다(0008) — local:<name>
+        """connector_tool_permissions 는 connectors(id) FK 가 없다 — local:<name>
         (.mcp.json 파생, connectors 테이블에 행이 없음)도 저장 가능해야 한다."""
         self._svc.set_tool_permission("local:filesystem", "write_file", "approval")
         assert self._svc.permission_for("local:filesystem", "write_file") == "approval"

@@ -1011,7 +1011,7 @@ interrupted), exit_code, started_at, ended_at, output_path, acknowledged`.
   턴 중+유휴를 모두 커버하므로 SSE 스트림-머지(단일 제너레이터 턴 모델과 충돌)의
   위험 없이 완전하다. 프론트는 카드가 running 인 동안 `GET /sessions/{id}/tasks` 를
   폴링해 라이브 출력·상태 전이를 반영한다(구현: rice-app `ChatScreen.refreshTasks`).
-* **마이그레이션**(`0020_background_tasks.sql`): `background_tasks`(id, session_id,
+* **영속 스키마**(`0001_init.sql`): `background_tasks`(id, session_id,
   command, cwd, status, exit_code, started_at, ended_at, output_path, acknowledged).
   FK 는 두지 않는다(learning_episodes 와 같은 선례 — 세션 삭제 정리는 `purge_session`
   이 명시적으로). 스풀 파일은 `paths.root/tasks/<id>.out`(재시작 생존), 쓰기 상한

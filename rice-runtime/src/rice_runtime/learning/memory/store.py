@@ -40,7 +40,7 @@ from ..skill.guard import scrub_secrets
 _ALLOWED_KINDS = frozenset({"fact", "preference"})
 _ALLOWED_STATUS = frozenset({"active", "quarantined"})
 
-# SELECT 컬럼 목록 — 0014에서 status/derived_from_external/source_message_ids 추가.
+# SELECT 컬럼 목록 — provenance와 quarantine 필드를 항상 함께 읽는다.
 _COLS = "id, kind, content, status, derived_from_external, source_session_id, source_message_ids"
 
 
