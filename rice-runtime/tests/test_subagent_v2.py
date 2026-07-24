@@ -93,7 +93,7 @@ def _runner(tmp_path, provider, *, learning=None, with_scratch=True, agents=None
 def test_subagent_toolset_gains_skill_tools_with_learning(tmp_path):
     paths = RicePaths.from_env(tmp_path)
     base = {spec.name for spec, _ in build_subagent_toolset(paths)}
-    assert base == {"read_file", "list_dir", "search_files", "fetch_url", "web_search"}
+    assert base == {"read_file", "list_dir", "grep", "search_files", "fetch_url", "web_search"}
 
     with_learning = {spec.name for spec, _ in build_subagent_toolset(paths, learning=_FakeLearning())}
     # skill_resource: 플러그인 스킬 번들 파일(references/ 등) 온디맨드 읽기 —

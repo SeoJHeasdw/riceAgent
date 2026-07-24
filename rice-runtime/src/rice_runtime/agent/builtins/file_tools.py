@@ -20,6 +20,7 @@ from pathlib import Path
 from ...core.paths import RicePaths
 from ...core.types import ToolSpec
 from ..tool_dispatch import BuiltinTool
+from ._search_engine import grep_search
 from .read_extract import ExtractionError, extract_document_text, is_extractable_document
 from .workspace import resolve_workspace_path as _resolve
 
@@ -30,10 +31,27 @@ _MAX_MATCHES = 200
 _MAX_LIST_ENTRIES = 500
 _MAX_LIST_DEPTH = 6
 
+# read_file line-window defaults: line-numbered output + offset/limit let the
+# model cite lines and read a large file in slices instead of all at once.
+_DEFAULT_READ_LINES = 2_000  # lines returned when `limit` is omitted
+_MAX_READ_LINES = 5_000      # hard cap on `limit`
+
+# list_dir: a single directory with more immediate children than this is
+# summarized (count + extension breakdown) instead of enumerated, so a
+# node_modules-sized folder can't flood the listing.
+_DIR_SUMMARY_THRESHOLD = 100
+
 # Sub-agent 아티팩트 격리 영역 — dot-디렉토리라 list_dir 목록에는 안 잡히지만
 # read_file은 정확한 경로로 읽을 수 있다(러너가 결과에 경로를 실어 준다).
 _SCRATCH_DIR = ".subagent"
 _MAX_SCRATCH_BYTES = 512 * 1024
+
+
+def _coerce_int(raw: object, default: int) -> int:
+    try:
+        return int(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
 
 
 def _make_read(paths: RicePaths) -> BuiltinTool:
@@ -44,7 +62,8 @@ def _make_read(paths: RicePaths) -> BuiltinTool:
         if not path.is_file():
             raise FileNotFoundError(f"not a file: {rel}")
 
-        # Auto-extract Office / notebook documents as readable text.
+        # Auto-extract Office / notebook documents as readable text (no line
+        # windowing — these are already bounded, structured extractions).
         if is_extractable_document(str(path)):
             try:
                 text = extract_document_text(str(path))
@@ -53,10 +72,33 @@ def _make_read(paths: RicePaths) -> BuiltinTool:
                 # Fall through to raw bytes read on extraction failure.
                 pass
 
+        # Line-numbered window: output is "N→line" so the model can cite line
+        # numbers and read big files in slices via offset/limit. The "N→" prefix
+        # is NOT part of the file — edit_file's description tells the model to
+        # strip it before matching old_string.
+        byte_truncated = path.stat().st_size > _MAX_READ_BYTES
         data = path.read_bytes()[:_MAX_READ_BYTES]
         text = data.decode("utf-8", errors="replace")
-        truncated = path.stat().st_size > _MAX_READ_BYTES
-        return {"path": rel, "content": text, "truncated": truncated}
+        lines = text.splitlines(keepends=True)
+        total = len(lines)
+
+        offset = max(1, _coerce_int(args.get("offset"), 1))  # 1-indexed start line
+        limit = _coerce_int(args.get("limit"), _DEFAULT_READ_LINES)
+        limit = min(max(1, limit), _MAX_READ_LINES)
+        start = offset - 1
+        window = lines[start : start + limit]
+        numbered = "".join(
+            f"{start + i + 1}→{line}" for i, line in enumerate(window)
+        )
+        window_truncated = (start + limit) < total
+        return {
+            "path": rel,
+            "content": numbered,
+            "start_line": offset if window else 0,
+            "end_line": start + len(window),
+            "total_lines": total,
+            "truncated": byte_truncated or window_truncated,
+        }
 
     return read_file
 
@@ -94,7 +136,11 @@ def _make_edit(paths: RicePaths) -> BuiltinTool:
         text = path.read_text(encoding="utf-8")
         count = text.count(old)
         if count == 0:
-            raise ValueError("old_text not found in file — read the file and copy the exact text")
+            raise ValueError(
+                "old_text not found in file. Re-read the file with read_file and copy the exact "
+                "current text — the file may have changed, and the 'N→' line-number prefix from "
+                "read_file is NOT part of the file (copy only what follows the →, with its indentation)."
+            )
         if count > 1 and not args.get("replace_all"):
             raise ValueError(f"old_text occurs {count} times — add surrounding lines to make it unique, or set replace_all")
         replaced = text.replace(old, new) if args.get("replace_all") else text.replace(old, new, 1)
@@ -104,6 +150,34 @@ def _make_edit(paths: RicePaths) -> BuiltinTool:
         return {"path": rel, "replacements": count if args.get("replace_all") else 1}
 
     return edit_file
+
+
+def _visible_children(d: Path) -> list[Path]:
+    """Sorted (dirs-first-then-files) children, skipping dotfiles, the noise dirs,
+    and symlinks (which could point outside the workspace — we never follow them)."""
+    try:
+        children = d.iterdir()
+    except OSError:
+        return []
+    kept = [
+        c
+        for c in children
+        if not c.name.startswith(".")
+        and c.name not in ("node_modules", "__pycache__")
+        and not c.is_symlink()
+    ]
+    return sorted(kept, key=lambda p: (p.is_file(), p.name))
+
+
+def _summarize_dir(children: list[Path]) -> dict:
+    """Count + top-10 extension breakdown for a directory too large to enumerate."""
+    files = [c for c in children if c.is_file()]
+    dirs = [c for c in children if c.is_dir()]
+    exts: dict[str, int] = {}
+    for f in files:
+        exts[f.suffix.lower() or "(none)"] = exts.get(f.suffix.lower() or "(none)", 0) + 1
+    top = dict(sorted(exts.items(), key=lambda kv: (-kv[1], kv[0]))[:10])
+    return {"file_count": len(files), "dir_count": len(dirs), "by_extension": top}
 
 
 def _make_list(paths: RicePaths) -> BuiltinTool:
@@ -121,28 +195,28 @@ def _make_list(paths: RicePaths) -> BuiltinTool:
             nonlocal truncated
             if truncated:
                 return
-            try:
-                children = sorted(d.iterdir(), key=lambda p: (p.is_file(), p.name))
-            except OSError:
-                return
-            for child in children:
-                if child.name.startswith(".") or child.name in ("node_modules", "__pycache__"):
-                    continue
+            for child in _visible_children(d):
                 if len(entries) >= _MAX_LIST_ENTRIES:
                     truncated = True
                     return
-                if child.is_symlink():
-                    # symlink 는 워크스페이스 밖(예: ~/.ssh)을 가리킬 수 있다 —
-                    # read_file 의 resolve 검증과 달리 여기선 따라가지 않고 스킵한다.
-                    continue
-                entry = {"path": child.relative_to(root).as_posix(), "type": "dir" if child.is_dir() else "file"}
-                if child.is_file():
+                is_dir = child.is_dir()
+                entry = {"path": child.relative_to(root).as_posix(), "type": "dir" if is_dir else "file"}
+                if not is_dir:
                     try:
                         entry["size"] = child.stat().st_size
                     except OSError:
                         pass
+                    entries.append(entry)
+                    continue
+                # Directory: summarize instead of enumerating when it's huge
+                # (e.g. a vendored folder), so one big subtree can't flood the list.
+                grandchildren = _visible_children(child)
+                if len(grandchildren) > _DIR_SUMMARY_THRESHOLD:
+                    entry["summary"] = _summarize_dir(grandchildren)
+                    entries.append(entry)
+                    continue
                 entries.append(entry)
-                if child.is_dir() and level + 1 < depth:
+                if level + 1 < depth:
                     walk(child, level + 1)
 
         walk(base, 0)
@@ -187,6 +261,39 @@ def _make_search(paths: RicePaths) -> BuiltinTool:
         return {"query": query, "matches": matches, "truncated": False}
 
     return search_files
+
+
+def _make_grep(paths: RicePaths) -> BuiltinTool:
+    """Regex code search (ripgrep-backed, Python fallback).
+
+    Confined to the workspace: an optional `path` is resolved through the sandbox
+    guard before the engine runs, so a search can't escape the root."""
+
+    async def grep(args: dict) -> object:
+        root = paths.workspace
+        pattern = args.get("pattern", "")
+        if not pattern or not isinstance(pattern, str):
+            raise ValueError("pattern is required and must be a string")
+        sub = args.get("path")
+        search_path = _resolve(root, sub) if sub else root
+        if not search_path.exists():
+            raise FileNotFoundError(f"path not found: {sub}")
+        return grep_search(
+            root,
+            search_path,
+            pattern,
+            glob=args.get("glob"),
+            type_=args.get("type"),
+            before=_coerce_int(args.get("before_context") or args.get("-B"), 0),
+            after=_coerce_int(args.get("after_context") or args.get("-A"), 0),
+            context=_coerce_int(args.get("context") or args.get("-C"), 0),
+            case_insensitive=bool(args.get("case_insensitive") or args.get("-i")),
+            head_limit=args.get("head_limit"),
+            multiline=bool(args.get("multiline")),
+            fixed_strings=bool(args.get("fixed_strings")),
+        )
+
+    return grep
 
 
 def scratch_tool_factory(paths: RicePaths):
@@ -255,10 +362,21 @@ def tools(paths: RicePaths) -> list[tuple[ToolSpec, BuiltinTool]]:
         (
             ToolSpec(
                 name="read_file",
-                description="Read a UTF-8 text file from the workspace. Paths are relative to the workspace root.",
+                description=(
+                    "Read a file from the workspace. Paths are relative to the workspace root.\n"
+                    "- Content is returned with line numbers, one per line, in the format: LINE_NUMBER→LINE_CONTENT. "
+                    "The 'N→' prefix is display only — it is not part of the file.\n"
+                    "- By default up to 2000 lines are returned from the top of the file. For a large file, pass "
+                    "`offset` (1-indexed start line) and `limit` (line count) to read a specific slice.\n"
+                    "- Office/notebook documents (.xlsx, .docx, .pptx, .ipynb) are auto-extracted to readable text."
+                ),
                 parameters={
                     "type": "object",
-                    "properties": {"path": {"type": "string", "description": "Workspace-relative file path."}},
+                    "properties": {
+                        "path": {"type": "string", "description": "Workspace-relative file path."},
+                        "offset": {"type": "integer", "description": "The line number to start reading from (1-indexed). Only provide if the file is too large to read at once."},
+                        "limit": {"type": "integer", "description": "The number of lines to read (default 2000, max 5000). Only provide if the file is too large to read at once."},
+                    },
                     "required": ["path"],
                 },
                 source="builtin",
@@ -288,8 +406,12 @@ def tools(paths: RicePaths) -> list[tuple[ToolSpec, BuiltinTool]]:
                 name="edit_file",
                 description=(
                     "Replace an exact text snippet inside an existing workspace file. Safer and cheaper "
-                    "than write_file for small changes — the rest of the file is untouched. old_text must "
-                    "match the file exactly (copy it from read_file output) and be unique unless replace_all."
+                    "than write_file for small changes — the rest of the file is untouched.\n"
+                    "- Read the file with read_file before editing it.\n"
+                    "- read_file prefixes each line with 'N→'. That prefix is NOT part of the file: copy only "
+                    "what comes after the →, with its exact indentation, into old_text.\n"
+                    "- old_text must match exactly one place in the file. If it appears more than once, add "
+                    "surrounding lines to make it unique, or set replace_all to change every occurrence."
                 ),
                 parameters={
                     "type": "object",
@@ -312,7 +434,9 @@ def tools(paths: RicePaths) -> list[tuple[ToolSpec, BuiltinTool]]:
                 name="list_dir",
                 description=(
                     "List files and folders under a workspace directory (recursive up to `depth`, "
-                    "default 2). Use this to get oriented before reading files."
+                    "default 2). Use this to get oriented before reading files. Dot-files and folders "
+                    "like node_modules/__pycache__ are skipped; very large subdirectories are summarized "
+                    "with a file count and extension breakdown instead of being enumerated."
                 ),
                 parameters={
                     "type": "object",
@@ -327,8 +451,44 @@ def tools(paths: RicePaths) -> list[tuple[ToolSpec, BuiltinTool]]:
         ),
         (
             ToolSpec(
+                name="grep",
+                description=(
+                    "Search file contents with regular expressions (ripgrep). Prefer this over "
+                    "search_files for anything beyond a plain substring.\n"
+                    "- Full regex syntax, so escape literal special characters: `functionCall\\(`.\n"
+                    "- Pass `pattern` as a raw regex string — no surrounding quotes.\n"
+                    "- Respects .gitignore. Filter by `glob` or `type` only when you are sure of the file type "
+                    "(import paths may not match source extensions, e.g. .js vs .ts).\n"
+                    "- Output is grouped by file, ripgrep-style: ':' marks match lines, '-' marks context lines. "
+                    "Large results are capped (default 200 matches) and flagged as truncated."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "pattern": {"type": "string", "description": "The regular expression pattern to search for in file contents."},
+                        "path": {"type": "string", "description": "Workspace-relative file or directory to search in. Defaults to the workspace root."},
+                        "glob": {"type": "string", "description": "Glob to filter files, e.g. \"*.py\" or \"*.{ts,tsx}\"."},
+                        "type": {"type": "string", "description": "File type to search (rg --type): py, js, ts, rust, go, java, c, cpp, md, json, yaml, toml, html, css, sh, sql, txt."},
+                        "-A": {"type": "integer", "description": "Number of lines to show after each match."},
+                        "-B": {"type": "integer", "description": "Number of lines to show before each match."},
+                        "-C": {"type": "integer", "description": "Number of lines to show before and after each match."},
+                        "-i": {"type": "boolean", "description": "Case-insensitive search."},
+                        "head_limit": {"type": "integer", "description": "Limit output to the first N matches (default 200, max 2000)."},
+                        "multiline": {"type": "boolean", "description": "Enable multiline mode where . matches newlines and patterns can span lines."},
+                    },
+                    "required": ["pattern"],
+                },
+                source="builtin",
+            ),
+            _make_grep(paths),
+        ),
+        (
+            ToolSpec(
                 name="search_files",
-                description="Search workspace files for a literal substring; returns matching path/line/text.",
+                description=(
+                    "Search workspace files for a literal substring; returns matching path/line/text. "
+                    "For regex, file-type filters, or context lines, use grep instead."
+                ),
                 parameters={
                     "type": "object",
                     "properties": {"query": {"type": "string", "description": "Literal substring to find."}},

@@ -12,8 +12,9 @@ and the name→handler map (`BuiltinTool`), which the composition root injects i
 the Orchestrator + ToolDispatcher.
 
 Registered builtin modules (add new ones here — one place):
-  file_tools    — read_file, write_file, edit_file, list_dir, search_files
-                  (+ xlsx/docx/ipynb/pptx extraction)
+  file_tools    — read_file, write_file, edit_file, list_dir, grep, search_files
+                  (+ xlsx/docx/ipynb/pptx extraction). grep = 정규식 코드 검색
+                  (ripgrep, 없으면 Python 폴백); search_files = 리터럴 부분문자열.
   office        — create_presentation/edit_presentation (.pptx 생성·슬라이드 단위
                   편집) + create_workbook (.xlsx 생성, 수식 로컬 평가 포함) +
                   create_document (.docx); 전부 requires_approval=True
@@ -28,7 +29,7 @@ Registered builtin modules (add new ones here — one place):
                   주입됐을 때만 등록된다
 
 `build_subagent_toolset(paths, learning=None)`는 sub-agent 워커에게 주는 격리
-부분집합이다 — read-only(read_file/list_dir/search_files/fetch_url/web_search)에, learning이
+부분집합이다 — read-only(read_file/list_dir/grep/search_files/fetch_url/web_search)에, learning이
 배선되면 스킬 온디맨드 로딩(skill_search/skill_view)이 더해진다. 일반 쓰기·셸·
 재위임은 뺀다(워커는 승인 게이트 밖에서 돈다); 산출물 쓰기는 별도의 thread 격리
 `write_scratch`(file_tools.scratch_tool_factory)가 담당한다.
@@ -48,7 +49,7 @@ if TYPE_CHECKING:
     from ...learning.interfaces import ILearningService
     from ..subagents import SubAgentRunner
 
-_SUBAGENT_TOOL_NAMES = ("read_file", "list_dir", "search_files", "fetch_url", "web_search")
+_SUBAGENT_TOOL_NAMES = ("read_file", "list_dir", "grep", "search_files", "fetch_url", "web_search")
 # learning 배선 시 워커에 추가되는 스킬 도구 — propose_skill은 제외한다(사용자
 # 가시 효과를 스테이징하므로 메인 스트림의 카드 흐름 밖에서 돌면 안 된다).
 _SUBAGENT_SKILL_TOOLS = ("skill_search", "skill_view", "skill_resource")

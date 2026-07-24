@@ -228,11 +228,12 @@ async def _run_command(
                 "timed_out": True,
             }
 
-        output = stdout_bytes.decode("utf-8", errors="replace")
+        output, output_truncated = _truncate_output(stdout_bytes)
         return {
             "output": output,
             "exit_code": proc.returncode,
             "timed_out": False,
+            "output_truncated": output_truncated,
         }
     except Exception as exc:
         return {
@@ -248,6 +249,24 @@ async def _run_command(
 _MIN_TIMEOUT_S = 1.0
 _MAX_TIMEOUT_S = 600.0
 _DEFAULT_TIMEOUT_S = 60.0
+
+# 셸 출력 상한(바이트). 상한이 없으면 `cat huge.log`/`npm install` 한 번이 컨텍스트
+# 윈도를 통째로 삼킨다. 앞부분(무엇을 실행했는지)과 뒷부분(에러·요약은 보통 끝에
+# 있다)을 함께 남기고 가운데를 잘라 낸다.
+_MAX_OUTPUT_BYTES = 40 * 1024
+_OUTPUT_TAIL_BYTES = 10 * 1024  # 뒤에서 보존할 몫(나머지는 앞에서 보존)
+
+
+def _truncate_output(data: bytes) -> tuple[str, bool]:
+    """바이트 출력을 상한 안으로 자른다(head+tail 보존). (텍스트, 잘림여부) 반환."""
+    if len(data) <= _MAX_OUTPUT_BYTES:
+        return data.decode("utf-8", errors="replace"), False
+    head_bytes = _MAX_OUTPUT_BYTES - _OUTPUT_TAIL_BYTES
+    head = data[:head_bytes].decode("utf-8", errors="replace")
+    tail = data[-_OUTPUT_TAIL_BYTES:].decode("utf-8", errors="replace")
+    omitted = len(data) - _MAX_OUTPUT_BYTES
+    marker = f"\n\n[... {omitted} bytes truncated ...]\n\n"
+    return head + marker + tail, True
 
 
 def _clamp_timeout(raw: object) -> float:
@@ -291,7 +310,9 @@ def tools(paths: RicePaths) -> list[tuple[ToolSpec, BuiltinTool]]:
                     "Execute a shell command on the local host and return its output. "
                     "Commands run in a subshell (bash/sh on POSIX, Git Bash on Windows). "
                     "Use for file operations, running scripts, installing packages, etc. "
-                    "Requires user approval before execution."
+                    "Requires user approval before execution. "
+                    "Output larger than ~40KB is truncated (head + tail kept); redirect bulk "
+                    "output to a file and read the parts you need instead."
                 ),
                 parameters={
                     "type": "object",

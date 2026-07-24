@@ -4,7 +4,7 @@ Sub-agents are exposed to the main model as a builtin tool. The main agent can
 spawn several focused workers in one tool-use round; the scheduler can run those
 workers in parallel, and the next main LLM call synthesizes their results.
 
-2026-07-04: 워커에게 read-only 도구(read_file/list_dir/search_files/fetch_url,
+2026-07-04: 워커에게 read-only 도구(read_file/list_dir/grep/search_files/fetch_url,
 2026-07-18부터 web_search 포함)를
 주는 미니 ReAct 루프가 됐다. 이전의 "제공된 컨텍스트만 요약" 워커는 컨텍스트
 격리 효과가 없었다 — 메인 에이전트가 파일 원문을 읽어 넘겨야 했으므로 오염은
