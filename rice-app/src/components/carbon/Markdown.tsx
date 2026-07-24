@@ -162,6 +162,50 @@ const FileChip: React.FC<{ path: string; onFileClick: (path: string) => void }> 
   );
 };
 
+// 웹 출처를 긴 URL로 쏟지 않고 축약된 칩으로 그린다: globe 아이콘 + 짧은 라벨(제목이
+// 있으면 제목, 없으면 호스트명), 전체 URL은 hover title로 노출. WHY: 모델이 조사
+// 후 다는 출처가 raw URL이거나 utm 파라미터가 붙어 길게 늘어지면 답변 가독성을
+// 해친다 — 검색엔진 인용 칩처럼 압축된 형태로 그린다. favicon 서비스(google/ddg
+// 등)로 방문 도메인이 외부에 새는 것을 피하려 아이콘은 로컬 globe로 고정한다.
+const URL_TEXT_RE = /^https?:\/\/\S+$/i;
+
+const hostnameOf = (href: string): string => {
+  try {
+    return new URL(href).hostname.replace(/^www\./, '');
+  } catch {
+    return href;
+  }
+};
+
+const nodeToText = (node: React.ReactNode): string =>
+  React.Children.toArray(node)
+    .map((child) => {
+      if (typeof child === 'string' || typeof child === 'number') return String(child);
+      if (React.isValidElement(child)) return nodeToText((child as React.ReactElement<{ children?: React.ReactNode }>).props.children);
+      return '';
+    })
+    .join('');
+
+const ExternalLinkChip: React.FC<{ href: string; children: React.ReactNode }> = ({ href, children }) => {
+  const host = hostnameOf(href);
+  const text = nodeToText(children).trim();
+  // 링크 텍스트가 곧 URL(autolink)이거나 비어 있으면 호스트명을, 실제 제목이면 제목을.
+  const label = !text || URL_TEXT_RE.test(text) ? host : text;
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer noopener"
+      title={href}
+      className="mx-0.5 inline-flex max-w-[16rem] items-center gap-1 rounded-full border border-border-subtle-01 bg-layer-02 px-2 py-0.5 align-baseline text-caption-01 text-text-secondary no-underline transition-colors hover:border-border-strong-01 hover:bg-layer-hover-02 hover:text-text-primary"
+    >
+      <Icon name="globe" size={12} className="flex-shrink-0 text-icon-secondary" />
+      <span className="truncate">{label}</span>
+      <Icon name="arrow-up-right" size={10} className="flex-shrink-0 opacity-50" />
+    </a>
+  );
+};
+
 export interface MarkdownProps {
   source: string;
   onFileClick?: (path: string) => void;
@@ -234,6 +278,11 @@ export const Markdown: React.FC<MarkdownProps> = ({ source, onFileClick, streami
             </a>
           );
         }
+        // 외부 웹 출처는 축약 칩으로 — 긴 URL/제목이 답변에 쏟아지지 않게 한다.
+        if (/^https?:\/\//i.test(href)) {
+          return <ExternalLinkChip href={href}>{children}</ExternalLinkChip>;
+        }
+        // mailto:, 페이지 내 앵커(#...), 상대 경로 등은 평범한 링크로 둔다.
         return (
           <a href={href} target="_blank" rel="noreferrer noopener" className="text-link-primary underline decoration-link-primary/40 underline-offset-2 hover:decoration-link-primary">
             {children}

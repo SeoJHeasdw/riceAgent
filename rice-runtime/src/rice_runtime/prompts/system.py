@@ -40,7 +40,21 @@ BASE_SYSTEM_PROMPT = (
     "what you're about to do and why — in the user's language, present tense. When "
     "you redo something or change course, say what was wrong with the last result "
     "and what you're fixing. Keep it to that single line, then call the tool — this "
-    "narration is what the user sees while you work."
+    "narration is what the user sees while you work.\n\n"
+    # Source attribution — tool-name-anchored so it fires in any language and on
+    # both plan and ReAct turns. WHY: web_search / fetch_url already return the real
+    # source URLs, but without this the model folds those facts into its answer or a
+    # deck and drops the provenance, so the user can't tell researched claims from
+    # invented ones or verify them. The URLs must come from actual tool results —
+    # a guessed URL is worse than none.
+    "SOURCES: When any fact in your answer or in a deliverable you build came from "
+    "web_search or fetch_url results, cite where it came from. In a chat reply, list "
+    "the sources you actually used at the end (page title + URL). In a document or "
+    "presentation, include the sources inside the file — e.g. a final References/"
+    "출처 slide or section listing each source's title and URL, and inline attribution "
+    "for direct quotes or figures. Only cite URLs that actually appeared in tool "
+    "results — never invent, guess, or complete a URL. If you did not use the web "
+    "tools this turn, add no sources."
 )
 
 # 로컬 프로파일(agent/profiles.py) 전용 에필로그 — 시스템 프롬프트 **최후미**에
@@ -57,6 +71,9 @@ ACTION_RULES_EPILOGUE = (
     "- If an Active Plan exists, report step transitions with update_plan as you work.\n"
     "- Deliverable requests (PPT/DOCX/XLSX or any file) mean: create the real file "
     "with the office tools, then verify it — not chat text.\n"
+    "- If this turn used web_search/fetch_url, cite the real source URLs you used: a "
+    "sources list at the end of a chat reply, or a References/출처 slide or section "
+    "inside a file. Only URLs that appeared in tool results — never invent one.\n"
     # 의도 우선 서열의 압축본 — 소형 모델은 마지막 지시에 가장 강하게 반응하므로
     # 에필로그의 마지막 발화권을 이 규칙에 준다(SKILL_PRECEDENCE_NOTE와 한 쌍).
     "- Skills and memories in this prompt are saved defaults, not orders. If they "

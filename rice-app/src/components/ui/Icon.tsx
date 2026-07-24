@@ -57,6 +57,7 @@ export type IconName =
   | 'radio-checked'
   | 'terminal'
   | 'document'
+  | 'globe'
   | 'folder'
   | 'side-panel-close'
   | 'side-panel-open'
@@ -115,6 +116,8 @@ const PATHS: Record<IconName, React.ReactNode> = {
   'radio-checked': <><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none" /></>,
   terminal: <><rect x="2" y="4" width="20" height="16" rx="2" /><path d="m7 9 3 3-3 3M13 15h4" /></>,
   document: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></>,
+  // 웹 출처 칩 favicon 폴백 — favicon 로드가 실패했을 때 대신 그린다.
+  globe: <><circle cx="12" cy="12" r="9" /><path d="M3 12h18" /><path d="M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18z" /></>,
   folder: <><path d="M3 6.5A2.5 2.5 0 0 1 5.5 4H10l2 2h6.5A2.5 2.5 0 0 1 21 8.5v9A2.5 2.5 0 0 1 18.5 20h-13A2.5 2.5 0 0 1 3 17.5z" /><path d="M3 9h18" /></>,
   'side-panel-close': <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M15 4v16" /><path d="M11.5 9.5 9 12l2.5 2.5" /></>,
   'side-panel-open': <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M15 4v16" /><path d="M8.5 9.5 11 12l-2.5 2.5" /></>,
