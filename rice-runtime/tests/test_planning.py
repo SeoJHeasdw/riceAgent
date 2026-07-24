@@ -298,6 +298,56 @@ async def test_loop_plans_executes_and_react_updates():
 
 
 @pytest.mark.asyncio
+async def test_planned_empty_first_round_continues_work_without_false_final_reconcile():
+    """실측 회귀: 플래너가 계획을 만든 직후 모델이 thinking만 내고 본문/도구는
+    비웠다. 아직 전달된 답이 없으므로 "final answer is already delivered" reconcile
+    넛지가 아니라, 첫 미완료 단계를 계속하라는 empty nudge를 줘야 한다."""
+    provider = _ScriptedProvider(
+        [
+            _text(_PLAN_JSON),  # planner
+            [],  # execution round 1: thinking-only provider의 wire상 빈 응답
+            [
+                ProviderChunk(kind="text", text="실제 작업을 완료했습니다."),
+                ProviderChunk(
+                    kind="tool_call",
+                    tool_call=ToolCall(
+                        tool_name="update_plan",
+                        arguments={
+                            "updates": [
+                                {"step_id": "s1", "status": "done"},
+                                {"step_id": "s2", "status": "done"},
+                            ],
+                            "finish_turn": True,
+                        },
+                        id="call_finish",
+                    ),
+                ),
+            ],
+        ]
+    )
+    loop = AgentLoop(
+        provider=provider,
+        dispatcher=_dispatcher({}),
+        planner=TurnPlanner(provider=provider, config=AgentConfig()),
+        agent_config=AgentConfig(),
+    )
+    result = LoopResult()
+    events = [
+        ev
+        async for ev in loop.run(_ctx((_spec("echo"),)), "s1", result, asyncio.Event())
+    ]
+
+    assert len(provider.calls) == 3  # planner + empty execution + completed response
+    assert result.final_message == "실제 작업을 완료했습니다."
+    assert any(m.metadata.get("synthetic") == "empty_nudge" for m in result.history)
+    assert not any(m.metadata.get("synthetic") == "plan_reconcile" for m in result.history)
+    message_events = [e for e in events if e.type == EventType.MESSAGE]
+    assert [e.data["content"] for e in message_events if "content" in e.data] == [
+        "실제 작업을 완료했습니다."
+    ]
+
+
+@pytest.mark.asyncio
 async def test_loop_without_plan_stays_pure_react():
     provider = _ScriptedProvider(
         [

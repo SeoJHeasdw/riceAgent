@@ -134,7 +134,16 @@ UPDATE_PLAN_SPEC = ToolSpec(
                 },
             },
             "reason": {"type": "string", "description": "One line: why the plan changed (for revisions)."},
+            "finish_turn": {
+                "type": "boolean",
+                "description": (
+                    "True only when this call makes every step terminal AND the same "
+                    "assistant response already contains the complete final answer. "
+                    "False for progress updates or short preambles."
+                ),
+            },
         },
+        "required": ["finish_turn"],
     },
     source="builtin",
     requires_approval=False,

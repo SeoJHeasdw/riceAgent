@@ -82,6 +82,11 @@ _EMPTY_NUDGE = (
     "Your last message was empty. Process the tool results above and answer the "
     "user's request — or call the next tool you need."
 )
+_EMPTY_PLAN_NUDGE = (
+    "Your last response contained no user-visible text or tool call. Process any "
+    "tool results above, then continue the first unfinished plan step now. Call "
+    "the tool you need; do not treat the empty response as a final answer."
+)
 # 빈 tool name은 오타가 아니라 priming(파일/도구 출력 속 tool-call XML을 흉내)이다
 # — 카탈로그를 되돌려주면 모델이 새 이름을 흉내내며 루프가 커진다(Hermes #47967).
 # 짧은 교정 메시지만 준다.
@@ -520,20 +525,28 @@ class AgentLoop:
 
             # No tool calls → this is the final answer for the turn.
             if not pending_calls:
-                # 소형 모델 방어: 도구를 이미 썼는데 본문 없이 끝났다(또는 thinking만
-                # 있다) — 빈 답을 확정하기 전에 넛지를 주고 재시도한다. 순수 대화
-                # 첫 턴(tool_calls_made==0)의 빈 응답은 provider 문제라 그대로 둔다.
+                # 소형 모델 방어: 도구를 이미 썼거나 미완료 계획이 있는데 본문 없이
+                # 끝났다(또는 thinking만 있다) — 빈 답을 확정하기 전에 넛지를 주고
+                # 재시도한다. 계획 없는 순수 대화 첫 턴(tool_calls_made==0)의 빈
+                # 응답은 provider 문제라 그대로 둔다.
                 # (reconcile 모드에선 빈 응답 방어를 건너뛴다 — 답은 이미 확정됐고,
                 # 여기서 받아낼 것은 계획 정리뿐이다.)
+                has_unfinished_plan = plan_state is not None and not plan_state.all_terminal
                 if (
                     not assistant_text.strip()
-                    and tool_calls_made > 0
+                    and (tool_calls_made > 0 or has_unfinished_plan)
                     and empty_retries < _EMPTY_RESPONSE_RETRIES
                     and reconcile_final_text is None
                 ):
                     empty_retries += 1
-                    log.warning("empty final answer after tool use — nudging (retry %d)", empty_retries)
-                    messages.append(Message(role="user", content=_EMPTY_NUDGE, metadata={"synthetic": "empty_nudge"}))
+                    log.warning(
+                        "empty response with unfinished work — nudging (retry %d)",
+                        empty_retries,
+                    )
+                    nudge = _EMPTY_PLAN_NUDGE if has_unfinished_plan else _EMPTY_NUDGE
+                    messages.append(
+                        Message(role="user", content=nudge, metadata={"synthetic": "empty_nudge"})
+                    )
                     continue
                 # ── 계획 종결 강제: 미종결 단계가 남은 채 final 로 끝나려 하면 1회
                 # reconcile 을 강제하고, 그래도 무시하면 런타임이 skipped 로 닫는다
@@ -716,12 +729,47 @@ class AgentLoop:
             # drain_completed 를 노출할 때만(레지스트리 주입 시) 동작 — 테스트 fake는
             # 없어도 무해(getattr 가드).
             drain_completed = getattr(self._dispatcher, "drain_completed", None)
+            drained_completion = False
             if reconcile_final_text is None and drain_completed is not None:
                 for completed in drain_completed(session_id):
+                    drained_completion = True
                     yield ev_task_completed(
                         completed.id, completed.status, completed.exit_code
                     )
                     messages.append(build_completion_observation(completed))
+
+            # ── 최종 답 + 계획 종결의 동시 응답 ────────────────────────────────
+            # 모델이 완성된 답변과 "남은 단계 전부 terminal" update_plan
+            # (finish_turn=true)을 같은 응답에 담은 경우, 계획 도구 결과를
+            # 보여주려고 provider 를 한 번 더 호출하면 이미 쓴 답을 그대로
+            # 재생성하기 쉽다. update_plan 은 외부 관찰을 만드는 도구가 아니라
+            # 턴-로컬 메타데이터 갱신이므로, 이 응답 자체를 canonical final 로
+            # 확정하고 끝낸다. 명시 플래그가 필요한 이유는 짧은 "계획을
+            # 업데이트하겠습니다" preamble을 최종 답으로 오인하지 않기 위해서다.
+            #
+            # 실제 작업 도구가 섞였거나 방금 백그라운드 완료 관찰이 들어왔다면
+            # 결과를 모델이 아직 보지 못했으므로 단축하지 않는다. 본문이 비어
+            # 있어도 마찬가지다 — 그때는 다음 라운드에서 사용자용 최종 답을
+            # 받아야 한다.
+            terminal_plan_update_only = (
+                plan_state is not None
+                and plan_state.all_terminal
+                and bool(pending_calls)
+                and all(c.tool_name == UPDATE_PLAN_SPEC.name for c in pending_calls)
+            )
+            finish_turn_requested = any(
+                c.arguments.get("finish_turn") is True for c in pending_calls
+            )
+            if (
+                reconcile_final_text is None
+                and terminal_plan_update_only
+                and finish_turn_requested
+                and assistant_text.strip()
+                and not drained_completion
+            ):
+                final_text = assistant_text
+                yield ev_message(content=assistant_text)
+                break
 
             # ── reconcile 종결: 확정된 답 이후, 계획 정리 호출만으로 끝난 라운드 —
             # 추가 LLM 라운드를 돌리지 않고 여기서 턴을 닫는다(재질의하면 소형 모델은

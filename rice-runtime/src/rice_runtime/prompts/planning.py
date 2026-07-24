@@ -178,7 +178,9 @@ update_plan is cheap.
 plan or ask the user.
 - Quality over brevity: verify results (read back what you produced) before marking a step done.
 - Only give your final answer when every step is done, failed, or skipped — and say what was \
-done and what wasn't."""
+done and what wasn't. When an update_plan call makes the last open step terminal, include the \
+complete final answer in that SAME response and set finish_turn=true. Set finish_turn=false for \
+progress-only updates; the runtime will continue after applying them."""
 
 
 def render_plan_status(
