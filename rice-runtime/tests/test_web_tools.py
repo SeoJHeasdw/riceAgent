@@ -693,6 +693,27 @@ async def test_fetch_url_reports_transport_body_cut(monkeypatch):
     assert len(out["text"].encode()) == 32
 
 
+async def test_truncated_transport_response_is_not_cached(monkeypatch):
+    monkeypatch.setattr(web_tools, "_MAX_FETCH_BYTES", 16)
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/plain"},
+            content=b"0123456789" * 10,
+        )
+
+    args = {"url": "https://example.com/large"}
+    first = await _fetch_url_impl(args, transport=_transport(handler))
+    second = await _fetch_url_impl(args, transport=_transport(handler))
+
+    assert first["source_truncated"] is True and second["source_truncated"] is True
+    assert calls["n"] == 2
+    assert "from_cache" not in second
+
+
 def test_common_noise_containers_and_anonymous_ui_line_are_removed():
     body = "당진 여행자가 직접 확인한 식당 정보와 대표 메뉴를 자세히 설명합니다. " * 12
     html = (
@@ -766,6 +787,195 @@ async def test_instruction_like_web_text_is_flagged_but_kept_as_source_data():
     assert "error" not in out and "Ignore all previous" in out["text"]
     assert "instruction-like text" in out["security_warning"]
     assert out["data_origin"] == "untrusted_web"
+
+
+# ── v4: xAI 경계 이식 — URL/도메인/MIME/base64 ─────────────────────────────
+
+
+def test_domain_matcher_normalizes_www_and_enforces_path_boundary():
+    matcher = web_tools._DomainMatcher(["www.Example.COM/docs/", "docs.python.org"])
+
+    assert matcher.canonical == ("example.com/docs", "docs.python.org")
+    assert matcher.allows("https://example.com/docs")
+    assert matcher.allows("https://www.example.com/docs/guide")
+    assert not matcher.allows("https://example.com/docs-internal")
+    assert not matcher.allows("https://example.com/docs/%2e%2e/admin")
+    assert not matcher.allows("https://example.com/docs%2f..%2fadmin")
+    assert not matcher.allows("https://sub.example.com/docs")
+    assert matcher.allows("https://docs.python.org/3/")
+
+
+def test_prepare_url_canonicalizes_and_bounds_targets():
+    assert web_tools._prepare_url(
+        "HTTPS://ExAmPle.COM./docs/../admin?q=1#fragment"
+    ) == "https://example.com/admin?q=1"
+    with pytest.raises(ValueError, match="single-label"):
+        web_tools._prepare_url("https://intranet/private")
+    with pytest.raises(ValueError, match="maximum length"):
+        web_tools._prepare_url(
+            "https://example.com/" + "x" * web_tools._MAX_URL_CHARS
+        )
+
+
+@pytest.mark.parametrize(
+    "value, message",
+    [
+        ([], "non-empty"),
+        (["*.example.com"], "exact host"),
+        (["localhost"], "local/internal"),
+        (["example.com?next=evil.com"], "exact host"),
+    ],
+)
+def test_domain_matcher_rejects_ambiguous_or_unsafe_rules(value, message):
+    with pytest.raises(ValueError, match=message):
+        web_tools._DomainMatcher(value)
+
+
+async def test_fetch_url_upgrades_public_http_and_redirect_downgrades():
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        if request.url.path == "/start":
+            return httpx.Response(
+                302, headers={"location": "http://example.com/final"}
+            )
+        return httpx.Response(
+            200, headers={"content-type": "text/plain"}, content="secure"
+        )
+
+    out = await _fetch_url_impl(
+        {"url": "http://example.com/start"}, transport=_transport(handler)
+    )
+
+    assert seen == [
+        "https://example.com/start",
+        "https://example.com/final",
+    ]
+    assert out["url"] == "https://example.com/final"
+    assert out["upgraded_from_http"] is True
+
+
+async def test_fetch_url_detects_redirect_loop_before_hop_limit():
+    def handler(request: httpx.Request) -> httpx.Response:
+        target = "/b" if request.url.path == "/a" else "/a"
+        return httpx.Response(302, headers={"location": target})
+
+    with pytest.raises(ValueError, match="redirect loop"):
+        await _fetch_url_impl(
+            {"url": "https://example.com/a"}, transport=_transport(handler)
+        )
+
+
+async def test_fetch_url_allowed_domains_blocks_initial_and_redirect_targets():
+    called = False
+
+    def initial_handler(request: httpx.Request) -> httpx.Response:
+        nonlocal called
+        called = True
+        return httpx.Response(200, content="must not run")
+
+    with pytest.raises(ValueError, match="outside allowed_domains"):
+        await _fetch_url_impl(
+            {
+                "url": "https://evil.example.net/",
+                "allowed_domains": ["example.com"],
+            },
+            transport=_transport(initial_handler),
+        )
+    assert called is False
+
+    def redirect_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            302, headers={"location": "https://cdn.example.net/content"}
+        )
+
+    with pytest.raises(ValueError, match="outside allowed_domains"):
+        await _fetch_url_impl(
+            {
+                "url": "https://example.com/start",
+                "allowed_domains": ["example.com"],
+            },
+            transport=_transport(redirect_handler),
+        )
+
+
+async def test_fetch_url_allowed_domains_cannot_bypass_via_unscoped_cache():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "example.com":
+            return httpx.Response(
+                302, headers={"location": "https://other.example.net/content"}
+            )
+        return httpx.Response(
+            200, headers={"content-type": "text/plain"}, content="cached secret"
+        )
+
+    args = {"url": "https://example.com/start"}
+    first = await _fetch_url_impl(args, transport=_transport(handler))
+    assert first["url"] == "https://other.example.net/content"
+
+    with pytest.raises(ValueError, match="outside allowed_domains"):
+        await _fetch_url_impl(
+            {**args, "allowed_domains": ["example.com"]},
+            transport=_transport(handler),
+        )
+
+
+async def test_fetch_url_prefers_and_preserves_direct_markdown():
+    markdown = "# API\n\nUse `rice.run()`.\n"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["accept"].startswith("text/markdown")
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/markdown; charset=utf-8"},
+            content=markdown,
+        )
+
+    out = await _fetch_url_impl(
+        {"url": "https://docs.example.com/api"}, transport=_transport(handler)
+    )
+    assert out["text"] == markdown
+    assert out["extraction_method"] == "direct_markdown"
+
+
+@pytest.mark.parametrize(
+    "content_type, content, expected",
+    [
+        ("application/yaml", "name: rice\nversion: 4\n", "version: 4"),
+        ("application/rss+xml", "<rss><title>Rice news</title></rss>", "Rice news"),
+        ("", "headerless but readable text", "headerless but readable text"),
+    ],
+)
+async def test_fetch_url_supports_additional_text_payloads(
+    content_type, content, expected
+):
+    def handler(request: httpx.Request) -> httpx.Response:
+        headers = {"content-type": content_type} if content_type else {}
+        return httpx.Response(200, headers=headers, content=content)
+
+    out = await _fetch_url_impl(
+        {"url": "https://example.com/data"}, transport=_transport(handler)
+    )
+    assert expected in out["text"]
+    assert "error" not in out
+
+
+async def test_fetch_url_strips_base64_data_uri_token_bombs():
+    payload = "A" * 20_000
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/plain"},
+            content=f"before data:image/png;base64,{payload} after",
+        )
+
+    out = await _fetch_url_impl(
+        {"url": "https://example.com/dump"}, transport=_transport(handler)
+    )
+    assert out["text"] == "before [base64 image/png data removed] after"
+    assert out["total_chars"] < 100
 
 
 # ── v3: web_search (DuckDuckGo HTML) ──────────────────────────────────────────
@@ -893,3 +1103,44 @@ async def test_web_search_parses_lite_markup_and_normalizes_tracking_url():
         "url": "https://example.com/guide?id=7",
         "snippet": "현지 식당과 관광지를 함께 정리한 안내",
     }]
+
+
+async def test_web_search_allowed_domains_uses_site_query_and_postfilters_results():
+    page = """
+    <html><body>
+      <a class="result__a" href="https://docs.example.com/api/start">Allowed API</a>
+      <div class="result__snippet">official docs</div>
+      <a class="result__a" href="https://docs.example.com/blog/news">Wrong path</a>
+      <div class="result__snippet">outside path</div>
+      <a class="result__a" href="https://evil.example.net/api/start">Wrong host</a>
+      <div class="result__snippet">outside host</div>
+    </body></html>
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["q"] == "rice api site:docs.example.com/api"
+        return httpx.Response(
+            200, headers={"content-type": "text/html"}, content=page
+        )
+
+    out = await web_tools._web_search_impl(
+        {
+            "query": "rice api",
+            "allowed_domains": ["docs.example.com/api"],
+        },
+        transport=_transport(handler),
+    )
+
+    assert out["allowed_domains"] == ["docs.example.com/api"]
+    assert out["results"] == [{
+        "title": "Allowed API",
+        "url": "https://docs.example.com/api/start",
+        "snippet": "official docs",
+    }]
+
+
+def test_web_tool_schemas_expose_allowed_domains():
+    specs = {spec.name: spec for spec, _handler in web_tools.tools()}
+
+    assert "allowed_domains" in specs["fetch_url"].parameters["properties"]
+    assert "allowed_domains" in specs["web_search"].parameters["properties"]
