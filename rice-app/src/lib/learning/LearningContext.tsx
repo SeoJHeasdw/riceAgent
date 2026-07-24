@@ -98,7 +98,7 @@ interface LearningContextValue {
   panelScrollRef: React.RefObject<HTMLDivElement | null>;
   /** 런타임 + 마켓 게시 상태로 나의 스킬 목록을 즉시 재조회한다. */
   refreshSkills: () => Promise<void>;
-  /** 모든 인메모리 학습 상태를 초기화한다 (전체 데이터 삭제 후 호출). */
+  /** 사용자 인메모리 학습 상태를 초기화하고 immutable 빌트인은 기본 상태로 보존한다. */
   resetAll: () => void;
 }
 
@@ -566,14 +566,38 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, []);
 
   const resetAll = useCallback(() => {
-    setSkills([]);
+    setSkills((prev) => prev
+      .filter((skill) => skill.origin === 'builtin')
+      .map((skill) => ({
+        ...skill,
+        state: 'active' as const,
+        enabled: true,
+        uses: 0,
+        injected: 0,
+        friction: 0,
+        routingMiss: 0,
+        patches: 0,
+        idleDays: undefined,
+      })));
     setSignals([]);
     setInstalled([]);
-    setDetails({});
-    setMyPlugins([]);
+    setDetails((prev) => Object.fromEntries(
+      Object.entries(prev).filter(([, detail]) => detail.createdFrom === 'created_from_builtin'),
+    ));
+    setMyPlugins((prev) => prev
+      .filter((plugin) => plugin.builtin)
+      .map((plugin) => ({ ...plugin, enabled: true })));
     setProposals([]);
     setSuggestions([]);
+    suggestionsRef.current = [];
     setCandidates([]);
+    resolvedRef.current = new Set();
+    setResolvedApprovals(new Set());
+    setHighlightedSkill(null);
+    if (timer.current) {
+      clearTimeout(timer.current);
+      timer.current = null;
+    }
   }, []);
 
   // install(plugin) = 마켓 → 나의 플러그인 materialize. marketId 기준 멱등(중복 설치 방지).

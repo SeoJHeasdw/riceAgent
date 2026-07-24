@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getStatus: () => ipcRenderer.invoke('runtime:status'),
     getPort: () => ipcRenderer.invoke('runtime:get-port'),
     getToken: () => ipcRenderer.invoke('runtime:get-token'),
+    factoryReset: () => ipcRenderer.invoke('runtime:factory-reset'),
     /** main pushes this once the runtime is healthy (App connects on it) */
     onReady: (cb: (status: { running: boolean; port?: number; token?: string }) => void) => {
       const listener = (_e: unknown, status: { running: boolean; port?: number; token?: string }) => cb(status);
@@ -57,6 +58,7 @@ export interface ElectronAPI {
     }>;
     getPort: () => Promise<number | null>;
     getToken: () => Promise<string | null>;
+    factoryReset: () => Promise<{ running: boolean; port?: number; pid?: number; token?: string }>;
     onReady: (cb: (status: { running: boolean; port?: number; token?: string }) => void) => () => void;
   };
   window: {

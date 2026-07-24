@@ -2,7 +2,8 @@ import { spawn, type ChildProcess } from 'child_process';
 import net from 'net';
 import crypto from 'crypto';
 import path from 'path';
-import { existsSync } from 'fs';
+import os from 'os';
+import { existsSync, promises as fs } from 'fs';
 import { app } from 'electron';
 
 export interface RuntimeStatus {
@@ -59,6 +60,8 @@ export class RuntimeManager {
   private port: number | null = null;
   private token: string | null = null;
   private isRunning = false;
+  private startPromise: Promise<RuntimeStatus> | null = null;
+  private resetInProgress = false;
 
   async initialize(): Promise<void> {
     console.log('[RuntimeManager] Initializing...');
@@ -73,6 +76,53 @@ export class RuntimeManager {
       return path.resolve(app.getAppPath(), '..', 'rice-runtime');
     }
     return path.join(process.resourcesPath, 'rice-runtime');
+  }
+
+  /**
+   * The runtime owns this directory in its entirety. Keeping resolution here
+   * and passing the same value to every child makes factory reset independent
+   * of dev/packaged Python defaults.
+   */
+  private dataRoot(): string {
+    const configured = process.env.RICE_HOME?.trim();
+    const root = configured
+      ? path.resolve(configured)
+      : app.isPackaged
+        ? path.join(app.getPath('userData'), 'runtime')
+        : path.join(os.homedir(), '.rice');
+    return this.assertSafeDataRoot(root);
+  }
+
+  /**
+   * RICE_HOME is an ownership declaration, but reject roots broad enough to
+   * erase the account, app installation, or current source tree if it was
+   * accidentally misconfigured.
+   */
+  private assertSafeDataRoot(candidate: string): string {
+    const resolved = path.resolve(candidate);
+    const normalized = process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+    const protectedPaths = [
+      path.parse(resolved).root,
+      os.homedir(),
+      os.tmpdir(),
+      app.getPath('appData'),
+      app.getPath('userData'),
+      app.getPath('temp'),
+      app.getAppPath(),
+      this.runtimeDir(),
+      process.cwd(),
+    ].map((item) => {
+      const value = path.resolve(item);
+      return process.platform === 'win32' ? value.toLowerCase() : value;
+    });
+
+    const containsProtectedPath = protectedPaths.some(
+      (item) => normalized === item || item.startsWith(`${normalized}${path.sep}`),
+    );
+    if (containsProtectedPath) {
+      throw new Error(`Refusing unsafe RICE data root: ${resolved}`);
+    }
+    return resolved;
   }
 
   /** (command, args) to launch, given the chosen port + token. */
@@ -121,7 +171,18 @@ export class RuntimeManager {
       console.log('[RuntimeManager] Runtime already running');
       return this.getStatus();
     }
+    if (this.startPromise) return this.startPromise;
 
+    const pending = this.startOnce();
+    this.startPromise = pending;
+    try {
+      return await pending;
+    } finally {
+      if (this.startPromise === pending) this.startPromise = null;
+    }
+  }
+
+  private async startOnce(): Promise<RuntimeStatus> {
     const dir = this.runtimeDir();
     const port = await findFreePort();
     const token = crypto.randomBytes(24).toString('hex');
@@ -132,13 +193,9 @@ export class RuntimeManager {
     const childEnv: NodeJS.ProcessEnv = {
       ...process.env,
       PYTHONUNBUFFERED: '1',
+      RICE_HOME: this.dataRoot(),
     };
     if (sourceTree) childEnv.PYTHONPATH = path.join(dir, 'src');
-    if (app.isPackaged && !childEnv.RICE_HOME) {
-      // Keep mutable state in the app's per-user data directory, never beside
-      // the signed/read-only installation under Program Files or an .app.
-      childEnv.RICE_HOME = path.join(app.getPath('userData'), 'runtime');
-    }
     this.process = spawn(cmd, args, {
       cwd: dir,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -212,6 +269,54 @@ export class RuntimeManager {
 
   getToken(): string | null {
     return this.isRunning ? this.token : null;
+  }
+
+  /** Ask the live runtime to remove OS-keychain data that is not under RICE_HOME. */
+  private async prepareFactoryReset(): Promise<void> {
+    if (!this.isRunning) {
+      const started = await this.start();
+      if (!started.running) {
+        throw new Error('Runtime is unavailable for factory-reset preparation');
+      }
+    }
+    if (!this.port || !this.token) {
+      throw new Error('Runtime credentials are unavailable for factory reset');
+    }
+    const response = await fetch(`http://127.0.0.1:${this.port}/factory-reset/prepare`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${this.token}` },
+    });
+    const body = await response.json() as { success?: boolean; error?: string };
+    if (!response.ok || !body.success) {
+      throw new Error(body.error || `Factory-reset preparation failed (${response.status})`);
+    }
+  }
+
+  /**
+   * True factory reset: release the live SQLite/WAL handles, remove the entire
+   * RICE-owned state tree, then boot against a newly-created empty root.
+   * Immutable builtins are code assets and are discovered again on that boot.
+   */
+  async factoryReset(): Promise<RuntimeStatus> {
+    if (this.resetInProgress) {
+      throw new Error('Runtime factory reset is already in progress');
+    }
+    this.resetInProgress = true;
+    const root = this.dataRoot();
+    console.log(`[RuntimeManager] Factory reset: ${root}`);
+    try {
+      await this.prepareFactoryReset();
+      await this.stop();
+      await fs.rm(root, { recursive: true, force: true });
+      await fs.mkdir(root, { recursive: true });
+      const status = await this.start();
+      if (!status.running) {
+        throw new Error('Runtime did not restart after factory reset');
+      }
+      return status;
+    } finally {
+      this.resetInProgress = false;
+    }
   }
 
   async shutdown(): Promise<void> {

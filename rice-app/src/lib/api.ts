@@ -1,6 +1,5 @@
 import type {
   ApiResponse,
-  Plugin,
   ImpactReport,
   PendingApproval,
   ToolApprovalDecision,
@@ -47,6 +46,22 @@ export interface LocalMcpTransportPayload {
   env?: Record<string, string>;
   url?: string;
   headers?: Record<string, string>;
+}
+
+/** GET /plugins runtime response (execution.interfaces.PluginInfo). */
+export interface RuntimePluginInfo {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  enabled: boolean;
+  required_connectors?: string[];
+  skill_count?: number;
+  skill_names?: string[];
+  agent_names?: string[];
+  risk_flags?: string[];
+  source?: 'builtin' | 'installed' | string;
+  author?: string;
 }
 
 /**
@@ -410,8 +425,8 @@ class ApiClient {
   }
 
   // ── plugins (CONTRACTS 1.3) ────────────────────────────────────
-  getPlugins(): Promise<ApiResponse<Plugin[]>> {
-    return this.get<Plugin[]>('/plugins');
+  getPlugins(): Promise<ApiResponse<RuntimePluginInfo[]>> {
+    return this.get<RuntimePluginInfo[]>('/plugins');
   }
   setPluginEnabled(id: string, enabled: boolean): Promise<ApiResponse> {
     return this.send('PATCH', `/plugins/${id}/enabled`, { enabled });

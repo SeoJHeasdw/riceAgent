@@ -47,6 +47,16 @@ paths:
       tags: [lifecycle]
       summary: Graceful shutdown
       responses: { "200": { $ref: "#/components/responses/Ok" } }
+  /factory-reset/prepare:
+    post:
+      tags: [lifecycle]
+      summary: Remove RICE-owned OS-keychain credentials before supervisor reset
+      description: >
+        Supervisor-only preparation step. After success, Electron stops the
+        runtime, removes the complete RICE_HOME tree, recreates it, and starts a
+        fresh runtime. This endpoint does not delete RICE_HOME while the process
+        has open SQLite/WAL handles.
+      responses: { "200": { $ref: "#/components/responses/Ok" } }
 
   /sessions:
     post:

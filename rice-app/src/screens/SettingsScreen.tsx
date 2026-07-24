@@ -1,14 +1,13 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { Button, CompanionCloudIcon, Icon, Input, Toggle } from '../components/ui';
+import { Button, CompanionCloudIcon, ConfirmDialog, Icon, Input, Toggle } from '../components/ui';
 import { dialogBackdropCls, dialogSurfaceCls } from '../components/ui/surfaces';
 import { useDialogA11y } from '../hooks/useDialogA11y';
 import { useI18n } from '../lib/i18n/I18nContext';
 import { replayOnboarding, replayTour, RESET_ALL_DATA_EVENT } from '../lib/tutorial';
 import { applyAppearance } from '../lib/appearance';
-import { api, platform } from '../lib/api';
-import { TOUR_DONE_KEY, SCREEN_TOUR_KEYS } from '../components/carbon/tour';
+import { platform } from '../lib/api';
 
 interface AppSettings {
   theme: 'dark' | 'light';
@@ -41,6 +40,17 @@ const DEFAULT_SETTINGS: AppSettings = {
 };
 
 const STORAGE_KEY = 'rice.settings';
+const RICE_STORAGE_PREFIX = 'rice.';
+
+type FactoryResetStatus = {
+  running: boolean;
+  port?: number;
+  token?: string;
+};
+
+type RuntimeFactoryResetBridge = {
+  factoryReset: () => Promise<FactoryResetStatus>;
+};
 
 function loadSettings(): AppSettings {
   try {
@@ -193,13 +203,22 @@ function SettingsScreen({ open, onClose }: SettingsScreenProps) {
   const [settings, setSettings] = useState<AppSettings>(loadSettings);
   const [activeSection, setActiveSection] = useState<SettingsSectionId>('general');
   const [saved, setSaved] = useState(false);
-  const [resetConfirming, setResetConfirming] = useState(false);
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetError, setResetError] = useState(false);
   const savedTimerRef = useRef<number | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
-  const initialFocusRef = useRef<HTMLButtonElement>(null);
+  const resetButtonRef = useRef<HTMLButtonElement>(null);
   const titleId = useId();
 
-  useDialogA11y({ open, dialogRef, onClose, initialFocusRef });
+  // ConfirmDialog owns Escape/focus trapping while it is open. Suspending the
+  // settings trap prevents one Escape press from closing both stacked dialogs.
+  useDialogA11y({
+    open: open && !resetDialogOpen,
+    dialogRef,
+    onClose,
+    initialFocusRef: resetButtonRef,
+  });
 
   useEffect(() => {
     applyAppearance({ font: settings.font, theme: settings.theme });
@@ -208,7 +227,9 @@ function SettingsScreen({ open, onClose }: SettingsScreenProps) {
   useEffect(() => {
     if (!open) return;
     setActiveSection('general');
-    setResetConfirming(false);
+    setResetDialogOpen(false);
+    setResetBusy(false);
+    setResetError(false);
   }, [open]);
 
   useEffect(
@@ -245,84 +266,88 @@ function SettingsScreen({ open, onClose }: SettingsScreenProps) {
   };
 
   const handleReset = async () => {
-    setResetConfirming(false);
+    if (resetBusy) return;
+    setResetBusy(true);
+    setResetError(false);
 
-    // ── 런타임 데이터 삭제 (온라인일 때만) ──────────────────────────────
-    if (api.isEnabled) {
-      // 각 카테고리를 병렬 조회 후 개별 삭제 — 일부 실패해도 계속 진행
-      const [sessions, skills, plugins, memories, connectors, localConnectors] = await Promise.allSettled([
-        api.listSessions(),
-        api.getSkills(),
-        api.getPlugins(),
-        api.getMemories(),
-        api.getConnectors(),
-        api.getLocalConnectors(),
+    try {
+      const runtime = (
+        window as { electronAPI?: { runtime?: RuntimeFactoryResetBridge } }
+      ).electronAPI?.runtime;
+      if (!runtime?.factoryReset) {
+        throw new Error('factory reset requires the RICE desktop runtime supervisor');
+      }
+
+      // 로컬 앱이 게시한 마켓 artifact도 함께 제거한다. 기본 제공/외부 artifact는
+      // managed_by 경계로 제외한다. Skill뿐 아니라 Plugin 게시본도 같은 사용자
+      // 행위이므로 둘 다 내린다(platform이 실행 중인 경우).
+      const catalogs = await Promise.all([
+        platform.getCatalog({ type: 'skill' }),
+        platform.getCatalog({ type: 'plugin' }),
       ]);
-
-      const deletions: Promise<unknown>[] = [];
-
-      if (sessions.status === 'fulfilled' && sessions.value.success) {
-        const list = sessions.value.data as { id: string }[] | undefined ?? [];
-        list.forEach((s) => deletions.push(api.deleteSession(s.id)));
-      }
-      if (skills.status === 'fulfilled' && skills.value.success) {
-        const list = skills.value.data as { id: string; source?: string | null }[] | undefined ?? [];
-        list
-          .filter((s) => s.source !== 'builtin')
-          .forEach((s) => deletions.push(
-            s.source?.startsWith('market:')
-              ? api.removeArtifact(`skill:${s.id}`)
-              : api.deleteSkill(s.id),
-          ));
-      }
-      if (plugins.status === 'fulfilled' && plugins.value.success) {
-        const list = plugins.value.data as { id: string; builtin?: boolean }[] | undefined ?? [];
-        list.filter((p) => !p.builtin).forEach((p) => deletions.push(api.deletePlugin(p.id)));
-      }
-      if (memories.status === 'fulfilled' && memories.value.success) {
-        type MemItem = { id: string };
-        const raw = memories.value.data as { memories?: MemItem[] } | MemItem[] | undefined;
-        const list: MemItem[] = Array.isArray(raw) ? raw : (raw?.memories ?? []);
-        list.forEach((m) => deletions.push(api.deleteMemory(m.id)));
-      }
-      if (connectors.status === 'fulfilled' && connectors.value.success) {
-        const list = connectors.value.data as { id: string }[] | undefined ?? [];
-        list.forEach((c) => deletions.push(api.deleteConnector(c.id)));
-      }
-      if (localConnectors.status === 'fulfilled' && localConnectors.value.success) {
-        const list = localConnectors.value.data as { name: string }[] | undefined ?? [];
-        list.forEach((c) => deletions.push(api.deleteLocalConnector(c.name)));
-      }
-
-      await Promise.allSettled(deletions);
-
-      // 런타임 설정 리셋 → 재시작 시 온보딩 재트리거
-      await api.updateSettings({ provider: { configured: false }, registered_models: [] });
-    }
-
-    // 로컬 앱이 게시한 마켓 artifact도 함께 제거한다. 기본 제공/외부 artifact는
-    // managed_by 경계로 제외돼 전체 데이터 초기화가 소스 카탈로그를 훼손하지 않는다.
-    const catalog = await platform.getCatalog({ type: 'skill' });
-    if (catalog.success && catalog.data) {
-      await Promise.allSettled(
-        catalog.data
-          .filter((artifact) => artifact.managed_by === 'rice-app')
-          .map((artifact) => platform.unpublish(artifact.id)),
+      const publishedIds = new Set(
+        catalogs.flatMap((catalog) => (
+          catalog.success && catalog.data
+            ? catalog.data
+              .filter((artifact) => artifact.managed_by === 'rice-app')
+              .map((artifact) => artifact.id)
+            : []
+        )),
       );
-    }
+      const unpublishResults = await Promise.all(
+        [...publishedIds].map((id) => platform.unpublish(id)),
+      );
+      if (unpublishResults.some((result) => !result.success)) {
+        throw new Error('published artifact reset failed');
+      }
 
-    // ── localStorage 초기화 ────────────────────────────────────────────
-    localStorage.removeItem(TOUR_DONE_KEY);
-    // 화면별 투어 완료 키도 초기화 — 이후 각 화면 방문 시 다시 볼 수 있게
-    for (const key of Object.values(SCREEN_TOUR_KEYS)) {
-      localStorage.removeItem(key);
-    }
-    setSettings(DEFAULT_SETTINGS);
-    setLanguage('en');
-    persist(DEFAULT_SETTINGS);
+      // Supervisor가 keychain 정리 → 런타임 종료 → RICE_HOME 전체 삭제 → 새
+      // 런타임 시작을 한 작업으로 수행한다.
+      const status = await runtime.factoryReset();
+      if (!status.running || !status.port) {
+        throw new Error('runtime did not restart after factory reset');
+      }
 
-    // ── 인메모리 상태 리셋 + 온보딩 재트리거 ──────────────────────────
-    window.dispatchEvent(new CustomEvent(RESET_ALL_DATA_EVENT));
+      // ── localStorage 초기화 ──────────────────────────────────────────
+      // Settings뿐 아니라 채팅 승인 모드, 패널 폭, 표시 옵션, 온보딩/투어 등
+      // RICE의 renderer 캐시를 모두 제거한다.
+      try {
+        const riceKeys = Array.from(
+          { length: localStorage.length },
+          (_, index) => localStorage.key(index),
+        ).filter((key): key is string => !!key && key.startsWith(RICE_STORAGE_PREFIX));
+        riceKeys.forEach((key) => localStorage.removeItem(key));
+      } catch {
+        // Hardened browser contexts may not expose localStorage. Runtime reset is
+        // still authoritative, and the current in-memory state resets below.
+      }
+      setSettings(DEFAULT_SETTINGS);
+      const browserLanguage = navigator.language.toLowerCase();
+      const firstInstallLanguage: typeof language = browserLanguage.startsWith('ko')
+        ? 'ko'
+        : browserLanguage.startsWith('ja')
+          ? 'ja'
+          : 'en';
+      setLanguage(firstInstallLanguage);
+      // setLanguage는 현재 화면 동기화를 위해 rice.language를 한 번 기록한다.
+      // 공장 초기화 결과는 첫 설치와 같아야 하므로 그 캐시도 다시 제거한다.
+      try {
+        localStorage.removeItem('rice.language');
+      } catch {
+        // Runtime data reset is authoritative.
+      }
+
+      // Settings is route-backed. Close it before opening onboarding so the two
+      // modal surfaces never remain stacked after a successful reset.
+      setResetDialogOpen(false);
+      onClose();
+      window.dispatchEvent(new CustomEvent(RESET_ALL_DATA_EVENT));
+    } catch (error) {
+      console.error('RICE data reset failed', error);
+      setResetError(true);
+    } finally {
+      setResetBusy(false);
+    }
   };
 
   const launchTutorial = (action: () => void) => {
@@ -529,39 +554,22 @@ function SettingsScreen({ open, onClose }: SettingsScreenProps) {
               </div>
             </div>
 
-            <div className={`flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center ${resetConfirming ? 'bg-support-error/10' : ''}`}>
+            <div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center">
               <div className="min-w-0 flex-1">
                 <div className="text-body-short-01 font-semibold text-text-primary">{t('danger.reset')}</div>
-                {resetConfirming && (
-                  <div className="mt-1 text-caption-01 font-medium leading-5 text-text-error" role="alert">
-                    {t('danger.resetConfirm')}
-                  </div>
-                )}
               </div>
-              {resetConfirming ? (
-                <div className="flex flex-wrap items-center justify-end gap-1.5">
-                  <Button kind="ghost" size="sm" onClick={() => setResetConfirming(false)}>
-                    {t('danger.cancel')}
-                  </Button>
-                  <Button
-                    kind="danger"
-                    size="sm"
-                    icon={<Icon name="trash" size={14} />}
-                    onClick={handleReset}
-                  >
-                    {t('danger.confirmReset')}
-                  </Button>
-                </div>
-              ) : (
-                <Button
-                  kind="danger"
-                  size="sm"
-                  icon={<Icon name="trash" size={14} />}
-                  onClick={() => setResetConfirming(true)}
-                >
-                  {t('danger.resetButton')}
-                </Button>
-              )}
+              <Button
+                ref={resetButtonRef}
+                kind="danger"
+                size="sm"
+                icon={<Icon name="trash" size={14} />}
+                onClick={() => {
+                  setResetError(false);
+                  setResetDialogOpen(true);
+                }}
+              >
+                {t('danger.resetButton')}
+              </Button>
             </div>
           </div>
         </section>
@@ -570,17 +578,19 @@ function SettingsScreen({ open, onClose }: SettingsScreenProps) {
   }[activeSection];
 
   return createPortal(
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-      <div className={dialogBackdropCls} onClick={onClose} aria-hidden="true" />
+    <>
+      <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+        <div className={dialogBackdropCls} onClick={onClose} aria-hidden="true" />
 
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        tabIndex={-1}
-        className={`relative flex h-[min(700px,calc(100vh-32px))] min-h-0 w-[min(920px,calc(100vw-32px))] flex-col overflow-hidden sm:flex-row ${dialogSurfaceCls}`}
-      >
+        <div
+          ref={dialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={titleId}
+          aria-hidden={resetDialogOpen || undefined}
+          tabIndex={-1}
+          className={`relative flex h-[min(700px,calc(100vh-32px))] min-h-0 w-[min(920px,calc(100vw-32px))] flex-col overflow-hidden sm:flex-row ${dialogSurfaceCls}`}
+        >
         <aside className="flex w-full flex-shrink-0 flex-col border-b border-border-subtle-01 bg-field-01 sm:w-[210px] sm:border-b-0 sm:border-r">
           <div className="flex h-[58px] items-center gap-2.5 border-b border-border-subtle-01 px-4 sm:h-[70px]">
             <CompanionCloudIcon className="h-7 w-8 flex-shrink-0 text-text-secondary" />
@@ -591,16 +601,16 @@ function SettingsScreen({ open, onClose }: SettingsScreenProps) {
           </div>
 
           <nav className="flex gap-1 overflow-x-auto p-2 sm:flex-col sm:overflow-visible sm:p-3 sm:pt-4" aria-label={t('title')}>
-            {sections.map((section, index) => {
+            {sections.map((section) => {
               const active = section.id === activeSection;
               return (
                 <button
                   key={section.id}
-                  ref={index === 0 ? initialFocusRef : undefined}
                   type="button"
                   onClick={() => {
                     setActiveSection(section.id);
-                    setResetConfirming(false);
+                    setResetDialogOpen(false);
+                    setResetError(false);
                   }}
                   aria-current={active ? 'page' : undefined}
                   className={`relative flex min-w-max items-center gap-2.5 rounded-lg border px-3 py-2 text-left transition-colors duration-150 sm:min-w-0 ${
@@ -655,8 +665,29 @@ function SettingsScreen({ open, onClose }: SettingsScreenProps) {
             <div className="mx-auto max-w-[640px]">{content}</div>
           </div>
         </div>
+        </div>
       </div>
-    </div>,
+      <ConfirmDialog
+        open={resetDialogOpen}
+        title={t(resetError ? 'danger.resetFailedTitle' : 'danger.reset')}
+        description={(
+          <p className={resetError ? 'font-medium text-text-error' : undefined} role={resetError ? 'alert' : undefined}>
+            {t(resetError ? 'danger.resetFailed' : 'danger.resetConfirm')}
+          </p>
+        )}
+        confirmLabel={t(resetError ? 'danger.retryReset' : 'danger.confirmReset')}
+        cancelLabel={t('danger.cancel')}
+        confirmIcon={resetError ? undefined : 'trash'}
+        tone="danger"
+        busy={resetBusy}
+        stackingClassName="z-[110]"
+        onConfirm={() => void handleReset()}
+        onClose={() => {
+          setResetError(false);
+          setResetDialogOpen(false);
+        }}
+      />
+    </>,
     document.body,
   );
 }

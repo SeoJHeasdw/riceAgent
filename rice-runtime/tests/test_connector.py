@@ -1040,6 +1040,41 @@ class TestToolPermissions:
         assert self._svc.tool_permissions("c1") == {}
 
 
+class TestFactoryResetPreparation:
+    """RICE_HOME 밖의 키체인 데이터도 공장 초기화에 포함된다."""
+
+    @pytest.mark.asyncio
+    async def test_removes_connector_tokens_and_orphan_custom_secret(self):
+        db = _fresh_db()
+        keychain = MagicMock(spec=KeychainStore)
+        svc = _service_with_keychain(db, _fresh_paths(), keychain)
+        svc._custom._keychain = keychain
+
+        svc._custom.add(
+            connector_type="custom_reset",
+            display_name="Reset MCP",
+            auth_url="https://reset.example/authorize",
+            token_url="https://reset.example/token",
+            mcp_endpoint="https://reset.example/mcp",
+            scopes=(),
+            client_id="client-reset",
+            client_secret="secret-reset",
+            registration_endpoint=None,
+        )
+        db.execute(
+            "INSERT INTO connectors(id, connector_type, display_name, status) "
+            "VALUES ('conn-reset', 'gmail', 'Gmail', 'connected')"
+        )
+
+        removed = await svc.prepare_factory_reset()
+
+        assert removed == {"connectors": 1, "custom_connector_types": 1}
+        keychain.delete.assert_called_once_with("conn-reset")
+        keychain.delete_secret.assert_any_call("custom_client:custom_reset")
+        assert db.query_one("SELECT id FROM connectors LIMIT 1") is None
+        assert db.query_one("SELECT connector_type FROM custom_connector_descriptors LIMIT 1") is None
+
+
 class TestDispatcherPolicyEnforcement:
     """dispatcher 가 도구별 정책(allow/approval/block)을 강제하는지 검증."""
 

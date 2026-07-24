@@ -643,6 +643,44 @@ class ConnectorService(IConnectorService):
         if row is not None:
             self._cleanup_custom_type(row["connector_type"])
 
+    async def prepare_factory_reset(self) -> dict[str, int]:
+        """공장 초기화 전 OS 키체인의 RICE 소유 비밀값을 전부 제거한다.
+
+        나머지 사용자 상태는 supervisor가 RICE_HOME 전체를 지우면 사라지지만,
+        OAuth token과 커스텀 client secret은 그 디렉터리 밖(OS 키체인)에 있다.
+        DB가 아직 열려 있을 때 id/type 목록을 스냅샷하고 모두 시도한 뒤, 하나라도
+        실패하면 초기화를 중단해 "전부 삭제됨"을 거짓으로 보고하지 않는다.
+        """
+        connector_ids = [
+            row["id"] for row in self._db.query_all("SELECT id FROM connectors")
+        ]
+        custom_types = list(self._custom.types())
+        failures: list[Exception] = []
+
+        for connector_id in connector_ids:
+            try:
+                await self.delete(connector_id)
+            except Exception as exc:  # noqa: BLE001 — remaining credentials must still be attempted
+                failures.append(exc)
+
+        # A descriptor can exist before/without a completed connector instance.
+        # Delete its dynamic-registration secret explicitly as well.
+        for connector_type in custom_types:
+            try:
+                self._custom.delete(connector_type)
+                self._flows.pop(connector_type, None)
+            except Exception as exc:  # noqa: BLE001 — aggregate after best effort
+                failures.append(exc)
+
+        if failures:
+            raise RuntimeError(
+                f"failed to remove {len(failures)} RICE keychain credential set(s)"
+            ) from failures[0]
+        return {
+            "connectors": len(connector_ids),
+            "custom_connector_types": len(custom_types),
+        }
+
     def _cleanup_custom_type(self, connector_type: str) -> None:
         """이 커스텀 타입의 connectors 행이 더 없으면 descriptor(DB)·secret(키체인)·
         flow(캐시)를 정리한다. 정적 타입(registry.py)은 건드리지 않는다."""

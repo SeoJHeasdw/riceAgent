@@ -62,6 +62,7 @@ const SCREEN_TOUR_STEPS_MAP = {
 function AppShell({ tourActive, screenToursSuspended, onTourDone, onTriggerOnboarding, onStopTour }: AppShellProps) {
   const location = useLocation();
   const navigate = useNavigate();
+  const [dataGeneration, setDataGeneration] = useState(0);
   const settingsOpen = location.pathname === '/settings';
   const { isDone, markDone, resetAll: resetScreenTours } = useScreenTour();
 
@@ -107,6 +108,10 @@ function AppShell({ tourActive, screenToursSuspended, onTourDone, onTriggerOnboa
   const { resetAll } = useLearning();
   const handleResetAllData = useCallback(() => {
     resetAll();
+    // Chat owns session/thread/model preference caches internally. Remount it
+    // after destructive reset so deleted sessions and local UI settings cannot
+    // survive until the next application launch.
+    setDataGeneration((generation) => generation + 1);
     resetScreenTours(); // 화면별 투어 완료 키도 초기화
     onStopTour();
     onTriggerOnboarding(); // 온보딩 첫 화면(언어 선택)부터 재시작
@@ -129,7 +134,7 @@ function AppShell({ tourActive, screenToursSuspended, onTourDone, onTriggerOnboa
             SSE handlers own the in-progress turn renderer; unmounting it used to
             discard every incremental event even though the runtime kept working. */}
         <div className={isChatRoute ? 'flex flex-1 min-h-0 animate-fade-in' : 'hidden'}>
-          <ChatScreen active={isChatRoute} />
+          <ChatScreen key={`chat-${dataGeneration}`} active={isChatRoute} />
         </div>
 
         {!isChatRoute && (
@@ -213,6 +218,11 @@ function App() {
   // data, so no failing localhost requests hit the console.
   useEffect(() => {
     const connect = (baseUrl: string, token: string | null = null) => {
+      // A factory reset/restart mints a new port and bearer token. Cycle the
+      // connected flag even when it was already true so every runtime-backed
+      // provider discards stale in-memory data and hydrates from the fresh DB.
+      api.setEnabled(false);
+      sseClient.setEnabled(false);
       api.setBaseUrl(baseUrl);
       api.setToken(token);
       api.setEnabled(true);
@@ -357,7 +367,13 @@ function App() {
                 tourActive={tourActive}
                 screenToursSuspended={langSelectOpen || onboardingOpen}
                 onTourDone={handleTourDone}
-                onTriggerOnboarding={() => setLangSelectOpen(true)}
+                onTriggerOnboarding={() => {
+                  setModelMode('saas');
+                  setCurrentModel('claude-sonnet-4-6');
+                  setModelSettings(defaultModelSettings);
+                  setOnboardingOpen(false);
+                  setLangSelectOpen(true);
+                }}
                 onStopTour={() => setTourActive(false)}
               />
               <LanguageSelectDialog

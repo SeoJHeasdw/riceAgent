@@ -33,7 +33,7 @@ import pytest
 
 from rice_runtime import build_container
 from rice_runtime.core.config import RuntimeArgs
-from rice_runtime.core.errors import ValidationError
+from rice_runtime.core.errors import NotFoundError, ValidationError
 from rice_runtime.core.paths import RicePaths
 from rice_runtime.core.storage.sqlite import Database
 from rice_runtime.core.types import InjectedSkill, ToolCall, ToolSpec
@@ -599,6 +599,40 @@ state: active
             ("skill:market-skill",),
         ) is None
 
+    @pytest.mark.asyncio
+    async def test_remove_repairs_market_skill_ghost_without_deleting_authored_skill(self):
+        """DB row가 먼저 사라진 market 파일은 정리하되 사용자 파일은 보호한다."""
+        paths = _fresh_paths()
+        db = _fresh_db()
+        loader = PluginLoader(db=db, sandbox=NoopSandbox(), paths=paths)
+        src = Path(tempfile.mkdtemp(prefix="rice-market-ghost-"))
+        (src / "SKILL.md").write_text(self.CLEAN_SKILL_MD, encoding="utf-8")
+        await loader.install(
+            path=str(src),
+            manifest=self._manifest("market-ghost", type="skill"),
+        )
+
+        db.execute("DELETE FROM installed_artifacts WHERE id = ?", ("skill:market-ghost",))
+        (paths.skills / "market-ghost.usage.json").write_text("{}", encoding="utf-8")
+        (paths.skills / "market-ghost.analysis.json").write_text("{}", encoding="utf-8")
+        (paths.skills / "market-ghost" / ".history").mkdir(parents=True)
+
+        await loader.remove("skill:market-ghost")
+
+        assert not (paths.skills / "market-ghost.md").exists()
+        assert not (paths.skills / "market-ghost.usage.json").exists()
+        assert not (paths.skills / "market-ghost.analysis.json").exists()
+        assert not (paths.skills / "market-ghost").exists()
+
+        authored = paths.skills / "authored.md"
+        authored.write_text(
+            "---\nname: authored\nsource: user\nversion: 1\n---\nkeep me\n",
+            encoding="utf-8",
+        )
+        with pytest.raises(NotFoundError):
+            await loader.remove("skill:authored")
+        assert authored.exists()
+
     def test_boot_reconciles_source_for_legacy_installed_skill(self):
         paths = _fresh_paths()
         db = _fresh_db()
@@ -651,7 +685,9 @@ state: active
             assert installed.status_code == 200
             assert (paths.skills / "route-skill.md").exists()
 
-            removed = client.delete("/artifacts/skill:route-skill", headers=headers)
+            # Renderer uses encodeURIComponent, so the canonical ':' arrives
+            # percent-encoded on the wire.
+            removed = client.delete("/artifacts/skill%3Aroute-skill", headers=headers)
 
             assert removed.status_code == 200
             assert removed.json()["success"] is True
@@ -660,6 +696,18 @@ state: active
                 "SELECT id FROM installed_artifacts WHERE id = ?",
                 ("skill:route-skill",),
             ) is None
+
+            ghost = paths.skills / "route-ghost.md"
+            ghost.write_text(
+                "---\nname: route-ghost\nsource: market:route-ghost\nversion: 1\n---\nghost\n",
+                encoding="utf-8",
+            )
+            removed_ghost = client.delete(
+                "/artifacts/skill%3Aroute-ghost", headers=headers
+            )
+            assert removed_ghost.status_code == 200
+            assert removed_ghost.json()["success"] is True
+            assert not ghost.exists()
         finally:
             c.shutdown()
 

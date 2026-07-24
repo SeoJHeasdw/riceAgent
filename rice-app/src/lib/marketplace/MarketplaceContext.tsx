@@ -11,6 +11,7 @@ import {
 } from '../skillBridge';
 import { platform, api } from '../api';
 import i18n from '../i18n';
+import { RESET_ALL_DATA_EVENT } from '../tutorial';
 
 /**
  * MarketplaceContext — single source of truth for the skill/plugin market,
@@ -165,7 +166,12 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
     const unsub = api.onEnabledChange((enabled) => {
       if (enabled) void loadCatalog();
     });
-    return unsub;
+    const handleReset = () => void loadCatalog();
+    window.addEventListener(RESET_ALL_DATA_EVENT, handleReset);
+    return () => {
+      unsub();
+      window.removeEventListener(RESET_ALL_DATA_EVENT, handleReset);
+    };
   }, [loadCatalog]);
 
   const toggleTag = useCallback((tag: string) => {

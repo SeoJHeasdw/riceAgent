@@ -138,6 +138,17 @@ ipcMain.handle('runtime:get-token', async () => {
   return runtimeManager.getToken();
 });
 
+ipcMain.handle('runtime:factory-reset', async () => {
+  if (!runtimeManager) {
+    throw new Error('Runtime manager not initialized');
+  }
+  const status = await runtimeManager.factoryReset();
+  if (status.running) {
+    mainWindow?.webContents.send('runtime:ready', status);
+  }
+  return status;
+});
+
 // Window management
 ipcMain.handle('window:minimize', () => {
   mainWindow?.minimize();

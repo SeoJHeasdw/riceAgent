@@ -93,6 +93,18 @@ async def get_settings(c: Container = Depends(get_container)):
     return {"success": True, "data": data}
 
 
+@router.post("/factory-reset/prepare")
+async def prepare_factory_reset(c: Container = Depends(get_container)):
+    """Supervisor factory reset의 사전 단계.
+
+    RICE_HOME 밖에 존재하는 OS 키체인 자격증명을 런타임이 DB 인덱스를 이용해
+    제거한다. 성공 응답 뒤 Electron이 런타임을 종료하고 데이터 루트 전체를
+    삭제·재생성한다.
+    """
+    removed = await c.connectors.prepare_factory_reset()
+    return {"success": True, "data": removed}
+
+
 @router.put("/settings")
 async def update_settings(body: SettingsIn, c: Container = Depends(get_container)):
     cfg = c.config

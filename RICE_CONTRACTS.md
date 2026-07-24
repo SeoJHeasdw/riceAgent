@@ -17,7 +17,16 @@ Electron main process
   3. GET /health 폴링 → ready
   4. 비정상 종료 시 재시작 (백오프, 최대 3회)
   5. 앱 종료 시 POST /shutdown → graceful stop
+  6. 공장 초기화 시 POST /factory-reset/prepare로 OS 키체인 정리
+     → 런타임 종료 → RICE_HOME 전체 삭제·재생성 → 새 포트/토큰으로 재시작
 ```
+
+공장 초기화는 개별 session/skill/plugin DELETE의 합이 아니다. 사용자 메모리·프로필,
+학습 ledger, 모델 키, 사용자/마켓 스킬·플러그인, 연결 메타, 로컬 MCP 설정, 기본 내부
+workspace를 포함한 **RICE_HOME 전체**가 삭제된다. RICE_HOME 밖 OS 키체인의 Connector
+토큰·커스텀 client secret은 종료 전 준비 API가 삭제한다. 앱 코드에 포함된 immutable
+builtin skill/plugin은 새 런타임 부팅 때 다시 발견된다. 사용자가 별도로 지정한 외부
+workspace의 일반 파일은 RICE 소유 루트가 아니므로 재귀 삭제하지 않는다.
 
 ### 1.2 전송 방식
 
@@ -36,12 +45,13 @@ Electron main process
 
 **명명 규칙**: SSE 제어 이벤트 타입은 wire vocabulary(`tool_approval_required`, `skill_patch_proposed`)이고, pending approval의 내부 `kind` 값은 parking vocabulary(`tool_approval`, `skill_patch`)다. 두 값은 의도적으로 다른 네임스페이스이며, `approval_id`가 둘을 연결한다.
 
-### 1.3 엔드포인트 초안
+### 1.3 엔드포인트
 
 | Method | Path | 용도 |
 |--------|------|------|
 | GET | `/health` | 기동 확인 |
 | POST | `/shutdown` | graceful 종료 |
+| **POST** | **`/factory-reset/prepare`** | **Electron supervisor 공장 초기화 사전 단계: RICE_HOME 밖 OS 키체인 Connector credential을 전부 삭제. 성공 뒤 supervisor가 런타임 종료→RICE_HOME 전체 삭제·재생성→재시작** |
 | POST | `/sessions` | 세션 생성 |
 | GET | `/sessions` / `/sessions/{id}` | 목록/상세 (히스토리 UI) |
 | ~~POST~~ | ~~`/sessions/{id}/attachments`~~ | **설계만 있고 미구현**(선업로드 multipart, xlsx·png만 → `{attachment_id, kind}`) — 라우트가 코드에 없다(2026-07-08 확인, 아래 첨부 절 참고) |

@@ -688,6 +688,26 @@ class PluginLoader:
             "SELECT type, name FROM installed_artifacts WHERE id = ?", (artifact_id,)
         )
         if row is None:
+            # Legacy/broken resets could remove the installed_artifacts row while
+            # leaving the canonical market skill on disk. GET /skills still
+            # exposes that file with source=market:*, so a later reset correctly
+            # routes here but used to receive a permanent 404. Repair only this
+            # narrowly-proven ghost case; an arbitrary skill:<name> request must
+            # never delete a user-authored file without its ownership record.
+            name = artifact_id.removeprefix("skill:")
+            if artifact_id.startswith("skill:") and VALID_SKILL_NAME.fullmatch(name):
+                skill_path = _resolved_within(
+                    self._paths.skills, self._paths.skills / f"{name}.md"
+                )
+                try:
+                    frontmatter = split_frontmatter(skill_path.read_text(encoding="utf-8"))
+                    source = str(frontmatter[0].get("source") or "") if frontmatter else ""
+                except Exception:  # noqa: BLE001 — malformed legacy YAML stays protected
+                    source = ""
+                if source.startswith("market:"):
+                    self._remove_skill_files(name)
+                    log.info("removed market skill ghost without DB row: %s", artifact_id)
+                    return
             raise NotFoundError(f"artifact not found: {artifact_id}")
         # DB 의 id/name 은 설치 시 검증된 값이지만, 삭제 경로도 동일하게 설치 루트
         # 안임을 재검증한다(수동 편집된 DB 행이 rmtree 를 임의 경로로 끌고 가지 않게).
@@ -697,13 +717,25 @@ class PluginLoader:
                 shutil.rmtree(dest, ignore_errors=True)
         else:
             # skill artifact installed FLAT as <name>.md (+ usage/history sidecars).
-            name = row["name"]
-            _resolved_within(self._paths.skills, self._paths.skills / f"{name}.md").unlink(missing_ok=True)
-            _resolved_within(self._paths.skills, self._paths.skills / f"{name}.usage.json").unlink(missing_ok=True)
-            shutil.rmtree(_resolved_within(self._paths.skills, self._paths.skills / name), ignore_errors=True)  # .history dir
+            self._remove_skill_files(row["name"])
         self._db.execute("DELETE FROM installed_artifacts WHERE id = ?", (artifact_id,))
         self._skills_cache.pop(artifact_id, None)
         self._agents_cache.pop(artifact_id, None)
+
+    def _remove_skill_files(self, name: str) -> None:
+        """Remove one installed skill's canonical file and every sidecar.
+
+        Kept in the plugin loader because both the normal DB-backed uninstall and
+        the narrowly-scoped market-ghost repair above own the same artifact tree.
+        """
+        for suffix in (".md", ".usage.json", ".analysis.json"):
+            _resolved_within(
+                self._paths.skills, self._paths.skills / f"{name}{suffix}"
+            ).unlink(missing_ok=True)
+        shutil.rmtree(
+            _resolved_within(self._paths.skills, self._paths.skills / name),
+            ignore_errors=True,
+        )
 
     # ── boot hygiene ──────────────────────────────────────────────────────────
 
