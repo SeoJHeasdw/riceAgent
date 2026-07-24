@@ -15,6 +15,14 @@
 - Phase 1에는 platform 없이 **로컬 mock 카탈로그**(`file://`)로 동작([RICE_CONTRACTS.md](RICE_CONTRACTS.md) 3장)
 - Phase 2 PoC 실행: `RICE_ARTIFACTS_DIR=../rice-marketplace/artifacts`, `RICE_PLUGIN_MARKETPLACES=../rice-marketplace`
 
+### 1.1 앱 ↔ platform 생명주기 (자동 기동 안 함 — 현행 유지, 2026-07-24)
+
+Electron main은 **`rice-runtime`(:8080)만 자식 프로세스로 spawn**하고([RuntimeManager](rice-app/electron/runtime.ts)), `rice-platform`(:7070)은 **자동 기동하지 않는다**. 즉 platform은 개발 래퍼(`app.sh`/`dev.sh`)나 수동으로 별도 실행할 때만 뜬다.
+
+따라서 **마켓 관련 전 기능(카탈로그 조회·설치·게시/공유)은 platform이 떠 있을 때만 동작**한다. 특히 app 게시(publish/share)는 이제 인메모리가 아니라 platform artifact + runtime 스킬로 **실제 영속**하므로, platform 오프라인이면 (조용히 성공한 척하지 않고) **명시적으로 실패**한다 — 설계상 의도된 동작이다.
+
+**결정**: 아직 실제 marketplace 배포 전(sibling `rice-marketplace` PoC 단계)이라 platform 자동 기동은 **하지 않고 현행을 유지**한다. 실 배포/상시 마켓이 생기는 시점에, `RuntimeManager`에 준하는 platform 생명주기(기동·헬스체크·종료)를 앱에 추가할지 재검토한다.
+
 ---
 
 ## 2. 모듈 구조

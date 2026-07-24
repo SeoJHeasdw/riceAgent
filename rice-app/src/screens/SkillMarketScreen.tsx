@@ -17,7 +17,6 @@ import { skillCategoryCodes, type SkillCategoryCode } from '../lib/mockData';
 import { Skill } from '../lib/types';
 import {
   installedSkillId,
-  isUserPublishedMarketId,
   ownedSkillIdFromPublishedMarketId,
 } from '../lib/skillBridge';
 
@@ -136,8 +135,9 @@ function SkillMarketScreen() {
     setDetailModalSkill(null);
 
     // 내가 올린 스킬의 "제거"는 설치 상태를 끄는 동작이 아니라 마켓에서 내리는
-    // 동작이다. 즉시 카탈로그 상태에서 제거해 다른 화면을 다녀올 필요가 없게 한다.
-    if (isUserPublishedMarketId(skill.id)) {
+    // 동작이다. 판정 근거는 카드/모달과 동일한 권위 신호(userPublished =
+    // managed_by:rice-app)를 쓴다 — id 접두사 휴리스틱과 갈라지지 않게.
+    if (skill.userPublished) {
       const removed = await unpublishSkill(skill.id);
       if (!removed) {
         showToast(t('market.toastRemoveFailed', { name: skill.name }), 'error');

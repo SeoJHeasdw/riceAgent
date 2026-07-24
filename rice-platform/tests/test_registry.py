@@ -157,6 +157,30 @@ def test_rice_app_publish_rejects_escaping_file_path(monkeypatch, tmp_path):
     assert not (tmp_path / "artifacts" / "escaped.txt").exists()
 
 
+def test_rice_app_publish_allows_prefixed_max_length_skill_id(monkeypatch, tmp_path):
+    """`pub-<skill-id>` 게시 이름은 런타임 스킬 id(최대 64자)에 접두사가 붙어
+    64자를 넘길 수 있다. 게시 검증기가 이를 막으면 정상 스킬 공유가 실패한다."""
+    monkeypatch.setenv("RICE_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
+    # 런타임 VALID_SKILL_NAME 상한(64자)짜리 스킬 id + `pub-` 접두사 = 68자.
+    skill_id = "s" + "a" * 63
+    name = f"pub-{skill_id}"
+    assert len(name) == 68
+
+    result = registry.publish_artifact(
+        {
+            "schema_version": 1,
+            "type": "skill",
+            "name": name,
+            "version": "1.0.0",
+            "managed_by": registry.RICE_APP_MANAGED_BY,
+        },
+        [{"path": "SKILL.md", "content": "# long\n"}],
+    )
+
+    assert result["id"] == name
+    assert registry.get_artifact(name) is not None
+
+
 def test_marketplace_skips_remote_source_objects(monkeypatch, tmp_path):
     """Upstream Claude marketplaces mix local string sources and remote source objects."""
     local = tmp_path / "plugins" / "local-plugin"

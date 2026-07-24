@@ -1,6 +1,6 @@
 # RICE Frontend Application
 
-The desktop application for **RICE** (Runtime-Integrated Conversational Environment) - an AI-powered conversational interface with integrated learning loop capabilities.
+The desktop application for **RICE** (Runtime Intelligence & Continuous Evolution) - an AI-powered conversational interface with integrated learning loop capabilities.
 
 ## 📋 Table of Contents
 

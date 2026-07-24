@@ -271,7 +271,16 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           shared: sharedOwnedIds.has(s.id),
         };
       });
-      setSkills(loadedSkills);
+      // upstream(원본 추적·업데이트 유무)은 GET /skills가 싣지 않는 클라이언트
+      // 전용 메타라 재조회 때마다 사라진다. mount 직후(prev 비어 있음)엔 그대로,
+      // 세션 중 재조회(예: 게시 후 refreshSkills)에선 직전 값을 id로 보존한다.
+      setSkills((prev) => {
+        const prevById = new Map(prev.map((s) => [s.id, s] as const));
+        return loadedSkills.map((skill) => ({
+          ...skill,
+          upstream: skill.upstream ?? prevById.get(skill.id)?.upstream,
+        }));
+      });
       setDetails(loadedDetails);
     });
   }, []);

@@ -31,7 +31,10 @@ import yaml
 _DEFAULT_ARTIFACTS_DIR = Path(__file__).parent.parent.parent / "artifacts"
 _REPO_ROOT = _DEFAULT_ARTIFACTS_DIR.parent.parent  # <repo>/
 RICE_APP_MANAGED_BY = "rice-app"
-_PUBLISH_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+# 게시 이름은 런타임 스킬 id(VALID_SKILL_NAME, 최대 64자)에 `pub-`/`skill-user-`
+# 같은 게시 접두사가 붙은 형태(`pub-<skill-id>`)라 64자를 넘길 수 있다. 두 검증기가
+# 어긋나 정상 스킬 공유가 막히지 않도록 접두사 여유분을 포함해 최대 96자를 허용한다.
+_PUBLISH_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
 
 
 def _artifacts_dir() -> Path:
@@ -224,7 +227,7 @@ def publish_artifact(manifest: dict[str, Any], files: list[dict[str, str]]) -> d
     if not _PUBLISH_NAME_RE.fullmatch(name):
         raise ValueError(
             "manifest.name must be a safe slug "
-            "([A-Za-z0-9][A-Za-z0-9._-]*, max 64 chars)"
+            "([A-Za-z0-9][A-Za-z0-9._-]*, max 96 chars)"
         )
     if manifest.get("managed_by") != RICE_APP_MANAGED_BY:
         raise PermissionError("published artifacts must declare managed_by: rice-app")

@@ -1,7 +1,7 @@
 {
   "name": "rice-app",
   "version": "0.1.0",
-  "description": "RICE - Runtime-Integrated Conversational Environment",
+  "description": "RICE - Runtime Intelligence & Continuous Evolution",
   "main": "dist-electron/main.js",
   "type": "module",
   "author": "RICE Team",
