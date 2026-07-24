@@ -70,6 +70,7 @@ class CreateSkillIn(BaseModel):
     body: str
     description: str = ""
     tags: list[str] = []
+    display_name: str | None = None
 
 
 class UpdateSkillIn(BaseModel):
@@ -123,7 +124,11 @@ async def list_skills(c: Container = Depends(get_container)):
 async def create_skill(body: CreateSkillIn, c: Container = Depends(get_container)):
     """사용자 직접 스킬 생성 (CONTRACTS §1.3)."""
     detail = c.learning.create_skill(
-        name=body.name, body=body.body, description=body.description, tags=tuple(body.tags)
+        name=body.name,
+        body=body.body,
+        description=body.description,
+        tags=tuple(body.tags),
+        display_name=body.display_name,
     )
     return {"success": True, "data": detail.__dict__}
 

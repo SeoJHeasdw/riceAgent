@@ -251,6 +251,8 @@
     "pluginEmpty": "プラグインがインストールされていません。マーケットから追加してください。",
     "pluginSkillCount": "{{count}}個のスキル",
     "pluginToggleFailed": "プラグインの状態を変更できませんでした。",
+    "pluginRemoveFailed": "プラグインを削除できませんでした。",
+    "skillRemoveFailed": "スキルを削除できませんでした。",
     "goToPlugin": "ショートカット",
     "pluginBuiltinTitle": "組み込みプラグイン — 有効/無効のみ可能",
     "rowMenuTitle": "オプション",

@@ -16,6 +16,7 @@ import { useResizable } from '../hooks/useResizable';
 import { Icon, ResizeHandle } from '../components/ui';
 import { pluginCategoryCodes, type PluginCategoryCode } from '../lib/mockData';
 import { Plugin } from '../lib/types';
+import { installedPluginId } from '../lib/skillBridge';
 
 /**
  * PluginMarketScreen - Marketplace for discovering and installing solution expert plugins
@@ -54,7 +55,7 @@ function PluginMarketScreen() {
     uninstallArtifact,
     togglePlugin,
   } = useMarketplace();
-  const { installPluginFromMarket } = useLearning();
+  const { installPluginFromMarket, setMyPlugins } = useLearning();
 
   // selectedCategory는 stable code 저장 — 렌더 시 t()로 표시
   const [selectedCategory, setSelectedCategory] = useState<SelectedPluginCategory>(CAT_ALL);
@@ -126,7 +127,13 @@ function PluginMarketScreen() {
   // Handle plugin uninstallation
   const handleUninstall = async (plugin: Plugin) => {
     setDetailModalPlugin(null);
-    await uninstallArtifact(plugin.id, 'plugin');
+    const removed = await uninstallArtifact(plugin.id, 'plugin');
+    if (!removed) {
+      showToast(t('toastUninstallFailed', { name: plugin.name }), 'error');
+      return;
+    }
+    const ownedId = installedPluginId(plugin.id);
+    setMyPlugins((prev) => prev.filter((owned) => owned.id !== ownedId));
     showToast(t('toastUninstalled', { name: plugin.name }), 'info');
   };
 

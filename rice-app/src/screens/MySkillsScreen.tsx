@@ -1620,7 +1620,7 @@ const SkillDetailView: React.FC<{
   const { language } = useI18n();
   const navigate = useNavigate();
   const { skills, setSkills, details, setDetails } = useLearning();
-  const { publishOwnedSkill, unpublishSkill } = useMarketplace();
+  const { publishOwnedSkill, unpublishSkill, uninstallArtifact } = useMarketplace();
   const toast = useToast();
   const [snapVer, setSnapVer] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<DetailTab>('overview');
@@ -1637,6 +1637,9 @@ const SkillDetailView: React.FC<{
   // Skill Market 공개 전용 다이얼로그 / 마켓에서 내리기 확인
   const [publishOpen, setPublishOpen] = useState(false);
   const [confirmUnshare, setConfirmUnshare] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+  const [unsharing, setUnsharing] = useState(false);
   const [analysisRefreshing, setAnalysisRefreshing] = useState(false);
   const [analysisFeedback, setAnalysisFeedback] = useState<AnalysisRefreshFeedback | null>(null);
 
@@ -2148,16 +2151,63 @@ const SkillDetailView: React.FC<{
 
       <ConfirmDialog
         open={confirmDelete}
+        busy={deleting}
         tone="danger"
         title={t('mySkills.deleteConfirmTitle', { name: skill.name })}
         confirmLabel={t('mySkills.deleteConfirmLabel')}
         confirmIcon="trash"
         onClose={() => setConfirmDelete(false)}
         onConfirm={() => {
-          setSkills((a) => a.filter((x) => x.id !== skillId));
-          if (skill.shared) unpublishSkill(publishedMarketId(skillId));
-          void api.deleteSkill(skillId);
-          setConfirmDelete(false);
+          if (deleting) return;
+          void (async () => {
+            setDeleting(true);
+            try {
+              if (skill.shared) {
+                const unpublished = await unpublishSkill(publishedMarketId(skillId));
+                if (!unpublished) {
+                  toast.notify({ message: t('mySkills.unshareFailedMsg', { name: skill.name }), variant: 'error' });
+                  return;
+                }
+                setSkills((items) =>
+                  items.map((item) => (item.id === skillId ? { ...item, shared: false } : item)),
+                );
+                setDetails((prev) => ({
+                  ...prev,
+                  [skillId]: { ...prev[skillId], shared: false },
+                }));
+              }
+
+              if (skill.origin === 'installed') {
+                const removed = await uninstallArtifact(skillId, 'skill');
+                if (!removed) {
+                  toast.notify({ message: t('mySkills.deleteFailedMsg', { name: skill.name, error: '' }), variant: 'error' });
+                  return;
+                }
+              } else {
+                const res = await api.deleteSkill(skillId);
+                if (!res.success) {
+                  toast.notify({
+                    message: t('mySkills.deleteFailedMsg', {
+                      name: skill.name,
+                      error: ` — ${apiErrorMessage(res)}`,
+                    }),
+                    variant: 'error',
+                  });
+                  return;
+                }
+              }
+
+              setSkills((items) => items.filter((item) => item.id !== skillId));
+              setDetails((prev) => {
+                const next = { ...prev };
+                delete next[skillId];
+                return next;
+              });
+              setConfirmDelete(false);
+            } finally {
+              setDeleting(false);
+            }
+          })();
         }}
         description={t('mySkills.deleteConfirmDesc')}
       />
@@ -2167,37 +2217,77 @@ const SkillDetailView: React.FC<{
         open={publishOpen}
         skill={skill}
         detail={detail}
-        onClose={() => setPublishOpen(false)}
+        busy={publishing}
+        onClose={() => {
+          if (!publishing) setPublishOpen(false);
+        }}
         onConfirm={() => {
-          setSkills((a) => a.map((x) => (x.id === skillId ? { ...x, shared: true } : x)));
-          // 설치형 재공유 시 원작자 attribution 유지 (ownedToMarketSkill 내부 처리)
-          // author:'me' sentinel을 현재 언어로 번역해 마켓 카드에 표시
-          publishOwnedSkill({ ...ownedToMarketSkill(skill, detail), author: t('author.previewAuthorMe') });
-          setPublishOpen(false);
-          // 공개의 실체 — 런타임이 워크스페이스 skill-exports/ 아래에 유통 가능한
-          // artifact(디렉토리 + tar.gz + checksum)를 만든다. 유통본과 원본의
-          // 계보는 없다(관계 단절). 실패해도 마켓 카드(로컬)는 유지 — 재시도 가능.
-          void api.exportSkill(skillId).then((res) => {
-            if (res.success && res.data) {
-              toast.notify({ message: t('mySkills.exportSuccessMsg', { name: skill.name }), variant: 'success' });
-            } else {
-              toast.notify({ message: t('mySkills.exportFailMsg', { error: res.error ? ` — ${res.error}` : '' }), variant: 'warning' });
+          if (publishing) return;
+          void (async () => {
+            setPublishing(true);
+            try {
+              // 설치형 재공유 시 원작자 attribution 유지 (ownedToMarketSkill 내부 처리).
+              const published = await publishOwnedSkill({
+                ...ownedToMarketSkill(skill, detail),
+                author: t('author.previewAuthorMe'),
+              });
+              if (!published) {
+                toast.notify({ message: t('mySkills.publishFailedMsg', { name: skill.name }), variant: 'error' });
+                return;
+              }
+              setSkills((items) =>
+                items.map((item) => (item.id === skillId ? { ...item, shared: true } : item)),
+              );
+              setDetails((prev) => ({
+                ...prev,
+                [skillId]: { ...prev[skillId], shared: true },
+              }));
+              setPublishOpen(false);
+
+              // 플랫폼 게시와 별도로 install-ready 내보내기 묶음도 계속 준비한다.
+              const res = await api.exportSkill(skillId);
+              if (res.success && res.data) {
+                toast.notify({ message: t('mySkills.exportSuccessMsg', { name: skill.name }), variant: 'success' });
+              } else {
+                toast.notify({ message: t('mySkills.exportFailMsg', { error: res.error ? ` — ${res.error}` : '' }), variant: 'warning' });
+              }
+            } finally {
+              setPublishing(false);
             }
-          });
+          })();
         }}
       />
 
       <ConfirmDialog
         open={confirmUnshare}
+        busy={unsharing}
         tone="danger"
         title={t('mySkills.unshareConfirmTitle', { name: skill.name })}
         confirmLabel={t('mySkills.unshareConfirmLabel')}
         confirmIcon="close"
         onClose={() => setConfirmUnshare(false)}
         onConfirm={() => {
-          setSkills((a) => a.map((x) => (x.id === skillId ? { ...x, shared: false } : x)));
-          unpublishSkill(publishedMarketId(skill.id));
-          setConfirmUnshare(false);
+          if (unsharing) return;
+          void (async () => {
+            setUnsharing(true);
+            try {
+              const unpublished = await unpublishSkill(publishedMarketId(skill.id));
+              if (!unpublished) {
+                toast.notify({ message: t('mySkills.unshareFailedMsg', { name: skill.name }), variant: 'error' });
+                return;
+              }
+              setSkills((items) =>
+                items.map((item) => (item.id === skillId ? { ...item, shared: false } : item)),
+              );
+              setDetails((prev) => ({
+                ...prev,
+                [skillId]: { ...prev[skillId], shared: false },
+              }));
+              setConfirmUnshare(false);
+            } finally {
+              setUnsharing(false);
+            }
+          })();
         }}
         description={t('mySkills.unshareConfirmDesc')}
       />

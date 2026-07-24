@@ -24,6 +24,7 @@ export interface SkillCardProps {
   points?: number;
   tags: string[];
   installed: boolean;
+  userPublished?: boolean;
   onInstall: () => void;
   onSponsor: () => void;
 }
@@ -59,18 +60,20 @@ export const SkillCard: React.FC<SkillCardProps> = ({
   points,
   tags,
   installed,
+  userPublished = false,
   onInstall,
   onSponsor,
 }) => {
   const { t: tRaw } = useTranslation('skills');
   const t = tRaw as (key: string, opts?: Record<string, unknown>) => string;
   const { language } = useI18n();
+  const acquired = installed || userPublished;
 
   return (
     <Card
       padding="md"
       className={`group relative flex flex-col min-h-[176px] cursor-pointer overflow-hidden transition-colors duration-150 ${
-        installed
+        acquired
           ? 'skill-card--installed'
           : 'skill-card--idle'
       }`}
@@ -79,14 +82,14 @@ export const SkillCard: React.FC<SkillCardProps> = ({
       <span
         aria-hidden="true"
         className={`absolute left-0 top-0 h-full w-0.5 bg-blue-60 transition-opacity ${
-          installed ? 'opacity-70' : 'opacity-0 group-hover:opacity-50'
+          acquired ? 'opacity-70' : 'opacity-0 group-hover:opacity-50'
         }`}
       />
       {/* Header — 아이콘 · 이름/출처 · 받기 pill */}
       <div className="relative flex items-start gap-3">
         <div
           className={`flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-lg border ${
-            installed
+            acquired
               ? 'bg-blue-60/14 border-blue-50/30 text-blue-30'
               : 'bg-blue-60/12 border-blue-50/25 text-blue-40'
           }`}
@@ -110,17 +113,17 @@ export const SkillCard: React.FC<SkillCardProps> = ({
         <button
           onClick={(e) => {
             e.stopPropagation();
-            if (!installed) onInstall();
+            if (!acquired) onInstall();
           }}
-          disabled={installed}
+          disabled={acquired}
           className={`flex-shrink-0 inline-flex items-center gap-1 h-7 rounded-full text-caption-01 font-semibold transition-colors ${
-            installed
+            acquired
               ? 'px-3 bg-blue-60/12 text-blue-30 ring-1 ring-inset ring-blue-50/25 cursor-default'
               : 'px-3 bg-transparent text-text-secondary ring-1 ring-inset ring-border-strong-01 hover:bg-blue-60/10 hover:text-blue-30 hover:ring-blue-50/35 cursor-pointer'
           }`}
         >
-          {installed && <Icon name="check" size={12} />}
-          {installed ? t('market.installed') : t('market.getBtn')}
+          {acquired && <Icon name="check" size={12} />}
+          {userPublished ? t('market.published') : installed ? t('market.installed') : t('market.getBtn')}
         </button>
       </div>
 

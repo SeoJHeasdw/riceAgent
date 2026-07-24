@@ -7,7 +7,7 @@ import { useDialogA11y } from '../hooks/useDialogA11y';
 import { useI18n } from '../lib/i18n/I18nContext';
 import { replayOnboarding, replayTour, RESET_ALL_DATA_EVENT } from '../lib/tutorial';
 import { applyAppearance } from '../lib/appearance';
-import { api } from '../lib/api';
+import { api, platform } from '../lib/api';
 import { TOUR_DONE_KEY, SCREEN_TOUR_KEYS } from '../components/carbon/tour';
 
 interface AppSettings {
@@ -267,7 +267,13 @@ function SettingsScreen({ open, onClose }: SettingsScreenProps) {
       }
       if (skills.status === 'fulfilled' && skills.value.success) {
         const list = skills.value.data as { id: string; source?: string | null }[] | undefined ?? [];
-        list.filter((s) => s.source !== 'builtin').forEach((s) => deletions.push(api.deleteSkill(s.id)));
+        list
+          .filter((s) => s.source !== 'builtin')
+          .forEach((s) => deletions.push(
+            s.source?.startsWith('market:')
+              ? api.removeArtifact(`skill:${s.id}`)
+              : api.deleteSkill(s.id),
+          ));
       }
       if (plugins.status === 'fulfilled' && plugins.value.success) {
         const list = plugins.value.data as { id: string; builtin?: boolean }[] | undefined ?? [];
@@ -292,6 +298,17 @@ function SettingsScreen({ open, onClose }: SettingsScreenProps) {
 
       // 런타임 설정 리셋 → 재시작 시 온보딩 재트리거
       await api.updateSettings({ provider: { configured: false }, registered_models: [] });
+    }
+
+    // 로컬 앱이 게시한 마켓 artifact도 함께 제거한다. 기본 제공/외부 artifact는
+    // managed_by 경계로 제외돼 전체 데이터 초기화가 소스 카탈로그를 훼손하지 않는다.
+    const catalog = await platform.getCatalog({ type: 'skill' });
+    if (catalog.success && catalog.data) {
+      await Promise.allSettled(
+        catalog.data
+          .filter((artifact) => artifact.managed_by === 'rice-app')
+          .map((artifact) => platform.unpublish(artifact.id)),
+      );
     }
 
     // ── localStorage 초기화 ────────────────────────────────────────────

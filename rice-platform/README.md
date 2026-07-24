@@ -41,7 +41,8 @@ RICE_ARTIFACTS_DIR=/path/to/artifacts rice-platform
 | GET | `/artifacts/{id}/files/{path}` | artifact 내 개별 파일 내용 (SkillFileBrowser lazy load) |
 | GET | `/artifacts/{id}/download` | tar.gz 다운로드 (`X-Checksum: sha256-…` 헤더) |
 | POST | `/artifacts/{id}/sponsor` | Blue Point 후원 (mock) |
-| POST | `/artifacts` | artifact 게시 (JSON body) |
+| POST | `/artifacts` | artifact 게시 (JSON body, manifest에 `managed_by: rice-app` 필요) |
+| DELETE | `/artifacts/{id}` | `managed_by: rice-app` 게시본 내리기 |
 
 > `/files/{path}`: 텍스트 파일은 `{ path, content, language }`, 바이너리(폰트·이미지 등)는
 > `{ path, content: null, language: "binary", binary: true }`. artifact 루트 밖 경로는 403.

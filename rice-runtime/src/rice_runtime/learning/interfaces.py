@@ -167,6 +167,7 @@ class SkillSummary:
     injected: int = 0
     friction: int = 0
     routing_miss: int = 0
+    display_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -463,6 +464,7 @@ class ILearningService(Protocol):
         body: str,
         description: str = "",
         tags: tuple[str, ...] = (),
+        display_name: str | None = None,
     ) -> SkillDetail:
         """User-authored skill (POST /skills). Validates the name, refuses
         collisions, writes a v1 active SKILL.md (source='user')."""

@@ -137,7 +137,7 @@ def _parse_skill_md_minimal(text: str) -> dict[str, Any]:
     }
 
 
-def _canonicalize_skill_md(text: str, name: str) -> str:
+def _canonicalize_skill_md(text: str, name: str, *, source: str | None = None) -> str:
     """설치되는 SKILL.md 의 frontmatter `name` 을 manifest name 으로 맞춘다.
 
     SkillStore 는 `<name>.md` 파일명과 frontmatter `name` 이 일치한다고 가정한다
@@ -162,6 +162,8 @@ def _canonicalize_skill_md(text: str, name: str) -> str:
         fm, body = parsed
         fm = dict(fm)
         fm["name"] = name
+    if source is not None:
+        fm["source"] = source
     body_sep = "" if body.startswith(("\n", "\r")) else "\n"
     return f"---\n{dump_yaml(fm)}---{body_sep}{body}"
 
@@ -737,6 +739,64 @@ class PluginLoader:
             log.info("reconciled %d builtin-shadowed plugin install(s)", removed)
         return removed
 
+    def reconcile_installed_skill_sources(self) -> int:
+        """구버전 market 설치 스킬에 영속 source 메타를 보충한다.
+
+        예전 설치본은 ``installed_artifacts``에는 ``skill:<name>`` 행이 있지만
+        ``<name>.md`` frontmatter에는 source가 없었다. 그러면 재시작 뒤 GET
+        /skills가 설치본을 학습 스킬처럼 내보내고, My Skills 삭제가 artifact
+        제거 대신 일반 스킬 삭제 경로를 골라 DB 유령 행을 남긴다.
+
+        설치 DB를 정본으로 삼아 파일만 원자 교체한다. 손상되거나 사라진 파일은
+        이 훅에서 추측 복구하지 않고 로그만 남긴다.
+        """
+        repaired = 0
+        rows = self._db.query_all(
+            "SELECT id, name FROM installed_artifacts WHERE type = 'skill'"
+        )
+        for row in rows:
+            name = str(row["name"])
+            staged: Path | None = None
+            try:
+                path = _resolved_within(
+                    self._paths.skills, self._paths.skills / f"{name}.md"
+                )
+                if not path.is_file():
+                    log.warning(
+                        "installed skill record has no definition file: %s", row["id"]
+                    )
+                    continue
+                text = path.read_text(encoding="utf-8")
+                parsed = split_frontmatter(text)
+                source = parsed[0].get("source") if parsed is not None else None
+                expected = f"market:{name}"
+                if source == expected:
+                    continue
+                canonical = _canonicalize_skill_md(text, name, source=expected)
+                staged = path.with_name(f".{path.name}.source-reconcile")
+                staged.write_text(canonical, encoding="utf-8")
+                staged.replace(path)
+                repaired += 1
+            except Exception:  # noqa: BLE001 — 손상된 구버전 파일 하나가 부팅을 막으면 안 됨
+                log.warning(
+                    "failed to reconcile installed skill source: %s",
+                    row["id"],
+                    exc_info=True,
+                )
+            finally:
+                if staged is not None:
+                    try:
+                        staged.unlink(missing_ok=True)
+                    except OSError:
+                        log.warning(
+                            "failed to clean installed skill reconcile staging file: %s",
+                            staged,
+                            exc_info=True,
+                        )
+        if repaired:
+            log.info("reconciled source metadata for %d installed skill(s)", repaired)
+        return repaired
+
     # ── internal helpers ──────────────────────────────────────────────────────
 
     @staticmethod
@@ -875,7 +935,14 @@ class PluginLoader:
             risk_flags = [
                 f"{parsed.name}:{label}" for label in scan_risks(raw_md_text)
             ]
-            md_text = _canonicalize_skill_md(raw_md_text, parsed.name)
+            # 설치 출처를 SKILL.md에 영속한다. 재시작 후 GET /skills hydrate에서도
+            # 마켓 설치본(origin=installed)을 직접 작성/학습 스킬과 구분할 수 있어야
+            # 제거 시 installed_artifacts 행까지 함께 정리할 수 있다.
+            md_text = _canonicalize_skill_md(
+                raw_md_text,
+                parsed.name,
+                source=f"market:{parsed.name}",
+            )
             self._paths.skills.mkdir(parents=True, exist_ok=True)
             target = _resolved_within(self._paths.skills, self._paths.skills / f"{parsed.name}.md")
             target.write_text(md_text, encoding="utf-8")

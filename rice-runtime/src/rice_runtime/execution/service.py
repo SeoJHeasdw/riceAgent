@@ -98,6 +98,9 @@ class PluginLoaderService(IPluginLoader):
     def reconcile_builtin_shadows(self) -> int:
         return self._impl.reconcile_builtin_shadows()
 
+    def reconcile_installed_skill_sources(self) -> int:
+        return self._impl.reconcile_installed_skill_sources()
+
     async def install(self, *, path: str, manifest: dict[str, Any]) -> PluginInfo:
         return await self._impl.install(path=path, manifest=manifest)
 

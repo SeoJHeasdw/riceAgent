@@ -40,6 +40,7 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
   useDialogA11y({ open: isOpen && !!artifact, dialogRef, onClose });
   const isSkill = type === 'skill';
   const skill = isSkill && artifact ? (artifact as Skill) : null;
+  const userPublishedSkill = !!skill?.userPublished;
   // 플랫폼 스킬(id: "platform-{id}")은 실제 SKILL.md를 platform 서버에서 가져온다.
   const isPlatformSkill = !!skill && skill.id.startsWith('platform-');
 
@@ -375,7 +376,7 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
 
         {/* Footer actions */}
         <div className="flex-shrink-0 px-5 py-3.5 border-t border-border-subtle-01 bg-layer-01">
-          {artifact.installed ? (
+          {artifact.installed || userPublishedSkill ? (
             <div className="flex items-center gap-3">
               {/* Plugin toggle */}
               {!isSkill && onToggle && (
@@ -400,7 +401,9 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
               {isSkill && (
                 <span className="flex items-center gap-1.5 text-body-short-01 text-text-secondary">
                   <span className="w-1.5 h-1.5 rounded-full bg-blue-50" />
-                  {tSkills('market.detail.installedManage')}
+                  {userPublishedSkill
+                    ? tSkills('market.detail.publishedManage')
+                    : tSkills('market.detail.installedManage')}
                 </span>
               )}
 
@@ -416,7 +419,9 @@ export const ArtifactDetailModal: React.FC<ArtifactDetailModalProps> = ({
                   className="ml-auto"
                   icon={<Icon name="trash" size={14} />}
                 >
-                  {tPlugins('detail.uninstallBtn')}
+                  {userPublishedSkill
+                    ? tSkills('market.detail.unpublishBtn')
+                    : tPlugins('detail.uninstallBtn')}
                 </Button>
               )}
             </div>

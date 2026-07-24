@@ -17,9 +17,17 @@ export interface SkillPublishDialogProps {
   detail: SkillDetail;
   onConfirm: () => void;
   onClose: () => void;
+  busy?: boolean;
 }
 
-export const SkillPublishDialog: React.FC<SkillPublishDialogProps> = ({ open, skill, detail, onConfirm, onClose }) => {
+export const SkillPublishDialog: React.FC<SkillPublishDialogProps> = ({
+  open,
+  skill,
+  detail,
+  onConfirm,
+  onClose,
+  busy = false,
+}) => {
   const { t } = useTranslation('skills');
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
@@ -42,7 +50,7 @@ export const SkillPublishDialog: React.FC<SkillPublishDialogProps> = ({ open, sk
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center">
       {/* backdrop */}
-      <div className={dialogBackdropCls} onClick={onClose} aria-hidden="true" />
+      <div className={dialogBackdropCls} onClick={busy ? undefined : onClose} aria-hidden="true" />
 
       {/* dialog */}
       <div
@@ -119,11 +127,18 @@ export const SkillPublishDialog: React.FC<SkillPublishDialogProps> = ({ open, sk
         <div className="flex items-center justify-end gap-2 px-5 py-2.5 border-t border-border-subtle-01 bg-background">
           <button
             onClick={onClose}
+            disabled={busy}
             className="h-7 px-3 rounded-lg text-body-short-01 font-semibold text-text-primary bg-layer-02 border border-border-strong-01 hover:bg-layer-hover-01 transition-colors"
           >
             {t('publish.cancelBtn')}
           </button>
-          <Button kind="primary" size="sm" icon={<Icon name="share" size={14} />} onClick={onConfirm}>
+          <Button
+            kind="primary"
+            size="sm"
+            icon={<Icon name="share" size={14} />}
+            onClick={onConfirm}
+            loading={busy}
+          >
             {t('publish.confirmBtn')}
           </Button>
         </div>

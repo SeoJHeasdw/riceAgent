@@ -31,6 +31,8 @@ export interface ConfirmDialogProps {
   onConfirm: () => void;
   /** 닫기/취소 콜백 */
   onClose: () => void;
+  /** 서버 반영 중 — 닫기/중복 확인을 막고 확인 버튼에 진행 상태를 표시한다. */
+  busy?: boolean;
   /** 다른 오버레이 위에 표시할 때 사용할 stacking class */
   stackingClassName?: string;
 }
@@ -45,6 +47,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   confirmIcon,
   onConfirm,
   onClose,
+  busy = false,
   stackingClassName = 'z-[60]',
 }) => {
   const { t } = useTranslation('common');
@@ -59,7 +62,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   return (
     <div className={`fixed inset-0 ${stackingClassName} flex items-center justify-center`}>
       {/* backdrop */}
-      <div className={dialogBackdropCls} onClick={onClose} aria-hidden="true" />
+      <div className={dialogBackdropCls} onClick={busy ? undefined : onClose} aria-hidden="true" />
 
       {/* dialog */}
       <div
@@ -93,6 +96,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
             ref={cancelRef}
             kind="ghost"
             size="xs"
+            disabled={busy}
             onClick={onClose}
           >
             {cancelLabel ?? t('cancel')}
@@ -103,6 +107,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
             className="min-w-[72px]"
             icon={confirmIcon ? <Icon name={confirmIcon} size={14} /> : undefined}
             onClick={onConfirm}
+            loading={busy}
           >
             {confirmLabel ?? t('confirm')}
           </Button>

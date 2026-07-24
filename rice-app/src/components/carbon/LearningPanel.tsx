@@ -3,11 +3,13 @@ import { useTranslation } from 'react-i18next';
 import { Icon, Tag } from '../ui';
 import type { IconName } from '../ui/Icon';
 import { useLearning } from '../../lib/learning/LearningContext';
-import { renderChangelog, wrapT, type Proposal, type ProposalKind } from '../../lib/learningData';
+import { renderChangelog, wrapT, type Proposal, type ProposalKind, type Skill } from '../../lib/learningData';
 import type { SkillCandidate, SkillSuggestion } from '../../lib/types';
 import { api } from '../../lib/api';
 import { localizeLearningWarning } from '../../lib/learningWarnings';
 import { TransparencyPanel } from './TransparencyPanel';
+import { useMarketplace } from '../../hooks/useMarketplace';
+import { publishedMarketId } from '../../lib/skillBridge';
 
 /**
  * LearningPanel - the right-side learning surface. Interactive: users decide
@@ -476,6 +478,7 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpe
     highlightedSkill,
     panelScrollRef,
   } = useLearning();
+  const { uninstallArtifact, unpublishSkill } = useMarketplace();
   const skillRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   // transient confirmation after accepting/dismissing a proposal
@@ -611,6 +614,36 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpe
 
   const activeSkills = skills.filter((s) => s.enabled).length;
   const activePlugins = myPlugins.filter((p) => p.enabled).length;
+  const removeSkill = async (skill: Skill) => {
+    if (skill.shared) {
+      const unpublished = await unpublishSkill(publishedMarketId(skill.id));
+      if (!unpublished) {
+        showFlash(t('learning.skillRemoveFailed'));
+        return;
+      }
+      setSkills((items) =>
+        items.map((item) => (item.id === skill.id ? { ...item, shared: false } : item)),
+      );
+      setDetails((prev) => ({
+        ...prev,
+        [skill.id]: { ...prev[skill.id], shared: false },
+      }));
+    }
+
+    const removed = skill.origin === 'installed'
+      ? await uninstallArtifact(skill.id, 'skill')
+      : (await api.deleteSkill(skill.id)).success;
+    if (!removed) {
+      showFlash(t('learning.skillRemoveFailed'));
+      return;
+    }
+    setSkills((items) => items.filter((item) => item.id !== skill.id));
+    setDetails((prev) => {
+      const next = { ...prev };
+      delete next[skill.id];
+      return next;
+    });
+  };
 
   return (
     <div className="h-full flex-shrink-0 bg-layer-01 border-l border-border-subtle-01 flex flex-col overflow-hidden" style={{ width }}>
@@ -812,8 +845,13 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpe
                               label: t('learning.skillMenuDelete'),
                               danger: true,
                               onClick: () => {
-                                setMyPlugins((arr) => arr.filter((x) => x.id !== p.id));
-                                if (api.isEnabled) void api.removeArtifact(p.id);
+                                void uninstallArtifact(p.id, 'plugin').then((removed) => {
+                                  if (removed) {
+                                    setMyPlugins((arr) => arr.filter((x) => x.id !== p.id));
+                                  } else {
+                                    showFlash(t('learning.pluginRemoveFailed'));
+                                  }
+                                });
                               },
                             },
                           ]),
@@ -898,7 +936,7 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpe
                               icon: 'trash' as IconName,
                               label: t('learning.skillMenuDelete'),
                               danger: true,
-                              onClick: () => setSkills((arr) => arr.filter((x) => x.id !== s.id)),
+                              onClick: () => void removeSkill(s),
                             },
                           ]),
                     ]}

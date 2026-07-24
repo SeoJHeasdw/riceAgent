@@ -72,6 +72,8 @@ class SkillData:
     # UI "비활성" 상태 영속화: state=active이지만 사용자가 주입을 꺼둔 스킬.
     # True(기본) = 주입 허용, False = 주입 중단. 기존 파일과 하위호환(없으면 True).
     enabled: bool = True
+    # 파일/명령 식별자인 name과 분리된 UI 표시 이름. 기존 파일은 name으로 폴백.
+    display_name: str | None = None
 
 
 # ── frontmatter 파싱 (메커니즘은 core/frontmatter.py — 여기는 필드 의미론) ────
@@ -125,6 +127,7 @@ def parse_skill_md(text: str) -> SkillData:
         absorbed_into=fm.get("absorbed_into"),
         tools=[str(t) for t in tools],
         enabled=enabled,
+        display_name=fm.get("display_name"),
     )
 
 
@@ -144,6 +147,8 @@ def serialize_skill_md(skill: SkillData) -> str:
         fm["tools"] = skill.tools
     if skill.source is not None:
         fm["source"] = skill.source
+    if skill.display_name is not None and skill.display_name != skill.name:
+        fm["display_name"] = skill.display_name
     if skill.created_at is not None:
         fm["created_at"] = skill.created_at
     if skill.updated_at is not None:

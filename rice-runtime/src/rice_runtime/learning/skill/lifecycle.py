@@ -198,6 +198,7 @@ class SkillLifecycle:
             source=hist_data.source,
             created_at=current.created_at,
             updated_at=now_iso(),
+            display_name=current.display_name or hist_data.display_name,
         )
         self._store.write(restored)
         self._store.restore_resources_from_history(name, version)

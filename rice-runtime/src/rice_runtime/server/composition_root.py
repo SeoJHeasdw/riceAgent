@@ -195,6 +195,9 @@ def build_container(
     # 빌트인 카탈로그에 가려 UI에 안 보이는데 remove()는 빌트인 id를 거부해
     # 영구히 지울 수 없던 유령 행/디렉토리(learning.recover_boot_state와 같은 자리).
     plugins.reconcile_builtin_shadows()
+    # 구버전 market skill은 installed_artifacts 행만 있고 SKILL.md source가 없어
+    # 재시작 뒤 학습 스킬처럼 보였다. 설치 DB를 기준으로 source를 영속 보정한다.
+    plugins.reconcile_installed_skill_sources()
     approvals: IApprovalGate = ApprovalRegistry()
 
     # ── provider selection (one mapping point) ────────────────────────────────

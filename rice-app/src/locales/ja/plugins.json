@@ -28,6 +28,7 @@
   "toastInstalling": "インストール中",
   "toastInstallDone": "インストール済み",
   "toastInstallFailed": "インストールに失敗しました",
+  "toastUninstallFailed": "{{name}}を削除できませんでした",
   "toastNeedsConnector": "{{name}}を有効にするにはコネクターを接続してください",
   "toastRiskFlagged": "{{name}}にリスク信号が検出されたため、無効状態でインストールしました — 内容を確認してから有効化してください",
   "toastUninstalled": "{{name}}が削除されました",

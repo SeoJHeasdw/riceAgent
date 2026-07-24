@@ -8,6 +8,8 @@ import { useLearning } from '../lib/learning/LearningContext';
 import { api } from '../lib/api';
 import { connectorIdForScope, type MyPlugin } from '../lib/learningData';
 import { localizeRiskLabel } from '../lib/learningWarnings';
+import { useMarketplace } from '../hooks/useMarketplace';
+import { useToast } from '../lib/toast/ToastContext';
 
 /**
  * MyPluginsScreen ("나의 플러그인") — management screen for installed plugins.
@@ -77,8 +79,11 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
   // 위험 라벨 로케일 문장은 chat 네임스페이스(learning.risk*) — learningWarnings.ts 공유
   const { t: tChat } = useTranslation('chat');
   const { myPlugins, setMyPlugins } = useLearning();
+  const { uninstallArtifact } = useMarketplace();
+  const toast = useToast();
   const [tab, setTab] = useState<PluginTab>('skills');
   const [connectorDialogOpen, setConnectorDialogOpen] = useState(false);
+  const [removing, setRemoving] = useState(false);
   const plugin = myPlugins.find((p) => p.id === pluginId);
 
   if (!plugin || !pluginId) {
@@ -112,9 +117,20 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
       });
     }
   };
-  const remove = () => {
-    setMyPlugins((a) => a.filter((x) => x.id !== pluginId));
-    if (api.isEnabled) void api.removeArtifact(pluginId);
+  const remove = async () => {
+    if (removing) return;
+    setRemoving(true);
+    try {
+      const removed = await uninstallArtifact(pluginId, 'plugin');
+      if (!removed) {
+        toast.notify({ message: t('toastUninstallFailed', { name: plugin.name }), variant: 'error' });
+        return;
+      }
+      setMyPlugins((a) => a.filter((x) => x.id !== pluginId));
+      toast.notify({ message: t('toastUninstalled', { name: plugin.name }), variant: 'info' });
+    } finally {
+      setRemoving(false);
+    }
   };
   const update = () =>
     plugin.update && patch((x) => ({ ...x, update: undefined, version: plugin.update!.version, updated: 'plugin_updated_just_installed' }));
@@ -402,7 +418,8 @@ const PluginDetailView: React.FC<{ pluginId: string | null }> = ({ pluginId }) =
             <Button
               kind="danger-ghost"
               size="sm"
-              onClick={remove}
+              onClick={() => void remove()}
+              loading={removing}
               icon={<Icon name="trash" size={14} />}
             >
               {t('myPlugins.actionRemove')}

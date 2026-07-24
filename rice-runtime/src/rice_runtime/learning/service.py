@@ -2358,6 +2358,7 @@ class LearningService(ILearningService):
                     injected=usage.injected,
                     friction=usage.friction,
                     routing_miss=usage.routing_miss,
+                    display_name=skill.display_name,
                 )
             )
         return result
@@ -2395,6 +2396,7 @@ class LearningService(ILearningService):
             injected=usage.injected,
             friction=usage.friction,
             routing_miss=usage.routing_miss,
+            display_name=skill.display_name,
             body=skill.body,
         )
 
@@ -2405,6 +2407,7 @@ class LearningService(ILearningService):
         body: str,
         description: str = "",
         tags: tuple[str, ...] = (),
+        display_name: str | None = None,
     ) -> SkillDetail:
         """사용자 직접 스킬 생성 (POST /skills, CONTRACTS §1.3)."""
         if not skill_guard.VALID_SKILL_NAME.match(name):
@@ -2432,6 +2435,9 @@ class LearningService(ILearningService):
         clean_description, clean_tags, _, _ = sanitize_metadata(description, tags, None)
         description = clean_description or ""
         tags = clean_tags or ()
+        clean_display_name = " ".join((display_name or "").split()).strip()
+        if len(clean_display_name) > 160:
+            raise ValidationError("skill display_name must be at most 160 characters")
         self._enforce_verification(name=name, body=body, description=description, tags=tags)
 
         now = now_iso()
@@ -2445,6 +2451,7 @@ class LearningService(ILearningService):
             source="user",
             created_at=now,
             updated_at=now,
+            display_name=clean_display_name or None,
         )
         self._skill_store.write(skill)
         usage = self._usage_store.read(name)  # 0-초기화 사이드카 생성 보장

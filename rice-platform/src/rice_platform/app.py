@@ -14,26 +14,19 @@ CORS: rice-app(Electron renderer, localhost)에서 접근하므로 localhost 전
 
 from __future__ import annotations
 
-import hashlib
-import io
-import json
 import logging
-import os
-import shutil
-import tarfile
-import tempfile
-from pathlib import Path
 from typing import Any
 
-import yaml
-from fastapi import FastAPI, HTTPException, Query, Request, UploadFile
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.responses import Response
 
 from .registry import (
     build_download_package,
+    delete_managed_artifact,
     get_artifact,
     list_artifacts,
+    publish_artifact,
     _artifacts_dir,
     _resolve_artifact_dir,
 )
@@ -88,6 +81,21 @@ async def artifact_detail(artifact_id: str):
     if item is None:
         raise HTTPException(status_code=404, detail=f"artifact not found: {artifact_id}")
     return {"success": True, "data": item}
+
+
+@app.delete("/artifacts/{artifact_id}")
+async def unpublish_artifact(artifact_id: str):
+    """rice-app이 게시한 artifact를 마켓에서 내린다."""
+    try:
+        deleted = delete_managed_artifact(artifact_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"artifact not found: {artifact_id}")
+    log.info("unpublished artifact: %s", artifact_id)
+    return {"success": True, "data": {"id": artifact_id}}
 
 
 # ── download (CONTRACTS §2.3) ─────────────────────────────────────────────────
@@ -215,28 +223,12 @@ async def publish(request: Request):
     if manifest.get("type") not in ("skill", "plugin"):
         raise HTTPException(status_code=422, detail="manifest.type must be skill or plugin")
 
-    artifact_dir = _artifacts_dir() / name
-    artifact_dir.mkdir(parents=True, exist_ok=True)
-    # 샌드박스 비교는 양쪽 모두 resolve 한 경로로 한다 (artifact_file 핸들러와 동일 규칙).
-    # 한쪽만 resolve 하면 심볼릭링크가 낀 경로에서 정상 파일이 조용히 누락될 수 있다.
-    resolved_dir = artifact_dir.resolve()
-
-    # manifest 저장
-    with (artifact_dir / "rice-artifact.yaml").open("w", encoding="utf-8") as f:
-        yaml.dump(manifest, f, allow_unicode=True, default_flow_style=False)
-
-    # 첨부 파일 저장
-    for file_entry in files:
-        rel_path = file_entry.get("path", "").lstrip("/")
-        content = file_entry.get("content", "")
-        if not rel_path:
-            continue
-        target = (artifact_dir / rel_path).resolve()
-        # sandbox: artifact_dir 밖으로 나가는 경로 거부
-        if resolved_dir not in target.parents and target != resolved_dir:
-            continue
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
+    try:
+        result = publish_artifact(manifest, files)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
 
     log.info("published artifact: %s (%s)", name, manifest.get("type"))
-    return {"success": True, "data": {"id": name, "name": name, "version": manifest.get("version", "1.0.0")}}
+    return {"success": True, "data": result}

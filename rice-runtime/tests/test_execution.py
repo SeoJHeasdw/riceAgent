@@ -567,6 +567,103 @@ state: active
         assert "prompt_injection" in row["risk_flags"]
 
     @pytest.mark.asyncio
+    async def test_skill_artifact_persists_market_source_and_removes_by_artifact_id(self):
+        """skill의 관리 id는 `<name>`이 아니라 `skill:<name>`이다.
+
+        source도 파일에 남아야 재시작 hydrate 뒤 MySkills 삭제가 artifact 제거
+        경로를 선택하고 installed_artifacts의 유령 행을 남기지 않는다.
+        """
+        paths = _fresh_paths()
+        db = _fresh_db()
+        loader = PluginLoader(db=db, sandbox=NoopSandbox(), paths=paths)
+        src = Path(tempfile.mkdtemp(prefix="rice-market-skill-"))
+        (src / "SKILL.md").write_text(self.CLEAN_SKILL_MD, encoding="utf-8")
+
+        await loader.install(
+            path=str(src),
+            manifest=self._manifest("market-skill", type="skill"),
+        )
+
+        installed = paths.skills / "market-skill.md"
+        assert "source: market:market-skill" in installed.read_text(encoding="utf-8")
+        assert db.query_one(
+            "SELECT id FROM installed_artifacts WHERE id = ?",
+            ("skill:market-skill",),
+        ) is not None
+
+        await loader.remove("skill:market-skill")
+
+        assert not installed.exists()
+        assert db.query_one(
+            "SELECT id FROM installed_artifacts WHERE id = ?",
+            ("skill:market-skill",),
+        ) is None
+
+    def test_boot_reconciles_source_for_legacy_installed_skill(self):
+        paths = _fresh_paths()
+        db = _fresh_db()
+        loader = PluginLoader(db=db, sandbox=NoopSandbox(), paths=paths)
+        legacy = paths.skills / "legacy-market.md"
+        legacy.write_text(self.CLEAN_SKILL_MD, encoding="utf-8")
+        db.execute(
+            """
+            INSERT INTO installed_artifacts
+              (id, type, name, version, source, installed_at, enabled, risk_flags)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "skill:legacy-market",
+                "skill",
+                "legacy-market",
+                "1.0.0",
+                "market",
+                "2026-07-23T00:00:00Z",
+                1,
+                "[]",
+            ),
+        )
+
+        assert loader.reconcile_installed_skill_sources() == 1
+        repaired = legacy.read_text(encoding="utf-8")
+        assert "name: legacy-market" in repaired
+        assert "source: market:legacy-market" in repaired
+        assert loader.reconcile_installed_skill_sources() == 0
+
+    def test_artifact_delete_route_accepts_canonical_skill_id(self):
+        """프론트가 DELETE /artifacts/skill:<name>를 보내는 실제 HTTP 계약."""
+        from fastapi.testclient import TestClient
+
+        paths = _fresh_paths()
+        c = build_container(RuntimeArgs(token="test-token"), paths=paths)
+        src = Path(tempfile.mkdtemp(prefix="rice-route-skill-"))
+        (src / "SKILL.md").write_text(self.CLEAN_SKILL_MD, encoding="utf-8")
+        headers = {"authorization": "Bearer test-token", "host": "localhost"}
+        try:
+            client = TestClient(create_app(c))
+            installed = client.post(
+                "/artifacts/install",
+                headers=headers,
+                json={
+                    "path": str(src),
+                    "manifest": self._manifest("route-skill", type="skill"),
+                },
+            )
+            assert installed.status_code == 200
+            assert (paths.skills / "route-skill.md").exists()
+
+            removed = client.delete("/artifacts/skill:route-skill", headers=headers)
+
+            assert removed.status_code == 200
+            assert removed.json()["success"] is True
+            assert not (paths.skills / "route-skill.md").exists()
+            assert c.db.query_one(
+                "SELECT id FROM installed_artifacts WHERE id = ?",
+                ("skill:route-skill",),
+            ) is None
+        finally:
+            c.shutdown()
+
+    @pytest.mark.asyncio
     async def test_skill_artifact_scans_original_frontmatter_before_name_canonicalization(self):
         """manifest name 교정이 원래 frontmatter의 위험 문구를 검사 전에 지우면
         안 된다 — 원문 전체 스캔 계약(description/name/숨김문자 포함)."""

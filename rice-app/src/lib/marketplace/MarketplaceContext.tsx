@@ -1,6 +1,14 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Skill, Plugin } from '../types';
-import { installedPluginId, installedSkillId, platformArtifactToSkill, platformArtifactToPlugin } from '../skillBridge';
+import {
+  installedPluginId,
+  installedSkillId,
+  ownedSkillIdFromPublishedMarketId,
+  platformArtifactIdFromMarketId,
+  platformArtifactToSkill,
+  platformArtifactToPlugin,
+  publishedMarketId,
+} from '../skillBridge';
 import { platform, api } from '../api';
 import i18n from '../i18n';
 
@@ -45,14 +53,14 @@ export interface MarketplaceContextValue {
   selectedTags: string[];
   toggleTag: (tag: string) => void;
   installArtifact: (id: string, type: 'skill' | 'plugin') => Promise<InstallArtifactResult | undefined>;
-  uninstallArtifact: (id: string, type: 'skill' | 'plugin') => Promise<void>;
+  uninstallArtifact: (id: string, type: 'skill' | 'plugin') => Promise<boolean>;
   sponsorSkill: (id: string, amount: number) => Promise<void>;
   /** Publish a user-authored skill (from the author modal); returns the created skill. */
-  publishSkill: (draft: SkillDraft) => Skill;
+  publishSkill: (draft: SkillDraft) => Promise<Skill | undefined>;
   /** Publish/replace an already-materialized market skill (from "나의 스킬" 공유). */
-  publishOwnedSkill: (skill: Skill) => Skill;
+  publishOwnedSkill: (skill: Skill) => Promise<Skill | undefined>;
   /** Remove a published skill from the market (from "나의 스킬" 공유 해제). */
-  unpublishSkill: (marketId: string) => void;
+  unpublishSkill: (marketId: string) => Promise<boolean>;
   togglePlugin: (id: string, enabled: boolean) => Promise<boolean>;
   filteredSkills: Skill[];
   filteredPlugins: Plugin[];
@@ -66,7 +74,36 @@ type RuntimeSkillSummary = { id: string; state?: 'active' | 'stale' | 'archived'
 type RuntimePluginInfo = { id: string; enabled: boolean; source?: string };
 
 const runtimePluginIdForMarketId = (id: string) => (id.startsWith('plugin:') ? id : installedPluginId(id));
-const runtimeSkillIdForMarketId = (id: string) => (id.startsWith('platform-') ? installedSkillId(id) : id);
+const runtimeSkillIdForMarketId = (id: string) =>
+  ownedSkillIdFromPublishedMarketId(id)
+  ?? (id.startsWith('platform-') ? installedSkillId(id) : id.replace(/^skill:/, ''));
+const runtimeSkillArtifactIdForMarketId = (id: string) =>
+  id.startsWith('skill:') ? id : `skill:${runtimeSkillIdForMarketId(id)}`;
+
+const definitionBody = (definition: string): string => {
+  const match = definition.match(/^---\s*\r?\n[\s\S]*?\r?\n---\s*(?:\r?\n)?/);
+  return match ? definition.slice(match[0].length) : definition;
+};
+
+const publishedSkillPayload = (skill: Skill) => {
+  const artifactId = platformArtifactIdFromMarketId(skill.id);
+  return {
+    manifest: {
+      schema_version: 1,
+      type: 'skill',
+      name: artifactId,
+      display_name: skill.name,
+      description: skill.description,
+      version: skill.version,
+      category: skill.category,
+      tags: skill.tags,
+      author: { name: skill.author, ...(skill.team ? { team: skill.team } : {}) },
+      published_at: new Date().toISOString(),
+      managed_by: 'rice-app',
+    },
+    files: (skill.files ?? []).map((file) => ({ path: file.path, content: file.content })),
+  };
+};
 
 const mergeSkillInstallState = (catalog: Skill[], installed: RuntimeSkillSummary[]): Skill[] => {
   const byId = new Map(installed.map((s) => [s.id, s] as const));
@@ -269,19 +306,41 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   const uninstallArtifact = useCallback(async (id: string, type: 'skill' | 'plugin') => {
     setIsLoading(true);
-    if (api.isEnabled) {
-      const artifactId = type === 'plugin' ? runtimePluginIdForMarketId(id) : runtimeSkillIdForMarketId(id);
-      const res = await api.removeArtifact(artifactId);
-      if (!res.success) console.error('artifact uninstall failed', res.error);
-    } else {
-      await new Promise((resolve) => setTimeout(resolve, 500));
+    try {
+      if (api.isEnabled) {
+        const artifactId =
+          type === 'plugin' ? runtimePluginIdForMarketId(id) : runtimeSkillArtifactIdForMarketId(id);
+        const res = await api.removeArtifact(artifactId);
+        if (!res.success) {
+          console.error('artifact uninstall failed', res.error);
+          return false;
+        }
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+      if (type === 'skill') {
+        const runtimeId = runtimeSkillIdForMarketId(id);
+        setSkills((prev) =>
+          prev.map((skill) =>
+            runtimeSkillIdForMarketId(skill.id) === runtimeId
+              ? { ...skill, installed: false, enabled: false }
+              : skill,
+          ),
+        );
+      } else {
+        const runtimeId = runtimePluginIdForMarketId(id);
+        setPlugins((prev) =>
+          prev.map((plugin) =>
+            runtimePluginIdForMarketId(plugin.id) === runtimeId
+              ? { ...plugin, installed: false, enabled: false }
+              : plugin,
+          ),
+        );
+      }
+      return true;
+    } finally {
+      setIsLoading(false);
     }
-    if (type === 'skill') {
-      setSkills((prev) => prev.map((skill) => (skill.id === id ? { ...skill, installed: false, enabled: false } : skill)));
-    } else {
-      setPlugins((prev) => prev.map((plugin) => (plugin.id === id ? { ...plugin, installed: false, enabled: false } : plugin)));
-    }
-    setIsLoading(false);
   }, []);
 
   const sponsorSkill = useCallback(async (id: string, amount: number) => {
@@ -298,10 +357,13 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
     setIsLoading(false);
   }, []);
 
-  // Publish a user-authored skill (author modal) — prepend, pre-installed.
-  const publishSkill = useCallback((draft: SkillDraft): Skill => {
+  // Skill Market 업로드: platform 게시본 + runtime 사용자 원본을 모두 영속한다.
+  const publishSkill = useCallback(async (draft: SkillDraft): Promise<Skill | undefined> => {
+    setIsLoading(true);
+    const ownedId = `skill-user-${Date.now()}`;
+    const marketId = publishedMarketId(ownedId);
     const skill: Skill = {
-      id: `skill-user-${Date.now()}`,
+      id: `platform-${marketId}`,
       name: draft.name.trim(),
       description: draft.description.trim(),
       version: draft.version.trim() || '1.0.0',
@@ -314,23 +376,85 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
       points: 0,
       installed: true,
       enabled: true,
+      userPublished: true,
       files: [{ path: 'SKILL.md', language: 'markdown', content: draft.definition }],
     };
-    setSkills((prev) => [skill, ...prev]);
-    return skill;
+    try {
+      const published = await platform.publish(publishedSkillPayload(skill));
+      if (!published.success) {
+        console.error('skill publish failed', published.error);
+        return undefined;
+      }
+
+      const created = await api.createSkill({
+        name: ownedId,
+        body: definitionBody(draft.definition),
+        description: draft.description.trim(),
+        tags: draft.tags,
+        display_name: draft.name.trim(),
+      });
+      if (!created.success) {
+        console.error('runtime authored skill create failed', created.error);
+        // 한쪽만 남는 반쪽 게시를 피한다. 게시 롤백 실패는 로그로 남기되 원래
+        // create 실패를 사용자에게 반환한다.
+        const rollback = await platform.unpublish(marketId);
+        if (!rollback.success) console.error('skill publish rollback failed', rollback.error);
+        return undefined;
+      }
+
+      setSkills((prev) => [
+        skill,
+        ...prev.filter((item) => platformArtifactIdFromMarketId(item.id) !== marketId),
+      ]);
+      return skill;
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
 
-  // Publish/replace an already-built market skill (from 나의 스킬 공유) — upsert by id.
-  const publishOwnedSkill = useCallback((skill: Skill): Skill => {
-    setSkills((prev) => {
-      const without = prev.filter((s) => s.id !== skill.id);
-      return [skill, ...without];
-    });
-    return skill;
+  // 나의 스킬 공유: platform artifact로 영속한 뒤 마켓 상태를 갱신한다.
+  const publishOwnedSkill = useCallback(async (skill: Skill): Promise<Skill | undefined> => {
+    setIsLoading(true);
+    const artifactId = platformArtifactIdFromMarketId(skill.id);
+    const persistedSkill: Skill = {
+      ...skill,
+      id: `platform-${artifactId}`,
+      installed: true,
+      enabled: true,
+      userPublished: true,
+    };
+    try {
+      const res = await platform.publish(publishedSkillPayload(persistedSkill));
+      if (!res.success) {
+        console.error('owned skill publish failed', res.error);
+        return undefined;
+      }
+      setSkills((prev) => [
+        persistedSkill,
+        ...prev.filter((item) => platformArtifactIdFromMarketId(item.id) !== artifactId),
+      ]);
+      return persistedSkill;
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
 
-  const unpublishSkill = useCallback((marketId: string) => {
-    setSkills((prev) => prev.filter((s) => s.id !== marketId));
+  const unpublishSkill = useCallback(async (marketId: string): Promise<boolean> => {
+    setIsLoading(true);
+    const artifactId = platformArtifactIdFromMarketId(marketId);
+    try {
+      const res = await platform.unpublish(artifactId);
+      if (!res.success) {
+        console.error('skill unpublish failed', res.error);
+        return false;
+      }
+      setSkills((prev) =>
+        prev.filter((skill) => platformArtifactIdFromMarketId(skill.id) !== artifactId),
+      );
+      return true;
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
 
   const togglePlugin = useCallback(async (id: string, enabled: boolean) => {

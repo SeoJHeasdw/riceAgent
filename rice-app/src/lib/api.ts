@@ -234,6 +234,16 @@ class ApiClient {
   getSkill(id: string): Promise<ApiResponse> {
     return this.get(`/skills/${id}`);
   }
+  /** 사용자 직접 작성 스킬 생성 — runtime에 source=user로 영속한다. */
+  createSkill(payload: {
+    name: string;
+    body: string;
+    description?: string;
+    tags?: string[];
+    display_name?: string;
+  }): Promise<ApiResponse> {
+    return this.send('POST', '/skills', payload);
+  }
   /** 스킬 본문/메타 직접 편집 (PUT /skills/{id}) — 본문 변경 시 런타임이
    *  version+1·히스토리 보관·분석 사이드카 재분석 enqueue 까지 수행한다.
    *  AI 편집 드로어(SkillEditDrawer)의 저장 경로. */
@@ -566,7 +576,14 @@ class PlatformApiClient {
   private async get<T>(endpoint: string): Promise<ApiResponse<T>> {
     try {
       const res = await fetch(`${this.baseUrl}${endpoint}`);
-      return await res.json();
+      const body = await res.json() as ApiResponse<T> & { detail?: string };
+      if (!res.ok) {
+        return {
+          success: false,
+          error: body.error || body.detail || `platform request failed (${res.status})`,
+        };
+      }
+      return body;
     } catch {
       return { success: false, error: 'platform offline' };
     }
@@ -583,7 +600,14 @@ class PlatformApiClient {
         headers: data ? { 'Content-Type': 'application/json' } : {},
         body: data ? JSON.stringify(data) : undefined,
       });
-      return await res.json();
+      const body = await res.json() as ApiResponse<T> & { detail?: string };
+      if (!res.ok) {
+        return {
+          success: false,
+          error: body.error || body.detail || `platform request failed (${res.status})`,
+        };
+      }
+      return body;
     } catch {
       return { success: false, error: 'platform offline' };
     }
@@ -670,6 +694,11 @@ class PlatformApiClient {
   /** POST /artifacts — artifact 게시(publish) */
   publish(payload: PlatformPublishPayload): Promise<ApiResponse<{ id: string; name: string; version: string }>> {
     return this.send('POST', '/artifacts', payload);
+  }
+
+  /** DELETE /artifacts/{id} — rice-app이 관리하는 게시본만 내릴 수 있다. */
+  unpublish(id: string): Promise<ApiResponse<{ id: string }>> {
+    return this.send('DELETE', `/artifacts/${encodeURIComponent(id)}`);
   }
 }
 

@@ -28,6 +28,7 @@
   "toastInstalling": "Installing",
   "toastInstallDone": "Installed",
   "toastInstallFailed": "Installation failed",
+  "toastUninstallFailed": "Could not remove {{name}}",
   "toastNeedsConnector": "Connect a connector to activate {{name}}",
   "toastRiskFlagged": "Risk signals were detected in {{name}} — installed disabled; review before enabling",
   "toastUninstalled": "{{name}} has been removed",

@@ -116,6 +116,11 @@ class IPluginLoader(Protocol):
         가리는데 remove()는 빌트인 id를 거부하므로, 이 훅 없이는 지울 방법이 없는
         유령 설치본이 영구히 남는다. 정리 건수를 반환."""
         ...
+
+    def reconcile_installed_skill_sources(self) -> int:
+        """부팅 시 구버전 market 설치 스킬의 ``source`` frontmatter를 보충한다."""
+        ...
+
     async def install(self, *, path: str, manifest: dict[str, Any]) -> PluginInfo:
         """Verify checksum, place under `~/.rice/{skills|plugins}/`, load
         (CONTRACTS §2.3)."""

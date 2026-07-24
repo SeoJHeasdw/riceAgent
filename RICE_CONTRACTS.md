@@ -238,7 +238,8 @@ artifact.tar.gz (skill)              artifact.tar.gz (plugin)
 | GET | `/catalog?type=&q=&category=&tags=&sort=` | 검색/목록/필터/정렬 |
 | GET | `/artifacts/{id}` / `/artifacts/{id}/download` | 상세/다운로드 (download는 `X-Checksum: sha256-…` 헤더 동봉) |
 | GET | `/artifacts/{id}/files/{path}` | artifact 내 개별 파일 내용 (app SkillFileBrowser lazy load) |
-| POST | `/artifacts` | 등록(publish) |
+| POST | `/artifacts` | 등록(publish). 앱 게시본은 manifest에 `managed_by: rice-app`을 기록 |
+| DELETE | `/artifacts/{id}` | `managed_by: rice-app` 게시본 내리기 |
 | POST | `/artifacts/{id}/sponsor` | Blue Point 후원 (mock) |
 
 - ✅ 스펙 소유: `rice-platform`의 `apps/api`
@@ -311,7 +312,7 @@ requires:
 > **계약 표면이 바뀐 항목**만 여기 고정한다(상세 동작은 각 모듈 docstring).
 
 ### 6.1 Skill CRUD (신규 — §1.3 보강)
-- `POST /skills` `{name(kebab), body, description?, tags?}` → 사용자 직접 스킬 생성(source=`user`).
+- `POST /skills` `{name(kebab), body, description?, tags?, display_name?}` → 사용자 직접 스킬 생성(source=`user`). `display_name`은 파일/명령 식별자인 `name`과 분리된 UI 표시명이다.
 - `PUT /skills/{id}` `{body?, description?, tags?, state?}` → 직접 편집. **본문 변경 시 version+1 + .history 보관**.
 - `PUT /skills/{id}/files/{file_path}` `{content}` → 번들 reference/script/template 파일 편집. **version+1 + 해당 버전의 전체 번들 스냅샷 보관**.
 - `DELETE /skills/{id}` → 본문·usage·history 사이드카 모두 삭제.

@@ -251,6 +251,8 @@
     "pluginEmpty": "No plugins installed. Add them from the market.",
     "pluginSkillCount": "{{count}} skills",
     "pluginToggleFailed": "Couldn't change the plugin state.",
+    "pluginRemoveFailed": "Couldn't remove the plugin.",
+    "skillRemoveFailed": "Couldn't delete the skill.",
     "goToPlugin": "Shortcut",
     "pluginBuiltinTitle": "Built-in plugin — can only be enabled/disabled",
     "rowMenuTitle": "Options",

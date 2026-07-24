@@ -251,6 +251,8 @@
     "pluginEmpty": "설치된 플러그인이 없어요. 마켓에서 추가할 수 있어요.",
     "pluginSkillCount": "스킬 {{count}}",
     "pluginToggleFailed": "플러그인 상태를 바꾸지 못했어요.",
+    "pluginRemoveFailed": "플러그인을 제거하지 못했어요.",
+    "skillRemoveFailed": "스킬을 삭제하지 못했어요.",
     "goToPlugin": "바로가기",
     "pluginBuiltinTitle": "기본 내장 플러그인 — 활성/비활성만 가능",
     "rowMenuTitle": "옵션",

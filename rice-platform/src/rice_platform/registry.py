@@ -19,6 +19,7 @@ import io
 import json
 import os
 import re
+import shutil
 import tarfile
 import tempfile
 from collections.abc import Iterator
@@ -29,6 +30,8 @@ import yaml
 
 _DEFAULT_ARTIFACTS_DIR = Path(__file__).parent.parent.parent / "artifacts"
 _REPO_ROOT = _DEFAULT_ARTIFACTS_DIR.parent.parent  # <repo>/
+RICE_APP_MANAGED_BY = "rice-app"
+_PUBLISH_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
 def _artifacts_dir() -> Path:
@@ -208,6 +211,89 @@ def _resolve_artifact_dir(artifact_id: str) -> Path | None:
         if manifest.get("type") == "plugin" and d.name == artifact_id:
             return d
     return None
+
+
+def publish_artifact(manifest: dict[str, Any], files: list[dict[str, str]]) -> dict[str, str]:
+    """앱이 게시한 artifact를 staging 후 원자적으로 교체한다.
+
+    기본 제공/외부 marketplace artifact를 같은 이름으로 덮어쓰지 않도록 기존
+    artifact도 ``managed_by: rice-app`` 인 경우에만 교체한다. 파일은 모두 artifact
+    루트 안의 상대경로여야 한다.
+    """
+    name = str(manifest.get("name", "")).strip()
+    if not _PUBLISH_NAME_RE.fullmatch(name):
+        raise ValueError(
+            "manifest.name must be a safe slug "
+            "([A-Za-z0-9][A-Za-z0-9._-]*, max 64 chars)"
+        )
+    if manifest.get("managed_by") != RICE_APP_MANAGED_BY:
+        raise PermissionError("published artifacts must declare managed_by: rice-app")
+
+    root = _artifacts_dir()
+    root.mkdir(parents=True, exist_ok=True)
+    artifact_dir = root / name
+    if artifact_dir.exists():
+        existing = _load_manifest(artifact_dir)
+        if not existing or existing.get("managed_by") != RICE_APP_MANAGED_BY:
+            raise PermissionError(f"artifact is not managed by rice-app: {name}")
+
+    stage_parent = Path(tempfile.mkdtemp(prefix=".rice-publish-", dir=str(root)))
+    staged = stage_parent / name
+    staged.mkdir()
+    backup_parent: Path | None = None
+    try:
+        with (staged / "rice-artifact.yaml").open("w", encoding="utf-8") as f:
+            yaml.dump(manifest, f, allow_unicode=True, default_flow_style=False)
+
+        resolved_stage = staged.resolve()
+        for file_entry in files:
+            rel_path = str(file_entry.get("path", "")).lstrip("/")
+            if not rel_path:
+                continue
+            target = (staged / rel_path).resolve()
+            if resolved_stage not in target.parents and target != resolved_stage:
+                raise ValueError(f"artifact file escapes artifact root: {rel_path}")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(str(file_entry.get("content", "")), encoding="utf-8")
+
+        if artifact_dir.exists():
+            backup_parent = Path(tempfile.mkdtemp(prefix=".rice-publish-backup-", dir=str(root)))
+            artifact_dir.rename(backup_parent / name)
+        try:
+            staged.rename(artifact_dir)
+        except BaseException:
+            backup = backup_parent / name if backup_parent else None
+            if backup is not None and backup.exists() and not artifact_dir.exists():
+                backup.rename(artifact_dir)
+            raise
+    finally:
+        shutil.rmtree(stage_parent, ignore_errors=True)
+        # 교체/롤백 어느 쪽도 target을 복구하지 못한 예외적 경우에는 backup을
+        # 남겨 수동 복구 가능성을 보존한다.
+        if (
+            backup_parent is not None
+            and (artifact_dir.exists() or not (backup_parent / name).exists())
+        ):
+            shutil.rmtree(backup_parent, ignore_errors=True)
+
+    return {"id": name, "name": name, "version": str(manifest.get("version", "1.0.0"))}
+
+
+def delete_managed_artifact(artifact_id: str) -> bool:
+    """rice-app이 게시한 로컬 artifact만 삭제한다.
+
+    외부 plugin marketplace와 기본 제공 artifact는 이 경로로 삭제할 수 없다.
+    """
+    if not _PUBLISH_NAME_RE.fullmatch(artifact_id):
+        raise ValueError("invalid artifact id")
+    artifact_dir = _artifacts_dir() / artifact_id
+    if not artifact_dir.exists():
+        return False
+    manifest = _load_manifest(artifact_dir)
+    if not manifest or manifest.get("managed_by") != RICE_APP_MANAGED_BY:
+        raise PermissionError(f"artifact is not managed by rice-app: {artifact_id}")
+    shutil.rmtree(artifact_dir)
+    return True
 
 
 def list_artifacts(
@@ -456,6 +542,8 @@ def _to_catalog_entry(manifest: dict[str, Any], artifact_dir: Path, artifact_id:
         "checksum": "",  # 다운로드 시점에 계산
         "requires": manifest.get("requires") or {},
         "published_at": manifest.get("published_at", ""),
+        # 로컬 앱이 게시·삭제를 관리하는 artifact인지 식별한다.
+        "managed_by": manifest.get("managed_by", ""),
         # Anthropic 구조 반영: 스킬에 번들된 리소스 존재 여부
         "bundled_resources": bundled_resources,
         "skill_files": skill_files,

@@ -28,6 +28,7 @@
   "toastInstalling": "설치 중",
   "toastInstallDone": "설치 완료",
   "toastInstallFailed": "설치에 실패했습니다",
+  "toastUninstallFailed": "{{name}}을(를) 제거하지 못했습니다",
   "toastNeedsConnector": "{{name}}을(를) 활성화하려면 커넥터를 연결하세요",
   "toastRiskFlagged": "{{name}}에서 위험 신호가 감지되어 비활성 상태로 설치했습니다 — 내용을 확인한 뒤 직접 활성화하세요",
   "toastUninstalled": "{{name}}이(가) 제거되었습니다",

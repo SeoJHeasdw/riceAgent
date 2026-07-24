@@ -48,6 +48,8 @@ export interface Skill {
   points: number;
   installed: boolean;
   enabled: boolean;
+  /** 이 로컬 사용자가 게시한 마켓 항목. 설치 해제가 아니라 마켓 내리기 대상이다. */
+  userPublished?: boolean;
   icon?: string;
   /** Bundled files shown in the detail modal. Falls back to a generated set. */
   files?: SkillFile[];
@@ -489,6 +491,8 @@ export interface PlatformArtifact {
   /** manifest.requires — runtime 버전 제약 + plugin이 요구하는 connector 목록 (CONTRACTS §2.1) */
   requires: { runtime?: string; connectors?: string[] };
   published_at: string;
+  /** 게시·삭제를 관리하는 주체. 로컬 앱 게시본은 `rice-app`. */
+  managed_by: string;
   bundled_resources: string[];
   skill_files: string[];
   has_bundled_resources: boolean;

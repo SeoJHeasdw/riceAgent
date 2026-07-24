@@ -15,7 +15,11 @@ import { useLearning } from '../lib/learning/LearningContext';
 import { Icon, ResizeHandle } from '../components/ui';
 import { skillCategoryCodes, type SkillCategoryCode } from '../lib/mockData';
 import { Skill } from '../lib/types';
-import { isUserPublishedMarketId, ownedSkillIdFromPublishedMarketId } from '../lib/skillBridge';
+import {
+  installedSkillId,
+  isUserPublishedMarketId,
+  ownedSkillIdFromPublishedMarketId,
+} from '../lib/skillBridge';
 
 /**
  * SkillMarketScreen - Marketplace for discovering and installing skills
@@ -55,7 +59,12 @@ function SkillMarketScreen() {
   } = useMarketplace();
 
   // 설치를 학습 store까지 배선 — 설치한 마켓 스킬이 "나의 스킬"에 소유 인스턴스로 등장한다.
-  const { installSkillFromMarket, setSkills: setOwnedSkills } = useLearning();
+  const {
+    installSkillFromMarket,
+    refreshSkills,
+    setDetails: setOwnedDetails,
+    setSkills: setOwnedSkills,
+  } = useLearning();
 
   // selectedCategory는 stable code 저장 — 렌더 시 t()로 표시
   const [selectedCategory, setSelectedCategory] = useState<SkillCategoryCode>('all');
@@ -129,18 +138,39 @@ function SkillMarketScreen() {
     // 내가 올린 스킬의 "제거"는 설치 상태를 끄는 동작이 아니라 마켓에서 내리는
     // 동작이다. 즉시 카탈로그 상태에서 제거해 다른 화면을 다녀올 필요가 없게 한다.
     if (isUserPublishedMarketId(skill.id)) {
-      unpublishSkill(skill.id);
+      const removed = await unpublishSkill(skill.id);
+      if (!removed) {
+        showToast(t('market.toastRemoveFailed', { name: skill.name }), 'error');
+        return;
+      }
       const ownedId = ownedSkillIdFromPublishedMarketId(skill.id);
       if (ownedId) {
         setOwnedSkills((prev) =>
           prev.map((owned) => (owned.id === ownedId ? { ...owned, shared: false } : owned)),
+        );
+        setOwnedDetails((prev) =>
+          prev[ownedId]
+            ? { ...prev, [ownedId]: { ...prev[ownedId], shared: false } }
+            : prev,
         );
       }
       showToast(t('market.toastUninstalled', { name: skill.name }), 'info');
       return;
     }
 
-    await uninstallArtifact(skill.id, 'skill');
+    const removed = await uninstallArtifact(skill.id, 'skill');
+    if (!removed) {
+      showToast(t('market.toastRemoveFailed', { name: skill.name }), 'error');
+      return;
+    }
+    const ownedId = installedSkillId(skill.id);
+    setOwnedSkills((prev) => prev.filter((owned) => owned.id !== ownedId));
+    setOwnedDetails((prev) => {
+      if (!(ownedId in prev)) return prev;
+      const next = { ...prev };
+      delete next[ownedId];
+      return next;
+    });
     showToast(t('market.toastUninstalled', { name: skill.name }), 'info');
   };
 
@@ -176,8 +206,13 @@ function SkillMarketScreen() {
   };
 
   // Publish a user-authored skill, then reveal it at the top of the grid.
-  const handlePublish = (draft: Parameters<typeof publishSkill>[0]) => {
-    const skill = publishSkill(draft);
+  const handlePublish = async (draft: Parameters<typeof publishSkill>[0]) => {
+    const skill = await publishSkill(draft);
+    if (!skill) {
+      showToast(t('market.toastPublishFailed', { name: draft.name }), 'error');
+      return undefined;
+    }
+    await refreshSkills();
     surfaceSkill(skill);
     showToast(t('market.toastPublished', { name: skill.name }), 'success');
     return skill;

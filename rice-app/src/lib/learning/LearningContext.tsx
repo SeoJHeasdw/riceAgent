@@ -16,6 +16,7 @@ import type {
 } from '../types';
 import {
   installedSkillId,
+  ownedSkillIdFromPublishedMarketId,
   marketSkillToOwned,
   installedPluginId,
   marketPluginToMyPlugin,
@@ -95,6 +96,8 @@ interface LearningContextValue {
 
   /** Scroll target for the learning panel (so chat can scroll it to top) */
   panelScrollRef: React.RefObject<HTMLDivElement | null>;
+  /** 런타임 + 마켓 게시 상태로 나의 스킬 목록을 즉시 재조회한다. */
+  refreshSkills: () => Promise<void>;
   /** 모든 인메모리 학습 상태를 초기화한다 (전체 데이터 삭제 후 호출). */
   resetAll: () => void;
 }
@@ -106,6 +109,7 @@ const LearningCtx = createContext<LearningContextValue | null>(null);
 function originFromSource(source: string | null | undefined): Skill['origin'] {
   if (source === 'builtin') return 'builtin';
   if (source === 'user') return 'authored';
+  if (source?.startsWith('market:')) return 'installed';
   return undefined; // = learned (skillOrigin 헬퍼의 기본값)
 }
 
@@ -120,6 +124,7 @@ function originFromSource(source: string | null | undefined): Skill['origin'] {
 function runtimeSkillToLearning(s: {
   id: string;
   name: string;
+  display_name?: string | null;
   version: number;
   description: string;
   state: 'active' | 'stale' | 'archived';
@@ -156,7 +161,7 @@ function runtimeSkillToLearning(s: {
           : `trend_days_ago:${usedDays}`;
   return {
     id: s.id,
-    name: s.name,
+    name: s.display_name || s.name,
     ver: `v${s.version}`,
     uses: s.use,
     injected: s.injected ?? 0,
@@ -237,10 +242,11 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // 스킬/제안함 로더 — hydrate와 제안 결정(승인 후 목록 동기화) 양쪽에서 재사용하므로
   // useCallback으로 훅 스코프에 둔다(useEffect 안에 가두면 decideSuggestion이 못 쓴다).
   const loadSkills = useCallback(() => {
-    return api.getSkills().then((res) => {
+    return Promise.all([api.getSkills(), platform.getCatalog({ type: 'skill' })]).then(([res, catalogRes]) => {
       if (!res.success || !res.data) return;
       type RuntimeSkill = {
         id: string; name: string; version: number; description: string;
+        display_name?: string | null;
         state: 'active' | 'stale' | 'archived'; tags: string[];
         use: number; injected?: number; friction?: number; routing_miss?: number;
         patch: number; last_used_at: string | null; source?: string | null;
@@ -248,9 +254,23 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         enabled?: boolean;
       };
       const raw = res.data as RuntimeSkill[];
-      const loadedSkills = raw.map(runtimeSkillToLearning);
+      const sharedOwnedIds = new Set(
+        (catalogRes.success && catalogRes.data ? catalogRes.data : [])
+          .filter((artifact) => artifact.managed_by === 'rice-app')
+          .map((artifact) => ownedSkillIdFromPublishedMarketId(artifact.id))
+          .filter((id): id is string => id !== null),
+      );
+      const loadedSkills = raw.map(runtimeSkillToLearning).map((skill) => ({
+        ...skill,
+        shared: sharedOwnedIds.has(skill.id),
+      }));
       const loadedDetails: Record<string, SkillDetail> = {};
-      raw.forEach((s) => { loadedDetails[s.id] = runtimeSkillToDetail({ ...s, source: s.source ?? null }); });
+      raw.forEach((s) => {
+        loadedDetails[s.id] = {
+          ...runtimeSkillToDetail({ ...s, source: s.source ?? null }),
+          shared: sharedOwnedIds.has(s.id),
+        };
+      });
       setSkills(loadedSkills);
       setDetails(loadedDetails);
     });
@@ -607,9 +627,10 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       highlightedSkill,
       jumpToSkill,
       panelScrollRef,
+      refreshSkills: loadSkills,
       resetAll,
     }),
-    [hydrating, skills, signals, installed, details, myPlugins, proposals, suggestions, candidates, refreshCandidates, evaluateCandidate, decideCandidate, mirrorParkedProposal, dropParkedMirror, resolvedApprovals, refreshSuggestions, decideSuggestion, discoverNow, removeSignal, installSkillFromMarket, installPluginFromMarket, highlightedSkill, jumpToSkill, resetAll],
+    [hydrating, skills, signals, installed, details, myPlugins, proposals, suggestions, candidates, refreshCandidates, evaluateCandidate, decideCandidate, mirrorParkedProposal, dropParkedMirror, resolvedApprovals, refreshSuggestions, decideSuggestion, discoverNow, removeSignal, installSkillFromMarket, installPluginFromMarket, highlightedSkill, jumpToSkill, loadSkills, resetAll],
   );
 
   return <LearningCtx.Provider value={value}>{children}</LearningCtx.Provider>;

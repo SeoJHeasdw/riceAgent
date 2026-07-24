@@ -355,8 +355,18 @@ class TestSkillCrud:
         from rice_runtime.core.errors import NotFoundError, ValidationError
 
         svc = self._svc()
-        detail = svc.create_skill(name="my-skill", body="step 1\nstep 2", description="d", tags=("a",))
+        detail = svc.create_skill(
+            name="my-skill",
+            body="step 1\nstep 2",
+            description="d",
+            tags=("a",),
+            display_name="나의 스킬",
+        )
         assert detail.name == "my-skill" and detail.version == 1 and detail.source == "user"
+        assert detail.display_name == "나의 스킬"
+        assert svc.get_skill("my-skill").display_name == "나의 스킬"
+        summary = next(skill for skill in svc.list_skills() if skill.id == "my-skill")
+        assert summary.display_name == "나의 스킬"
 
         # 중복 생성 거부
         with pytest.raises(ValidationError):

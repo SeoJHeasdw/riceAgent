@@ -57,6 +57,7 @@ def _manifest_for(skill: SkillData) -> dict[str, Any]:
         "schema_version": 1,
         "type": "skill",
         "name": skill.name,
+        "display_name": skill.display_name or skill.name,
         "version": f"{skill.version}.0.0",
         "description": skill.description or "",
         "tags": list(skill.tags or []),

@@ -87,6 +87,76 @@ def test_unknown_artifact_returns_none():
     assert registry.build_download_package("does-not-exist") is None
 
 
+def test_rice_app_publish_and_unpublish_are_persistent(monkeypatch, tmp_path):
+    artifacts = tmp_path / "artifacts"
+    monkeypatch.setenv("RICE_ARTIFACTS_DIR", str(artifacts))
+    manifest = {
+        "schema_version": 1,
+        "type": "skill",
+        "name": "pub-skill-user-123",
+        "display_name": "회의 요약",
+        "description": "회의를 요약한다.",
+        "version": "1.0.0",
+        "managed_by": registry.RICE_APP_MANAGED_BY,
+    }
+
+    result = registry.publish_artifact(
+        manifest,
+        [{"path": "SKILL.md", "content": "# 회의 요약\n"}],
+    )
+
+    assert result["id"] == "pub-skill-user-123"
+    item = registry.get_artifact("pub-skill-user-123")
+    assert item is not None
+    assert item["managed_by"] == registry.RICE_APP_MANAGED_BY
+    assert (artifacts / "pub-skill-user-123" / "SKILL.md").exists()
+
+    assert registry.delete_managed_artifact("pub-skill-user-123") is True
+    assert registry.get_artifact("pub-skill-user-123") is None
+
+
+def test_rice_app_publish_cannot_overwrite_unmanaged_artifact(monkeypatch, tmp_path):
+    artifacts = tmp_path / "artifacts"
+    existing = artifacts / "caveman"
+    existing.mkdir(parents=True)
+    (existing / "rice-artifact.yaml").write_text(
+        "schema_version: 1\ntype: skill\nname: caveman\nversion: 1.0.0\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("RICE_ARTIFACTS_DIR", str(artifacts))
+
+    with pytest.raises(PermissionError):
+        registry.publish_artifact(
+            {
+                "schema_version": 1,
+                "type": "skill",
+                "name": "caveman",
+                "version": "2.0.0",
+                "managed_by": registry.RICE_APP_MANAGED_BY,
+            },
+            [{"path": "SKILL.md", "content": "# replaced\n"}],
+        )
+
+    with pytest.raises(PermissionError):
+        registry.delete_managed_artifact("caveman")
+
+
+def test_rice_app_publish_rejects_escaping_file_path(monkeypatch, tmp_path):
+    monkeypatch.setenv("RICE_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
+    with pytest.raises(ValueError):
+        registry.publish_artifact(
+            {
+                "schema_version": 1,
+                "type": "skill",
+                "name": "pub-safe",
+                "version": "1.0.0",
+                "managed_by": registry.RICE_APP_MANAGED_BY,
+            },
+            [{"path": "../escaped.txt", "content": "nope"}],
+        )
+    assert not (tmp_path / "artifacts" / "escaped.txt").exists()
+
+
 def test_marketplace_skips_remote_source_objects(monkeypatch, tmp_path):
     """Upstream Claude marketplaces mix local string sources and remote source objects."""
     local = tmp_path / "plugins" / "local-plugin"

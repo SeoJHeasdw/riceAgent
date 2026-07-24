@@ -87,7 +87,7 @@ export interface SkillAuthorModalProps {
   open: boolean;
   onClose: () => void;
   /** 게시 확정 시 호출 — 생성된 스킬을 반환받아 미리보기에 사용 */
-  onPublish: (draft: SkillDraft) => Skill;
+  onPublish: (draft: SkillDraft) => Promise<Skill | undefined>;
   /** 완료 화면에서 "마켓에서 보기"를 눌렀을 때 */
   onViewInMarket?: (skill: Skill) => void;
 }
@@ -121,6 +121,7 @@ export const SkillAuthorModal: React.FC<SkillAuthorModalProps> = ({
   const [fileName, setFileName] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [published, setPublished] = useState<Skill | null>(null);
+  const [publishing, setPublishing] = useState(false);
 
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -140,6 +141,7 @@ export const SkillAuthorModal: React.FC<SkillAuthorModalProps> = ({
       setFileName(null);
       setDragOver(false);
       setPublished(null);
+      setPublishing(false);
     }
   }, [open]);
 
@@ -241,18 +243,23 @@ ${t('author.template.defaultStep3')}
     if (f) applyFile(f);
   };
 
-  const handlePublish = () => {
-    if (!canPublish || !category) return;
-    const skill = onPublish({
-      name: trimmedName,
-      description: description.trim(),
-      category, // stable code 저장
-      tags,
-      version: version.trim() || '1.0.0',
-      team: team.trim() || undefined,
-      definition: effectiveDef,
-    });
-    setPublished(skill);
+  const handlePublish = async () => {
+    if (!canPublish || !category || publishing) return;
+    setPublishing(true);
+    try {
+      const skill = await onPublish({
+        name: trimmedName,
+        description: description.trim(),
+        category, // stable code 저장
+        tags,
+        version: version.trim() || '1.0.0',
+        team: team.trim() || undefined,
+        definition: effectiveDef,
+      });
+      if (skill) setPublished(skill);
+    } finally {
+      setPublishing(false);
+    }
   };
 
   // 비활성 "다음/게시" 위에 hover 시 안내 문구
@@ -333,8 +340,9 @@ ${t('author.template.defaultStep3')}
           <Button
             kind="primary"
             size="sm"
-            onClick={handlePublish}
+            onClick={() => void handlePublish()}
             disabled={!canPublish}
+            loading={publishing}
             icon={<Icon name="share" size={15} />}
           >
             {t('author.publishBtn')}
