@@ -30,7 +30,10 @@ import logging
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import replace
-from typing import Protocol, cast
+from typing import Protocol, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from .background_tasks import BackgroundTaskRegistry, CompletedTask
 
 from ..connector.interfaces import IConnectorService
 from ..core import lexical
@@ -216,6 +219,7 @@ class ToolDispatcher:
         folded_catalog: dict[str, ToolSpec] | None = None,
         approval_mode: ApprovalMode = "ask",
         web_search_enabled: bool = True,
+        background_tasks: "BackgroundTaskRegistry | None" = None,
     ) -> None:
         self._connectors = connectors
         self._plugins = plugins
@@ -224,6 +228,10 @@ class ToolDispatcher:
         self._approval_mode = approval_mode
         self._web_search_enabled = web_search_enabled
         self._builtins = builtins or {}
+        # 백그라운드 작업 완료 큐 — 창 A 드레인(loop 이 매 도구 라운드 직후
+        # drain_completed 를 부른다)의 접점. 오케스트레이터가 세션 스코프 레지스트리를
+        # 매 턴 주입한다(§11.8). None 이면(테스트/독립) 드레인은 빈 리스트.
+        self._background_tasks = background_tasks
         # connector+plugin 도구 전체(접혔든 아니든) — bridge 도구(tool_search/describe/call)가
         # 이름으로 찾는 대상. fold_tools_for_budget 이 실제로 접었을 때만 쓰이게 되지만,
         # 접지 않았을 때도 넣어 둬서 무해하다(LLM 스키마에 브릿지가 없으면 애초에 안 불림).
@@ -380,6 +388,13 @@ class ToolDispatcher:
 
     async def result_for(self, call: ToolCall) -> ToolResult:
         return self._results.get(call.id, ToolResult(call.id, ok=False, error="no result"))
+
+    def drain_completed(self, session_id: str) -> "list[CompletedTask]":
+        """창 A: 이 세션의 미확인 백그라운드 완료를 드레인한다(loop 이 매 도구 라운드
+        직후 호출 → 완료를 관찰로 주입). 레지스트리 미주입이면 빈 리스트."""
+        if self._background_tasks is None:
+            return []
+        return self._background_tasks.drain_completed(session_id)
 
     def _public_call(self, call: ToolCall, spec: ToolSpec) -> ToolCall:
         """Resolve a folded execution for display without changing its public id.

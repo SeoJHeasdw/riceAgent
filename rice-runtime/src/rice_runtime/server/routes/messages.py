@@ -285,3 +285,26 @@ async def pending_approvals(session_id: str, c: Container = Depends(get_containe
         for r in c.approvals.pending(session_id)
     ]
     return {"success": True, "data": items}
+
+
+# ── 백그라운드 셸 작업 (AGENT_EXECUTION §11 Phase 2) ──────────────────────────
+@router.get("/sessions/{session_id}/tasks")
+async def list_tasks(session_id: str, c: Container = Depends(get_container)):
+    """이 세션의 실행 중 + 최근 완료 백그라운드 작업(프론트 작업 카드용). 프론트는
+    카드가 running 인 동안 이 라우트를 폴링해 라이브 출력·상태 전이를 반영한다 —
+    유휴 중 완료도 여기서 잡히므로 능동 푸시(rice 3대 불변식과 충돌) 없이 완성된다."""
+    if c.sessions.get(session_id) is None:
+        raise NotFoundError(f"session {session_id} not found")
+    return {"success": True, "data": c.background_tasks.snapshot(session_id)}
+
+
+@router.post("/sessions/{session_id}/tasks/{task_id}/kill")
+async def kill_task(session_id: str, task_id: str, c: Container = Depends(get_container)):
+    """사용자가 작업 카드에서 백그라운드 작업을 중단한다(프로세스 그룹 종료).
+    세션 소유 작업만 종료된다(교차 세션 가드). 이미 끝난 작업이면 그 상태를 돌려준다."""
+    if c.sessions.get(session_id) is None:
+        raise NotFoundError(f"session {session_id} not found")
+    result = c.background_tasks.kill_task(task_id, session_id=session_id)
+    if "error" in result:
+        raise NotFoundError(result["error"])
+    return {"success": True, "data": result}

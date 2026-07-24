@@ -14,7 +14,7 @@ import { defaultModelSettings } from '../lib/mockData';
 import { RUN_SKILL_EVENT, NEW_CHAT_EVENT, openCommandPalette } from '../lib/commandBridge';
 import { api } from '../lib/api';
 import { sseClient } from '../lib/sse';
-import type { ApprovalMode, PatchTrigger, PendingApproval, PlanUpdatedEventData, ToolApprovalRequiredData, SkillPatchProposedData, SkillCandidateStagedEventData, MemoryWrittenEventData, ErrorEventData, SSEEvent } from '../lib/types';
+import type { ApprovalMode, PatchTrigger, PendingApproval, PlanUpdatedEventData, ToolApprovalRequiredData, SkillPatchProposedData, SkillCandidateStagedEventData, MemoryWrittenEventData, ErrorEventData, SSEEvent, BackgroundTask, TaskStartedEventData, TaskCompletedEventData } from '../lib/types';
 import { CompanionCloudIcon, Icon, Kbd, ResizeHandle, ConfirmDialog, Tooltip, Toggle } from '../components/ui';
 import type { IconName } from '../components/ui/Icon';
 import { FileViewerProvider } from '../lib/fileViewer/FileViewerProvider';
@@ -190,6 +190,69 @@ const upsertPlanBlock = (blocks: ThreadMessage[], d: PlanUpdatedEventData): Thre
   return [...blocks, planToBlock(d)];
 };
 
+// ── 백그라운드 작업 카드 리듀서 (AGENT_EXECUTION §11 Phase 2) ──
+// 카드는 위치가 아니라 taskId 로 식별된다: 라이브 SSE(task_started/completed) →
+// 폴링(GET /tasks) → 리로드(synthetic task_completed 메시지)가 같은 taskId 의
+// 카드를 중복 없이 수렴시킨다(running 상태로 턴 경계를 넘는 유일한 카드).
+const TASK_OUTPUT_COLLAPSE_CHARS = 800;
+type TaskBlock = Extract<ThreadMessage, { kind: 'task' }>;
+
+const taskToBlock = (t: BackgroundTask): TaskBlock => ({
+  kind: 'task',
+  taskId: t.task_id,
+  command: t.command,
+  status: t.status,
+  exitCode: t.exit_code,
+  output: t.output || undefined,
+  collapsed: (t.output?.length ?? 0) > TASK_OUTPUT_COLLAPSE_CHARS,
+});
+
+// taskId 로 카드를 upsert: 있으면 partial 병합(없는 필드 보존 — 사용자 접기 상태 등),
+// 없으면 끝에 새 카드로 추가. 완료 이벤트가 실행 중 카드를 제자리에서 갱신한다.
+const upsertTaskBlock = (
+  blocks: ThreadMessage[],
+  patch: Partial<TaskBlock> & { taskId: string },
+): ThreadMessage[] => {
+  const idx = blocks.findIndex((b) => b.kind === 'task' && b.taskId === patch.taskId);
+  if (idx >= 0) {
+    const current = blocks[idx] as TaskBlock;
+    // GET /tasks 요청은 서로 겹칠 수 있다. 완료 이벤트/최신 snapshot 뒤에 예전
+    // running 응답이 늦게 도착해 terminal 상태를 되돌리는 것을 막는다.
+    if (current.status !== 'running' && patch.status === 'running') return blocks;
+    const copy = [...blocks];
+    copy[idx] = { ...current, ...patch };
+    return copy;
+  }
+  return [...blocks, { kind: 'task', command: '', status: 'running', ...patch }];
+};
+
+// synthetic task_completed 메시지(role="user", content="[background task finished]\n{json}")
+// → 완료 카드. 리로드가 라이브와 같은 카드를 복원한다. 파싱 실패는 null(숨긴다).
+const parseTaskCompletedMessage = (content: string): TaskBlock | null => {
+  try {
+    const json = content.replace(/^\[background task finished\]\s*/, '');
+    const d = JSON.parse(json) as {
+      task_id?: string;
+      command?: string;
+      status?: BackgroundTask['status'];
+      exit_code?: number | null;
+      output?: string;
+    };
+    if (!d.task_id) return null;
+    return {
+      kind: 'task',
+      taskId: d.task_id,
+      command: d.command ?? '',
+      status: d.status ?? 'exited',
+      exitCode: d.exit_code ?? null,
+      output: d.output || undefined,
+      collapsed: (d.output?.length ?? 0) > TASK_OUTPUT_COLLAPSE_CHARS,
+    };
+  } catch {
+    return null;
+  }
+};
+
 // Reconstruct the full agentic trace from persisted messages so a reloaded
 // conversation looks like the live turn: reasoning (assistant `metadata.thinking`)
 // → plan card (metadata `plan`, 마지막 스냅샷 승리) → tool call cards (assistant
@@ -208,8 +271,15 @@ const toThread = (msgs: RawMessage[]): ThreadMessage[] => {
   );
   for (const m of msgs) {
     if (m.role === 'user') {
-      // 루프가 주입한 합성 메시지(빈 응답 넛지 등)는 사용자가 친 말이 아니다 — 숨긴다.
-      if (m.content && !m.metadata?.synthetic) out.push({ kind: 'user', text: m.content, sentAt: m.ts });
+      // 백그라운드 작업 완료 관찰(synthetic)은 사용자 말풍선이 아니라 작업 카드로
+      // 복원한다 — 라이브 task_completed 와 같은 그림(§11 Phase 2).
+      if (m.metadata?.synthetic === 'task_completed') {
+        const tb = parseTaskCompletedMessage(m.content);
+        if (tb) out = upsertTaskBlock(out, tb);
+      } else if (m.content && !m.metadata?.synthetic) {
+        // 루프가 주입한 다른 합성 메시지(빈 응답 넛지 등)는 사용자가 친 말이 아니다 — 숨긴다.
+        out.push({ kind: 'user', text: m.content, sentAt: m.ts });
+      }
     } else if (m.role === 'assistant') {
       if (m.metadata?.thinking) out.push({ kind: 'thinking', duration: '', text: m.metadata.thinking, streaming: false });
       if (m.metadata?.plan) out = upsertPlanBlock(out, m.metadata.plan);
@@ -1504,6 +1574,78 @@ function ChatScreen({ active = true }: { active?: boolean }) {
   const upsertPlan = (sessionId: string, d: PlanUpdatedEventData) =>
     updateThreadFor(sessionId, (p) => upsertPlanBlock(p, d));
 
+  // ── 백그라운드 작업 (§11 Phase 2) ──────────────────────────────────────────
+  // GET /tasks 스냅샷으로 실행 중 카드(라이브 출력)를 갱신하고, 리로드/완료 시
+  // 실행 중 작업을 표면화한다. **이미 카드가 있는 작업 + 현재 running 작업만**
+  // 반영한다 — 오래된 완료 작업을 카드로 되살리지 않는다(그건 히스토리 synthetic
+  // 이 담당). 카드는 taskId 로 upsert 되어 폴링이 위치·중복을 흔들지 않는다.
+  const refreshTasks = async (sessionId: string) => {
+    if (!connected) return;
+    const res = await api.listTasks(sessionId);
+    if (!res.success) return;
+    const tasks = (res.data as BackgroundTask[] | undefined) ?? [];
+    if (tasks.length === 0) return;
+    updateThreadFor(sessionId, (p) => {
+      let out = p;
+      for (const task of tasks) {
+        const exists = out.some((b) => b.kind === 'task' && b.taskId === task.task_id);
+        if (task.status === 'running' || exists) out = upsertTaskBlock(out, taskToBlock(task));
+      }
+      return out;
+    });
+  };
+
+  // task_started: 명령이 background 로 뜨거나 auto-background 로 승격됐다 → 실행 중
+  // 카드를 지금 지점(그 명령이 돌던 자리)에 심는다.
+  const applyTaskStarted = (sessionId: string, d: TaskStartedEventData) =>
+    updateThreadFor(sessionId, (p) =>
+      upsertTaskBlock(p, { taskId: d.task_id, command: d.command, status: 'running' }),
+    );
+
+  // task_completed: 상태·종료코드를 즉시 반영하고, 최종 출력(+미관측 카드의 command)을
+  // 스냅샷에서 채운다.
+  const applyTaskCompleted = (sessionId: string, d: TaskCompletedEventData) => {
+    updateThreadFor(sessionId, (p) =>
+      upsertTaskBlock(p, { taskId: d.task_id, status: d.status, exitCode: d.exit_code }),
+    );
+    void refreshTasks(sessionId);
+  };
+
+  // 사용자가 작업 카드의 Kill 을 누름. live kill 응답의 "killed"는 시그널 수락
+  // 상태이고 watcher/DB 확정 전일 수 있으므로 카드는 running으로 두어 폴링을
+  // 계속한다. snapshot이 terminal 상태와 최종 출력을 함께 확정한다.
+  const handleKillTask = (taskId: string) => {
+    const sessionId = activeSessionIdRef.current;
+    if (!sessionId) return;
+    void api.killTask(sessionId, taskId)
+      .then((res) => {
+        if (!res.success) {
+          toast.notify({ message: t('task.killFailed'), variant: 'error' });
+          return;
+        }
+        // 이미 끝난 작업이면 API가 확정 상태를 돌려준다. live kill의 임시
+        // "killed"만 snapshot에 맡겨 polling을 너무 일찍 멈추지 않는다.
+        const status = res.data?.status;
+        if (status && status !== 'killed') {
+          updateThreadFor(sessionId, (p) =>
+            upsertTaskBlock(p, { taskId, status: status as BackgroundTask['status'] }),
+          );
+        }
+      })
+      .finally(() => void refreshTasks(sessionId));
+  };
+
+  // 실행 중 작업 카드가 있는 동안만 GET /tasks 를 폴링해 라이브 출력·상태 전이를
+  // 반영한다(유휴 중 완료도 여기서 잡히므로 능동 푸시 없이 완성 — rice 3대 불변식
+  // 유지). 실행 중 작업이 없으면 폴링하지 않는다.
+  const hasRunningTask = thread.some((b) => b.kind === 'task' && b.status === 'running');
+  useEffect(() => {
+    if (!connected || !activeSessionId || !hasRunningTask) return;
+    const id = window.setInterval(() => void refreshTasks(activeSessionId), 2500);
+    return () => window.clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connected, activeSessionId, hasRunningTask]);
+
   // ── smooth answer streaming ("typewriter") ────────────────────────────────
   // Deltas can arrive as either tiny character trickles or large bursts. Rendering
   // them verbatim makes the text shimmer; draining by a fixed, bounded chunk gives
@@ -1908,6 +2050,13 @@ function ChatScreen({ active = true }: { active?: boolean }) {
         handleSkillPatched(e.data as { skill_id: string; version: number });
       } else if (e.type === 'skill_candidate_staged') {
         handleSkillCandidateStaged(e.data as SkillCandidateStagedEventData);
+      } else if (e.type === 'task_started') {
+        // 백그라운드 작업이 떴다 → 실행 중 카드. 진행 중이던 답변 세그먼트는 닫는다.
+        sealAnswer(sessionId);
+        applyTaskStarted(sessionId, e.data as TaskStartedEventData);
+      } else if (e.type === 'task_completed') {
+        // 완료(창 A: 이 턴 / 창 B: 유휴 후 이 턴 ASSEMBLE) → 카드 상태·출력 갱신.
+        applyTaskCompleted(sessionId, e.data as TaskCompletedEventData);
       } else if (e.type === 'done') {
         // NOTE: no sealAnswer() here — let the typewriter finish its tail smoothly
         // after the network is done (that trailing type-out is the desired feel).
@@ -2056,6 +2205,9 @@ function ChatScreen({ active = true }: { active?: boolean }) {
       setThreadState(next);
       setLoadedSession(id);
     }
+    // 리로드 시 아직 실행 중인 백그라운드 작업을 표면화하고(히스토리엔 완료 관찰만
+    // 있다), 히스토리로 복원된 완료 카드의 출력도 최신 스냅샷으로 정합한다(§11 Phase 2).
+    void refreshTasks(id);
   };
 
   // Re-fetch approvals still parked on the server for a session and re-render their
@@ -2484,6 +2636,7 @@ function ChatScreen({ active = true }: { active?: boolean }) {
                       onApprovePatch={handleApprovePatch}
                       onRejectPatch={handleRejectPatch}
                       onRespondApproval={handleToolApproval}
+                      onKillTask={handleKillTask}
                       highlightIndex={highlightMsg}
                       actionsCopyAt={actionsCopyAt}
                       actionsTimeAt={actionsTimeAt}

@@ -194,6 +194,32 @@ export interface ErrorEventData {
   message: string;
 }
 
+// ── 백그라운드 셸 작업 (AGENT_EXECUTION §11) ──
+// 오래 도는 terminal 명령이 background 로 뜨거나 auto-background 로 승격될 때
+// task_started, 완료가 대화에 드레인될 때 task_completed. 활성 스트림에서만 온다
+// (유휴 중 완료는 스트림이 없어 없지만, 완료 관찰은 다음 턴 히스토리로 전달된다 —
+// 카드의 완료 출력은 GET /sessions/{id}/tasks 폴링이 채운다).
+export type BackgroundTaskStatus = 'running' | 'exited' | 'killed' | 'interrupted';
+export interface TaskStartedEventData {
+  task_id: string;
+  command: string;
+}
+export interface TaskCompletedEventData {
+  task_id: string;
+  status: BackgroundTaskStatus;
+  exit_code: number | null;
+}
+/** GET /sessions/{id}/tasks 의 한 작업 — 실행 중이면 라이브 출력, 완료면 최종. */
+export interface BackgroundTask {
+  task_id: string;
+  command: string;
+  status: BackgroundTaskStatus;
+  exit_code: number | null;
+  started_at: string;
+  ended_at: string | null;
+  output: string;
+}
+
 /** what raised a patch proposal — audit trail (LEARNING_LOOP 5.2.2).
  * T4 = brand-new skill proposal (from_version=0, Phase A.1 — creation unified
  * into the patch flow instead of a separate skill_created event).
@@ -362,6 +388,8 @@ export type SSEEvent =
   | { type: 'memory_written'; data: MemoryWrittenEventData }
   | { type: 'skill_patched'; data: SkillPatchedEventData }
   | { type: 'skill_candidate_staged'; data: SkillCandidateStagedEventData }
+  | { type: 'task_started'; data: TaskStartedEventData }
+  | { type: 'task_completed'; data: TaskCompletedEventData }
   | { type: 'done'; data: Record<string, never> }
   | { type: 'error'; data: ErrorEventData }
   // control events

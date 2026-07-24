@@ -1,4 +1,13 @@
 {
+  "task": {
+    "label": "バックグラウンド",
+    "statusRunning": "実行中",
+    "statusKilled": "停止済み",
+    "statusInterrupted": "中断",
+    "exitCode": "終了 {{code}}",
+    "kill": "停止",
+    "killFailed": "バックグラウンドタスクを停止できませんでした。"
+  },
   "message": {
     "openFile": "ファイルを開く",
     "generating": "回答を生成中",

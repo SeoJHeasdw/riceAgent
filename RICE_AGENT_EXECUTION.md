@@ -857,3 +857,196 @@ input_tokens + cache_read_input_tokens` 합산치를 싣는다 — 캐시 히트
 (위 rolling cache + §4 프리픽스 동결의 효과) 단독 값은 전체의 극소가 되어
 TokenCalibrator의 하한 가드에 전부 버려지고 보정이 멈추기 때문. 합산하면 캐시
 적중과 무관하게 "이 프롬프트의 전체 실측"이 유지된다.
+
+## 11. 백그라운드 셸 작업 — 턴을 넘겨 사는 실행
+
+> **상태: Phase 1 + Phase 2 구현 완료 (2026-07-24).** 런타임: `agent/background_tasks.py`
+> (레지스트리 — 스풀 상한·보존·snapshot 포함) + `builtins/terminal_tool.py`(background/
+> auto-bg + task_output/kill_task) + `agent/loop.py`(창 A) + `agent/orchestrator.py`
+> (창 B·수명주기) + `server/composition_root.py`(생성·주입·부팅 화해) + `server/routes/
+> messages.py`(GET /sessions/{id}/tasks · POST …/kill) + migration `0020`. 프론트: 인라인
+> **작업 카드**(rice-app `ChatMessage.tsx` TaskCard, taskId 키 upsert) + task_started/
+> task_completed SSE 소비 + running 동안 GET /tasks **폴링**(라이브 출력·상태) + Kill 버튼
+> + 리로드 복원(synthetic task_completed → 카드) + i18n 3언어. 테스트: `tests/test_
+> background_tasks.py`(17) + `tests/test_loop_termination.py` 시나리오 9·10, 프론트 tsc·eslint 클린.
+> **잠긴 방향 결정(그대로 구현):** (1) 완료 알림 = **경량 모델**(관찰 주입, 서버 푸시·재진입
+> 루프 없음), (2) **auto-background on timeout** Phase 1 포함. **착수 시 확정된 열린 결정 3개:**
+> kill_task=무승인, foreground_block_budget_s=**60**(사용자 선택, 권장 30→상향), 세션당 동시
+> 상한=5. **설계 대비 교정 2건:** (§11.2) 완료 관찰은 role="tool" 아닌 `role="user"` synthetic
+> (wire repair orphan 규칙 충돌). (§11.7) **`ev_task_output` SSE 스트리밍은 폴링으로 대체** —
+> SSE 는 유휴 중(턴 없음) 출력을 전달할 수 없어 어차피 폴링이 필요하고, 폴링이 턴 중+유휴를
+> 모두 커버하므로 단일 제너레이터 턴 모델과의 충돌을 피하는 완전한 해법이다.
+
+목표는 `npm run build`·dev 서버·긴 스크립트처럼 오래 도는 명령을, 턴을 블록하지
+않고 띄워 두고 **완료되면 그 결과를 대화에 되먹이는 것**이다. 실행 자체(프로세스
+detach)는 쉽다. 어려운 것은 rice의 실행 모델 위에서 **"작업이 끝났다"를 모델에게
+전달하는 경로**다.
+
+### 11.1 왜 어려운가 — 세 가지 제약
+
+rice는 **턴 단위**다. 이 세 불변식이 설계를 규정한다:
+
+1. **턴 1개 = async generator 1개** (`agent/loop.py`). 도구는 자기가 호출된
+   라운드에만 실행되고, 결과는 `messages`에 실려 다음 반복에 모델이 본다.
+2. **세션당 동시 활성 턴은 1개** (`orchestrator._active`, `run_turn`이 두 번째
+   POST /messages를 `session_busy`로 거절). 밖에서 진행 중 턴에 끼어들 수 없다.
+3. **턴 사이 유휴 시 아무것도 안 돈다.** 그리고 **서버→클라이언트 푸시 채널이
+   없다** — SSE는 턴 단위 HTTP 스트리밍이라 `ev_done()`에 닫힌다.
+
+그래서 백그라운드 작업이 **유휴 중에 끝나면 주입할 루프도, 알릴 스트림도 없다.**
+정답은 이미 코드베이스에 선례가 있다: 파킹할 스트림이 없는 백그라운드 산출물은
+**영속 후 다음 기회에 노출**한다 — 크로스세션 발굴은 제안함에 쌓고(`server/
+scheduler.py`), 승인 타임아웃/연결 끊김은 제안을 제안함으로 보존한다(`agent/
+effect_surfacing.py`). 백그라운드 작업 완료도 같은 철학을 따른다.
+
+### 11.2 알림 = "미확인 완료 큐" (단일 메커니즘, DB 백업)
+
+완료 전달을 **하나의 큐**로 통일한다. 작업이 끝나면 레지스트리가 완료를
+`acknowledged=false`로 기록하고 DB에 영속한다. 이 큐를 두 지점에서 드레인한다:
+
+* **창 A — 같은 턴이 아직 도는 중.** 루프가 도구 결과를 `messages`에 append하는
+  라운드 직후(`agent/loop.py`의 `_tool_result_message` append 루프 다음),
+  세션의 미확인 완료를 드레인해 `role="tool"` 관찰로 주입한다. 모델은 다음
+  반복에 그것을 본다 = 자연스러운 ReAct 관찰→재평가. auto-bg를 Phase 1에 넣으면
+  작업이 턴 중간에 생겨 턴이 한동안 더 도는 경우가 많으므로, **창 A가 실질적
+  비중을 갖는다.**
+* **창 B — 세션 유휴(턴 종료 후 완료).** 다음 턴의 ASSEMBLE 단계(`orchestrator.
+  _drive_turn`이 `base_history`를 조립하는 지점)에서 미확인 완료를 드레인해
+  히스토리에 관찰로 주입하고 `transcript`에 영속한다(리로드 일관성).
+
+주입된 완료는 `acknowledged=true`. 큐가 **DB 백업**이라 런타임이 재시작해도
+미확인 완료가 살아남아 다음 턴에 전달된다. 관찰 메시지는 **`role="user"`
+synthetic**(`metadata={"synthetic":"task_completed", ...}`)으로 주입한다 — 원
+`background` 호출과는 별개의 합성 관찰이다. **구현 시 교정(2026-07-24):** 초안은
+`role="tool"` + `tool_call_id`를 기술했으나, `context_manager._repair_tool_adjacency`
+가 **직전 assistant 의 매칭 tool_call 이 없는 모든 tool 메시지를 orphan 으로 드롭**
+하고(§4) Claude 어댑터가 `tool_result` 에 인접 `tool_use` 를 요구하므로, "원 호출과
+별개의 새 tool 관찰"은 인접 짝이 없어 렌더에서 사라지거나 provider 가 거절한다.
+그래서 기존 4개 synthetic 주입(plan_status·empty/narration/plan_reconcile nudge)과
+같은 wire-safe 경로 = `role="user"` 를 쓴다. `synthetic` 마커로 루프의 사용자-질문
+추출이 이 관찰을 이 턴의 질문으로 오인하지 않는다. 성패 정본은 `metadata["ok"]`
+(정상 종료=exited·exit 0만 true), content 는 모델용 렌더 `{task_id, command, status,
+exit_code, output(≤40KB)}`. 관찰 생성은 `background_tasks.build_completion_observation`
+단일 지점(창 A·B 공유)이라 두 드레인이 어긋나지 않는다.
+
+**중요:** 창 A/B 어느 쪽도 **재진입 루프·서버 푸시·"단일 활성 턴/유휴 무실행"
+불변식 변경을 요구하지 않는다.** 그래서 능동 알림(완료 즉시 새 턴 기동)은 v1
+비목표다(§11.10).
+
+### 11.3 TaskRegistry — 세션 스코프 소유
+
+레지스트리는 **오케스트레이터가 세션 키로 소유**한다 — `_render_states`·`_aborts`와
+같은 자리다. 디스패처는 턴마다 새로 생성되므로(`orchestrator.py`의 `ToolDispatcher(...)`
+per turn, C-2) 거기 두면 턴이 끝날 때 작업 추적이 증발한다.
+
+각 `Task`: `id, session_id, command, cwd, pgid, status(running|exited|killed|
+interrupted), exit_code, started_at, ended_at, output_path, acknowledged`.
+
+* **stdout은 tempfile로 스풀**한다(메모리 폭주 방지) — 완료 관찰·`task_output`은
+  거기서 `_truncate_output`(§터미널, 이미 구현)으로 40KB 상한. auto-background
+  승격 전 foreground 구간도 무한 `bytearray`가 아니라 1MB prefix + 표시용 10KB
+  tail의 유계 capture를 써서 `yes`류 폭주가 승격 예산 동안 메모리를 채우지 못한다.
+* 프로세스는 `start_new_session`으로 그룹 분리(터미널 도구에 이미 있음) → 종료 시
+  `_kill_process_group`(이미 구현) 재사용.
+* **완료 감지**는 작업마다 감시 asyncio 태스크 하나(`proc.wait()`) — 완료 시
+  레지스트리 상태 갱신 + 미확인 완료 큐 push + DB 갱신 + (활성 스트림 있으면) SSE.
+  `server/scheduler.py`의 상주 감시 태스크 패턴과 동형.
+
+### 11.4 도구 표면
+
+* **`terminal`에 `background: true`** 파라미터 추가 → detach + 즉시
+  `{task_id, status:"running"}` 반환. 승인은 기존 그대로(terminal은
+  `requires_approval=True`, `parallel_safe=False`).
+* **`task_output(task_id)`** → 현재 스풀 stdout(40KB 상한) + status + exit_code.
+  read-only, **무승인**, `parallel_safe=True`.
+* **`kill_task(task_id)`** → 프로세스 그룹 SIGTERM→SIGKILL. 무승인 제안(자기가 띄운
+  프로세스 종료는 저위험 — 최종 결정 §11.10).
+* 서브에이전트 워커에는 주지 않는다(승인 게이트 밖에서 돌고 부작용 도구를 빼는
+  원칙 — §6, `_SUBAGENT_TOOL_NAMES`).
+
+세 도구 모두 `needs_session=True`로 옵트인해 `session_id`를 받고 레지스트리에
+접근한다(`tool_dispatch.py`의 `SessionBuiltinTool` 프로토콜 — 이미 존재).
+
+### 11.5 auto-background on timeout — 바뀌는 계약 하나
+
+* config: `terminal.auto_background_on_timeout`(기본 **true**),
+  `terminal.foreground_block_budget_s`(기본 **30**).
+* on이면: 포그라운드 명령이 예산을 넘고도 아직 실행 중이면 **kill 대신 백그라운드로
+  승격** — 부분 출력 + `task_id` 반환. 즉 `timeout`의 의미가 "죽이기 전 한계"에서
+  **"포그라운드로 얼마나 블록할지의 예산"** 으로 바뀐다.
+* off이면 기존 kill 동작 그대로(`terminal_tool._run_command`의 현재 타임아웃 경로).
+* 구현은 `_run_command`의 `asyncio.wait_for(communicate(), timeout)` 자리에서
+  타임아웃 분기를 "(auto-bg on이면) 프로세스를 레지스트리에 등록하고 detach +
+  부분 출력 회수"로 바꾸는 것 — 프로세스 그룹 관리·kill이 이미 있어 재사용.
+* **근거**: terminal은 HITL로 이미 승인된 명령이다. 승인된 작업을 30초에 죽여
+  결과를 버리는 것보다, 살려서 백그라운드로 넘기고 완료 시 되먹이는 것이 안전하고
+  유용하다. terminal 설명에 "긴 명령은 자동 백그라운드화되어 task_id로 반환되니
+  폴링·sleep 대기 말고 알림을 기다리라"를 명시한다.
+
+### 11.6 수명주기 & 안전
+
+* **턴 abort**: 백그라운드는 **죽이지 않는다**(정의상 턴을 넘겨 산다). 포그라운드
+  워커만 취소(`tool_scheduler`의 `task.cancel()`은 이미 반환된 detach 작업에
+  도달하지 않는다).
+* **세션 삭제 / `release_session` / shutdown(`abort_all`)**: 그 세션의 백그라운드
+  작업 전부 kill. `orchestrator.release_session`·`abort_all`에
+  `registry.kill_session(session_id)`를 배선한다. shutdown은 SQLite close 전에
+  `prepare_shutdown`으로 running 행을 killed로 동기 확정하고 늦은 watcher의 DB
+  finalize를 막아, 닫힌 connection을 건드리는 teardown 경쟁을 차단한다.
+* **런타임 재시작**: OS 프로세스는 죽는다 → 부팅 시 DB의 `status=running` 레코드를
+  `interrupted`로 화해한다(적대 리뷰 #7 "크래시 후 running 리뷰 잡 영구 방치"와
+  같은 처리). 미확인 완료 큐는 DB라 살아남아 다음 턴에 전달된다.
+* **자원 상한**: 세션당 동시 `running` 상한(기본 **5**), 초과 시 `background:true`를
+  에러 결과로 거절. 전역 상한(예 20)도 둔다.
+* **HITL**: 시작 = terminal이라 기존 승인 통과. `kill_task`는 무승인(§11.10).
+* **정리**: 스풀 tempfile은 작업/세션 종료 시 삭제.
+
+### 11.7 계약·영속
+
+* **SSE 이벤트**(`core/types` `ev_*`, CONTRACTS §1.3 등재 완료):
+  `ev_task_started(task_id, command)`(spawn/승격 시), `ev_task_completed(task_id,
+  status, exit_code)`(완료 드레인 시) — 활성 스트림에서만. 프론트는 이 둘로 카드를
+  세우고 갱신한다. **`ev_task_output`(라이브 출력 델타 스트리밍)은 채택하지 않았다** —
+  SSE 는 유휴 중(턴 없음) 출력을 전달할 수 없어 어차피 폴링이 필요하고, 폴링이
+  턴 중+유휴를 모두 커버하므로 SSE 스트림-머지(단일 제너레이터 턴 모델과 충돌)의
+  위험 없이 완전하다. 프론트는 카드가 running 인 동안 `GET /sessions/{id}/tasks` 를
+  폴링해 라이브 출력·상태 전이를 반영한다(구현: rice-app `ChatScreen.refreshTasks`).
+* **마이그레이션**(`0020_background_tasks.sql`): `background_tasks`(id, session_id,
+  command, cwd, status, exit_code, started_at, ended_at, output_path, acknowledged).
+  FK 는 두지 않는다(learning_episodes 와 같은 선례 — 세션 삭제 정리는 `purge_session`
+  이 명시적으로). 스풀 파일은 `paths.root/tasks/<id>.out`(재시작 생존), 쓰기 상한
+  1MB(폭주 방어), ack 후에도 카드 조회용으로 보존하되 세션당 최근 20개로 prune.
+* **조회/제어 라우트**(Phase 2, `server/routes/messages.py`): `GET /sessions/{id}/tasks`
+  (실행 중 + 최근 완료, 출력 포함 — 프론트 카드·폴링), `POST /sessions/{id}/tasks/
+  {task_id}/kill`(카드 Kill 버튼 — 세션 소유 가드). 둘 다 세션 스코프.
+
+### 11.8 배선 지점 (구체 seam)
+
+| 관심사 | 위치 | 배선 |
+|---|---|---|
+| TaskRegistry | 새 모듈(`agent/background_tasks.py`) | orchestrator 세션 스코프 소유, composition_root가 생성·주입 |
+| terminal 핸들러 | `builtins/terminal_tool.py` | `needs_session=True` + registry 클로저; `tools(paths, registry)` |
+| 창 A 드레인 | `agent/loop.py` 도구결과 append 직후 | `dispatcher.drain_completed(session_id)` → `messages.append(관찰)` (loop는 이미 dispatcher 보유; registry는 dispatcher에 주입) |
+| 창 B 드레인 | `orchestrator._drive_turn` ASSEMBLE | `registry.drain_completed` → 히스토리 주입 + `transcript.append` |
+| 수명주기 kill | `orchestrator.release_session`·`abort_all` | `registry.kill_session` |
+| 부팅 화해 | composition_root/startup | `registry.reconcile_on_boot()` (running→interrupted) |
+
+### 11.9 단계적 구현
+
+* **Phase 1 — 완료(2026-07-24)**: TaskRegistry + `terminal background:true` +
+  **auto-bg on timeout** + `task_output`/`kill_task` + 창 A·B 주입 + 수명주기(kill/화해)
+  + SSE `task_started`/`task_completed` + 마이그레이션.
+* **Phase 2 — 완료(2026-07-24)**: 프론트 인라인 작업 카드(taskId 키 upsert) + SSE
+  task_started/completed 소비 + running 동안 `GET /sessions/{id}/tasks` **폴링**(라이브
+  출력·상태) + Kill 버튼(`POST …/kill`) + 리로드 복원 + i18n 3언어 + 스풀 상한·보존.
+  `ev_task_output` SSE 는 폴링으로 대체(§11.7 근거). 능동 알림은 비목표(§11.10).
+
+### 11.10 열린 결정 / 비목표
+
+* **확정된 결정 (2026-07-24 착수 시점):** `kill_task`=**무승인**(자기가 띄운
+  프로세스 종료는 저위험), `foreground_block_budget_s`=**60**(사용자 선택 —
+  권장 30에서 상향해, 중간 길이 명령도 포그라운드로 끝나길 기다린다),
+  세션당 동시 상한=**5**(전역 20). 전부 `core/config.py::TerminalConfig` 로 노출.
+* **비목표(v1)**: 능동 알림(완료 즉시 새 턴 기동) — 재진입 루프 + 서버 푸시 채널 +
+  "단일 활성 턴/유휴 무실행" 불변식 변경이 필요해 rice 아키텍처와 충돌하므로 제외.
+  크로스세션 작업 공유. 작업 우선순위/큐잉.

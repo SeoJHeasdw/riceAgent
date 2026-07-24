@@ -1,4 +1,13 @@
 {
+  "task": {
+    "label": "백그라운드",
+    "statusRunning": "실행 중",
+    "statusKilled": "중단됨",
+    "statusInterrupted": "재시작으로 중단됨",
+    "exitCode": "종료 {{code}}",
+    "kill": "중단",
+    "killFailed": "백그라운드 작업을 중단하지 못했어요."
+  },
   "message": {
     "openFile": "파일 열기",
     "generating": "응답 생성 중",

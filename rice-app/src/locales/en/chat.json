@@ -1,4 +1,13 @@
 {
+  "task": {
+    "label": "Background",
+    "statusRunning": "running",
+    "statusKilled": "killed",
+    "statusInterrupted": "interrupted",
+    "exitCode": "exit {{code}}",
+    "kill": "Kill",
+    "killFailed": "Couldn't stop the background task."
+  },
   "message": {
     "openFile": "Open file",
     "generating": "Generating response",

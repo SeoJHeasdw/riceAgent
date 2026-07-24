@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
+from ..agent.background_tasks import BackgroundTaskRegistry
 from ..agent.builtins import build_builtin_tools, build_subagent_toolset, scratch_tool_factory
 from ..agent.builtins import subagent_tools
 from ..agent.interfaces import IAgent, IApprovalGate, ISessionTitler
@@ -96,6 +97,7 @@ class Container:
     agent: IAgent
     titler: ISessionTitler
     token_calibrator: TokenCalibrator
+    background_tasks: BackgroundTaskRegistry
     _shutdown_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
     _async_shutdown_complete: bool = field(default=False, init=False, repr=False)
     _db_closed: bool = field(default=False, init=False, repr=False)
@@ -114,6 +116,7 @@ class Container:
         cannot perform network I/O.
         """
         self._abort_all()
+        self.background_tasks.prepare_shutdown()
         cancel_pending = getattr(self.providers, "cancel_pending", None)
         if cancel_pending is not None:
             cancel_pending()
@@ -136,6 +139,7 @@ class Container:
             if self._async_shutdown_complete:
                 return
             self._abort_all()
+            self.background_tasks.prepare_shutdown()
             shutdown_providers = getattr(self.providers, "shutdown", None)
             if shutdown_providers is not None:
                 try:
@@ -317,6 +321,13 @@ def build_container(
     # 싱글턴. 실측 usage로 CJK 예산 추정을 세션 전반에 걸쳐 보정한다.
     token_calibrator = TokenCalibrator()
 
+    # 백그라운드 셸 작업 레지스트리(§11) — 단일 인스턴스. terminal 도구 클로저와
+    # 오케스트레이터 양쪽에 주입한다(§11.8). 부팅 화해: 이전 프로세스가 running 으로
+    # 남긴 작업(OS 프로세스는 런타임과 함께 죽었다)을 interrupted 로 정정한다 —
+    # learning_impl.recover_boot_state 와 같은 자리의 크래시 복구.
+    background_tasks = BackgroundTaskRegistry(db, config_store, paths.root / "tasks")
+    background_tasks.reconcile_on_boot()
+
     subagents = SubAgentRunner(
         resolve_provider=resolve_provider,
         transcript=sessions,
@@ -332,7 +343,13 @@ def build_container(
         # 가 워커 시스템 프롬프트로 소비한다. 활성 플러그인 기준 라이브 조회.
         resolve_agents=plugins.injected_agents,
     )
-    builtin_specs, builtins = build_builtin_tools(paths, learning=learning, subagents=subagents)
+    builtin_specs, builtins = build_builtin_tools(
+        paths,
+        learning=learning,
+        subagents=subagents,
+        background_tasks=background_tasks,
+        config_store=config_store,
+    )
 
     def live_builtin_specs() -> tuple[ToolSpec, ...]:
         """매 턴 재평가되는 빌트인 카탈로그 — delegate_subagent 스펙만 라이브로
@@ -370,6 +387,7 @@ def build_container(
         builtin_specs=live_builtin_specs,
         token_calibrator=token_calibrator,
         workspace=workspace_location,
+        background_tasks=background_tasks,
     )
 
     return Container(
@@ -388,4 +406,5 @@ def build_container(
         agent=agent,
         titler=titler,
         token_calibrator=token_calibrator,
+        background_tasks=background_tasks,
     )

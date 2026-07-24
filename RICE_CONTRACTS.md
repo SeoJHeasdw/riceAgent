@@ -53,6 +53,8 @@ Electron main process
 | **DELETE** | **`/sessions/{id}`** | **세션 삭제: 진행 중 턴에 abort 요청 + bounded drain 대기 → 영속 세션/메시지 제거 → 세션 소유 agent/learning 인메모리 상태 해제. 전역 plugin-skill snapshot은 유지** |
 | POST | `/sessions/{id}/tool-approval` | tool 실행 승인 응답 (`tool_approval_required` 이벤트에 대응, `approval_id` 포함) |
 | GET | `/sessions/{id}/pending-approvals` | 대기 중 승인 목록 (SSE 재연결 복구 — RUNTIME_DESIGN 5.1) |
+| **GET** | **`/sessions/{id}/tasks`** | **백그라운드 셸 작업(실행 중 + 최근 완료, 출력 포함) — 프론트 작업 카드·폴링 (AGENT_EXECUTION §11).** |
+| **POST** | **`/sessions/{id}/tasks/{task_id}/kill`** | **백그라운드 작업 중단(카드 Kill 버튼) — 세션 소유 가드.** |
 | GET | `/sessions/{id}/messages?cursor=` | 과거 메시지 페이지네이션 (히스토리 로드) |
 | POST | `/sessions/{id}/regenerate` | 응답 재생성 (ChatScreen) — **경로 정정(2026-07-08)**: `msg_id` 세그먼트 없음, 과거 문서 오기 — 코드·프론트 모두 이 경로 |
 | ~~GET~~ | ~~`/sessions/{id}/export?format=md\|json`~~ | **미구현** — 코드에 없음(2026-07-08 확인) |
@@ -124,6 +126,8 @@ Electron main process
 9. `error` - 오류 발생 (error_code, message). 모델 호출의 사용자 조치 가능 오류는 `provider.ollama_unreachable`·`provider.model_not_found`·`provider.auth_failed`·`provider.quota_exceeded` 네 안정 코드로 전달한다.
 
 > **`skill_candidate_staged`(skill_id, candidate_id, baseline_version) — 2026-07-19 순수 추가(조건부 10번째 스트림 이벤트).** `candidate_eval_enabled`(기본 off)가 켜진 경우에만, 스킬 제안 승인이 즉시 적용 대신 candidate 격리로 귀결됐을 때 `skill_patched` **대신** 발행된다 — "적용됨"과 "평가 대기"는 다른 사건이다(LEARNING_LOOP §10.6). 이후의 승격/폐기는 백그라운드에서 일어나므로 SSE가 아니라 `GET /skills/candidates`·`GET /learning/events`로 관찰한다(승격되면 `GET /skills`의 version이 오른다). 구형 클라이언트는 미지 타입을 드랍하므로(sse.ts) 하위호환 — 게이트가 꺼져 있으면(기본) 이 이벤트는 절대 발행되지 않고 스트림은 기존 9종 그대로다. **프론트 배선(같은 날)**: rice-app 은 이 이벤트를 토스트("평가 통과 후 반영")로 알리고 학습 패널의 **승격 대기(candidates) 섹션**(LearningPanel — 후보 목록·평가 리포트 요약(성공률 델타·심판 합의율·전사 재생율)·지금 평가/바로 승격/폐기)을 재동기화한다.
+
+> **`task_started`(task_id, command) · `task_completed`(task_id, status, exit_code) — 2026-07-24 순수 추가(백그라운드 셸 작업, AGENT_EXECUTION §11).** 오래 도는 terminal 명령이 `background:true` 로 뜨거나 auto-background 로 승격될 때 `task_started`, 완료가 대화에 관찰로 드레인될 때(창 A: 턴 내 / 창 B: 다음 턴 ASSEMBLE) `task_completed` 를 발행한다 — **활성 스트림에서만**(유휴 중 완료는 스트림이 없어 이벤트가 없지만, 완료 관찰은 DB 백업 큐로 다음 턴 히스토리에 전달된다). `status ∈ {exited, killed, interrupted}`. 완료 관찰 자체는 별도 SSE가 아니라 **`role="user"` synthetic 메시지**(`metadata.synthetic="task_completed"`)로 히스토리·transcript에 실린다(§11.2 — role="tool"은 wire repair orphan 규칙과 충돌해 채택하지 않음). 구형 클라이언트는 미지 타입을 드랍하므로(sse.ts) 하위호환 — 백그라운드 기능을 안 쓰면 스트림은 기존 이벤트 그대로다. **Phase 2 완료(2026-07-24)**: rice-app 은 이 두 이벤트로 인라인 **작업 카드**(taskId 키 upsert)를 세우고, 카드가 running 인 동안 **`GET /sessions/{id}/tasks` 를 폴링**해 라이브 출력·상태 전이를 반영하며(유휴 중 완료도 여기서 잡힌다), Kill 버튼은 **`POST /sessions/{id}/tasks/{task_id}/kill`** 로 중단한다. 리로드는 synthetic `task_completed` 메시지에서 완료 카드를 복원한다. **`ev_task_output`(라이브 출력 델타 SSE)은 채택하지 않았다** — SSE 는 유휴 중 출력을 전달할 수 없어 어차피 폴링이 필요하고, 폴링이 턴 중+유휴를 모두 커버하므로 스트림-머지 없이 완전하다.
 
 > **`tool_call` bridge 표현 계약**: abort 없이 결과까지 도달한 bridge 실행은 public
 > SSE에서 wrapper의 outer `tool_call_id`를 유지한 요청 대상 이름·인자의 `tool_call`

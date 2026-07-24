@@ -17,6 +17,10 @@
      이후의 진짜 최종 답이 최종
   8. reconcile 넛지에 추론을 남김 → 억제 라운드의 추론은 라이브·리로드 양쪽에서
      보이지 않는다(런타임이 주입한 STOP을 사용자 탓으로 서술하는 독백 차단)
+  9. 백그라운드 완료가 매 라운드 무한 주입(창 A) + 침묵 도구 호출 → 주입이 반복
+     예산을 늘리지 않아 반복 상한이 최종 방벽으로 남는다(§11.2 창 A 드레인)
+ 10. 창 A 드레인은 reconcile 모드에서 게이트로 억제된다 → 확정된 답의 턴이 완료
+     주입으로 재개되지 않고 추가 provider 라운드 없이 닫힌다
 
 새 방어 장치를 추가할 때는 반드시 여기에 상호작용 시나리오를 추가할 것 —
 "장치 하나가 더해질 때마다 종료 증명을 다시 한다"가 이 파일의 계약이다.
@@ -28,6 +32,7 @@ import asyncio
 
 import pytest
 
+from rice_runtime.agent.background_tasks import CompletedTask
 from rice_runtime.agent.loop import AgentLoop, LoopResult
 from rice_runtime.agent.profiles import LOCAL_PROFILE
 from rice_runtime.agent.tool_dispatch import ToolDispatcher
@@ -36,7 +41,19 @@ from rice_runtime.core.types import Message, ToolCall, ToolSpec, TurnContext
 from rice_runtime.server.approval import ApprovalRegistry
 
 
-def _dispatcher() -> ToolDispatcher:
+class _AlwaysDrainingRegistry:
+    """매 드레인마다 완료 하나를 무한 공급하는 적대적 레지스트리 — 창 A 주입이
+    종료 보장을 깨지 않는지(반복 예산을 늘리지 않는지) 검증용."""
+
+    def __init__(self) -> None:
+        self.drains = 0
+
+    def drain_completed(self, session_id: str) -> list[CompletedTask]:
+        self.drains += 1
+        return [CompletedTask(id=f"t{self.drains}", command="sleep 1", status="exited", exit_code=0, output="done")]
+
+
+def _dispatcher(background_tasks=None) -> ToolDispatcher:
     async def echo(args):
         return {"ok": True}
 
@@ -46,6 +63,7 @@ def _dispatcher() -> ToolDispatcher:
         approvals=ApprovalRegistry(),
         approval_timeout_s=1,
         builtins={"echo": echo},
+        background_tasks=background_tasks,
     )
 
 
@@ -376,6 +394,55 @@ async def test_reconcile_rewrite_is_suppressed_and_plan_force_closed():
     plan_events = [ev for ev in events if ev.type.value == "plan_updated"]
     assert plan_events[-1].data["status"] == "completed"
     assert all(s["status"] in ("done", "failed", "skipped") for s in plan_events[-1].data["steps"])
+
+
+# ── 시나리오 9·10: 백그라운드 완료 주입(창 A)이 종료 보장을 깨지 않는다 ──────────
+
+
+@pytest.mark.asyncio
+async def test_infinite_background_completions_still_bounded_by_iteration_cap():
+    """완료가 매 도구 라운드 무한 주입돼도(적대적 레지스트리), 주입은 role="user"
+    관찰일 뿐 반복 예산을 늘리지 않으므로 반복 상한이 정확히 최종 방벽으로 남는다."""
+    provider = _ForeverSilentToolCaller()
+    registry = _AlwaysDrainingRegistry()
+    result = LoopResult()
+    events = [
+        ev
+        async for ev in AgentLoop(
+            provider=provider, dispatcher=_dispatcher(registry), profile=LOCAL_PROFILE
+        ).run(_ctx(max_iterations=6), "s1", result, asyncio.Event())
+    ]
+
+    # 반복 상한에서 정확히 멈춘다 — 완료 주입이 라운드를 추가하지 않는다
+    assert provider.calls == 6
+    errors = [ev for ev in events if ev.type.value == "error"]
+    assert len(errors) == 1 and errors[0].data["error_code"] == "max_iterations"
+    # 주입 메커니즘은 동작한다(관찰이 히스토리에 실림) — 단 라운드 수에 유계
+    injected = [m for m in result.history if m.metadata.get("synthetic") == "task_completed"]
+    assert 0 < len(injected) <= 6
+    assert any(ev.type.value == "task_completed" for ev in events)
+
+
+@pytest.mark.asyncio
+async def test_background_drain_suppressed_during_reconcile_close():
+    """reconcile 모드(확정 답 이후 계획 정리)에선 창 A 드레인이 게이트로 억제된다 —
+    완료가 매 라운드 공급돼도 reconcile 종결이 추가 provider 라운드 없이 닫힌다."""
+    provider = _ReconcileWithUpdatePlan()
+    registry = _AlwaysDrainingRegistry()
+    result = LoopResult()
+    events = [
+        ev
+        async for ev in AgentLoop(provider=provider, dispatcher=_dispatcher(registry)).run(
+            _ctx(), "s1", result, asyncio.Event()
+        )
+    ]
+
+    # 드레인 레지스트리를 껴도 시나리오 5와 같은 3회에서 끝난다(reconcile 라운드는
+    # 억제되고, 주입은 start_plan 라운드 1회뿐이라 종결을 지연시키지 않는다)
+    assert provider.calls == 3
+    assert result.final_message == "the answer"
+    injected = [m for m in result.history if m.metadata.get("synthetic") == "task_completed"]
+    assert len(injected) == 1  # reconcile 라운드에선 주입되지 않았다
 
 
 class _ReconcileResumesRealWork(_PlanAnswerBase):

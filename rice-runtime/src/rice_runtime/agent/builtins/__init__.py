@@ -46,7 +46,9 @@ from . import file_tools, office, skill_tools, subagent_tools, terminal_tool, vi
 from .file_tools import scratch_tool_factory  # re-export — composition root가 러너에 주입  # noqa: F401
 
 if TYPE_CHECKING:
+    from ...core.config import ConfigStore
     from ...learning.interfaces import ILearningService
+    from ..background_tasks import BackgroundTaskRegistry
     from ..subagents import SubAgentRunner
 
 _SUBAGENT_TOOL_NAMES = ("read_file", "list_dir", "grep", "search_files", "fetch_url", "web_search")
@@ -59,17 +61,28 @@ def build_builtin_tools(
     paths: RicePaths,
     learning: "ILearningService | None" = None,
     subagents: "SubAgentRunner | None" = None,
+    background_tasks: "BackgroundTaskRegistry | None" = None,
+    config_store: "ConfigStore | None" = None,
 ) -> tuple[tuple[ToolSpec, ...], dict[str, BuiltinTool]]:
     """Assemble every builtin tool. New builtin modules register here (one place).
 
     `learning`은 propose_skill(미드턴 승격 제안)의 스테이징 대상 — None이면(기존
-    테스트/독립 사용) 그 도구만 빠지고 나머지는 동일하다."""
+    테스트/독립 사용) 그 도구만 빠지고 나머지는 동일하다.
+    `background_tasks`(+`config_store`)가 있으면 terminal 이 background:true /
+    auto-background 승격을 지원하고 task_output/kill_task 가 등록된다 — None이면
+    terminal 은 포그라운드 전용(§11)."""
     specs: list[ToolSpec] = []
     handlers: dict[str, BuiltinTool] = {}
-    for module in (file_tools, office, terminal_tool, vision_tools):
+    for module in (file_tools, office, vision_tools):
         for spec, handler in module.tools(paths):
             specs.append(spec)
             handlers[spec.name] = handler
+    # terminal 은 background 레지스트리 + config 를 받아야 하므로 별도 배선.
+    for spec, handler in terminal_tool.tools(
+        paths, registry=background_tasks, config_store=config_store
+    ):
+        specs.append(spec)
+        handlers[spec.name] = handler
     for spec, handler in web_tools.tools():
         specs.append(spec)
         handlers[spec.name] = handler

@@ -278,6 +278,28 @@ class AgentConfig:
 
 
 @dataclass(frozen=True)
+class TerminalConfig:
+    """백그라운드 셸 작업 노브 (RICE_AGENT_EXECUTION.md §11).
+
+    terminal 은 이미 HITL 로 승인된 명령이라, 오래 도는 것을 30초에 죽여 결과를
+    버리는 것보다 살려서 백그라운드로 넘기고 완료 시 되먹이는 것이 안전하고
+    유용하다(§11.5). 이 노브들이 그 경계를 정한다."""
+
+    # 포그라운드 명령이 예산을 넘고도 실행 중이면 kill 대신 백그라운드로 승격한다.
+    # off 면 기존 kill-on-timeout 동작 그대로.
+    auto_background_on_timeout: bool = True
+    # auto-bg on 일 때 포그라운드로 블록할 예산(초). 넘으면 부분 출력 + task_id 를
+    # 반환하고 작업은 백그라운드에서 계속 돈다. 즉 timeout 의 의미가 "죽이기 전
+    # 한계"에서 "포그라운드로 얼마나 블록할지의 예산"으로 바뀐다(§11.5).
+    # 모델이 terminal.timeout 인자를 명시하면 그 값이 이 예산을 대신한다.
+    foreground_block_budget_s: int = 60
+    # 세션당 동시 running 상한 — 초과 시 background:true 를 에러로 거절(자원 상한, §11.6).
+    max_concurrent_per_session: int = 5
+    # 전역 동시 running 상한(모든 세션 합).
+    max_concurrent_global: int = 20
+
+
+@dataclass(frozen=True)
 class UIConfig:
     language: str = "ko"
     theme: str = "system"  # light | dark | system
@@ -294,6 +316,7 @@ class Config:
     learning: LearningConfig = field(default_factory=LearningConfig)
     context: ContextConfig = field(default_factory=ContextConfig)
     agent: AgentConfig = field(default_factory=AgentConfig)
+    terminal: TerminalConfig = field(default_factory=TerminalConfig)
     ui: UIConfig = field(default_factory=UIConfig)
 
     def to_dict(self) -> dict:
@@ -394,11 +417,13 @@ def _merge(base: Config, raw: dict) -> Config:
     learn = {**asdict(base.learning), **_known_fields(LearningConfig, section("learning"))}
     context = {**asdict(base.context), **_known_fields(ContextConfig, section("context"))}
     agent = {**asdict(base.agent), **_known_fields(AgentConfig, section("agent"))}
+    terminal = {**asdict(base.terminal), **_known_fields(TerminalConfig, section("terminal"))}
     ui = {**asdict(base.ui), **_known_fields(UIConfig, section("ui"))}
     return Config(
         provider=ProviderConfig(**prov),
         learning=LearningConfig(**learn),
         context=ContextConfig(**context),
         agent=AgentConfig(**agent),
+        terminal=TerminalConfig(**terminal),
         ui=UIConfig(**ui),
     )

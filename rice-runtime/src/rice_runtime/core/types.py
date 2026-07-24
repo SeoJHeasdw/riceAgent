@@ -349,6 +349,12 @@ class EventType(str, Enum):
     # (sse.ts 는 미지 타입을 드랍). 이후의 승격/폐기는 백그라운드에서 일어나므로
     # SSE 가 아니라 GET /skills/candidates·GET /learning/events 로 관찰한다.
     SKILL_CANDIDATE_STAGED = "skill_candidate_staged"
+    # 백그라운드 셸 작업(§11) — 활성 스트림에서만 방출된다. task_started 는 spawn/
+    # 승격 시점(항상 턴 안), task_completed 는 완료 드레인 시점(창 A: 턴 내 / 창 B:
+    # 다음 턴 ASSEMBLE). 순수 추가 이벤트 — 구형 클라이언트는 미지 타입을 드랍한다
+    # (sse.ts). 프론트 작업 카드는 Phase 2.
+    TASK_STARTED = "task_started"
+    TASK_COMPLETED = "task_completed"
     DONE = "done"
     ERROR = "error"
     # control events (carry approval_id — out-of-band HITL, CONTRACTS §1.2)
@@ -437,6 +443,22 @@ def ev_skill_candidate_staged(
             "candidate_id": candidate_id,
             "baseline_version": baseline_version,
         },
+    )
+
+
+def ev_task_started(task_id: str, command: str) -> SSEEvent:
+    """백그라운드 작업이 떴다(spawn 또는 auto-background 승격). 항상 턴 안에서
+    방출된다 — 시작은 정의상 활성 스트림 안이다(§11.7)."""
+    return SSEEvent(EventType.TASK_STARTED, {"task_id": task_id, "command": command})
+
+
+def ev_task_completed(task_id: str, status: str, exit_code: int | None) -> SSEEvent:
+    """백그라운드 작업이 끝났다 — 완료 드레인(창 A/B) 시점에 활성 스트림으로만
+    방출된다. 유휴 중 완료는 스트림이 없어 이 이벤트가 없지만, 완료 관찰은 DB
+    백업 큐로 다음 턴에 히스토리에 전달된다(§11.2)."""
+    return SSEEvent(
+        EventType.TASK_COMPLETED,
+        {"task_id": task_id, "status": status, "exit_code": exit_code},
     )
 
 

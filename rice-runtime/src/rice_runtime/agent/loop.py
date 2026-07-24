@@ -42,11 +42,14 @@ from ..core.types import (
     ev_error,
     ev_message,
     ev_plan_updated,
+    ev_task_completed,
+    ev_task_started,
     ev_thinking,
     ev_tool_call,
     ev_tool_result,
 )
 from ..prompts.planning import PLAN_GUIDANCE, render_plan_status
+from .background_tasks import build_completion_observation
 from .context_manager import (
     ContextRenderStats,
     ConversationContextManager,
@@ -693,6 +696,32 @@ class AgentLoop:
                         _tool_result_message(res, tool_name=call.tool_name, source=source)
                     )
                     tool_calls_made += 1
+                    # 백그라운드 작업이 떴으면(background:true 또는 auto-bg 승격) 시작
+                    # 이벤트를 활성 스트림으로 방출한다(§11.7). background:True 마커는
+                    # terminal/auto-bg 승격 결과의 명시적 계약(문자열 sniffing 아님).
+                    if (
+                        res.ok
+                        and isinstance(res.result, dict)
+                        and res.result.get("background")
+                        and res.result.get("task_id")
+                    ):
+                        yield ev_task_started(
+                            str(res.result["task_id"]), str(res.result.get("command", ""))
+                        )
+
+            # ── 창 A 드레인(§11.2): 도구 라운드 직후, 이 세션의 미확인 백그라운드
+            # 완료를 관찰로 주입한다 — 모델은 다음 반복에 그것을 본다(자연스러운
+            # ReAct 관찰→재평가). reconcile 모드(답 확정 후 계획 정리)에선 건너뛴다:
+            # 답은 이미 끝났고, 그 완료는 다음 턴 창 B가 전달한다. dispatcher가
+            # drain_completed 를 노출할 때만(레지스트리 주입 시) 동작 — 테스트 fake는
+            # 없어도 무해(getattr 가드).
+            drain_completed = getattr(self._dispatcher, "drain_completed", None)
+            if reconcile_final_text is None and drain_completed is not None:
+                for completed in drain_completed(session_id):
+                    yield ev_task_completed(
+                        completed.id, completed.status, completed.exit_code
+                    )
+                    messages.append(build_completion_observation(completed))
 
             # ── reconcile 종결: 확정된 답 이후, 계획 정리 호출만으로 끝난 라운드 —
             # 추가 LLM 라운드를 돌리지 않고 여기서 턴을 닫는다(재질의하면 소형 모델은

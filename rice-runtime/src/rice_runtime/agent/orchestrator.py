@@ -71,6 +71,7 @@ from ..core.types import (
     TurnOutcome,
     ev_done,
     ev_error,
+    ev_task_completed,
 )
 from ..core.tokens import TokenCalibrator
 from ..execution.interfaces import IPluginLoader
@@ -81,6 +82,7 @@ from .effect_surfacing import surface_learning_effect
 from .interfaces import IApprovalGate, ITranscript
 from .loop import AgentLoop, LoopResult
 from .planner import TurnPlanner
+from .background_tasks import BackgroundTaskRegistry, build_completion_observation
 from .profiles import OrchestrationProfile, resolve_profile
 from .providers.interfaces import ILLMProvider
 from .tool_dispatch import BuiltinTool, ToolDispatcher, fold_tools_for_budget
@@ -218,6 +220,7 @@ class Orchestrator:
         builtin_specs: tuple[ToolSpec, ...] | Callable[[], tuple[ToolSpec, ...]] = (),
         token_calibrator: TokenCalibrator | None = None,
         workspace: WorkspaceLocation | None = None,
+        background_tasks: BackgroundTaskRegistry | None = None,
     ) -> None:
         # `resolve_provider` is a thunk, not a captured instance, so a runtime
         # model switch (PUT /settings) takes effect next turn (C-1). Likewise
@@ -242,6 +245,11 @@ class Orchestrator:
         # 캐시를 지키는 세션 스코프 메모리(context_manager.py ★ 불변식). LRU 캡.
         self._render_states: OrderedDict[str, ContextRenderState] = OrderedDict()
         self._aborts: dict[str, asyncio.Event] = {}
+        # 백그라운드 셸 작업 레지스트리(§11) — 세션 스코프 소유(_render_states 류).
+        # 매 턴 ToolDispatcher 에 주입해 창 A 드레인을 가능케 하고, 창 B(아래 ASSEMBLE)
+        # 와 수명주기 kill(release_session/abort_all)에서 직접 쓴다. None 이면(테스트/
+        # 독립) 백그라운드 기능 비활성 — 기존 동작 그대로.
+        self._background_tasks = background_tasks
         # 세션별 진행 중 턴 락 — 같은 세션 동시 POST /messages 차단. 값은 "턴 종료"
         # 이벤트로, abort_and_drain 이 진행 중 턴이 실제로 끝날 때까지 기다리는 데
         # 쓴다(DELETE /sessions 등 mutation 이 스트리밍 중 transcript 를 찢지 않게).
@@ -381,6 +389,17 @@ class Orchestrator:
                 ACTION_RULES_EPILOGUE if profile.action_rules_epilogue else None,
             )
             base_history = self._transcript.history(session_id)
+            # ── 창 B 드레인(§11.2): 세션 유휴 중(이전 턴 종료 후) 끝난 백그라운드
+            # 완료를, 이 턴 ASSEMBLE 에서 히스토리에 관찰로 주입 + transcript 영속
+            # (리로드 일관성). 사용자 메시지는 이미 tail 이고, 완료 관찰(role="user"
+            # synthetic)을 그 뒤에 실어 모델이 이번 답에서 함께 본다. drain 이
+            # acknowledged 를 마킹하므로 창 A(턴 내)와 겹쳐도 이중 전달이 없다.
+            if self._background_tasks is not None:
+                for c in self._background_tasks.drain_completed(session_id):
+                    obs = build_completion_observation(c)
+                    self._transcript.append(session_id, obs)
+                    base_history = base_history + (obs,)
+                    yield ev_task_completed(c.id, c.status, c.exit_code)
             ctx = TurnContext(
                 session_id=session_id,
                 system_prompt=system_prompt,
@@ -401,6 +420,7 @@ class Orchestrator:
                 folded_catalog={t.name: t for t in foldable_tools},
                 approval_mode=approval_mode,
                 web_search_enabled=web_search_enabled,
+                background_tasks=self._background_tasks,
             )
             # 플래너와 실행 루프는 같은 provider 인스턴스를 쓴다(로컬 LLM 하나가
             # 겸임). planning_enabled=False면 플래너 없이 순수 ReAct — 기존 동작.
@@ -538,6 +558,10 @@ class Orchestrator:
             if abort is not None:
                 abort.set()
             self._approvals.cancel_session(session_id)
+        # 백그라운드 작업은 정의상 턴을 넘겨 살지만, 프로세스 종료(shutdown)에는
+        # 함께 내린다(§11.6) — 살아남으면 고아가 된다. best-effort sync.
+        if self._background_tasks is not None:
+            self._background_tasks.kill_all()
 
     # ── session-scoped render state ──────────────────────────────────────────
     def _render_state(self, session_id: str) -> ContextRenderState:
@@ -558,6 +582,10 @@ class Orchestrator:
         재시작 때까지 죽은 세션을 들고 있지 않게 한다."""
         self._render_states.pop(session_id, None)
         self._learning.release_session(session_id)
+        # 세션의 백그라운드 작업 kill + DB 행·스풀 정리(§11.6) — 세션이 사라졌으니
+        # 그 작업들도 실행·기록을 남길 이유가 없다.
+        if self._background_tasks is not None:
+            self._background_tasks.purge_session(session_id)
 
     # ── builtin tool catalog (override/extend in composition root) ───────────
     def _builtin_specs(self):

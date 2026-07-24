@@ -13,6 +13,7 @@ import type {
   SkillCandidate,
   LearningEvent,
   RuntimeMemory,
+  BackgroundTask,
 } from './types';
 import type { RuntimeSkillAnalysis, RuntimeSkillVersion } from './learningData';
 
@@ -225,6 +226,17 @@ class ApiClient {
   /** recover prompts still parked after an SSE reconnect (CONTRACTS 1.2) */
   getPendingApprovals(sessionId: string): Promise<ApiResponse<PendingApproval[]>> {
     return this.get<PendingApproval[]>(`/sessions/${sessionId}/pending-approvals`);
+  }
+
+  // ── 백그라운드 셸 작업 (AGENT_EXECUTION §11 Phase 2) ─────────────
+  /** this session's running + recent background tasks (task cards). The card view
+   *  polls this while a task is running to reflect live output + status. */
+  listTasks(sessionId: string): Promise<ApiResponse<BackgroundTask[]>> {
+    return this.get<BackgroundTask[]>(`/sessions/${sessionId}/tasks`);
+  }
+  /** user-initiated stop of a background task (kill button on a running card). */
+  killTask(sessionId: string, taskId: string): Promise<ApiResponse<{ task_id: string; status: string }>> {
+    return this.send('POST', `/sessions/${sessionId}/tasks/${taskId}/kill`);
   }
 
   // ── skills + learning loop (CONTRACTS 1.3, LEARNING_LOOP 5.2) ───

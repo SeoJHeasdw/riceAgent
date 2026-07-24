@@ -317,6 +317,72 @@ const BashCard: React.FC<{ m: Extract<ThreadMessage, { kind: 'tool_bash' }> }> =
   );
 };
 
+// ── background task card (AGENT_EXECUTION §11) — 턴을 넘겨 사는 셸 작업 ──
+// BashCard(한 라운드 내 완결 셸 명령)와 시각 언어를 공유하되, running 상태로 턴
+// 경계를 넘고 사용자가 Kill 할 수 있다는 점이 다르다. 라이브 SSE(task_started →
+// task_completed) + 폴링(GET /tasks)이 상태·출력을 갱신한다.
+const TaskCard: React.FC<{
+  m: Extract<ThreadMessage, { kind: 'task' }>;
+  onKill?: (taskId: string) => void;
+}> = ({ m, onKill }) => {
+  const [open, setOpen] = useState(!m.collapsed);
+  const { t } = useTranslation('chat');
+  const running = m.status === 'running';
+  const success = m.status === 'exited' && m.exitCode === 0;
+  const statusLabel =
+    m.status === 'running'
+      ? t('task.statusRunning')
+      : m.status === 'killed'
+        ? t('task.statusKilled')
+        : m.status === 'interrupted'
+          ? t('task.statusInterrupted')
+          : t('task.exitCode', { code: m.exitCode ?? '?' });
+  return (
+    <div className="my-1.5 max-w-[640px] border border-border-subtle-01 rounded-lg overflow-hidden bg-layer-01">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-border-subtle-01">
+        <Icon name="terminal" size={14} className="text-icon-secondary flex-shrink-0" />
+        <span className="text-caption-01 font-semibold text-text-secondary flex-shrink-0">{t('task.label')}</span>
+        <span className="text-caption-01 text-text-helper truncate">{statusLabel}</span>
+        {running ? (
+          <div className="ml-auto flex items-center gap-2 flex-shrink-0">
+            <span className="ia-spinner w-3.5 h-3.5" aria-label={t('task.statusRunning')} />
+            {onKill && (
+              <Button kind="danger-ghost" size="xs" onClick={() => onKill(m.taskId)}>
+                {t('task.kill')}
+              </Button>
+            )}
+          </div>
+        ) : success ? (
+          <Icon name="check-circle" size={13} className="text-support-success ml-auto flex-shrink-0" title={statusLabel} />
+        ) : (
+          <Icon name="warning" size={13} filled className="text-support-error ml-auto flex-shrink-0" title={statusLabel} />
+        )}
+      </div>
+      <div className="font-mono text-label-micro leading-[18px]">
+        <div className="flex gap-2.5 px-3 py-1.5">
+          <span className="text-text-helper select-none w-7 flex-shrink-0">IN</span>
+          <span className="text-text-primary whitespace-pre-wrap break-all">{m.command}</span>
+        </div>
+        {m.output !== undefined &&
+          m.output !== '' &&
+          (open ? (
+            <div className="flex gap-2.5 px-3 py-1.5 border-t border-border-subtle-01 bg-background">
+              <span className="text-text-helper select-none w-7 flex-shrink-0">OUT</span>
+              <span className="text-text-secondary whitespace-pre-wrap break-all">{m.output}</span>
+            </div>
+          ) : (
+            <button
+              onClick={() => setOpen(true)}
+              className="flex items-center gap-1.5 w-full px-3 py-1.5 border-t border-border-subtle-01 text-caption-01 text-link-primary hover:bg-layer-hover-01 transition-colors"
+            >
+              <Icon name="chevron-down" size={13} /> {t('message.viewOutput')}
+            </button>
+          ))}
+      </div>
+    </div>
+  );
+};
+
 // ── read tool card (파일/지식 읽기 — 파일 + 요약, chat1 의 Read 블록) ─
 const ReadCard: React.FC<{ m: Extract<ThreadMessage, { kind: 'tool_read' }> }> = ({ m }) => (
   <div className="my-1.5 max-w-[640px] flex items-center gap-2 px-3 py-2 border border-border-subtle-01 rounded-lg bg-layer-01">
@@ -1362,11 +1428,13 @@ const AssistantBlock: React.FC<{
   onApprovePatch?: (m: Extract<ThreadMessage, { kind: 'patch' }>, editedBody?: string) => void;
   onRejectPatch?: (m: Extract<ThreadMessage, { kind: 'patch' }>) => void;
   onRespondApproval?: (m: Extract<ThreadMessage, { kind: 'approval' }>, decision: 'approve' | 'reject') => void;
+  /** stop a running background task (kill button on a task card) */
+  onKillTask?: (taskId: string) => void;
   showActions?: boolean;
   actionsCopyText?: string;
   /** epoch ms for the action bar timestamp */
   actionsSentAt?: number;
-}> = ({ m, onCorrect, onJumpSkill, onRegenerate, onApprovePatch, onRejectPatch, onRespondApproval, showActions, actionsCopyText, actionsSentAt }) => {
+}> = ({ m, onCorrect, onJumpSkill, onRegenerate, onApprovePatch, onRejectPatch, onRespondApproval, onKillTask, showActions, actionsCopyText, actionsSentAt }) => {
   const { openFile } = useFileViewer();
   if (m.kind === 'thinking') return <ThinkingBlock m={m} />;
   if (m.kind === 'toolrun') return <ToolCallCard m={m} onJumpSkill={onJumpSkill} />;
@@ -1402,6 +1470,7 @@ const AssistantBlock: React.FC<{
     );
 
   if (m.kind === 'plan') return <PlanCard m={m} />;
+  if (m.kind === 'task') return <TaskCard m={m} onKill={onKillTask} />;
   if (m.kind === 'toolcall') return <BuiltinToolCard m={m} />;
   if (m.kind === 'tool_bash') return <BashCard m={m} />;
   if (m.kind === 'tool_read') return <ReadCard m={m} />;
@@ -1459,6 +1528,8 @@ export interface ChatTurnProps {
   onRejectPatch?: (m: Extract<ThreadMessage, { kind: 'patch' }>) => void;
   /** respond to a tool-execution approval (HITL) — posts back to the runtime */
   onRespondApproval?: (m: Extract<ThreadMessage, { kind: 'approval' }>, decision: 'approve' | 'reject') => void;
+  /** stop a running background task (kill button on a task card) */
+  onKillTask?: (taskId: string) => void;
   /** thread index of the message to highlight (jumped to from a proposal source) */
   highlightIndex?: number | null;
   /** index → originating answer text; renders the action bar at that index */
@@ -1477,6 +1548,7 @@ export const ChatTurn: React.FC<ChatTurnProps> = ({
   onApprovePatch,
   onRejectPatch,
   onRespondApproval,
+  onKillTask,
   highlightIndex,
   actionsCopyAt = {},
   actionsTimeAt = {},
@@ -1531,6 +1603,7 @@ export const ChatTurn: React.FC<ChatTurnProps> = ({
                 onApprovePatch={onApprovePatch}
                 onRejectPatch={onRejectPatch}
                 onRespondApproval={onRespondApproval}
+                onKillTask={onKillTask}
                 showActions={index in actionsCopyAt}
                 actionsCopyText={actionsCopyAt[index]}
                 actionsSentAt={actionsTimeAt[index]}

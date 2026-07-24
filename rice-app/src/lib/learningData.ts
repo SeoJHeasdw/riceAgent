@@ -1,5 +1,5 @@
 import type { IconName } from '../components/ui/Icon';
-import type { ImpactReport, PatchTrigger, PlanStepData, SkillFile } from './types';
+import type { BackgroundTaskStatus, ImpactReport, PatchTrigger, PlanStepData, SkillFile } from './types';
 import i18n from './i18n/index';
 
 // 동적 키/returnObjects 호출용 넓은 타입 래퍼.
@@ -577,6 +577,25 @@ export type ThreadMessage =
       caption?: string;
       columns: string[];
       rows: string[][];
+    }
+  | {
+      // 백그라운드 셸 작업 카드 (AGENT_EXECUTION §11) — terminal 이 background 로 뜨거나
+      // auto-background 로 승격된, 턴을 넘겨 사는 명령. 라이브 SSE(task_started →
+      // task_completed) + 폴링(GET /sessions/{id}/tasks)으로 갱신되고, 리로드 시엔
+      // synthetic task_completed 메시지로 복원된다. 도구 카드(한 라운드 내 완결)와
+      // 달리 running 상태로 턴 경계를 넘을 수 있고 사용자가 kill 할 수 있다.
+      kind: 'task';
+      /** runtime task_id — SSE·폴링·kill 이 이 값으로 카드를 찾는다(위치 아닌 키) */
+      taskId: string;
+      /** 실행한 셸 명령 */
+      command: string;
+      status: BackgroundTaskStatus;
+      /** 종료 코드 (exited 일 때 유효; running 이면 undefined) */
+      exitCode?: number | null;
+      /** 출력 (라이브 폴링·완료 시 채워짐, 40KB 상한). undefined = 아직 없음 */
+      output?: string;
+      /** 긴 출력 기본 접힘 */
+      collapsed?: boolean;
     };
 
 // Chat history (sessions + threads) is no longer mocked here - it lives in
