@@ -18,17 +18,34 @@ skills/tools are indexed in English. Expanding a handful of universal intent
 words ("만들어줘"→create, "메일"→mail) is what bridges the ko-query → en-index
 gap without per-skill alias curation or a semantic model. Explicit mentions
 ($skill / tool names typed by the user) always route exactly regardless.
+
+★ 확장은 리콜 보조지, 증거 증식이 아니다 (2026-07-25). 예전 `expand_query`는
+확장어를 원래 토큰과 구분 없는 평평한 집합으로 돌려줬고, `field_score`가 그
+전부를 **각각 독립된 1.0 hit**으로 셌다. 그래서 사용자가 실제로 친 단어 하나가
+점수 여러 개로 불어났다 — "생성해줘"(raw 토큰 1개) → {create, new, 생성해줘}로
+3배가 되어, relevance.py 의 `MIN_STRONG_HITS`(= 서로 **독립된** author-signal
+2개를 요구하는 정밀도 게이트)를 단어 하나로 통과시켰다. 영어 "create it"은
+같은 게이트에 정상적으로 막히므로, 게이트가 주 사용자 언어에서만 꺼져 있던 셈.
+
+그래서 쿼리는 이제 평평한 집합이 아니라 **term(사용자가 친 토큰) 단위**로 묶인다
+(`QueryTerms`): 한 term 의 여러 variant 는 서로 경쟁해 **최고 credit 하나만**
+기여한다. 리콜은 그대로다(확장어는 여전히 매칭돼 점수를 만든다) — 달라지는 건
+한 단어가 게이트 통과에 필요한 증거를 스스로 복제하지 못한다는 것뿐이다.
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Set as AbstractSet
+from dataclasses import dataclass
+from functools import lru_cache
 
 __all__ = [
     "tokens",
-    "expand_query",
+    "prepare_query",
     "field_score",
     "name_mentioned",
+    "QueryTerms",
     "MIN_TOKEN_LEN",
 ]
 
@@ -92,61 +109,139 @@ _INTENT_KO2EN: dict[str, tuple[str, ...]] = {
 }
 
 
-def expand_query(query_tokens: set[str]) -> set[str]:
-    """Query tokens + intent-table expansions for any Korean stems present.
-    Field/document text is NEVER expanded — expansion is a query-side recall aid,
-    so an English index can be found from a Korean request deterministically."""
-    expanded = set(query_tokens)
-    for t in query_tokens:
-        if not _HANGUL.match(t):
-            continue
-        for stem, en_words in _INTENT_KO2EN.items():
-            if t.startswith(stem):
-                expanded.update(en_words)
-    return expanded
-
-
 # ── fuzzy (char-bigram dice) ──────────────────────────────────────────────────
 
 
-def _bigrams(s: str) -> set[str]:
-    return {s[i : i + 2] for i in range(len(s) - 1)}
+def _bigrams(s: str) -> frozenset[str]:
+    return frozenset(s[i : i + 2] for i in range(len(s) - 1))
 
 
-def _dice(a: str, b: str) -> float:
-    ba, bb = _bigrams(a), _bigrams(b)
-    if not ba or not bb:
-        return 0.0
-    return 2.0 * len(ba & bb) / (len(ba) + len(bb))
+# ── query preparation ─────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class _Term:
+    """One token the user actually typed, plus its intent-table expansions.
+
+    `variants[0]` is the typed token itself. Each entry carries its precomputed
+    bigrams (None when the variant is too short for meaningful fuzzy matching) so
+    the dice ladder never rebuilds them per candidate field — the same prepared
+    query is scored against every skill/tool in the catalog."""
+
+    variants: tuple[tuple[str, frozenset[str] | None], ...]
+
+
+@dataclass(frozen=True)
+class QueryTerms:
+    """A query prepared once and scored against many fields.
+
+    `raw` is the untouched typed tokens — `name_mentioned` uses it so an
+    intent-table expansion can never fabricate an explicit mention."""
+
+    raw: frozenset[str]
+    terms: tuple[_Term, ...]
+
+    def __bool__(self) -> bool:
+        return bool(self.terms)
+
+
+def prepare_query(query: str) -> QueryTerms:
+    """Tokenise + expand + precompute bigrams, once per query.
+
+    Expansion is query-side only — field/document text is NEVER expanded, so an
+    English index stays findable from a Korean request deterministically. The
+    grouping into terms is what keeps one typed word worth at most one hit
+    (module docstring ★)."""
+    raw = tokens(query)
+    terms = []
+    for t in raw:
+        variants = [t]
+        if _HANGUL.match(t):
+            # 한 토큰이 여러 stem 에 걸릴 수 있고(예: "보고서"→report/document,
+            # "보내"→send) 확장어가 겹칠 수 있다 — 같은 variant 를 두 번 담아도
+            # term 단위 최고점 규칙상 점수는 안 변하지만, 중복 비교는 낭비다.
+            seen = {t}
+            for stem, en_words in _INTENT_KO2EN.items():
+                if not t.startswith(stem):
+                    continue
+                for w in en_words:
+                    if w not in seen:
+                        seen.add(w)
+                        variants.append(w)
+        terms.append(
+            _Term(
+                variants=tuple(
+                    (v, _bigrams(v) if len(v) >= _FUZZY_MIN_LEN else None) for v in variants
+                )
+            )
+        )
+    # 정렬로 term 순서를 고정한다 — 점수는 순서 독립이지만, 결정론적 순서는
+    # 디버깅/골든 테스트에서 같은 쿼리가 늘 같은 구조를 만들게 한다.
+    return QueryTerms(raw=frozenset(raw), terms=tuple(sorted(terms, key=lambda x: x.variants[0][0])))
 
 
 # ── field scoring ─────────────────────────────────────────────────────────────
 
+# 필드 인덱스 캐시 크기. 필드 텍스트는 **문서**(스킬 이름/태그/설명/본문 상단,
+# 도구 이름/설명)라 카탈로그 크기로 유계다 — 스킬 40개 × 4필드 + 도구 수백 개면
+# 수백 엔트리다. 쿼리는 절대 키가 되지 않으므로 세션이 길어져도 자라지 않는다.
+_FIELD_CACHE_SIZE = 512
 
-def field_score(query_tokens: set[str], field_text: str) -> float:
-    """How many query tokens land in this field. The ladder, best credit wins:
+
+@lru_cache(maxsize=_FIELD_CACHE_SIZE)
+def _field_index(field_text: str) -> tuple[frozenset[str], tuple[tuple[str, frozenset[str]], ...]]:
+    """(토큰 집합, fuzzy 대상 토큰+bigram). 같은 카탈로그가 턴마다 새 쿼리로 다시
+    스코어링되므로 필드 쪽은 캐시가 그대로 산다.
+
+    캐시 키는 **필드 텍스트 자체**다 — 내용이 바뀌면 키가 바뀌어 자동으로
+    무효화되므로 stale 이 원천적으로 불가능하다(스킬 편집/버전업 포함). 이름이나
+    id 로 키를 잡았다면 무효화 훅이 필요했을 자리."""
+    field = tokens(field_text)
+    return frozenset(field), tuple(
+        (f, _bigrams(f)) for f in field if len(f) >= _FUZZY_MIN_LEN
+    )
+
+
+def field_score(query: QueryTerms, field_text: str) -> float:
+    """How many of the user's typed words land in this field, best credit wins:
     exact token 1.0 → substring containment 0.5 (bridges '투자용'→'투자',
     'ppt'→'pptx') → char-bigram fuzzy 0.25 (bridges typos and near-forms,
-    'workbok'→'workbook'). Deterministic and order-independent."""
-    field = tokens(field_text)
-    if not field or not query_tokens:
+    'workbok'→'workbook'). Deterministic and order-independent.
+
+    Credit is per **term**, not per variant: a term's expansions compete with each
+    other and only the strongest contributes (module docstring ★). A pure-English
+    query has one variant per term, so its scoring is unchanged."""
+    if not query:
         return 0.0
-    hits = 0.0
-    for q in query_tokens:
-        if q in field:
-            hits += 1.0
-            continue
-        if len(q) >= _PARTIAL_MIN_LEN and any(q in f or f in q for f in field):
-            hits += 0.5
-            continue
-        if len(q) >= _FUZZY_MIN_LEN and any(
-            len(f) >= _FUZZY_MIN_LEN and _dice(q, f) >= _FUZZY_THRESHOLD for f in field
-        ):
-            hits += 0.25
-    return hits
+    # 필드 토큰의 bigram 은 필드당 한 번만 만든다 — 예전 `_dice(q, f)` 는
+    # (쿼리토큰 × 필드토큰) 쌍마다 양쪽을 새로 만들어 O(|Q|·|F|) 번 집합을
+    # 생성했다. 실제로 서로 다른 집합은 O(|Q|+|F|) 개뿐이다.
+    field, fuzzy_field = _field_index(field_text)
+    if not field:
+        return 0.0
+    total = 0.0
+    for term in query.terms:
+        best = 0.0
+        for variant, vgrams in term.variants:
+            if variant in field:
+                best = 1.0
+                break  # 사다리 최고점 — 나머지 variant 를 볼 필요가 없다
+            if len(variant) >= _PARTIAL_MIN_LEN and any(
+                variant in f or f in variant for f in field
+            ):
+                best = max(best, 0.5)
+                continue
+            if best < 0.25 and vgrams:
+                nv = len(vgrams)
+                for _, fgrams in fuzzy_field:
+                    if 2.0 * len(vgrams & fgrams) / (nv + len(fgrams)) >= _FUZZY_THRESHOLD:
+                        best = 0.25
+                        break
+        total += best
+    return total
 
 
-def name_mentioned(query_tokens: set[str], name: str) -> bool:
+def name_mentioned(query_tokens: AbstractSet[str], name: str) -> bool:
     """Explicit-mention routing: did the user literally name this skill/tool?
     True when EVERY token of the name appears in the raw (unexpanded) query —
     '$business-planning 스킬 써줘' or 'run create_presentation' route exactly,

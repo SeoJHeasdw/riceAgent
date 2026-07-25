@@ -21,7 +21,9 @@ see core/lexical.py). The routing ladder, strongest first:
   2. name/tag token match (the author's own "this is what I'm about" signal);
   3. description/body token match, with substring + char-bigram fuzzy credit;
   4. a tiny global ko→en intent table expands generic Korean verbs/nouns so a
-     Korean request finds an English-indexed skill (core/lexical.py);
+     Korean request finds an English-indexed skill (core/lexical.py) — the
+     expansions of one typed word compete for a single hit, they do not each
+     count (see MIN_STRONG_HITS below);
   5. negative triggers — a tag like `not:excel` subtracts when the query hits
      that word, letting authors carve off known false-positive neighborhoods.
 """
@@ -53,6 +55,12 @@ AUTO_INJECT_THRESHOLD = 3.0
 # hit = 1.0, substring = 0.5) — one keyword puts a skill in the index, where it is
 # one `skill_view` away; it does not put its body in the prompt. Explicit mention
 # still routes unconditionally.
+#
+# "independent" 는 2026-07-25 까지 한국어에서 성립하지 않았다: intent 확장이 쿼리를
+# 평평한 토큰 집합으로 펼쳐서, "생성해줘" 한 단어가 {create, new, 생성해줘} 로 strong
+# 2.0 을 자력으로 만들어 이 게이트를 통과했다(영어 "create it" 은 1.0 으로 정상 차단 —
+# 게이트가 주 사용자 언어에서만 꺼져 있었다). core/lexical.py 가 쿼리를 term(사용자가
+# 친 토큰) 단위로 묶고 term 당 최고 credit 하나만 세면서 그 비대칭이 사라졌다.
 MIN_STRONG_HITS = 2.0
 
 # Explicit mention outranks any organic score — the user asked for THIS skill.
@@ -103,13 +111,13 @@ def _split_tags(tags: list[str]) -> tuple[list[str], list[str]]:
 
 
 def _score_one(
-    raw_query: set[str], query: set[str], name: str, tags: list[str], description: str, body: str
+    query: lexical.QueryTerms, name: str, tags: list[str], description: str, body: str
 ) -> tuple[float, float, bool]:
     """(score, strong_hits, explicit). `strong_hits` = raw name+tag hit credit —
     the author-signal evidence the auto-inject gate requires."""
     # 1. explicit mention — checked against the RAW query (an intent-table
     #    expansion must never fabricate a "mention").
-    if lexical.name_mentioned(raw_query, name):
+    if lexical.name_mentioned(query.raw, name):
         return _EXPLICIT_MENTION_BONUS, _EXPLICIT_MENTION_BONUS, True
     positive_tags, negative_tags = _split_tags(tags)
     name_hits = lexical.field_score(query, name.replace("-", " "))
@@ -122,6 +130,15 @@ def _score_one(
     )
     if negative_tags:
         score -= _NEGATIVE_HIT_PENALTY * lexical.field_score(query, " ".join(negative_tags))
+    # strong = name/tag **필드 커버리지**(저자가 스스로 밝힌 신호를 몇 군데나 때렸나).
+    # 한 단어가 name 과 tag 를 모두 때려 2.0 이 되는 건 의도된 동작이다 — 영어도
+    # 똑같이 동작한다("xlsx" 는 name·tag 를 모두 때려 2.0, "excel" 은 tag 만이라 1.0).
+    # 이걸 "서로 다른 입력 단어 수"로 바꿔보면 한국어가 구조적으로 손해를 본다:
+    # 한국어 단어는 intent 테이블에 있는 것만 영어 인덱스에 닿으므로("체크리스트"→
+    # checklist 는 테이블에 없다), 정당한 요청("배포 체크리스트대로 진행해줘" →
+    # deploy-checklist)까지 게이트에 막힌다. 실제 비대칭은 여기가 아니라 확장어가
+    # **한 필드 안에서** 여러 hit 으로 세지던 것이었고, 그건 core/lexical.py 의
+    # term 묶음이 닫았다.
     return max(0.0, score), name_hits + tag_hits, False
 
 
@@ -136,12 +153,11 @@ def score_skills(query: str, skills: list) -> list[ScoredSkill]:
     (9.0)를 넘어 — 사용자가 이름을 콕 집은 스킬이 단일 주입 슬롯
     (skill_max_auto_inject=1)을 빼앗기는 역전이 났다. "사용자가 THIS를 시켰다"는
     어떤 유기 매칭보다 강한 신호이므로 정렬 키에서 명시적으로 우선한다."""
-    raw_q = lexical.tokens(query)
-    q = lexical.expand_query(raw_q)
+    q = lexical.prepare_query(query)
     scored = []
     for s in skills:
         score, strong, explicit = (
-            _score_one(raw_q, q, s.name, s.tags, s.description, s.body) if q else (0.0, 0.0, False)
+            _score_one(q, s.name, s.tags, s.description, s.body) if q else (0.0, 0.0, False)
         )
         scored.append(
             ScoredSkill(

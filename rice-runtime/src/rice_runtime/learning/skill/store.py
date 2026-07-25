@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import os
 import shutil
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -74,6 +74,15 @@ class SkillData:
     enabled: bool = True
     # 파일/명령 식별자인 name과 분리된 UI 표시 이름. 기존 파일은 name으로 폴백.
     display_name: str | None = None
+
+
+def _clone_skill(data: SkillData) -> SkillData:
+    """캐시 보관본과 호출부가 서로를 못 건드리게 하는 사본.
+
+    `replace()` 만으론 부족하다 — 얕은 복사라 `tags`/`tools` 리스트를 원본과
+    공유하게 되고, 호출부의 `skill.tags.append(...)` 가 캐시를 오염시킨다.
+    문자열/불리언 필드는 불변이라 그대로 공유해도 안전하다."""
+    return replace(data, tags=list(data.tags), tools=list(data.tools))
 
 
 # ── frontmatter 파싱 (메커니즘은 core/frontmatter.py — 여기는 필드 의미론) ────
@@ -166,6 +175,9 @@ class SkillStore:
 
     def __init__(self, paths: RicePaths) -> None:
         self._paths = paths
+        # path → ((mtime_ns, size), 파싱본). `list()` 전용 캐시 — 보관본은 절대
+        # 반환되지 않고 사본만 나간다(`_clone_skill`). 크기는 스킬 파일 수로 유계다.
+        self._list_cache: dict[str, tuple[tuple[int, int], SkillData]] = {}
 
     def _skill_path(self, name: str) -> Path:
         return self._paths.skills / f"{name}.md"
@@ -205,18 +217,39 @@ class SkillStore:
         return parse_skill_md(path.read_text(encoding="utf-8"))
 
     def list(self) -> list[SkillData]:
-        """모든 스킬을 반환한다 (이름 정렬). 파싱 오류는 건너뛴다(fail-safe)."""
+        """모든 스킬을 반환한다 (이름 정렬). 파싱 오류는 건너뛴다(fail-safe).
+
+        턴마다 최소 2회(prefetch + search_skills/routing_miss) 불리는 경로라
+        (mtime_ns, size) 키의 파일별 파싱 캐시를 둔다 — 안 바뀐 파일은 다시 읽지도
+        파싱하지도 않는다. 파일 하나가 바뀌면 그 파일만 무효화된다.
+
+        **캐시본은 절대 밖으로 내보내지 않는다**: SkillData 는 의도적으로
+        `frozen=False`이고 호출부가 실제로 필드를 바꾼다(service.apply_patch,
+        lifecycle.set_state 등). 공유 인스턴스를 돌려주면 그 변경이 캐시를 오염시켜
+        디스크와 어긋난 상태가 계속 읽힌다. 그래서 매 호출 사본을 만든다."""
         skills_dir = self._paths.skills
         if not skills_dir.exists():
+            self._list_cache.clear()
             return []
         result = []
+        seen: set[str] = set()
         for path in sorted(skills_dir.glob("*.md")):
+            key = str(path)
+            seen.add(key)
             try:
-                result.append(parse_skill_md(path.read_text(encoding="utf-8")))
+                st = path.stat()
+                stamp = (st.st_mtime_ns, st.st_size)
+                cached = self._list_cache.get(key)
+                if cached is None or cached[0] != stamp:
+                    cached = (stamp, parse_skill_md(path.read_text(encoding="utf-8")))
+                    self._list_cache[key] = cached
+                result.append(_clone_skill(cached[1]))
             except Exception:
                 # 손상된 SKILL.md(사용자 직접 편집 등)는 무음으로 건너뛴다 — 한 파일
                 # 오류가 전체 목록을 막지 않게(fail-safe). (Exception이 ValidationError 포함)
-                pass
+                self._list_cache.pop(key, None)
+        for stale in [k for k in self._list_cache if k not in seen]:
+            del self._list_cache[stale]  # 삭제된 스킬의 캐시 회수
         return result
 
     def read_history(self, name: str) -> list[tuple[int, str, str]]:

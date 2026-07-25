@@ -160,12 +160,12 @@ _SPOTLIGHT_BUDGET_TOKENS = 4_000
 _SPOTLIGHT_MAX_TOOLS = 8
 
 
-def _score_tool(query_tokens: set[str], spec: ToolSpec) -> float:
+def _score_tool(query: lexical.QueryTerms, spec: ToolSpec) -> float:
     """도구 관련도: 이름(언더스코어/점 분해) 2.0 가중 + 설명 1.0 가중.
     exact/substring/bigram-fuzzy 사다리는 core/lexical.py 하나를 공유한다."""
     name_text = spec.name.replace("_", " ").replace(".", " ")
-    return 2.0 * lexical.field_score(query_tokens, name_text) + lexical.field_score(
-        query_tokens, spec.description
+    return 2.0 * lexical.field_score(query, name_text) + lexical.field_score(
+        query, spec.description
     )
 
 
@@ -186,7 +186,7 @@ def fold_tools_for_budget(
     if sum(_estimate_tool_tokens(t) for t in foldable) <= _TOOL_BUDGET_TOKENS:
         return core + foldable
     spotlight: list[ToolSpec] = []
-    q = lexical.expand_query(lexical.tokens(query))
+    q = lexical.prepare_query(query)
     if q:
         ranked = sorted(
             ((score, spec) for spec in foldable if (score := _score_tool(q, spec)) > 0),
@@ -434,7 +434,7 @@ class ToolDispatcher:
             # exact/substring/fuzzy + ko→en intent 확장)으로 상위 매칭을 돌려준다.
             # 빈 쿼리는 "뭐가 있나" 브라우징이므로 전체 카탈로그를 그대로 반환.
             query = str(call.arguments.get("query", "")).strip()
-            q = lexical.expand_query(lexical.tokens(query))
+            q = lexical.prepare_query(query)
             if not q:
                 matches = [
                     {"name": t.name, "description": t.description}

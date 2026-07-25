@@ -35,7 +35,11 @@ from rice_runtime.core.storage.sqlite import Database
 from rice_runtime.core.types import InjectedSkill, ToolCall, ToolSpec
 from rice_runtime.execution.plugin.loader import PluginLoader
 from rice_runtime.learning.service import LearningService
-from rice_runtime.learning.skill.relevance import AUTO_INJECT_THRESHOLD, score_skills
+from rice_runtime.learning.skill.relevance import (
+    AUTO_INJECT_THRESHOLD,
+    auto_inject_eligible,
+    score_skills,
+)
 from rice_runtime.learning.skill.store import SkillData, SkillStore
 
 
@@ -93,12 +97,64 @@ class TestLexicalLadder:
         assert negated.score < plain.score
 
     def test_bigram_fuzzy_bridges_typos(self):
-        assert lexical.field_score({"workbok"}, "create workbook") > 0
+        assert lexical.field_score(lexical.prepare_query("workbok"), "create workbook") > 0
 
     def test_expansion_never_fabricates_explicit_mention(self):
         """intent 확장어로는 explicit-mention 보너스가 발동하지 않아야 한다."""
         ranked = score_skills("뭔가 만들어줘", [_skill("create")])
         assert ranked[0].score < 2 * AUTO_INJECT_THRESHOLD  # 보너스(9.0) 미발동
+
+    def test_expansion_cannot_manufacture_independent_evidence(self):
+        """한 단어의 intent 확장이 정밀도 게이트(MIN_STRONG_HITS)를 스스로 통과시키면
+        안 된다. "생성해줘"는 사용자가 친 단어 **하나**이므로 author-signal 도 하나다 —
+        예전엔 {create, new, 생성해줘} 로 평평하게 펼쳐져 strong=2.0 으로 게이트를
+        통과했고(영어 "create it"은 정상적으로 막혔다), 게이트가 한국어에서만 꺼져
+        있었다. term 단위 최고점 규칙이 그 비대칭을 없앤다."""
+        skill = _skill("note-taker", tags=("create", "new"), description="Take a note")
+        ko = score_skills("생성해줘", [skill])[0]
+        en = score_skills("create it", [skill])[0]
+        assert ko.strong == en.strong == 1.0  # 양쪽 다 author-signal 1개
+        assert not auto_inject_eligible(ko) and not auto_inject_eligible(en)
+        assert ko.score > 0  # 리콜은 유지 — 인덱스에 남아 skill_view 로 열린다
+
+    def test_mixed_korean_english_query_is_symmetric(self):
+        """혼용 쿼리에서 게이트가 언어에 따라 다르게 열리면 안 된다.
+
+        비교 기준을 맞추는 게 핵심이다: "엑셀"은 확장으로 name(xlsx)·tag(excel)을
+        모두 덮으므로, 대응하는 영어는 같은 두 필드를 덮는 "xlsx"다("excel"이
+        아니다 — tag 하나만 덮으므로 정책상 인덱스행이 맞다). strong 은 name/tag
+        **필드 커버리지**를 세므로 둘은 같은 값이어야 한다."""
+        xl = _skill("xlsx-builder", tags=("excel", "xlsx", "spreadsheet"),
+                    description="Build an Excel workbook")
+        ko = score_skills("엑셀", [xl])[0]
+        en = score_skills("xlsx", [xl])[0]
+        assert ko.strong == en.strong == 2.0
+        assert auto_inject_eligible(ko) == auto_inject_eligible(en)
+        # 한 필드만 덮는 단어는 양쪽 언어 모두 인덱스행
+        assert not auto_inject_eligible(score_skills("excel", [xl])[0])
+
+    def test_mixed_script_query_scores_each_word_once(self):
+        """ko/en 을 섞어 쓴 쿼리에서도 한 단어는 한 번만 세어진다 — 동의어를 나란히
+        쓴 한국어+영어 쿼리와 순수 영어 등가물의 strong 이 같아야 한다."""
+        mail = _skill("mail-sender", tags=("mail", "email", "send"), description="Send email")
+        assert score_skills("메일 email 보내줘", [mail])[0].strong == \
+               score_skills("mail email send", [mail])[0].strong
+
+    def test_field_index_cache_cannot_go_stale(self):
+        """필드 인덱스 캐시는 필드 **내용**으로 키를 잡는다 — 스킬 본문이 바뀌면
+        키도 바뀌므로 무효화 훅 없이 자동으로 새 인덱스를 탄다."""
+        before = score_skills("deploy", [_skill("s", body="nothing relevant here")])[0]
+        after = score_skills("deploy", [_skill("s", body="run the deploy script")])[0]
+        assert after.score > before.score
+
+    def test_multi_signal_korean_request_still_auto_injects(self):
+        """게이트 강화가 진짜 다신호 한국어 요청까지 막으면 안 된다."""
+        scored = score_skills(
+            "투자 사업계획서 발표자료 만들어줘",
+            [_skill("business-planning", tags=("investor", "pitch", "presentation"),
+                    description="Build an investor pitch deck")],
+        )[0]
+        assert auto_inject_eligible(scored)
 
 
 # ── plugin skills ride the same relevance pipeline (P0) ──────────────────────

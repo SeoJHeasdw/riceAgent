@@ -134,6 +134,36 @@ class TestSkillStore:
         names = {s.name for s in skills}
         assert {"skill-a", "skill-b"} <= names
 
+    # ── list() 파싱 캐시의 안전 불변식 (2026-07-25) ───────────────────────────
+    # 캐시는 (mtime_ns, size) 키다. 두 성질이 깨지면 캐시가 버그가 된다:
+    # 디스크 변경이 안 보이거나, 호출부의 변경이 캐시로 새거나.
+
+    def test_list_cache_sees_disk_edits(self):
+        self._store.write(_make_skill("edited-skill"))
+        assert "MARKER" not in self._store.list()[0].body
+        edited = self._store.read("edited-skill")
+        edited.body += "\nMARKER\n"
+        self._store.write(edited)
+        assert "MARKER" in self._store.list()[0].body
+
+    def test_list_cache_survives_deletion(self):
+        self._store.write(_make_skill("doomed"))
+        assert [s.name for s in self._store.list()] == ["doomed"]
+        (self._paths.skills / "doomed.md").unlink()
+        assert self._store.list() == []
+
+    def test_list_result_mutation_does_not_poison_cache(self):
+        """SkillData 는 frozen=False 이고 호출부가 실제로 필드를 바꾼다
+        (apply_patch/set_state). 캐시본이 새어나가면 그 변경이 디스크와 어긋난 채
+        계속 읽힌다 — list() 는 매번 사본을 줘야 한다."""
+        self._store.write(_make_skill("shared"))
+        first = self._store.list()[0]
+        first.state = "archived"
+        first.tags.append("injected-tag")
+        second = self._store.list()[0]
+        assert second.state == "active"
+        assert "injected-tag" not in second.tags
+
     def test_list_empty_when_no_skills(self):
         assert self._store.list() == []
 

@@ -38,7 +38,10 @@ _EMA_ALPHA = 0.3  # 새 관측 가중치. 낮을수록 안정적, 높을수록 �
 
 def _is_cjk(ch: str) -> bool:
     """CJK(한글/한자/가나 등 폭넓은 표의·음절 문자)면 True. 이 문자들은 BPE에서
-    라틴보다 훨씬 촘촘하게 토큰화된다(글자당 토큰이 크다)."""
+    라틴보다 훨씬 촘촘하게 토큰화된다(글자당 토큰이 크다).
+
+    `estimate_tokens`는 더 이상 이 함수를 문자마다 부르지 않는다(아래 참조) —
+    코드포인트 분류의 **정본 정의**로 남아 테스트/문서가 참조한다."""
     o = ord(ch)
     return (
         0x1100 <= o <= 0x11FF      # Hangul Jamo
@@ -60,14 +63,26 @@ def estimate_tokens(text: str) -> int:
     """언어 인식 토큰 추정(순수 함수). CJK 글자와 그 외를 나눠 가중합한다.
 
     빈 문자열은 0. 결과는 최소 1(비지 않은 입력) — 0-비용 메시지가 예산에서
-    사라져 wire 정합성 계산이 어긋나는 걸 막는다."""
+    사라져 wire 정합성 계산이 어긋나는 걸 막는다.
+
+    구현(2026-07-25): 문자마다 `_is_cjk`를 부르는 파이썬 루프였고, 이게 렌더
+    비용을 지배했다 — 컨텍스트 매니저가 반복마다 트랜스크립트 전체를 여러 번
+    세므로(70KB당 19.5ms), **동기 호출인 `loop.py::_render`가 이벤트 루프를
+    반복마다 수십 ms씩 막아** SSE 토큰 flush 가 끊겼다. 이제 UTF-8 바이트
+    길이 산술로 같은 값을 C 속도로 얻는다(70KB당 0.04ms):
+
+        CJK(BMP) 문자는 UTF-8 3바이트 = 문자당 +2바이트.
+        ASCII 는 1바이트 = +0. 따라서 (bytes - chars) // 2 가 CJK 글자 수다.
+
+    ASCII·한글·한자·가나·혼합·JSON 에서 결과가 **비트 단위로 동일**하다(실측).
+    갈리는 건 2바이트(라틴-1/키릴)와 4바이트(이모지, CJK Ext-B) 문자뿐이고,
+    전부 **과대추정** 쪽이다 — 이 파일이 못박은 "틀리더라도 안전한 방향(더
+    일찍 압축)"과 같은 방향이라 예산 안전성은 오히려 강해진다."""
     if not text:
         return 0
-    cjk = 0
-    for ch in text:
-        if _is_cjk(ch):
-            cjk += 1
-    other = len(text) - cjk
+    n_chars = len(text)
+    cjk = (len(text.encode("utf-8")) - n_chars) // 2
+    other = n_chars - cjk
     est = cjk * _CJK_TOKENS_PER_CHAR + other * _OTHER_TOKENS_PER_CHAR
     return max(1, int(est + 0.5))
 

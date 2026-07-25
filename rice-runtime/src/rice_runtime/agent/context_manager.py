@@ -174,6 +174,10 @@ def estimate_tokens(text: str) -> int:
 # 압축이 오래된 이미지 메시지를 먼저 접는다.
 _IMAGE_TOKEN_ESTIMATE = 1_600
 
+# 체크포인트 구성 시 wire-수리 고정점 반복 상한(`_build_checkpoint`). 실측상 2패스면
+# 수렴한다 — 상한은 무한루프 방어용이다.
+_MAX_REPAIR_PASSES = 8
+
 
 def estimate_message_tokens(message: Message, estimate: Callable[[str], int] = _cjk_estimate_tokens) -> int:
     tool_cost = 0
@@ -438,7 +442,29 @@ class ConversationContextManager:
                 retained_tokens += cost
 
         retained_ids = {m.id for m in retained}
-        omitted = [m for m in managed if m.id not in retained_ids]
+        omitted_ids = {m.id for m in managed if m.id not in retained_ids}
+
+        # ── wire 수리로 사라질 메시지를 미리 생략 집합에 합친다 ──────────────
+        # greedy 선택은 "큰 건 건너뛰고 작은 옛 메시지는 담는" 방식이라 히스토리에
+        # 구멍을 낸다. 그 구멍은 렌더 마지막의 `_repair_tool_adjacency`가 정리하는데,
+        # 거기서 지워지는 메시지는 **retained 였으므로 요약에도 안 들어간다** — 요약
+        # 에도 없고 wire 에도 없는 조용한 유실이다(부모 assistant 가 생략된 tool
+        # 결과가 대표적). 수리를 여기서 미리 돌려 그 메시지들을 omitted 로 넘기면
+        # 최소한 요약에는 남는다.
+        #
+        # 한 번 걷어내면 새 고아가 생길 수 있어(결과를 잃은 부모의 tool_calls 가
+        # 다시 불완전해진다) 고정점까지 반복한다. 매 패스가 집합을 단조 증가시키고
+        # 후보는 유한하므로 종료가 보장된다 — 상한은 방어적 안전핀이다.
+        for _ in range(_MAX_REPAIR_PASSES):
+            visible = tuple(m for m in managed if m.id not in omitted_ids)
+            visible, orphan_ids = self._drop_orphaned_tool_prefix(visible)
+            _, repair_msg_ids, _ = _repair_tool_adjacency(visible)
+            newly_lost = (set(orphan_ids) | set(repair_msg_ids)) - omitted_ids
+            if not newly_lost:
+                break
+            omitted_ids |= newly_lost
+
+        omitted = [m for m in managed if m.id in omitted_ids]
         if not omitted:
             # 압축할 것이 없다(전부 보호 suffix 안) — 예산 초과는 용인하고
             # 프로바이더/재시도 경로에 맡긴다(기존 동작과 동일).
@@ -585,12 +611,23 @@ def _summarize_omitted(messages: Sequence[Message], summary_tokens: int) -> str:
 
 
 def _message_prefix(message: Message) -> str:
+    """요약 한 줄의 머리말. **모델이 읽을 문장**이지 wire 덤프가 아니다.
+
+    도구 결과를 `tool result call_1` 로 적던 것이 특히 나빴다(2026-07-25): call id
+    는 프로바이더 내부 식별자라 모델에게 아무 의미가 없고, 컨텍스트에 존재하지도
+    않는 id 를 요약이 언급하는 꼴이라 소형 모델이 그걸 되짚으려 든다. 도구 메시지는
+    이미 `tool_name`·`ok` 를 metadata 로 갖고 있으므로 그걸 쓴다 — "무슨 도구가
+    성공/실패했나"는 모델이 실제로 쓸 수 있는 정보다."""
     if message.role == "assistant" and message.tool_calls:
         names = ", ".join(call.tool_name for call in message.tool_calls[:3])
         return f"assistant requested tool(s) {names}"
     if message.role == "tool":
-        tool_call_id = message.metadata.get("tool_call_id")
-        return f"tool result {tool_call_id}" if tool_call_id else "tool result"
+        name = message.metadata.get("tool_name")
+        # 성패 정본은 metadata["ok"] 다 — content 의 "ERROR: " 접두사 sniffing 금지
+        # (loop.py `_tool_message` 계약).
+        ok = message.metadata.get("ok")
+        status = "" if ok is None else (" ok" if ok else " failed")
+        return f"{name} result{status}" if name else "tool result"
     return message.role
 
 

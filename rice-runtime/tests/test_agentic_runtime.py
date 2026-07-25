@@ -153,7 +153,15 @@ def test_context_manager_skips_oversized_middle_message_without_breaking_scan():
     assert "Compressed Conversation Context" in rendered.history[0].content
 
 
-def test_context_manager_does_not_summarize_wire_repair_drops():
+def test_context_manager_summarizes_wire_repair_drops():
+    """wire 수리로 떨어질 메시지도 요약에 실린다(2026-07-25 방침 전환).
+
+    이전 방침은 "생략과 삭제는 다른 사건"이라 수리 삭제분을 요약에서 제외했다.
+    그 결과가 조용한 유실이다: greedy 예산 선택이 retained 로 담은 메시지를 수리가
+    나중에 지우면, 그 내용은 **요약에도 없고 wire 에도 없다** — 모델이 도구 관찰
+    자체를 통째로 잊는다. 지금은 `_build_checkpoint`가 수리를 미리 돌려 삭제될
+    메시지를 생략 집합으로 넘기므로 최소한 요약에는 남는다. 감사(stats) 는 그대로
+    유지된다 — 무엇이 왜 사라졌는지는 여전히 ledger 로 추적 가능해야 한다."""
     cfg = ContextConfig(
         max_tokens=25,
         retained_tokens=15,
@@ -165,17 +173,26 @@ def test_context_manager_does_not_summarize_wire_repair_drops():
     call = ToolCall(tool_name="lookup", arguments={}, id="call_1")
     messages = (
         Message(role="assistant", content="", tool_calls=(call,)),
-        Message(role="tool", content="small result", metadata={"tool_call_id": "call_1"}),
+        # loop.py `_tool_message` 가 싣는 실제 metadata 모양
+        Message(role="tool", content="small result",
+                metadata={"tool_call_id": "call_1", "tool_name": "lookup", "ok": True}),
         Message(role="user", content="latest"),
     )
 
     rendered = ConversationContextManager(cfg).render("", messages)
 
     real = [m for m in rendered.history if m.metadata.get("synthetic") != "context_summary"]
-    assert [m.role for m in real] == ["user"]
-    # wire 수리로 떨어진 도구 결과는 요약에 실리지 않는다(생략과 삭제는 다른 사건).
-    assert all("tool result call_1" not in m.content for m in rendered.history)
-    assert "tool result call_1" not in rendered.system_prompt
+    assert [m.role for m in real] == ["user"]  # wire 상 결과는 이전과 동일
+    summary = "".join(
+        m.content for m in rendered.history if m.metadata.get("synthetic") == "context_summary"
+    )
+    assert "small result" in summary  # 더 이상 조용히 사라지지 않는다
+    # 요약 머리말은 모델이 읽는 문장이다 — 도구 이름/성패를 쓰고, 프로바이더 내부
+    # call id 는 절대 노출하지 않는다(소형 모델이 없는 id 를 되짚으려 든다).
+    assert "lookup result ok" in summary
+    assert "call_1" not in summary
+    # 수리가 렌더 시점에 또 지울 것은 남아있지 않다 — 체크포인트가 이미 흡수했다.
+    assert rendered.stats.dropped_message_ids == ()
 
 
 # ── 프리픽스 캐시 불변식 (context_manager ★, 2026-07-11) ─────────────────────
