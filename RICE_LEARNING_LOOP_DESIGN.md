@@ -92,6 +92,13 @@ absorbed_into: null                   # curator 통합으로 archived됐으면 �
     다시 시작하고, `use`는 lifetime 누적을 유지한다.
   - `friction`/`routing_miss` = 리뷰 LLM에 실리는 실측 힌트(§5.2.2) — 각각 "절차를
     의심하라", "발견성(설명/태그)을 고쳐라"의 근거.
+  - **발견성은 수리(routing_miss)만이 아니라 생성 시점에도 배선된다(2026-07-25)**:
+    이전에는 `propose_skill_create`의 tags 설명이 "0-5 short tags."뿐이라 새 스킬이
+    **영어 태그만 달고 태어났고**, routing_miss가 쌓여 리뷰가 돌 때까지 몇 번은 안
+    걸렸다. 이제 리뷰(T1)·발굴(T4) 두 생성 경로가 `prompts/review.py::
+    TAGS_PARAM_DESCRIPTION` 하나를 공유해 처음부터 한/영 트리거를 요구한다(두 경로가
+    따로 표류하던 것이 결함의 원인이라 상수를 공유한다). 빌트인 스킬도 한국어 트리거
+    태그를 싣는다 — 사용자가 못 고치는 스킬이라 학습 루프가 사후 수리할 수 없다.
 - 카운터 증가 시점: `use`/`injected`/`friction`=턴 종료 observe, `view`/`routing_miss`=`skill_view`, `patch`=본문 수정(승인) 시 (§5.2.4)
 - 상태 전이·curator 입력으로 사용 (§5.1). `use`·`patch`는 학습 측정 지표로도 사용된다([RICE_LEARNING_EVAL.md](RICE_LEARNING_EVAL.md) 2장).
 - **설명 사이드카(별개 파일, 2026-07-06 신규)**: `usage.json`이 텔레메트리라면, `learning/skill/analysis.py`+`analyzer.py`가 만드는 `SkillAnalysisData`는 "이 스킬이 뭘 하는지" 사람이 읽을 설명이다(휴리스틱+LLM 1회, `GET /skills/{id}`가 lazy-load, `POST /skills/{id}/analysis/refresh`로 재생성). **UI 설명 전용 — 권한/실행 판단에는 절대 쓰이지 않는다.**

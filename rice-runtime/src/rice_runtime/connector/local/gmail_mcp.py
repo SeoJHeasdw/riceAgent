@@ -42,9 +42,14 @@ _MAX_RESULTS_CAP = 25
 # 원격 gmail MCP 카탈로그와 이름이 겹치지 않게 gmail_ 접두 — 이름 재탐색 라우팅의
 # 로컬 우선 규칙이 원격 도구를 가리는 사고를 피한다(둘 다 연결된 경우).
 TOOLS: list[dict[str, Any]] = [
+    # `keywords` 는 MCP 표준 밖의 확장 필드다(mcp/client.py `_raw_to_spec` 가 읽는다).
+    # 라우터 전용 트리거 어휘이고 모델 스키마에는 실리지 않으므로, 설명문을 한국어로
+    # 오염시키지 않고 한국어 요청이 이 도구에 닿게 한다. 전역 intent 테이블은 범용
+    # 동사(메일→mail 등)만 덮으므로 도메인어(라벨·초안·받은편지함)는 여기서만 닿는다.
     {
         "name": "gmail_list_labels",
         "description": "List the Gmail labels of the connected account.",
+        "keywords": ["라벨", "메일", "지메일", "label", "gmail"],
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
@@ -54,6 +59,7 @@ TOOLS: list[dict[str, Any]] = [
             "(e.g. 'from:billing@example.com newer_than:7d'). "
             "Returns id, from, subject, date and snippet for each match."
         ),
+        "keywords": ["메일", "지메일", "이메일", "받은편지함", "검색", "찾기", "gmail", "inbox"],
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -69,6 +75,7 @@ TOOLS: list[dict[str, Any]] = [
     {
         "name": "gmail_get_message",
         "description": "Read one Gmail message by id — headers plus the plain-text body.",
+        "keywords": ["메일", "지메일", "이메일", "본문", "읽기", "내용", "gmail"],
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -83,6 +90,7 @@ TOOLS: list[dict[str, Any]] = [
             "Create a Gmail draft (does NOT send). "
             "The user reviews and sends it from Gmail themselves."
         ),
+        "keywords": ["메일", "지메일", "이메일", "초안", "답장", "회신", "작성", "보내기", "gmail", "draft"],
         "inputSchema": {
             "type": "object",
             "properties": {

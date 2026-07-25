@@ -25,7 +25,7 @@ import json
 import logging
 from typing import Any
 
-from ...core.types import ToolResult, ToolSpec
+from ...core.types import ToolResult, ToolSpec, coerce_tool_keywords
 
 log = logging.getLogger("rice.connector.mcp")
 
@@ -214,6 +214,10 @@ class RemoteMcpClient:
 
         connector 도구는 외부 머신에 접근하므로 항상 승인 대상이다
         (source="connector", requires_approval=True — RUNTIME_DESIGN §5).
+
+        `keywords`는 MCP 표준 밖의 선택적 확장이다 — 우리가 만든 로컬 서버
+        (connector/local/*)가 한국어 트리거를 실어 보내는 통로이며, 표준만 따르는
+        서드파티 서버는 이 키가 없어 `()`로 남는다(동작 변화 없음).
         """
         return ToolSpec(
             name=raw["name"],
@@ -222,6 +226,7 @@ class RemoteMcpClient:
             source="connector",
             owner_id=self._owner_id or None,
             requires_approval=True,
+            keywords=coerce_tool_keywords(raw.get("keywords")),
         )
 
 

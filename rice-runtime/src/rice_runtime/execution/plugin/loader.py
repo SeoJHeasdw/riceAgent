@@ -51,6 +51,7 @@ from ...core.types import (
     ToolCall,
     ToolResult,
     ToolSpec,
+    coerce_tool_keywords,
     new_id,
     now_iso,
 )
@@ -280,6 +281,9 @@ class PluginLoader:
                     owner_id=info.id,
                     # plugin tools require approval by default (RUNTIME_DESIGN §5)
                     requires_approval=bool(t.get("requires_approval", True)),
+                    # 라우팅 전용 트리거 어휘(모델에 안 실림) — 매니페스트가 한국어
+                    # 트리거를 선언할 수 있게 한다. 없으면 () 로 기존 동작 그대로.
+                    keywords=coerce_tool_keywords(t.get("keywords")),
                 )
             )
         return specs

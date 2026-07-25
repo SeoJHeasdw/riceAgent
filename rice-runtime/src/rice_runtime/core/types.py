@@ -96,6 +96,42 @@ class ToolSpec:
     # 실행된다. 판정 기준이 스케줄러의 하드코딩 이름 목록이 아니라 도구 선언
     # 자신에게 있다(2026-07-10).
     parallel_safe: bool = True
+    # 라우팅 전용 트리거 어휘 — 스킬의 tags와 같은 역할(2026-07-25). **모델에게는
+    # 보이지 않는다**: provider 어댑터는 name/description/parameters만 직렬화하므로
+    # 이 필드는 wire 에 실리지 않고 토큰을 쓰지 않는다. 오직 tool_dispatch 의
+    # 결정론적 lexical 라우터(스포트라이트·tool_search)만 읽는다.
+    #
+    # WHY: 접힌 도구는 이름·설명의 영어 어휘로만 매칭되는데 그 텍스트는 대개
+    # **벤더가 쓴 것**이라 한국어 트리거를 넣을 수 없다. 전역 ko→en intent
+    # 테이블(core/lexical.py)은 범용 동사만 덮고 도메인어는 의도적으로 제외한다
+    # ("per-skill/per-tool alias 를 테이블에 넣는 건 smell"). 그래서 도구가 자기
+    # 트리거 어휘를 직접 들고 다니게 한다 — description 을 한국어로 오염시키면
+    # 모델이 읽는 텍스트가 나빠지고 매 턴 토큰을 쓴다.
+    keywords: tuple[str, ...] = ()
+
+
+# keywords 는 플러그인 매니페스트·MCP 서버 응답 등 **신뢰할 수 없는 입력**에서 온다.
+# 라우터 점수에만 쓰이지만(모델에 안 실림) 무제한 리스트가 매 턴 토큰화를 타면
+# 라우팅 비용이 커지므로 개수·길이를 자른다.
+MAX_TOOL_KEYWORDS = 12
+MAX_TOOL_KEYWORD_LEN = 40
+
+
+def coerce_tool_keywords(raw: object) -> tuple[str, ...]:
+    """임의의 JSON 값 → 안전한 keywords 튜플. 리스트가 아니거나 항목이 문자열이
+    아니면 조용히 버린다(fail-safe — 매니페스트 오타가 도구 로딩을 막지 않는다)."""
+    if not isinstance(raw, (list, tuple)):
+        return ()
+    out: list[str] = []
+    for item in raw:
+        if not isinstance(item, str):
+            continue
+        word = item.strip()[:MAX_TOOL_KEYWORD_LEN]
+        if word:
+            out.append(word)
+        if len(out) >= MAX_TOOL_KEYWORDS:
+            break
+    return tuple(out)
 
 
 @dataclass(frozen=True)

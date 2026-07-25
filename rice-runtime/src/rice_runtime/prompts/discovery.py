@@ -21,6 +21,9 @@ from dataclasses import dataclass
 from typing import Sequence
 
 from ..core.types import Message, ToolSpec
+# 생성 경로의 tags 설명은 review.py가 정본이다 — 두 생성 경로(리뷰/발굴)가 서로
+# 다른 지침을 주면 스킬 발견성이 어느 경로로 태어났는지에 따라 갈린다.
+from .review import TAGS_PARAM_DESCRIPTION
 
 
 @dataclass(frozen=True)
@@ -107,7 +110,7 @@ def build_discovery_tool_specs() -> tuple[ToolSpec, ...]:
                         "description": "kebab-case, class-level (e.g. 'weekly-sales-report'), 2-64 chars.",
                     },
                     "description": {"type": "string", "description": "One-line summary."},
-                    "tags": {"type": "array", "items": {"type": "string"}, "description": "0-5 short tags."},
+                    "tags": {"type": "array", "items": {"type": "string"}, "description": TAGS_PARAM_DESCRIPTION},
                     "body": {
                         "type": "string",
                         "description": "Full SKILL.md body (markdown, no frontmatter) — numbered steps, exact commands, pitfalls.",

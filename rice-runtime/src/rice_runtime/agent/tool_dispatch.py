@@ -27,8 +27,9 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import replace
 from typing import Protocol, TYPE_CHECKING, cast
 
@@ -158,15 +159,65 @@ BRIDGE_TOOL_SPECS: tuple[ToolSpec, ...] = (_TOOL_SEARCH_SPEC, _TOOL_DESCRIBE_SPE
 # 도구를 못 쓰는 실패가 잦다. top-K 만 직접 노출하고 나머지는 브릿지 뒤에 둔다.
 _SPOTLIGHT_BUDGET_TOKENS = 4_000
 _SPOTLIGHT_MAX_TOOLS = 8
+# ToolSpec.keywords 가중 — 스킬 relevance 의 태그 가중(_W_TAGS)과 같은 논리로
+# 이름과 동등하게 둔다. 저자가 명시한 트리거이므로 설명 본문보다 강한 신호다.
+_W_TOOL_KEYWORDS = 2.0
+# 후보가 이보다 적으면 df 통계가 잡음이다(스킬 쪽 _IDF_MIN_CANDIDATES 와 같은 이유).
+_IDF_MIN_TOOLS = 3
 
 
-def _score_tool(query: lexical.QueryTerms, spec: ToolSpec) -> float:
-    """도구 관련도: 이름(언더스코어/점 분해) 2.0 가중 + 설명 1.0 가중.
-    exact/substring/bigram-fuzzy 사다리는 core/lexical.py 하나를 공유한다."""
+def _tool_term_weights(
+    query: lexical.QueryTerms, specs: Sequence[ToolSpec]
+) -> tuple[float, ...] | None:
+    """도구 카탈로그에 대한 판별력(IDF) 가중 — 스킬 쪽(relevance.term_weights)과 같은
+    논리이며, **여기가 본진**이다: 스킬은 수십 개지만 도구는 커넥터/플러그인이 붙을수록
+    수백 개가 되고, IDF 의 가치는 후보 수에 비례한다.
+
+    도구 카탈로그는 이름·설명이 **전부 영어**라 df 통계가 특히 깨끗하다(스크립트가
+    섞이지 않아 같은 개념이 여러 표기로 쪼개지지 않는다). 그래서 'get'·'list'·'search'
+    처럼 도구 이름에 편재하는 단어가 자동으로 무게를 잃고, 'calendar'·'invoice'처럼
+    실제로 카탈로그를 좁히는 단어가 스포트라이트를 결정하게 된다.
+
+    스킬과 동일하게 평균 1.0 정규화라 점수 규모가 보존된다(스포트라이트는 score>0
+    필터를 쓰므로 규모 변화는 무해하지만, 두 소비자의 의미를 같게 유지한다)."""
+    n = len(specs)
+    if n < _IDF_MIN_TOOLS or not query:
+        return None
+    docs = [
+        lexical.field_tokens(
+            f"{s.name.replace('_', ' ').replace('.', ' ')} {' '.join(s.keywords)} {s.description}"
+        )
+        for s in specs
+    ]
+    raw = []
+    for i in range(len(query.terms)):
+        df = sum(1 for d in docs if lexical.term_matches(query, i, d))
+        raw.append(math.log(1.0 + (n - df + 0.5) / (df + 0.5)))
+    mean = sum(raw) / len(raw)
+    if mean <= 0:
+        return None
+    return tuple(w / mean for w in raw)
+
+
+def _score_tool(
+    query: lexical.QueryTerms, spec: ToolSpec, weights: tuple[float, ...] | None = None
+) -> float:
+    """도구 관련도: 이름(언더스코어/점 분해) 2.0 + keywords 2.0 + 설명 1.0 가중.
+    exact/substring/bigram-fuzzy 사다리는 core/lexical.py 하나를 공유한다.
+
+    `keywords`는 스킬의 tags와 같은 무게(이름과 동등)를 받는다 — 둘 다 "이 도구가
+    무엇에 관한 것인가"를 저자가 직접 밝힌 신호다. 이름·설명은 대개 벤더의 영어
+    텍스트라 한국어 요청이 닿지 않는데, keywords가 그 다리를 놓는다(ToolSpec 참조).
+    선언하지 않은 도구는 `()`라 점수가 이전과 완전히 동일하다."""
     name_text = spec.name.replace("_", " ").replace(".", " ")
-    return 2.0 * lexical.field_score(query, name_text) + lexical.field_score(
-        query, spec.description
+    score = 2.0 * lexical.field_score(query, name_text, weights) + lexical.field_score(
+        query, spec.description, weights
     )
+    if spec.keywords:
+        score += _W_TOOL_KEYWORDS * lexical.field_score(
+            query, " ".join(spec.keywords), weights
+        )
+    return score
 
 
 def fold_tools_for_budget(
@@ -188,8 +239,9 @@ def fold_tools_for_budget(
     spotlight: list[ToolSpec] = []
     q = lexical.prepare_query(query)
     if q:
+        w = _tool_term_weights(q, foldable)
         ranked = sorted(
-            ((score, spec) for spec in foldable if (score := _score_tool(q, spec)) > 0),
+            ((score, spec) for spec in foldable if (score := _score_tool(q, spec, w)) > 0),
             key=lambda pair: pair[0],
             reverse=True,
         )
@@ -441,11 +493,13 @@ class ToolDispatcher:
                     for t in self._folded_catalog.values()
                 ]
             else:
+                catalog = tuple(self._folded_catalog.values())
+                w = _tool_term_weights(q, catalog)
                 ranked = sorted(
                     (
                         (score, t)
-                        for t in self._folded_catalog.values()
-                        if (score := _score_tool(q, t)) > 0
+                        for t in catalog
+                        if (score := _score_tool(q, t, w)) > 0
                     ),
                     key=lambda pair: pair[0],
                     reverse=True,

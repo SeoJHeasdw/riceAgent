@@ -3,7 +3,7 @@ name: business-planning
 version: 1
 description: Turn a business request into an investor-grade deliverable — financial model (.xlsx) first, then a designed pitch deck (.pptx) — using the create_workbook and create_presentation tools.
 state: active
-tags: [business, pitch-deck, financial-model, pptx, xlsx]
+tags: [business, pitch-deck, financial-model, pptx, xlsx, 사업계획서, 재무모델, 투자제안서, IR]
 source: builtin
 ---
 

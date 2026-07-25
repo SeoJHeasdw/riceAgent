@@ -28,7 +28,7 @@ import logging
 from ..core.errors import ConflictError, NotFoundError, ValidationError
 from ..core.paths import RicePaths
 from ..core.storage.sqlite import Database
-from ..core.types import ToolCall, ToolResult, ToolSpec, now_iso
+from ..core.types import ToolCall, ToolResult, ToolSpec, coerce_tool_keywords, now_iso
 from .credential.keychain import KeychainStore
 from .custom_registry import CustomConnectorStore, resolve_descriptor
 from .discovery import DiscoveredOAuthConfig, discover_oauth_config, register_dynamic_client
@@ -1008,6 +1008,7 @@ def _specs_from_json(connector_id: str, tools_json: str) -> list[ToolSpec]:
                 source="connector",
                 owner_id=connector_id,
                 requires_approval=bool(t.get("requires_approval", True)),
+                keywords=coerce_tool_keywords(t.get("keywords")),
             )
         )
     return specs

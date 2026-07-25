@@ -106,6 +106,27 @@ REVIEW_SYSTEM_PROMPT = (
 )
 
 
+# 스킬 **생성** 시점의 tags 파라미터 설명 — 위 routing_miss 힌트(수리 경로)와 같은
+# 원칙을 처음부터 적용한다. 2026-07-25까지 생성 경로는 "0-5 short tags."뿐이라,
+# 새 스킬은 영어 태그만 달고 태어나 routing_miss가 쌓여 리뷰가 돌 때까지 몇 번은
+# 안 걸렸다. 라우터는 결정론적 lexical 매칭이고(core/lexical.py) 전역 ko→en intent
+# 테이블은 범용 동사(만들다/검색하다)만 덮으므로, **도메인 명사**(재무모델·체크리스트
+# ·IR)는 스킬 자신의 태그로만 닿는다 — 그 테이블에 도메인어를 넣는 건 lexical.py가
+# 명시적으로 금지한 anti-pattern이다. 한국어 태그는 exact match(사다리 최상단)로
+# 걸리므로 테이블 항목이 필요 없다.
+#
+# discovery.py의 propose_skill_create도 이 상수를 공유한다 — 두 생성 경로가
+# 따로 표류하던 것이 애초의 결함이었다.
+TAGS_PARAM_DESCRIPTION = (
+    "0-5 short tags — these are the skill's trigger words for a deterministic "
+    "keyword router, not documentation. Include the words this user actually types "
+    "when they want this task, in BOTH Korean and English (e.g. for a financial "
+    "model skill: ['financial-model', '재무모델', 'valuation', '투자']). Domain nouns "
+    "matter most: generic verbs like 만들다/검색하다 are already handled globally, "
+    "but a domain word only matches if it is here."
+)
+
+
 def _render_skill_catalog(
     full_body_skills: Sequence[tuple[str, str, str]],  # (skill_id, description, body)
     compact_skills: Sequence[tuple[str, str]],  # (skill_id, description)
@@ -217,7 +238,7 @@ def build_review_tool_specs(patchable_skill_ids: Sequence[str]) -> tuple[ToolSpe
                         "description": "kebab-case, class-level (e.g. 'k8s-service-deploy'), 2-64 chars.",
                     },
                     "description": {"type": "string", "description": "One-line summary."},
-                    "tags": {"type": "array", "items": {"type": "string"}, "description": "0-5 short tags."},
+                    "tags": {"type": "array", "items": {"type": "string"}, "description": TAGS_PARAM_DESCRIPTION},
                     "body": {
                         "type": "string",
                         "description": "Full SKILL.md body (markdown, no frontmatter) — numbered steps, exact commands, pitfalls.",

@@ -36,7 +36,7 @@ gap without per-skill alias curation or a semantic model. Explicit mentions
 from __future__ import annotations
 
 import re
-from collections.abc import Set as AbstractSet
+from collections.abc import Sequence, Set as AbstractSet
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -202,7 +202,70 @@ def _field_index(field_text: str) -> tuple[frozenset[str], tuple[tuple[str, froz
     )
 
 
-def field_score(query: QueryTerms, field_text: str) -> float:
+def field_credits(query: QueryTerms, field_text: str) -> tuple[float, ...]:
+    """Per-term credit against this field, positionally aligned to `query.terms`.
+
+    `field_score` is this summed. Callers that must weight terms individually
+    (IDF — see `learning/skill/relevance.py::term_weights`) need the breakdown;
+    summing first would destroy it."""
+    if not query:
+        return ()
+    field, fuzzy_field = _field_index(field_text)
+    if not field:
+        return (0.0,) * len(query.terms)
+    return tuple(_term_credit(term, field, fuzzy_field) for term in query.terms)
+
+
+def field_tokens(field_text: str) -> frozenset[str]:
+    """이 필드의 토큰 집합(캐시된 인덱스에서). document-frequency 집계처럼 점수가
+    아니라 '이 문서가 이 말을 담고 있나'만 필요한 호출자용."""
+    return _field_index(field_text)[0]
+
+
+def term_matches(query: QueryTerms, index: int, tokens_: AbstractSet[str]) -> bool:
+    """query.terms[index]가 이 토큰 집합에 (사다리 어느 단계로든) 걸리나.
+    df 집계용 — 점수 없이 존재 여부만 본다."""
+    if index >= len(query.terms) or not tokens_:
+        return False
+    fuzzy = [(f, _bigrams(f)) for f in tokens_ if len(f) >= _FUZZY_MIN_LEN]
+    return _term_credit(query.terms[index], tokens_, fuzzy) > 0.0
+
+
+def _term_credit(
+    term: _Term,
+    field: AbstractSet[str],
+    fuzzy_field: Sequence[tuple[str, frozenset[str]]],
+) -> float:
+    """사다리 한 term 분: exact 1.0 → substring 0.5 → bigram fuzzy 0.25.
+    term 의 variant 들은 서로 경쟁해 최고점 하나만 낸다(모듈 docstring ★)."""
+    best = 0.0
+    for variant, vgrams in term.variants:
+        if variant in field:
+            return 1.0  # 사다리 최고점 — 나머지 variant 를 볼 필요가 없다
+        if len(variant) >= _PARTIAL_MIN_LEN and any(
+            # `variant in f` 는 f 가 variant 보다 길므로 자동으로 안전하다.
+            # 반대 방향(`f in variant`)은 f 에도 길이 하한이 필요하다 — 없으면
+            # MIN_TOKEN_LEN(2) 짜리 불용어가 긴 쿼리어의 부분문자열이라는 이유로
+            # 0.5 를 준다: "invoice" 가 "…items **in** gmail…" 을 담은 문서 전부에
+            # 걸려 df 가 1/193 → 73/193 으로 뭉개졌다(2026-07-25 실측). 상수의 원래
+            # 취지가 "구별될 만큼 긴 토큰만"이므로 양쪽에 대칭으로 적용한다.
+            variant in f or (len(f) >= _PARTIAL_MIN_LEN and f in variant)
+            for f in field
+        ):
+            best = max(best, 0.5)
+            continue
+        if best < 0.25 and vgrams:
+            nv = len(vgrams)
+            for _, fgrams in fuzzy_field:
+                if 2.0 * len(vgrams & fgrams) / (nv + len(fgrams)) >= _FUZZY_THRESHOLD:
+                    best = 0.25
+                    break
+    return best
+
+
+def field_score(
+    query: QueryTerms, field_text: str, weights: Sequence[float] | None = None
+) -> float:
     """How many of the user's typed words land in this field, best credit wins:
     exact token 1.0 → substring containment 0.5 (bridges '투자용'→'투자',
     'ppt'→'pptx') → char-bigram fuzzy 0.25 (bridges typos and near-forms,
@@ -210,7 +273,11 @@ def field_score(query: QueryTerms, field_text: str) -> float:
 
     Credit is per **term**, not per variant: a term's expansions compete with each
     other and only the strongest contributes (module docstring ★). A pure-English
-    query has one variant per term, so its scoring is unchanged."""
+    query has one variant per term, so its scoring is unchanged.
+
+    `weights` (per-term, aligned to `query.terms`) scales each term's credit —
+    this is where IDF enters. `None` means every term counts 1.0, i.e. exactly the
+    pre-IDF behaviour."""
     if not query:
         return 0.0
     # 필드 토큰의 bigram 은 필드당 한 번만 만든다 — 예전 `_dice(q, f)` 는
@@ -220,24 +287,11 @@ def field_score(query: QueryTerms, field_text: str) -> float:
     if not field:
         return 0.0
     total = 0.0
-    for term in query.terms:
-        best = 0.0
-        for variant, vgrams in term.variants:
-            if variant in field:
-                best = 1.0
-                break  # 사다리 최고점 — 나머지 variant 를 볼 필요가 없다
-            if len(variant) >= _PARTIAL_MIN_LEN and any(
-                variant in f or f in variant for f in field
-            ):
-                best = max(best, 0.5)
-                continue
-            if best < 0.25 and vgrams:
-                nv = len(vgrams)
-                for _, fgrams in fuzzy_field:
-                    if 2.0 * len(vgrams & fgrams) / (nv + len(fgrams)) >= _FUZZY_THRESHOLD:
-                        best = 0.25
-                        break
-        total += best
+    for i, term in enumerate(query.terms):
+        credit = _term_credit(term, field, fuzzy_field)
+        if credit and weights is not None:
+            credit *= weights[i]
+        total += credit
     return total
 
 

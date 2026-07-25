@@ -30,7 +30,9 @@ see core/lexical.py). The routing ladder, strongest first:
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
+from typing import Sequence
 
 from ...core import lexical
 
@@ -103,6 +105,44 @@ def auto_inject_eligible(scored: ScoredSkill) -> bool:
     return scored.score >= AUTO_INJECT_THRESHOLD and scored.strong >= MIN_STRONG_HITS
 
 
+# ── 판별력 가중(IDF) ──────────────────────────────────────────────────────────
+# 사다리는 "이 말이 이 문서에 있나"만 봤다 — 코퍼스에서 그 말이 **얼마나 희소한가**는
+# 보지 않았다. 그래서 카탈로그 전체에 퍼진 단어("report")가 아무것도 변별하지 못하면서
+# 희소한 단어("payroll")와 같은 무게를 받았고, 그 단어를 여러 필드에 반복한 스킬이
+# 유일하게 관련 있는 스킬을 눌렀다(실측: 'payroll report' → payroll-run이 꼴찌).
+# 판별력은 임베딩/리랭커가 대신해주던 바로 그 신호이며, IDF는 그것을 **모델 없이**
+# 결정론적으로 얻는 고전적 방법이다.
+#
+# 스케일 보존이 핵심: 가중치를 평균 1.0으로 정규화하므로 점수 규모가 이전과 같고,
+# 실측으로 보정된 AUTO_INJECT_THRESHOLD/MIN_STRONG_HITS를 다시 맞출 필요가 없다.
+# 즉 이 변경은 **순수 재랭킹**이다 — 주입 여부의 절대 기준은 건드리지 않는다.
+_IDF_MIN_CANDIDATES = 3  # 후보가 이보다 적으면 df 통계가 무의미 → 전부 1.0
+
+
+def term_weights(query: lexical.QueryTerms, skills: Sequence) -> tuple[float, ...] | None:
+    """query.terms에 정렬된 판별력 가중치. 후보가 너무 적으면 None(가중 없음).
+
+    df는 **저자 신호 필드(name+tags+description)** 기준으로 센다 — 본문은 길고
+    잡토큰이 많아 df를 뭉개서 모든 단어를 흔하게 보이게 만든다.
+    """
+    n = len(skills)
+    if n < _IDF_MIN_CANDIDATES or not query:
+        return None
+    docs = [
+        lexical.field_tokens(f"{s.name.replace('-', ' ')} {' '.join(s.tags)} {s.description}")
+        for s in skills
+    ]
+    raw: list[float] = []
+    for i in range(len(query.terms)):
+        df = sum(1 for d in docs if lexical.term_matches(query, i, d))
+        # 표준 smoothed IDF. df=n(모든 문서에 존재) → 0에 가깝고, df=0/1 → 최대.
+        raw.append(math.log(1.0 + (n - df + 0.5) / (df + 0.5)))
+    mean = sum(raw) / len(raw)
+    if mean <= 0:  # 모든 term이 모든 문서에 존재 — 변별 정보 없음, 균등 취급
+        return None
+    return tuple(w / mean for w in raw)  # 평균 1.0 정규화 → 점수 규모 불변
+
+
 def _split_tags(tags: list[str]) -> tuple[list[str], list[str]]:
     """`not:`-prefixed tags are negative triggers, everything else is positive."""
     positive = [t for t in tags if not t.startswith(_NEGATIVE_TAG_PREFIX)]
@@ -111,7 +151,12 @@ def _split_tags(tags: list[str]) -> tuple[list[str], list[str]]:
 
 
 def _score_one(
-    query: lexical.QueryTerms, name: str, tags: list[str], description: str, body: str
+    query: lexical.QueryTerms,
+    name: str,
+    tags: list[str],
+    description: str,
+    body: str,
+    weights: tuple[float, ...] | None = None,
 ) -> tuple[float, float, bool]:
     """(score, strong_hits, explicit). `strong_hits` = raw name+tag hit credit —
     the author-signal evidence the auto-inject gate requires."""
@@ -120,16 +165,28 @@ def _score_one(
     if lexical.name_mentioned(query.raw, name):
         return _EXPLICIT_MENTION_BONUS, _EXPLICIT_MENTION_BONUS, True
     positive_tags, negative_tags = _split_tags(tags)
-    name_hits = lexical.field_score(query, name.replace("-", " "))
-    tag_hits = lexical.field_score(query, " ".join(positive_tags))
+    # name/tag 는 credit 을 한 번만 계산해 **두 가지로** 쓴다:
+    #   score  = IDF 가중합 (랭킹 — 판별력 있는 단어가 더 무겁다)
+    #   strong = 무가중 합  (게이트 — MIN_STRONG_HITS 는 실측으로 보정된 절대
+    #            기준이라 가중치가 섞이면 의미가 바뀐다. IDF 는 순수 재랭킹이다.)
+    name_credits = lexical.field_credits(query, name.replace("-", " "))
+    tag_credits = lexical.field_credits(query, " ".join(positive_tags))
+    strong = sum(name_credits) + sum(tag_credits)
+    if weights is None:
+        name_hits, tag_hits = sum(name_credits), sum(tag_credits)
+    else:
+        name_hits = sum(c * w for c, w in zip(name_credits, weights))
+        tag_hits = sum(c * w for c, w in zip(tag_credits, weights))
     score = (
         _W_NAME * name_hits
         + _W_TAGS * tag_hits
-        + _W_DESC * lexical.field_score(query, description)
-        + _W_BODY * lexical.field_score(query, body[:_BODY_SCAN_CHARS])
+        + _W_DESC * lexical.field_score(query, description, weights)
+        + _W_BODY * lexical.field_score(query, body[:_BODY_SCAN_CHARS], weights)
     )
     if negative_tags:
-        score -= _NEGATIVE_HIT_PENALTY * lexical.field_score(query, " ".join(negative_tags))
+        score -= _NEGATIVE_HIT_PENALTY * lexical.field_score(
+            query, " ".join(negative_tags), weights
+        )
     # strong = name/tag **필드 커버리지**(저자가 스스로 밝힌 신호를 몇 군데나 때렸나).
     # 한 단어가 name 과 tag 를 모두 때려 2.0 이 되는 건 의도된 동작이다 — 영어도
     # 똑같이 동작한다("xlsx" 는 name·tag 를 모두 때려 2.0, "excel" 은 tag 만이라 1.0).
@@ -139,7 +196,7 @@ def _score_one(
     # deploy-checklist)까지 게이트에 막힌다. 실제 비대칭은 여기가 아니라 확장어가
     # **한 필드 안에서** 여러 hit 으로 세지던 것이었고, 그건 core/lexical.py 의
     # term 묶음이 닫았다.
-    return max(0.0, score), name_hits + tag_hits, False
+    return max(0.0, score), strong, False
 
 
 def score_skills(query: str, skills: list) -> list[ScoredSkill]:
@@ -154,10 +211,15 @@ def score_skills(query: str, skills: list) -> list[ScoredSkill]:
     (skill_max_auto_inject=1)을 빼앗기는 역전이 났다. "사용자가 THIS를 시켰다"는
     어떤 유기 매칭보다 강한 신호이므로 정렬 키에서 명시적으로 우선한다."""
     q = lexical.prepare_query(query)
+    # 판별력 가중은 **후보 집합 전체**를 봐야 나온다 — 희소성은 코퍼스 상대적이다.
+    # 카탈로그가 같으면 결과도 같다(결정론 유지).
+    weights = term_weights(q, skills) if q else None
     scored = []
     for s in skills:
         score, strong, explicit = (
-            _score_one(q, s.name, s.tags, s.description, s.body) if q else (0.0, 0.0, False)
+            _score_one(q, s.name, s.tags, s.description, s.body, weights)
+            if q
+            else (0.0, 0.0, False)
         )
         scored.append(
             ScoredSkill(

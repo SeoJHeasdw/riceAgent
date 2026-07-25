@@ -18,7 +18,7 @@ import logging
 import os
 from typing import Any
 
-from ...core.types import ToolResult, ToolSpec
+from ...core.types import ToolResult, ToolSpec, coerce_tool_keywords
 
 log = logging.getLogger("rice.connector.mcp.stdio")
 
@@ -148,7 +148,12 @@ class StdioMcpClient:
                     pass
 
     def _raw_to_spec(self, raw: dict) -> ToolSpec:
-        """MCP tools/list 항목 → ToolSpec (source=connector, 승인 필요 기본)."""
+        """MCP tools/list 항목 → ToolSpec (source=connector, 승인 필요 기본).
+
+        `keywords`는 MCP 표준 밖의 선택적 확장(라우팅 전용 트리거 어휘) — 번들
+        로컬 서버(connector/local/*)가 한국어 트리거를 싣는 통로다. 표준만 따르는
+        서드파티 stdio 서버는 이 키가 없어 ()로 남는다(동작 변화 없음).
+        """
         return ToolSpec(
             name=raw["name"],
             description=raw.get("description", ""),
@@ -156,6 +161,7 @@ class StdioMcpClient:
             source="connector",
             owner_id=self._owner_id or None,
             requires_approval=True,
+            keywords=coerce_tool_keywords(raw.get("keywords")),
         )
 
 
