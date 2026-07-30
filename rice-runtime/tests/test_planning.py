@@ -318,6 +318,7 @@ async def test_planned_empty_first_round_continues_work_without_false_final_reco
                                 {"step_id": "s2", "status": "done"},
                             ],
                             "finish_turn": True,
+                            "final_answer": "실제 작업을 완료했습니다.",
                         },
                         id="call_finish",
                     ),

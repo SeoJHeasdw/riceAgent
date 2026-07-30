@@ -522,6 +522,7 @@ class AgentLoop:
                     metadata=metadata,
                 )
             )
+            round_assistant_index = len(messages) - 1
 
             # No tool calls → this is the final answer for the turn.
             if not pending_calls:
@@ -740,12 +741,13 @@ class AgentLoop:
 
             # ── 최종 답 + 계획 종결의 동시 응답 ────────────────────────────────
             # 모델이 완성된 답변과 "남은 단계 전부 terminal" update_plan
-            # (finish_turn=true)을 같은 응답에 담은 경우, 계획 도구 결과를
+            # (finish_turn=true + final_answer)을 같은 응답에 담은 경우, 계획 도구 결과를
             # 보여주려고 provider 를 한 번 더 호출하면 이미 쓴 답을 그대로
             # 재생성하기 쉽다. update_plan 은 외부 관찰을 만드는 도구가 아니라
             # 턴-로컬 메타데이터 갱신이므로, 이 응답 자체를 canonical final 로
-            # 확정하고 끝낸다. 명시 플래그가 필요한 이유는 짧은 "계획을
-            # 업데이트하겠습니다" preamble을 최종 답으로 오인하지 않기 위해서다.
+            # 확정하고 끝낸다. boolean 플래그만 믿으면 로컬 모델이 짧은 "이제
+            # 안내하겠습니다" preamble에 finish_turn=true를 잘못 붙였을 때 결과
+            # 없이 턴이 끝난다. 별도 final_answer가 실제 종료 증거다.
             #
             # 실제 작업 도구가 섞였거나 방금 백그라운드 완료 관찰이 들어왔다면
             # 결과를 모델이 아직 보지 못했으므로 단축하지 않는다. 본문이 비어
@@ -760,16 +762,44 @@ class AgentLoop:
             finish_turn_requested = any(
                 c.arguments.get("finish_turn") is True for c in pending_calls
             )
+            declared_final_answer = next(
+                (
+                    answer.strip()
+                    for c in pending_calls
+                    if c.tool_name == UPDATE_PLAN_SPEC.name
+                    and c.arguments.get("finish_turn") is True
+                    and isinstance((answer := c.arguments.get("final_answer")), str)
+                    and answer.strip()
+                ),
+                "",
+            )
             if (
                 reconcile_final_text is None
                 and terminal_plan_update_only
                 and finish_turn_requested
-                and assistant_text.strip()
+                and declared_final_answer
                 and not drained_completion
             ):
-                final_text = assistant_text
-                yield ev_message(content=assistant_text)
+                final_text = declared_final_answer
+                # final_answer는 tool argument 안에 있으므로 SSE final만 내보내고
+                # history를 그대로 두면 라이브에서는 보인 답이 재로드 후 사라진다.
+                # 이 라운드 assistant 본문을 canonical final로 교체해 durable
+                # history와 라이브 결과가 같은 한 개의 답으로 수렴하게 한다.
+                messages[round_assistant_index] = replace(
+                    messages[round_assistant_index],
+                    content=declared_final_answer,
+                )
+                yield ev_message(content=declared_final_answer)
                 break
+            if (
+                reconcile_final_text is None
+                and terminal_plan_update_only
+                and finish_turn_requested
+                and not declared_final_answer
+            ):
+                log.warning(
+                    "finish_turn requested without final_answer — continuing for a real final response"
+                )
 
             # ── reconcile 종결: 확정된 답 이후, 계획 정리 호출만으로 끝난 라운드 —
             # 추가 LLM 라운드를 돌리지 않고 여기서 턴을 닫는다(재질의하면 소형 모델은

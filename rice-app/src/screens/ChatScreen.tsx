@@ -113,6 +113,30 @@ const unwrapBridgeToolCall = (call: RawToolCall): RawToolCall => {
 
 type ThreadStateUpdate = ThreadMessage[] | ((previous: ThreadMessage[]) => ThreadMessage[]);
 
+// 화면 전환을 빠르게 하려고 복원된 thread를 메모리에 보관하되, 열어본 모든 대화를
+// 영구 보존하지는 않는다. 각 세션은 최근 50개 durable message와 큰 도구 결과를
+// 포함할 수 있으므로 무제한 Map은 장시간 사용 시 ChatScreen만 계속 비대해진다.
+const THREAD_CACHE_LIMIT = 8;
+
+const storeBoundedThread = (
+  cache: Map<string, ThreadMessage[]>,
+  sessionId: string,
+  value: ThreadMessage[],
+  protectedIds: ReadonlySet<string>,
+) => {
+  // Map 삽입 순서를 LRU 순서로 사용한다.
+  cache.delete(sessionId);
+  cache.set(sessionId, value);
+
+  const persistedKeys = [...cache.keys()].filter(Boolean);
+  while (persistedKeys.length > THREAD_CACHE_LIMIT) {
+    const victimIndex = persistedKeys.findIndex((id) => !protectedIds.has(id));
+    if (victimIndex < 0) break;
+    const [victim] = persistedKeys.splice(victimIndex, 1);
+    cache.delete(victim);
+  }
+};
+
 type LiveTurnProgress = {
   sessionId: string;
 };
@@ -1083,17 +1107,26 @@ function ChatScreen({ active = true }: { active?: boolean }) {
   const threadRef = useRef<ThreadMessage[]>([]);
   const threadCacheRef = useRef<Map<string, ThreadMessage[]>>(new Map([['', []]]));
 
+  const cacheThread = (sessionId: string, next: ThreadMessage[]) => {
+    storeBoundedThread(
+      threadCacheRef.current,
+      sessionId,
+      next,
+      new Set([sessionId, activeSessionIdRef.current]),
+    );
+  };
+
   const setThread = (update: ThreadStateUpdate) => {
     const next = typeof update === 'function' ? update(threadRef.current) : update;
     threadRef.current = next;
-    threadCacheRef.current.set(activeSessionIdRef.current, next);
+    cacheThread(activeSessionIdRef.current, next);
     setThreadState(next);
   };
 
   const updateThreadFor = (sessionId: string, update: ThreadStateUpdate) => {
     const previous = threadCacheRef.current.get(sessionId) ?? [];
     const next = typeof update === 'function' ? update(previous) : update;
-    threadCacheRef.current.set(sessionId, next);
+    cacheThread(sessionId, next);
     if (activeSessionIdRef.current === sessionId) {
       threadRef.current = next;
       setThreadState(next);
@@ -1103,7 +1136,7 @@ function ChatScreen({ active = true }: { active?: boolean }) {
   const showSessionThread = (sessionId: string, next: ThreadMessage[]) => {
     activeSessionIdRef.current = sessionId;
     threadRef.current = next;
-    threadCacheRef.current.set(sessionId, next);
+    cacheThread(sessionId, next);
     setActiveSessionId(sessionId);
     setThreadState(next);
   };
@@ -1235,8 +1268,30 @@ function ChatScreen({ active = true }: { active?: boolean }) {
   // from clearing or starting a newer turn in the same room.
   const turnRequestRef = useRef(0);
 
-  const sessionPanel = useResizable({ initial: 264, min: 200, max: 420, storageKey: 'rice.panel.sessions' });
-  const learningPanel = useResizable({ initial: 320, min: 240, max: 480, storageKey: 'rice.panel.learning', invert: true });
+  const chatLayoutRef = useRef<HTMLDivElement>(null);
+  const previewSessionWidth = useCallback((width: number) => {
+    chatLayoutRef.current?.style.setProperty('--rice-session-panel-width', `${width}px`);
+  }, []);
+  const previewLearningWidth = useCallback((width: number) => {
+    chatLayoutRef.current?.style.setProperty('--rice-learning-panel-width', `${width}px`);
+  }, []);
+  const sessionPanel = useResizable({
+    initial: 264,
+    min: 200,
+    max: 420,
+    storageKey: 'rice.panel.sessions',
+    onResizePreview: previewSessionWidth,
+    deferStateDuringDrag: true,
+  });
+  const learningPanel = useResizable({
+    initial: 320,
+    min: 240,
+    max: 480,
+    storageKey: 'rice.panel.learning',
+    invert: true,
+    onResizePreview: previewLearningWidth,
+    deferStateDuringDrag: true,
+  });
 
   // 모델 카탈로그는 없다(SaaS=직접 등록, Local=ollama에서 라이브 조회).
   // 헤더에 보여줄 이름은 현재 선택된 모델 식별자 그대로 사용한다.
@@ -1717,6 +1772,33 @@ function ChatScreen({ active = true }: { active?: boolean }) {
     // authoritative `content`로 확정된 버블 뒤에 도착한 델타는 새 세그먼트다
     // (reconcile 후 작업이 재개된 턴) — 확정된 답에 이어붙이지 않는다.
     if (a.active && a.complete && typeof d.delta === 'string') sealAnswer(sessionId);
+    if (!a.active && typeof d.content === 'string' && d.content.trim()) {
+      // update_plan 라운드는 `delta → tool_call → authoritative content` 순서다.
+      // 숨긴 계획 도구의 tool_call 핸들러가 delta 버블을 먼저 seal한 뒤 동일한
+      // content가 오면 예전 코드는 새 버블을 하나 더 만들었다. 현재 사용자 턴의
+      // 동일 본문은 새 메시지가 아니라 이미 그린 버블의 최종 확정이다.
+      const blocks = threadCacheRef.current.get(sessionId) ?? [];
+      let duplicateAt = -1;
+      for (let i = blocks.length - 1; i >= 0; i--) {
+        const block = blocks[i];
+        if (block.kind === 'user') break;
+        if (block.kind === 'agent' && block.text.trim() === d.content.trim()) {
+          duplicateAt = i;
+          break;
+        }
+      }
+      if (duplicateAt >= 0) {
+        updateThreadFor(sessionId, (previous) => {
+          const copy = [...previous];
+          const block = copy[duplicateAt];
+          if (block?.kind === 'agent') {
+            copy[duplicateAt] = { ...block, text: d.content as string, streaming: false };
+          }
+          return copy;
+        });
+        return;
+      }
+    }
     if (!a.active) {
       a.active = true;
       a.sessionId = sessionId;
@@ -2155,7 +2237,7 @@ function ChatScreen({ active = true }: { active?: boolean }) {
         sessionId = id;
         const pendingThread = threadCacheRef.current.get(originSessionId) ?? [];
         threadCacheRef.current.delete(originSessionId);
-        threadCacheRef.current.set(id, pendingThread);
+        cacheThread(id, pendingThread);
         // A very fast room switch can happen while POST /sessions is pending.
         // Only move the visible selection if this is still the originating room.
         if (activeSessionIdRef.current === originSessionId) {
@@ -2199,7 +2281,7 @@ function ChatScreen({ active = true }: { active?: boolean }) {
     const res = await api.getMessages(id);
     const msgs = res.success ? ((res.data as { messages?: RawMessage[] })?.messages ?? []) : [];
     const next = toThread(msgs);
-    threadCacheRef.current.set(id, next);
+    cacheThread(id, next);
     if (activeSessionIdRef.current === id) {
       threadRef.current = next;
       setThreadState(next);
@@ -2572,7 +2654,14 @@ function ChatScreen({ active = true }: { active?: boolean }) {
 
   return (
     <FileViewerProvider>
-      <div className="relative flex flex-1 min-w-0 overflow-hidden">
+      <div
+        ref={chatLayoutRef}
+        className="relative flex flex-1 min-w-0 overflow-hidden"
+        style={{
+          '--rice-session-panel-width': `${sessionPanel.width}px`,
+          '--rice-learning-panel-width': `${learningPanel.width}px`,
+        } as React.CSSProperties}
+      >
         {/* Session Sidebar */}
         <SessionSidebar
           sessions={sessions}
@@ -2582,6 +2671,7 @@ function ChatScreen({ active = true }: { active?: boolean }) {
           onRenameSession={renameSession}
           onDeleteSession={requestDeleteSession}
           isOpen={sessionSidebarOpen}
+          isResizing={sessionPanel.isResizing}
           width={sessionPanel.width}
           modelName={selectedModelName}
           modelMode={modelMode}
@@ -2935,8 +3025,16 @@ function ChatScreen({ active = true }: { active?: boolean }) {
         {/* Learning Panel — its width expands from the right, so the chat area
             is pushed in rather than covered. */}
         <div
-          className="relative flex-shrink-0 overflow-hidden transition-[width] duration-[280ms] ease-[cubic-bezier(0.16,1,0.3,1)]"
-          style={{ width: learningPanelOpen ? learningPanel.width + 6 : 0 }}
+          className={`relative flex-shrink-0 overflow-hidden ${
+            learningPanel.isResizing
+              ? 'transition-none will-change-[width]'
+              : 'transition-[width] duration-[280ms] ease-[cubic-bezier(0.16,1,0.3,1)]'
+          }`}
+          style={{
+            width: learningPanelOpen
+              ? 'calc(var(--rice-learning-panel-width, 320px) + 6px)'
+              : 0,
+          }}
         >
           {learningPanelOpen && (
             <div className="rice-learning-panel-enter flex h-full">

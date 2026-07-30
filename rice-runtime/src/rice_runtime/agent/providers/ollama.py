@@ -43,6 +43,15 @@ log = logging.getLogger("rice.agent.providers.ollama")
 # at this larger budget when that specific signature is detected.
 _REASONING_RETRY_NUM_PREDICT = 200
 
+# 일부 로컬 모델/템플릿 조합(qwen3.6 실측)은 Ollama의 native `thinking`
+# 필드를 쓰면서도 닫는 태그 뒤의 **사용자용 본문까지 같은 필드에 계속 싣는다**.
+# 그대로 전달하면 AgentLoop는 content=""인 thinking-only 응답으로 오인해 empty
+# nudge를 만들고, 실제 완성 답은 접힌 추론 블록 안에 숨는다. 스트림 경계에서 닫는
+# 태그를 인식해 그 뒤를 text로 정상화한다. 태그가 청크 사이에서 갈라질 수 있으므로
+# 가장 긴 마커 길이만큼 tail을 보류한다.
+_THINKING_CLOSE_MARKERS = ("</thinking>", "</think>")
+_THINKING_MARKER_TAIL = max(len(marker) for marker in _THINKING_CLOSE_MARKERS) - 1
+
 # ── 이벤트 루프당 공유 httpx 클라이언트 ──────────────────────────────────────
 # provider 인스턴스는 턴마다 새로 만들어질 수 있으므로(registry) 커넥션 풀은
 # 모듈 수준에 둔다. 이벤트 루프가 바뀌면(테스트 등) 새 클라이언트로 교체 —
@@ -360,18 +369,58 @@ class OllamaProvider(ILLMProvider):
             payload["tools"] = _to_ollama_tools(tools)
 
         yielded_done = False
+        thinking_tail = ""
+        thinking_closed = False
         try:
             async for item in self._stream_chat(payload):
                 message = item.get("message") or {}
                 thinking = message.get("thinking")
                 if thinking:
-                    yield ProviderChunk(kind="thinking", text=thinking)
+                    if thinking_closed:
+                        # 닫는 태그 뒤에도 native thinking 필드로 오는 델타는 본문이다.
+                        yield ProviderChunk(kind="text", text=thinking)
+                    else:
+                        thinking_tail += thinking
+                        lowered = thinking_tail.lower()
+                        marker_hits = [
+                            (lowered.find(marker), marker)
+                            for marker in _THINKING_CLOSE_MARKERS
+                            if lowered.find(marker) >= 0
+                        ]
+                        if marker_hits:
+                            marker_at, marker = min(marker_hits, key=lambda hit: hit[0])
+                            reasoning = thinking_tail[:marker_at]
+                            answer = thinking_tail[marker_at + len(marker):]
+                            if reasoning:
+                                yield ProviderChunk(kind="thinking", text=reasoning)
+                            if answer:
+                                yield ProviderChunk(kind="text", text=answer)
+                            thinking_tail = ""
+                            thinking_closed = True
+                        elif len(thinking_tail) > _THINKING_MARKER_TAIL:
+                            safe_end = len(thinking_tail) - _THINKING_MARKER_TAIL
+                            yield ProviderChunk(kind="thinking", text=thinking_tail[:safe_end])
+                            thinking_tail = thinking_tail[safe_end:]
                 content = message.get("content")
                 if content:
+                    # 정상 native 경계가 왔다면 보류 중인 reasoning tail을 먼저 내보내
+                    # thinking → text 순서를 지킨다. 이후 thinking 필드로 되돌아가는
+                    # 비정상 델타는 사용자 본문 연속으로 취급한다.
+                    if thinking_tail:
+                        yield ProviderChunk(kind="thinking", text=thinking_tail)
+                        thinking_tail = ""
+                    thinking_closed = True
                     yield ProviderChunk(kind="text", text=content)
-                for call in _extract_tool_calls(message):
+                calls = _extract_tool_calls(message)
+                if calls and thinking_tail:
+                    yield ProviderChunk(kind="thinking", text=thinking_tail)
+                    thinking_tail = ""
+                for call in calls:
                     yield ProviderChunk(kind="tool_call", tool_call=call)
                 if item.get("done"):
+                    if thinking_tail:
+                        yield ProviderChunk(kind="thinking", text=thinking_tail)
+                        thinking_tail = ""
                     _log_done_stats(item, self._cfg.model)
                     stop_reason = item.get("done_reason") or ("tool_use" if message.get("tool_calls") else "end_turn")
                     yield ProviderChunk(

@@ -21,10 +21,12 @@
      예산을 늘리지 않아 반복 상한이 최종 방벽으로 남는다(§11.2 창 A 드레인)
  10. 창 A 드레인은 reconcile 모드에서 게이트로 억제된다 → 확정된 답의 턴이 완료
      주입으로 재개되지 않고 추가 provider 라운드 없이 닫힌다
-  11. 완성 답변 + 전 단계 종결 update_plan 동시 응답 → 그 답을 즉시 최종 확정해
+ 11. 완성 답변 + 전 단계 종결 update_plan 동시 응답 → 그 답을 즉시 최종 확정해
      계획 도구 결과만 되먹이는 중복 provider 라운드를 만들지 않는다
  12. 전 단계 종결 update_plan이어도 finish_turn=false인 짧은 preamble이면 →
      성급히 끝내지 않고 다음 라운드의 실제 최종 답을 받는다
+ 13. 짧은 preamble에 finish_turn=true를 잘못 붙여도 final_answer가 없으면 →
+     플래그를 불신하고 다음 라운드에서 실제 최종 답을 받는다
 
 새 방어 장치를 추가할 때는 반드시 여기에 상호작용 시나리오를 추가할 것 —
 "장치 하나가 더해질 때마다 종료 증명을 다시 한다"가 이 파일의 계약이다.
@@ -351,6 +353,7 @@ class _FinalAnswerWithTerminalPlanUpdate(_CountingProvider):
                             {"step_id": "s2", "status": "done"},
                         ],
                         "finish_turn": True,
+                        "final_answer": "complete final answer",
                     },
                     id="c2",
                 ),
@@ -382,6 +385,59 @@ async def test_terminal_plan_update_with_complete_answer_ends_without_another_ll
     assert "duplicate" not in str(result.history)
     plan_events = [ev for ev in events if ev.type.value == "plan_updated"]
     assert plan_events[-1].data["status"] == "completed"
+
+
+class _FinalAnswerDeclaredInPlan(_FinalAnswerWithTerminalPlanUpdate):
+    async def stream(self, *, system, messages, tools=(), temperature=0.7, **_):
+        self.calls += 1
+        if self.calls == 1:
+            yield ProviderChunk(
+                kind="tool_call",
+                tool_call=ToolCall(
+                    tool_name="start_plan",
+                    arguments={"goal": "g", "steps": [{"title": "a"}, {"title": "b"}]},
+                    id="c1",
+                ),
+            )
+            yield ProviderChunk(kind="done", stop_reason="tool_use")
+            return
+        yield ProviderChunk(kind="text", text="마지막으로 정리하겠습니다.")
+        yield ProviderChunk(
+            kind="tool_call",
+            tool_call=ToolCall(
+                tool_name="update_plan",
+                arguments={
+                    "updates": [
+                        {"step_id": "s1", "status": "done"},
+                        {"step_id": "s2", "status": "done"},
+                    ],
+                    "finish_turn": True,
+                    "final_answer": "완료했습니다. 결과 파일은 result.html입니다.",
+                },
+                id="c2",
+            ),
+        )
+        yield ProviderChunk(kind="done", stop_reason="tool_use")
+
+
+@pytest.mark.asyncio
+async def test_declared_final_answer_replaces_preamble_in_durable_history():
+    provider = _FinalAnswerDeclaredInPlan()
+    result = LoopResult()
+    _ = [
+        ev
+        async for ev in AgentLoop(provider=provider, dispatcher=_dispatcher()).run(
+            _ctx(), "s1", result, asyncio.Event()
+        )
+    ]
+
+    assert result.final_message == "완료했습니다. 결과 파일은 result.html입니다."
+    final_round = next(
+        message
+        for message in result.history
+        if message.role == "assistant" and any(call.id == "c2" for call in message.tool_calls)
+    )
+    assert final_round.content == result.final_message
 
 
 class _PreambleWithTerminalPlanUpdate(_FinalAnswerWithTerminalPlanUpdate):
@@ -442,6 +498,73 @@ async def test_terminal_plan_progress_preamble_waits_for_actual_final_answer():
     assert [ev.data["content"] for ev in messages if "content" in ev.data] == [
         "actual final answer"
     ]
+
+
+class _IncorrectFinishPreamble(_FinalAnswerWithTerminalPlanUpdate):
+    """실측 회귀: 로컬 모델이 결과 예고 문장에 finish_turn=true를 잘못 붙였다.
+
+    boolean 하나만 신뢰하면 이 문장이 canonical final이 되어 실제 결과가 영원히
+    오지 않는다. final_answer가 없으면 계획 갱신만 소비하고 다음 라운드에서 진짜
+    최종 답을 받아야 한다.
+    """
+
+    async def stream(self, *, system, messages, tools=(), temperature=0.7, **_):
+        self.calls += 1
+        if self.calls == 1:
+            yield ProviderChunk(
+                kind="tool_call",
+                tool_call=ToolCall(
+                    tool_name="start_plan",
+                    arguments={"goal": "g", "steps": [{"title": "a"}, {"title": "b"}]},
+                    id="c1",
+                ),
+            )
+            yield ProviderChunk(kind="done", stop_reason="tool_use")
+            return
+        if self.calls == 2:
+            yield ProviderChunk(
+                kind="text",
+                text="HTML 파일을 확인했습니다. 이제 결과를 안내해 드릴게요.",
+            )
+            yield ProviderChunk(
+                kind="tool_call",
+                tool_call=ToolCall(
+                    tool_name="update_plan",
+                    arguments={
+                        "updates": [
+                            {"step_id": "s1", "status": "done"},
+                            {"step_id": "s2", "status": "done"},
+                        ],
+                        "finish_turn": True,
+                    },
+                    id="c2",
+                ),
+            )
+            yield ProviderChunk(kind="done", stop_reason="tool_use")
+            return
+        yield ProviderChunk(kind="text", text="파일을 생성했고 위치는 /workspace/result.html입니다.")
+        yield ProviderChunk(kind="done", stop_reason="end_turn")
+
+
+@pytest.mark.asyncio
+async def test_finish_turn_without_declared_final_answer_continues_for_real_result():
+    provider = _IncorrectFinishPreamble()
+    result = LoopResult()
+    events = [
+        ev
+        async for ev in AgentLoop(provider=provider, dispatcher=_dispatcher()).run(
+            _ctx(), "s1", result, asyncio.Event()
+        )
+    ]
+
+    assert provider.calls == 3
+    assert result.final_message == "파일을 생성했고 위치는 /workspace/result.html입니다."
+    contents = [
+        ev.data["content"]
+        for ev in events
+        if ev.type.value == "message" and "content" in ev.data
+    ]
+    assert contents == ["파일을 생성했고 위치는 /workspace/result.html입니다."]
 
 
 class _ReconcileThinksAloud(_PlanAnswerBase):

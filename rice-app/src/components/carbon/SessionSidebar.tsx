@@ -23,6 +23,8 @@ export interface SessionSidebarProps {
   onRenameSession: (id: string, title: string) => Promise<boolean>;
   onDeleteSession: (id: string) => void;
   isOpen: boolean;
+  /** Disable width easing while the user is actively dragging the divider. */
+  isResizing?: boolean;
   /** Panel width in px (drag-resizable from parent) */
   width?: number;
   /** Selected model name shown in the footer model button */
@@ -80,6 +82,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   onRenameSession,
   onDeleteSession,
   isOpen,
+  isResizing = false,
   width = 264,
   modelName,
   modelMode = 'saas',
@@ -127,17 +130,19 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
   return (
     <div
-      className={`flex-shrink-0 bg-layer-01 flex flex-col min-w-0 overflow-hidden transition-[width] duration-200 ease-out ${
+      className={`flex-shrink-0 bg-layer-01 flex flex-col min-w-0 overflow-hidden ${
+        isResizing ? 'transition-none will-change-[width]' : 'transition-[width] duration-200 ease-out'
+      } ${
         isOpen ? 'border-r border-shell-border' : 'border-r-0'
       }`}
-      style={{ width: isOpen ? width : 0 }}
+      style={{ width: isOpen ? `var(--rice-session-panel-width, ${width}px)` : 0 }}
       aria-hidden={!isOpen}
     >
       <div
         className={`h-full flex flex-col min-w-0 transition-[opacity,transform] duration-200 ease-out ${
           isOpen ? 'opacity-100 translate-x-0' : 'pointer-events-none opacity-0 -translate-x-2'
         }`}
-        style={{ width }}
+        style={{ width: `var(--rice-session-panel-width, ${width}px)` }}
       >
         {/* Header row only reserves the macOS traffic-light zone; the toggle itself is a
             fixed control owned by ChatScreen so it stays put when the panel collapses. */}

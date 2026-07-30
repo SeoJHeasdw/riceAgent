@@ -137,9 +137,17 @@ UPDATE_PLAN_SPEC = ToolSpec(
             "finish_turn": {
                 "type": "boolean",
                 "description": (
-                    "True only when this call makes every step terminal AND the same "
-                    "assistant response already contains the complete final answer. "
+                    "True only when this call makes every step terminal AND "
+                    "final_answer contains the complete user-facing result. "
                     "False for progress updates or short preambles."
+                ),
+            },
+            "final_answer": {
+                "type": "string",
+                "description": (
+                    "When finish_turn=true, the complete user-facing final answer. "
+                    "Do not put a promise such as 'I will show the result now' here. "
+                    "Omit or use an empty string when finish_turn=false."
                 ),
             },
         },

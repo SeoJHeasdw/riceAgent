@@ -646,7 +646,10 @@ export const LearningPanel: React.FC<LearningPanelProps> = ({ width = 320, onOpe
   };
 
   return (
-    <div className="h-full flex-shrink-0 bg-layer-01 border-l border-border-subtle-01 flex flex-col overflow-hidden" style={{ width }}>
+    <div
+      className="h-full flex-shrink-0 bg-layer-01 border-l border-border-subtle-01 flex flex-col overflow-hidden"
+      style={{ width: `var(--rice-learning-panel-width, ${width}px)` }}
+    >
       {/* 제목은 패널의 정체성, 우측 버튼은 감사/audit 액션이다. 패널 토글과
           같은 renew 아이콘을 반복하지 않아 세 컨트롤의 역할이 섞이지 않게 한다. */}
       <div className="flex items-center gap-2 px-4 pr-6 h-11 flex-shrink-0 border-b border-border-subtle-00 electron-drag">

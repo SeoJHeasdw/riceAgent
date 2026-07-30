@@ -204,6 +204,40 @@ async def test_ollama_stream_emits_text_then_one_done(monkeypatch):
     assert chunks[-1].stop_reason == "end_turn"
 
 
+@pytest.mark.asyncio
+async def test_ollama_recovers_answer_leaked_after_thinking_close_tag(monkeypatch):
+    """qwen3.6 실측: native thinking 필드가 닫는 태그 뒤의 최종 답까지 삼킨다.
+
+    태그가 스트림 청크 사이에서 갈라져도 reasoning과 사용자 본문을 올바른
+    ProviderChunk 채널로 분리해야 AgentLoop가 thinking-only 빈 응답으로 오인하지
+    않는다.
+    """
+    provider = OllamaProvider(
+        ProviderConfig(kind="ollama", model="qwen3.6", base_url="http://ollama.local")
+    )
+
+    async def fake_stream_chat(payload):
+        yield {"message": {"thinking": "내부 추론입니다.</think"}, "done": False}
+        yield {
+            "message": {"thinking": "ing>\n\n파일을 만들었습니다."},
+            "done": True,
+            "done_reason": "stop",
+        }
+
+    monkeypatch.setattr(provider, "_stream_chat", fake_stream_chat)
+    chunks = await _collect(
+        provider.stream(system="sys", messages=(Message(role="user", content="hi"),))
+    )
+
+    assert [chunk.kind for chunk in chunks] == ["thinking", "thinking", "text", "done"]
+    assert "".join(chunk.text or "" for chunk in chunks if chunk.kind == "thinking") == (
+        "내부 추론입니다."
+    )
+    assert "".join(chunk.text or "" for chunk in chunks if chunk.kind == "text") == (
+        "\n\n파일을 만들었습니다."
+    )
+
+
 def test_missing_claude_key_falls_back_to_echo():
     c = _container_with("claude")
     try:
