@@ -188,6 +188,7 @@ class OAuthFlow:
         port: int | None = None,
     ) -> None:
         self._d = descriptor
+        self._connectors_dir = connectors_dir
         # 자격증명: 명시 인자 > env/JSON 로더 순.
         if client_id and client_secret:
             resolved: ClientConfig | None = ClientConfig(client_id=client_id, client_secret=client_secret)
@@ -229,6 +230,16 @@ class OAuthFlow:
 
     def _require_client_id(self) -> None:
         """client_secret 은 이제 선택(public client 는 PKCE 로 대체) — client_id 만 필수."""
+        # 앱이 실행 중인 상태에서 사용자가 Google OAuth client JSON 을 설치할 수 있다.
+        # flow 는 서비스 시작 때 만들어지므로 최초 값만 붙잡고 있으면 파일을 올바른
+        # 위치에 둔 뒤에도 런타임을 재시작하기 전까지 계속 422가 난다. 아직 client_id가
+        # 없을 때만 다시 해석해 명시 인자/기존 연결의 동작은 그대로 유지한다.
+        if not self._client_id:
+            resolved = load_client_config(self._d, self._connectors_dir)
+            if resolved is not None:
+                self._client_id = resolved.client_id
+                self._client_secret = resolved.client_secret
+                self._project_id = resolved.project_id
         if self._client_id:
             return
         if self._d.is_custom:
@@ -244,7 +255,12 @@ class OAuthFlow:
             f"{self._d.display_name} OAuth requires a client_id. Set "
             f"{self._d.env_client_id}, or {self._d.env_client_secret_file}=<client_secret.json>, "
             f"or drop the client JSON at ~/.rice/connectors/{self._d.client_secret_filename} "
-            f"(RUNTIME_DESIGN §9.2, §10)."
+            f"(RUNTIME_DESIGN §9.2, §10).",
+            code="connectors.oauth_client_not_configured",
+            params={
+                "displayName": self._d.display_name,
+                "configFilename": self._d.client_secret_filename,
+            },
         )
 
     def build_auth_url(self) -> tuple[str, str, str]:

@@ -123,8 +123,28 @@ class TestGmailConnector:
         monkeypatch.delenv("RICE_GMAIL_CLIENT_SECRET_FILE", raising=False)
 
         flow = GmailOAuthFlow(client_id=None, client_secret=None, redirect_uri="http://localhost:9/cb")
-        with pytest.raises(OAuthConfigError):
+        with pytest.raises(OAuthConfigError) as caught:
             flow.build_auth_url()
+        assert caught.value.code == "connectors.oauth_client_not_configured"
+
+    def test_build_auth_url_reloads_client_json_installed_after_startup(self, monkeypatch):
+        """런타임 시작 뒤 client JSON 을 설치해도 재시작 없이 다음 연결이 성공해야 한다."""
+        from rice_runtime.connector.oauth.flow import GmailOAuthFlow
+
+        monkeypatch.delenv("RICE_GMAIL_CLIENT_ID", raising=False)
+        monkeypatch.delenv("RICE_GMAIL_CLIENT_SECRET", raising=False)
+        monkeypatch.delenv("RICE_GMAIL_CLIENT_SECRET_FILE", raising=False)
+        paths = _fresh_paths()
+        flow = GmailOAuthFlow(connectors_dir=paths.connectors, redirect_uri="http://localhost:9/cb")
+
+        (paths.connectors / "gmail_client_secret.json").write_text(
+            json.dumps({"installed": {"client_id": "late-client.apps", "client_secret": "late-secret"}}),
+            encoding="utf-8",
+        )
+
+        url, state, verifier = flow.build_auth_url()
+        assert "client_id=late-client.apps" in url
+        assert state and verifier
 
     @pytest.mark.asyncio
     async def test_exchange_code_omits_client_secret_when_absent_and_sends_verifier(self, monkeypatch):

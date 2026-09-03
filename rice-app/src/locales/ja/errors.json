@@ -41,6 +41,7 @@
     "no_results": "評価結果が見つかりません — 先に評価ハーネスを実行してください（python -m eval.runner）。"
   },
   "connectors": {
+    "oauth_client_not_configured": "{{displayName}}の接続に必要なGoogle OAuth設定がありません。Google Cloudからデスクトップアプリ用のclient JSONをダウンロードし、~/.rice/connectors/{{configFilename}}として保存してから、もう一度接続してください。",
     "custom_client_id_missing": "{{displayName}}にOAuthクライアントIDがありません。このサーバーは動的クライアント登録をサポートしていないか、登録に失敗しました — コネクターを削除してから「カスタムを追加」で再追加し、詳細設定でクライアントID（および必要であればシークレット）を手動で入力してください。",
     "dynamic_registration_failed": "このサーバーからOAuthクライアントIDを取得できませんでした — 動的クライアント登録（RFC 7591）が失敗したかサポートされていません。詳細設定でクライアントID（および必要であればシークレット）を手動で入力してください。"
   }

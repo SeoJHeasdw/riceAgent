@@ -77,6 +77,11 @@ class ConnectorManager:
         descriptor = resolve_descriptor(self._custom, connector_type)
         display_name = descriptor.display_name if descriptor else connector_type
 
+        # OAuth 설정을 먼저 검증한다. 이전에는 connector 행을 만든 다음 URL 구성에서
+        # 실패해, client 설정이 없을 때마다 연결되지 않은 카드가 DB에 남았다. 삭제 후
+        # 재시도해도 같은 좀비 행이 생기는 원인이므로 DB를 건드리기 전에 fail-closed 한다.
+        oauth_url, state, code_verifier = self._flow_for(connector_type).build_auth_url()
+
         # 같은 타입의 재사용 가능한 레코드(연결 전 pending 또는 자격증명 오류로 재연결 대상)
         # 를 재사용 — 없으면 새로 생성. error 상태도 재사용해 재연결 시 중복 레코드를 막는다.
         existing = self._db.query_one(
@@ -101,7 +106,6 @@ class ConnectorManager:
                 (connector_id, connector_type, display_name),
             )
 
-        oauth_url, state, code_verifier = self._flow_for(connector_type).build_auth_url()
         # 만료된 세션을 정리하고 새 세션을 영속화한다(재시작 내성). 15분은 authorization
         # code 자체의 통상 수명(수 분)보다 넉넉한 상한.
         self._db.execute(

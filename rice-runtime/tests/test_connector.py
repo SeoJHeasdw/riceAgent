@@ -102,6 +102,20 @@ class TestBeginConnect:
         with pytest.raises(ValidationError):
             self._svc._manager.begin_connect("slack")
 
+    def test_oauth_config_failure_does_not_leave_disconnected_connector(self, monkeypatch):
+        """OAuth 설정 실패는 DB 변경 전에 끝나 삭제해도 되살아나는 좀비 카드를 만들지 않는다."""
+        monkeypatch.delenv("RICE_GMAIL_CLIENT_ID", raising=False)
+        monkeypatch.delenv("RICE_GMAIL_CLIENT_SECRET", raising=False)
+        monkeypatch.delenv("RICE_GMAIL_CLIENT_SECRET_FILE", raising=False)
+        # setup_method 시점의 개발자 환경값을 flow가 캡처했을 수도 있으므로, env를
+        # 비운 뒤 테스트 전용 빈 connectors 디렉터리로 서비스를 다시 구성한다.
+        self._svc = ConnectorService(self._db, self._paths)
+
+        with pytest.raises(ValidationError):
+            self._svc._manager.begin_connect("gmail")
+
+        assert self._db.query_one("SELECT id FROM connectors WHERE connector_type='gmail'") is None
+
     @pytest.mark.asyncio
     async def test_begin_connect_via_service(self):
         """ConnectorService.begin_connect 도 정상 동작한다."""

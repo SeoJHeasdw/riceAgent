@@ -41,6 +41,7 @@
     "no_results": "No eval results found — run the eval harness (python -m eval.runner) first."
   },
   "connectors": {
+    "oauth_client_not_configured": "{{displayName}} needs Google OAuth setup. Download a Desktop app client JSON from Google Cloud, save it as ~/.rice/connectors/{{configFilename}}, then connect again.",
     "custom_client_id_missing": "{{displayName}} has no OAuth client ID. This server doesn't support dynamic client registration, or registration failed — remove the connector, then re-add it via \"Add custom\" and enter the client ID (and secret, if you have one) manually in advanced settings.",
     "dynamic_registration_failed": "Couldn't obtain an OAuth client ID from this server — dynamic client registration (RFC 7591) failed or isn't supported. Enter the client ID (and secret, if you have one) manually in advanced settings."
   }
