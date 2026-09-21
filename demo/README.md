@@ -32,5 +32,9 @@ cd ../../javis/local-tts-engine
 npm run demo -- record /Users/jaehoseo/Desktop/vswrk/bob/rice/demo/scenarios/rice-core-flow.json
 ```
 
+느리게 그려지는 장면(온보딩 시네마틱)은 시나리오의 장면에 `"timeScale": 0.25`를 적는다.
+그 사실을 아는 것은 앱뿐이고, 편집은 그 값을 보고 장면을 통째로 4배로 되돌린다.
+적지 않으면 실제 속도로 찍힌 장면으로 보아 기다림만 감는다.
+
 `{scenario}`는 이 폴더, `{work}`는 그 촬영의 작업 폴더로 풀린다. `RICE_HOME`을 작업
 폴더로 두므로 촬영은 실제 설정·대화 기록을 건드리지 않는다.

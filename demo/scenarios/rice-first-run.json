@@ -1,0 +1,191 @@
+{
+  "schemaVersion": 1,
+  "name": "rice-first-run",
+  "app": {
+    "kind": "electron",
+    "cwd": "{scenario}/../../rice-app",
+    "prepare": [
+      "npm",
+      "run",
+      "build:electron"
+    ],
+    "executable": "node_modules/electron/dist/Electron.app/Contents/MacOS/Electron",
+    "args": [
+      "{scenario}/../../rice-app"
+    ],
+    "window": "file://",
+    "env": {
+      "RICE_DEMO": "1",
+      "RICE_HOME": "{work}/home",
+      "RICE_RUNTIME_DIR": "../rice-runtime"
+    },
+    "files": {
+      "home/config.yaml": "provider:\n  kind: ollama\n  model: qwen3.6:35b-a3b-q4_K_M\n  base_url: http://localhost:11434\n  configured: false\n  show_thinking: true\nui:\n  workspace_path: /tmp/rice-demo/workspace\n"
+    },
+    "ready": {
+      "selector": "html[data-demo]",
+      "console": "runtime connected",
+      "timeoutMs": 60000
+    }
+  },
+  "viewport": {
+    "width": 1920,
+    "height": 1080,
+    "scale": 2
+  },
+  "scenes": [
+    {
+      "id": "awakening",
+      "timeScale": 0.25,
+      "steps": [
+        {
+          "waitFor": ".language-dock__continue",
+          "timeoutMs": 60000
+        },
+        {
+          "pause": 900
+        },
+        {
+          "click": ".language-dock__continue"
+        },
+        {
+          "waitFor": ".cinematic-onboarding--loop",
+          "timeoutMs": 60000
+        }
+      ]
+    },
+    {
+      "id": "loop",
+      "timeScale": 0.25,
+      "steps": [
+        {
+          "pause": 1500
+        },
+        {
+          "click": {
+            "role": "button",
+            "name": "능력 확장하기",
+            "exact": true
+          }
+        },
+        {
+          "waitFor": ".cinematic-onboarding--ecosystem",
+          "timeoutMs": 20000
+        }
+      ]
+    },
+    {
+      "id": "capabilities",
+      "timeScale": 0.25,
+      "steps": [
+        {
+          "pause": 1200
+        },
+        {
+          "click": {
+            "role": "button",
+            "name": "다음 모듈 결합",
+            "exact": true
+          }
+        },
+        {
+          "pause": 1200
+        },
+        {
+          "click": {
+            "role": "button",
+            "name": "다음 모듈 결합",
+            "exact": true
+          }
+        },
+        {
+          "pause": 1200
+        },
+        {
+          "click": {
+            "role": "button",
+            "name": "AI 모델 연결",
+            "exact": true
+          }
+        },
+        {
+          "waitFor": ".cinematic-onboarding--model",
+          "timeoutMs": 20000
+        }
+      ]
+    },
+    {
+      "id": "model",
+      "timeScale": 0.25,
+      "steps": [
+        {
+          "pause": 900
+        },
+        {
+          "click": {
+            "role": "button",
+            "name": "로컬 모델 확인"
+          }
+        },
+        {
+          "waitFor": {
+            "role": "button",
+            "name": "qwen3.6:35b-a3b-q4_K_M"
+          },
+          "timeoutMs": 30000
+        },
+        {
+          "pause": 1200
+        },
+        {
+          "click": {
+            "role": "button",
+            "name": "RICE 시작하기"
+          }
+        },
+        {
+          "waitGone": ".cinematic-onboarding",
+          "timeoutMs": 40000
+        }
+      ]
+    },
+    {
+      "id": "tour",
+      "steps": [
+        {
+          "waitFor": "[role=dialog][aria-label^=\"투어\"]",
+          "timeoutMs": 30000
+        },
+        {
+          "pause": 1800
+        },
+        {
+          "click": {
+            "role": "button",
+            "name": "건너뛰기",
+            "exact": true
+          }
+        },
+        {
+          "waitGone": "[role=dialog][aria-label^=\"투어\"]",
+          "timeoutMs": 15000
+        }
+      ]
+    },
+    {
+      "id": "chat",
+      "textFrom": "main",
+      "steps": [
+        {
+          "waitFor": {
+            "placeholder": "RICE에게 메시지"
+          },
+          "timeoutMs": 20000
+        },
+        {
+          "pause": 2500
+        }
+      ]
+    }
+  ]
+}
