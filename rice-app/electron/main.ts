@@ -3,6 +3,7 @@ import path from 'path';
 import { promises as fs } from 'fs';
 import { fileURLToPath } from 'url';
 import { RuntimeManager } from './runtime.js';
+import { demoEnabled, demoSearch } from './demo.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -35,12 +36,14 @@ function createWindow() {
     },
   });
 
-  // Load the app
-  if (isDev) {
+  // Load the app. 데모 촬영은 개발 서버 화면이 아니라 빌드된 화면을 쓰고 DevTools를
+  // 열지 않는다 — 제품에 없는 것이 소개 영상에 남으면 안 된다(./demo.ts).
+  if (isDev && !demoEnabled) {
     mainWindow.loadURL('http://localhost:5173');
     mainWindow.webContents.openDevTools();
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'),
+      demoEnabled ? { search: demoSearch() } : {});
   }
 
   mainWindow.on('closed', () => {

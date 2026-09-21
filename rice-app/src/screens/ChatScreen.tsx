@@ -2974,7 +2974,7 @@ function ChatScreen({ active = true }: { active?: boolean }) {
               </div>
               {workspacePath && (
                 <div className="mt-3 flex min-w-0 max-w-full items-center gap-1 px-1 text-caption-01 text-text-helper">
-                  <Tooltip label={t('saveLocationOpenTooltip')}>
+                  <Tooltip label={t('saveLocationOpenTooltip')} className="flex-shrink-0">
                     <button
                       type="button"
                       onClick={openWorkspaceFolder}
@@ -2985,7 +2985,7 @@ function ChatScreen({ active = true }: { active?: boolean }) {
                       <span className="text-text-secondary">{t('saveLocation')}</span>
                     </button>
                   </Tooltip>
-                  <Tooltip label={t('saveLocationChangeTooltip', { path: workspacePath })}>
+                  <Tooltip label={t('saveLocationChangeTooltip', { path: workspacePath })} className="min-w-0">
                     <button
                       type="button"
                       onClick={chooseWorkspaceFolder}

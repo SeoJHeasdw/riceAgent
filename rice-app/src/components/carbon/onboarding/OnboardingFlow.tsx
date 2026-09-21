@@ -1,5 +1,6 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useDemoAnimationSpeed } from '../../../lib/demo';
 import { useI18n } from '../../../lib/i18n/I18nContext';
 import type { ModelDraft, ModelSettings } from '../ModelPicker';
 import { CinematicCanvas } from './cinematic/CinematicCanvas';
@@ -53,9 +54,12 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
   }, [draft, onComplete]);
 
   const sequence = useCinematicSequence(complete, reducedMotion);
+  const stage = useRef<HTMLDivElement>(null);
+  useDemoAnimationSpeed(stage);
 
   return (
     <div
+      ref={stage}
       className={`cinematic-onboarding cinematic-onboarding--${sequence.phase}${reducedMotion ? ' is-reduced-motion' : ''}${lowPower ? ' is-low-power' : ''}`}
       role="dialog"
       aria-modal="true"

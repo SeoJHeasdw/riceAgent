@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { Canvas } from '@react-three/fiber';
 import * as THREE from 'three';
+import { slowClockForDemo } from '../../../../lib/demo';
 import type { AwakeningBeat, CinematicPhase, SceneDragState } from '../sequences/types';
 import { CoreScene } from './CoreScene';
 
@@ -94,10 +95,12 @@ export const CinematicCanvas = ({
         camera={{ position: [0, 0, 7.5], fov: 42, near: 0.1, far: 80 }}
         dpr={lowPower ? 1 : [1, 1.55]}
         gl={{ antialias: !lowPower, alpha: true, powerPreference: 'high-performance' }}
-        onCreated={({ gl }) => {
+        onCreated={({ gl, clock }) => {
           gl.toneMapping = THREE.ACESFilmicToneMapping;
           gl.toneMappingExposure = 1.12;
           gl.setClearColor('#101319', 0);
+          // 데모 촬영일 때만 장면 전체가 느려진다. 평소에는 아무 일도 하지 않는다.
+          slowClockForDemo(clock);
         }}
         fallback={<div className="cinematic-core-fallback" />}
       >

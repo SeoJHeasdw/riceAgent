@@ -20,18 +20,26 @@ const SIDE_CLASS: Record<'top' | 'bottom' | 'bottom-start' | 'bottom-end' | 'lef
 export interface TooltipProps {
   label: string;
   side?: 'top' | 'bottom' | 'bottom-start' | 'bottom-end' | 'left' | 'right';
+  /**
+   * 감싸는 span에 붙일 클래스.
+   *
+   * 이 span이 flex 줄의 항목이 되면 줄어들 수 있는지를 이것이 정한다. 긴 경로처럼
+   * 끊을 곳이 없는 글은 span의 최소 너비가 글 전체라, `min-w-0` 없이는 안쪽 버튼의
+   * 말줄임이 걸리지 않고 옆 글자를 밀어낸다.
+   */
+  className?: string;
   /** true거나 label이 빈 문자열이면 children만 그대로 렌더 */
   disabled?: boolean;
   children: React.ReactElement;
 }
 
-export const Tooltip: React.FC<TooltipProps> = ({ label, side = 'top', disabled, children }) => {
+export const Tooltip: React.FC<TooltipProps> = ({ label, side = 'top', disabled, className, children }) => {
   const id = useId();
   if (disabled || !label) return children;
   const child = children as React.ReactElement<{ 'aria-describedby'?: string }>;
   const describedBy = [child.props['aria-describedby'], id].filter(Boolean).join(' ');
   return (
-    <span className="relative inline-flex group/tooltip electron-no-drag">
+    <span className={`relative inline-flex group/tooltip electron-no-drag${className ? ` ${className}` : ''}`}>
       {React.cloneElement(child, { 'aria-describedby': describedBy })}
       <span
         id={id}

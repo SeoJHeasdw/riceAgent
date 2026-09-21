@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "name": "rice-core-flow",
+  "app": {
+    "kind": "electron",
+    "cwd": "{scenario}/../../rice-app",
+    "prepare": ["npm", "run", "build:electron"],
+    "executable": "node_modules/electron/dist/Electron.app/Contents/MacOS/Electron",
+    "args": ["{scenario}/../../rice-app"],
+    "window": "file://",
+    "env": {
+      "RICE_DEMO": "1",
+      "RICE_HOME": "{work}/home",
+      "RICE_RUNTIME_DIR": "../rice-runtime"
+    },
+    "files": {
+      "home/config.yaml": "provider:\n  kind: ollama\n  model: qwen3.6:35b-a3b-q4_K_M\n  base_url: http://localhost:11434\n  configured: true\n  show_thinking: true\nui:\n  workspace_path: /tmp/rice-demo/workspace\n"
+    },
+    "ready": { "selector": "html[data-demo]", "console": "runtime connected", "timeoutMs": 60000 }
+  },
+  "viewport": { "width": 1920, "height": 1080, "scale": 2 },
+  "scenes": [
+    {
+      "id": "ask",
+      "steps": [
+        { "type": { "placeholder": "RICE에게 메시지" }, "text": "작업 폴더에 '촬영 체크리스트.md' 파일을 만들고 영상 촬영 체크리스트 5개를 적어 줘." },
+        { "press": "Enter" }
+      ]
+    },
+    {
+      "id": "approve",
+      "steps": [
+        { "waitFor": { "role": "button", "name": "승인", "exact": true }, "timeoutMs": 180000 },
+        { "pause": 1500 },
+        { "click": { "role": "button", "name": "승인", "exact": true } }
+      ]
+    },
+    {
+      "id": "result",
+      "textFrom": "main",
+      "steps": [
+        { "waitGone": "[role=status][aria-label=\"Pondering\"]", "timeoutMs": 300000 },
+        { "pause": 3000 }
+      ]
+    }
+  ]
+}
