@@ -36,5 +36,9 @@ npm run demo -- record /Users/jaehoseo/Desktop/vswrk/bob/rice/demo/scenarios/ric
 그 사실을 아는 것은 앱뿐이고, 편집은 그 값을 보고 장면을 통째로 4배로 되돌린다.
 적지 않으면 실제 속도로 찍힌 장면으로 보아 기다림만 감는다.
 
+첫 실행 시나리오의 온보딩·투어는 `camera: "overview"`로 전체 구도를 지킨다. 아래쪽
+진행 버튼을 확대하면 위 제목과 3D 구성이 잘리기 때문이다. `textFrom`은 해당 온보딩
+단계·투어를 가리킨다. 촬영 엔진은 화면을 떠나기 직전의 글도 보존한다.
+
 `{scenario}`는 이 폴더, `{work}`는 그 촬영의 작업 폴더로 풀린다. `RICE_HOME`을 작업
 폴더로 두므로 촬영은 실제 설정·대화 기록을 건드리지 않는다.

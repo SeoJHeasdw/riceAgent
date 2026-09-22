@@ -36,6 +36,8 @@
   "scenes": [
     {
       "id": "awakening",
+      "camera": "overview",
+      "textFrom": ".cinematic-onboarding",
       "timeScale": 0.25,
       "steps": [
         {
@@ -43,7 +45,7 @@
           "timeoutMs": 60000
         },
         {
-          "pause": 2000
+          "pause": 7000
         },
         {
           "click": ".language-dock__continue"
@@ -56,10 +58,12 @@
     },
     {
       "id": "loop",
-      "timeScale": 0.25,
+      "camera": "overview",
+      "textFrom": ".cinematic-onboarding--loop",
+      "timeScale": 0.125,
       "steps": [
         {
-          "pause": 8000
+          "pause": 21000
         },
         {
           "click": {
@@ -76,10 +80,12 @@
     },
     {
       "id": "capabilities",
-      "timeScale": 0.25,
+      "camera": "overview",
+      "textFrom": ".cinematic-onboarding--ecosystem",
+      "timeScale": 0.125,
       "steps": [
         {
-          "pause": 5000
+          "pause": 11000
         },
         {
           "click": {
@@ -89,7 +95,7 @@
           }
         },
         {
-          "pause": 5000
+          "pause": 11000
         },
         {
           "click": {
@@ -99,7 +105,7 @@
           }
         },
         {
-          "pause": 5000
+          "pause": 11000
         },
         {
           "click": {
@@ -116,6 +122,8 @@
     },
     {
       "id": "model",
+      "camera": "overview",
+      "textFrom": ".cinematic-onboarding--model",
       "timeScale": 0.25,
       "steps": [
         {
@@ -151,6 +159,8 @@
     },
     {
       "id": "tour",
+      "camera": "overview",
+      "textFrom": "[role=dialog][aria-label^=\"투어\"]",
       "steps": [
         {
           "waitFor": "[role=dialog][aria-label^=\"투어\"]",
