@@ -4,6 +4,8 @@
 > Agent는 업무 수행 인터페이스, Skill은 업무 자산의 기술 단위, Learning Loop는 자산 후보의 발견·재사용·개선을 돕는 내부 엔진이다.
 > Claude Desktop · Hermes Agent를 실행 경험과 learning loop의 참조 모델로 삼는다.
 
+![RICE 대화 화면 — 실행 계획과 HTML 파일 생성](rice-chat-preview.png)
+
 ## 사전 준비 (Prerequisites)
 
 ### 시스템 요구사항
