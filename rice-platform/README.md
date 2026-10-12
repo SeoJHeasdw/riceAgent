@@ -40,7 +40,7 @@ RICE_ARTIFACTS_DIR=/path/to/artifacts rice-platform
 | GET | `/artifacts/{id}` | 단일 artifact 상세 |
 | GET | `/artifacts/{id}/files/{path}` | artifact 내 개별 파일 내용 (SkillFileBrowser lazy load) |
 | GET | `/artifacts/{id}/download` | tar.gz 다운로드 (`X-Checksum: sha256-…` 헤더) |
-| POST | `/artifacts/{id}/sponsor` | Blue Point 후원 (mock) |
+| POST | `/artifacts/{id}/sponsor` | Point 후원 (mock) |
 | POST | `/artifacts` | artifact 게시 (JSON body, manifest에 `managed_by: rice-app` 필요) |
 | DELETE | `/artifacts/{id}` | `managed_by: rice-app` 게시본 내리기 |
 

@@ -7,7 +7,7 @@ here (a one-line factory entry), keeping the swap seam closed (RUNTIME_DESIGN §
 Real providers are lazily imported so the skeleton runs with only `echo` available
 (no anthropic/httpx deps required to boot).
 
-Credentials (API key, custom base_url, watsonx project_id) are NOT in config.yaml —
+Credentials (API key, custom base_url) are NOT in config.yaml —
 they live in `state.db` (provider_models). The registry takes a `credentials`
 lookup (model_id → ProviderCredentials) so it can build a provider with the active
 model's secret at resolve time (re-evaluated each turn, C-1).
@@ -32,8 +32,7 @@ class ProviderCredentials:
     """Per-model secret/connection info, sourced from provider_models (state.db)."""
 
     api_key: str | None = None
-    base_url: str | None = None  # openai-compatible custom endpoint / watsonx region
-    project_id: str | None = None  # watsonx only
+    base_url: str | None = None  # OpenAI-compatible custom endpoint
 
 
 CredentialLookup = Callable[[str], "ProviderCredentials | None"]
@@ -56,7 +55,6 @@ class ProviderRegistry(IProviderRegistry):
             "claude": self._make_claude,
             "ollama": self._make_ollama,
             "openai": self._make_openai,
-            "watsonx": self._make_watsonx,
         }
         # 단일 슬롯 인스턴스 캐시 — 같은 설정이면 같은 provider를 돌려준다.
         # 매 턴 새 인스턴스를 만들면 provider가 보유한 HTTP 커넥션 풀/SDK
@@ -80,7 +78,7 @@ class ProviderRegistry(IProviderRegistry):
             kind, cfg.model, cfg.base_url, cfg.timeout_seconds,
             getattr(cfg, "num_ctx", None), getattr(cfg, "keep_alive", None),
             getattr(cfg, "idle_unload_seconds", None),
-            (creds.api_key, creds.base_url, creds.project_id) if creds else None,
+            (creds.api_key, creds.base_url) if creds else None,
         )
         if self._cache is not None and self._cache[0] == signature:
             return self._cache[1]
@@ -152,10 +150,3 @@ class ProviderRegistry(IProviderRegistry):
         from .openai import OpenAIProvider  # noqa: PLC0415 - lazy by design
 
         return OpenAIProvider(cfg, api_key=creds.api_key, base_url=creds.base_url)
-
-    def _make_watsonx(self, cfg: ProviderConfig, creds: ProviderCredentials | None) -> ILLMProvider:
-        if creds is None or not creds.api_key or not creds.project_id or not creds.base_url:
-            raise ProviderError("watsonx provider needs api_key, project_id and base_url (region endpoint)")
-        from .watsonx import WatsonxProvider  # noqa: PLC0415 - lazy by design
-
-        return WatsonxProvider(cfg, api_key=creds.api_key, project_id=creds.project_id, base_url=creds.base_url)

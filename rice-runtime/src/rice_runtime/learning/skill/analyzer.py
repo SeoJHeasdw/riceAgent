@@ -62,7 +62,7 @@ _KNOWN_TOOL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("terminal", re.compile(r"\b(terminal|shell|bash|zsh|command line|CLI|npm|pnpm|yarn|pytest|git|rg|grep)\b", re.I)),
     ("file tools", re.compile(r"\b(read_file|write_file|edit_file|list_dir|filesystem|workspace)\b", re.I)),
     ("web/search", re.compile(r"\b(web search|browser|fetch_url|url|http|검색|브라우저)\b", re.I)),
-    ("database", re.compile(r"\b(sql|db2|postgres|mysql|database|schema|query)\b", re.I)),
+    ("database", re.compile(r"\b(sql|postgres|mysql|database|schema|query)\b", re.I)),
     ("python", re.compile(r"\b(python|pandas|notebook|script\.py)\b", re.I)),
     ("office", re.compile(r"\b(create_presentation|create_workbook|excel|xlsx|pptx|powerpoint|스프레드시트)\b", re.I)),
     ("connector", re.compile(r"\b(gmail|calendar|drive|slack|salesforce|connector|oauth)\b", re.I)),

@@ -4,9 +4,6 @@
 # claude code
 .claude
 
-# bob
-.bob
-
 # Python (defense-in-depth; rice-runtime/.gitignore has the detailed rules)
 __pycache__/
 *.py[cod]

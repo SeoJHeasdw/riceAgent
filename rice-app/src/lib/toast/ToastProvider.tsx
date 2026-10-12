@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { ProgressToast, type ProgressTone } from '../../components/carbon/ProgressToast';
-import { NotificationToast, type NotificationVariant } from '../../components/carbon/NotificationToast';
+import { ProgressToast, type ProgressTone } from '../../components/workspace/ProgressToast';
+import { NotificationToast, type NotificationVariant } from '../../components/workspace/NotificationToast';
 import { ToastContext, type ToastApi } from './ToastContext';
 
 /**
@@ -128,5 +128,3 @@ const ToastViewport: React.FC<{ items: ToastItem[]; onDismiss: (id: number) => v
     </div>
   );
 };
-
-// Made with Bob

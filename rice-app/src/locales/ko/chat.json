@@ -468,7 +468,7 @@
     "groupLast30Days": "최근 30일",
     "groupOlder": "이전",
     "modelLocal": "로컬 · Ollama",
-    "modelSaas": "SaaS · watsonx"
+    "modelSaas": "SaaS"
   },
   "modelSettings": {
     "title": "모델 설정",
@@ -513,7 +513,7 @@
     "barWarm": "학습 후",
     "taskTitle": {
       "T-A": "분기 매출 요약",
-      "T-B": "Db2 스키마 점검",
+      "T-B": "데이터베이스 스키마 점검",
       "T-C": "고객 이탈 분석"
     }
   },

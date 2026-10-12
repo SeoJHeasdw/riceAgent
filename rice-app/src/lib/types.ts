@@ -62,7 +62,7 @@ export interface Skill {
 
 // A slash-command skill a plugin provides (invoked with "/" in chat)
 export interface PluginSkill {
-  /** Slash-command id, e.g. "watsonx_troubleshooting_ocp" (rendered as /…) */
+  /** Slash-command id, e.g. "deployment_troubleshooting" (rendered as /…) */
   command: string;
   desc: string;
 }
@@ -543,5 +543,3 @@ export interface PlatformPublishPayload {
   manifest: Record<string, unknown>;
   files: { path: string; content: string }[];
 }
-
-// Made with Bob

@@ -1,6 +1,6 @@
 import React from 'react';
 import { useLocation } from 'react-router-dom';
-import { IconRail, IconRailItem } from './carbon';
+import { IconRail, IconRailItem } from './workspace';
 import { CompanionCloudIcon } from './ui';
 
 /**
@@ -73,5 +73,3 @@ export const Layout: React.FC<LayoutProps> = ({
     </div>
   );
 };
-
-// Made with Bob

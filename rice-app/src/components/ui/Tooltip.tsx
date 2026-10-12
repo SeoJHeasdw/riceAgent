@@ -57,5 +57,3 @@ export const Tooltip: React.FC<TooltipProps> = ({ label, side = 'top', disabled,
     </span>
   );
 };
-
-// Made with Bob

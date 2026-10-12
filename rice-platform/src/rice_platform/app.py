@@ -5,7 +5,7 @@
     GET  /catalog                       artifact 목록 (type/q/category/tags/sort)
     GET  /artifacts/{id}                단일 artifact 상세
     GET  /artifacts/{id}/download       tar.gz 다운로드 (+ X-Checksum 헤더)
-    POST /artifacts/{id}/sponsor        Blue Point 후원 (mock)
+    POST /artifacts/{id}/sponsor        Point 후원 (mock)
     POST /artifacts                     artifact 게시 (publish, MVP: 디렉토리 저장)
 
 CORS: rice-app(Electron renderer, localhost)에서 접근하므로 localhost 전체 허용.
@@ -180,7 +180,7 @@ async def artifact_download(artifact_id: str):
     )
 
 
-# ── sponsor (Blue Point mock, PLATFORM_DESIGN §6) ─────────────────────────────
+# ── sponsor (Point mock, PLATFORM_DESIGN §6) ─────────────────────────────
 
 # 메모리 내 포인트 집계 (재시작 시 초기화 — MVP)
 _sponsor_totals: dict[str, int] = {}

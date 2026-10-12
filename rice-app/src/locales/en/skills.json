@@ -1,7 +1,7 @@
 {
   "market": {
     "title": "Skill Market",
-    "subtitle": "Download skills built by IBMers and sponsor their creators with Blue Points",
+    "subtitle": "Download skills built by members and sponsor their creators with points",
     "search": "Search skills...",
     "install": "Install",
     "installed": "Installed",
@@ -11,7 +11,8 @@
     "sortRecent": "Most recent",
     "sortRating": "Top rated",
     "sortSponsored": "Most sponsored",
-    "railBalanceLabel": "My IBM Blue Points",
+    "pointsUnit": "pts",
+    "railBalanceLabel": "My points",
     "railMonthlyChange": "This month +{{amount}}",
     "railCategoriesTitle": "Categories",
     "railUploadBtn": "Upload my skill",
@@ -22,7 +23,7 @@
     "toastRiskFlagged": "Risk signals were detected in {{name}} — review the skill body in My Skills",
     "toastUninstalled": "{{name}} has been removed",
     "toastRemoveFailed": "Could not remove {{name}}",
-    "toastSponsored": "Sponsored {{author}} with {{amount}} BP",
+    "toastSponsored": "Sponsored {{author}} with {{amount}} pts",
     "toastPublished": "Published {{name}} to the market",
     "toastPublishFailed": "Could not publish {{name}} to the market",
     "emptyTitle": "No skills found",
@@ -61,7 +62,7 @@
     "categoryCommunication": "Communication",
     "categoryProductivity": "Productivity",
     "getBtn": "Get",
-    "sponsorBtnTitle": "Sponsor with Blue Points",
+    "sponsorBtnTitle": "Sponsor with points",
     "sponsorBtnLabel": "Sponsor"
   },
   "publish": {
@@ -129,7 +130,7 @@
     "blocked1": "Write the SKILL.md content",
     "doneTitle": "Published",
     "doneHeading": "Your skill is live on the market",
-    "doneBody": "Other IBMers can now find, install, and sponsor {{name}}.",
+    "doneBody": "Other members can now find, install, and sponsor {{name}}.",
     "doneCloseBtn": "Close",
     "doneViewBtn": "View in market",
     "filePickTitle": "Already have a SKILL.md?",
@@ -166,7 +167,7 @@
     "metaTagsNone": "None",
     "metaDef": "Definition",
     "metaDefValue": "SKILL.md · {{count}} chars",
-    "scopeHint": "Once published, all IBMers can search and install this skill.",
+    "scopeHint": "Once published, all members can search and install this skill.",
     "scopeUnpublishHint": "You can unpublish it at any time from My Skills.",
     "tagSuggestionDataAnalysis": "data,analysis,visualization,excel",
     "tagSuggestionAutomation": "automation,workflow,schedule",
@@ -474,10 +475,10 @@
   },
   "sponsor": {
     "modalTitle": "Sponsor skill",
-    "descriptionPrefix": "Send IBM Blue Points to",
+    "descriptionPrefix": "Send points to",
     "descriptionSuffix": "",
-    "balanceLabel": "My balance: {{balance}} BP",
-    "sponsorBtn": "Sponsor {{amount}} BP"
+    "balanceLabel": "My balance: {{balance}} pts",
+    "sponsorBtn": "Sponsor {{amount}} pts"
   },
   "sourceWorkspace": {
     "backTitle": "Back to skill details (Esc)",

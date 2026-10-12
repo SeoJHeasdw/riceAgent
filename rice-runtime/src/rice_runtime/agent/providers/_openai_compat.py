@@ -1,7 +1,7 @@
 """Shared OpenAI-style chat helpers (RUNTIME_DESIGN §6).
 
-Both the OpenAI provider and IBM watsonx.ai speak the OpenAI `chat/completions`
-wire shape (system/user/assistant/tool messages, `tools` as function specs, and
+OpenAI and compatible endpoints use the `chat/completions` wire shape
+(system/user/assistant/tool messages, `tools` as function specs, and
 SSE `choices[].delta` streaming). This module holds the format mapping + the
 streaming-delta assembler so each provider only owns its HTTP + auth.
 

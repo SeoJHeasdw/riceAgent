@@ -6,11 +6,11 @@
     "turns": [
       {
         "role": "user",
-        "content": "지난 분기 Db2 매출 데이터로 임원 보고용 요약 만들어줘. 지난번처럼 핵심만 불릿으로."
+        "content": "지난 분기 데이터베이스 매출 데이터로 임원 보고용 요약 만들어줘. 지난번처럼 핵심만 불릿으로."
       },
       {
         "role": "assistant",
-        "content": "먼저 데이터 소스부터 확인할게요. `db2-prod.sales` 에 붙어서 스키마가 예상과 맞는지 보겠습니다."
+        "content": "먼저 데이터 소스부터 확인할게요. `database-prod.sales` 에 붙어서 스키마가 예상과 맞는지 보겠습니다."
       },
       {
         "role": "assistant",
@@ -26,7 +26,7 @@
       },
       {
         "role": "assistant",
-        "content": "센트→달러 보정까지 끝내고 `db2-prod.sales` 의 2026 Q1 데이터를 요약했습니다. 단위만 맞추니 전분기 대비 +11.4%로 깔끔하게 떨어지네요."
+        "content": "센트→달러 보정까지 끝내고 `database-prod.sales` 의 2026 Q1 데이터를 요약했습니다. 단위만 맞추니 전분기 대비 +11.4%로 깔끔하게 떨어지네요."
       },
       {
         "role": "user",
@@ -46,7 +46,7 @@
       },
       {
         "role": "user",
-        "content": "참, 매출 원본이 watsonx.data로 옮겨졌어. 이제 db2-prod 말고 거기서 읽어줘."
+        "content": "참, 매출 원본이 analytics-store로 옮겨졌어. 이제 database-prod 말고 거기서 읽어줘."
       },
       {
         "role": "assistant",
@@ -54,7 +54,7 @@
       },
       {
         "role": "assistant",
-        "content": "역시 1단계가 아직 `db2-prod.sales` 를 가리키고 있네요. 본문을 이렇게 고치면 다음 실행부터 자동으로 새 소스를 씁니다. 적용 전에 확인해 주세요."
+        "content": "역시 1단계가 아직 `database-prod.sales` 를 가리키고 있네요. 본문을 이렇게 고치면 다음 실행부터 자동으로 새 소스를 씁니다. 적용 전에 확인해 주세요."
       },
       {
         "role": "user",
@@ -68,12 +68,12 @@
   },
   {
     "id": "c2",
-    "title": "Db2 → watsonx.data 마이그레이션 점검",
+    "title": "데이터베이스 → analytics-store 마이그레이션 점검",
     "group": "오늘",
     "turns": [
       {
         "role": "user",
-        "content": "Db2 prod 스키마를 watsonx.data로 옮기기 전에 깨질 만한 거 점검해줘."
+        "content": "데이터베이스 prod 스키마를 analytics-store로 옮기기 전에 깨질 만한 거 점검해줘."
       },
       {
         "role": "assistant",
@@ -89,7 +89,7 @@
       },
       {
         "role": "assistant",
-        "content": "아, 막혔어요. `watsonx.data` 카탈로그는 `WITH TIME ZONE` 자체를 안 받네요 — 핸드북 권장 문구와 카탈로그 실제 지원이 어긋나는 지점이에요. 타임존은 컬럼 타입이 아니라 적재 단계에서 UTC로 정규화하는 게 맞겠어요. 카탈로그가 정확히 뭘 지원하는지 보고 고치겠습니다."
+        "content": "아, 막혔어요. `analytics-store` 카탈로그는 `WITH TIME ZONE` 자체를 안 받네요 — 핸드북 권장 문구와 카탈로그 실제 지원이 어긋나는 지점이에요. 타임존은 컬럼 타입이 아니라 적재 단계에서 UTC로 정규화하는 게 맞겠어요. 카탈로그가 정확히 뭘 지원하는지 보고 고치겠습니다."
       },
       {
         "role": "assistant",

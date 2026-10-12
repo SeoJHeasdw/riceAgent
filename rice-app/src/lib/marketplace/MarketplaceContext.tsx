@@ -65,8 +65,8 @@ export interface MarketplaceContextValue {
   togglePlugin: (id: string, enabled: boolean) => Promise<boolean>;
   filteredSkills: Skill[];
   filteredPlugins: Plugin[];
-  bluePointBalance: number;
-  setBluePointBalance: (balance: number) => void;
+  pointBalance: number;
+  setPointBalance: (balance: number) => void;
 }
 
 const MarketplaceCtx = createContext<MarketplaceContextValue | null>(null);
@@ -134,7 +134,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState('popular');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const [bluePointBalance, setBluePointBalance] = useState(12480);
+  const [pointBalance, setPointBalance] = useState(12480);
 
   // platform 카탈로그 + runtime 설치 상태 병합. 런타임 연결이 뒤늦게 켜지는 Electron
   // 부트 흐름에서도 재조회해 마켓 카드의 설치/활성 상태가 재시작 뒤 흔들리지 않게 한다.
@@ -351,7 +351,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   const sponsorSkill = useCallback(async (id: string, amount: number) => {
     setIsLoading(true);
-    // platform 스킬이면 실제 sponsor API 호출 (Blue Point mock)
+    // platform 스킬이면 실제 sponsor API 호출 (Point mock)
     if (id.startsWith('platform-')) {
       const artifactId = id.slice('platform-'.length);
       await platform.sponsorArtifact(artifactId, amount);
@@ -359,7 +359,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
     setSkills((prev) => prev.map((skill) => (skill.id === id ? { ...skill, points: skill.points + amount } : skill)));
-    setBluePointBalance((prev) => Math.max(0, prev - amount));
+    setPointBalance((prev) => Math.max(0, prev - amount));
     setIsLoading(false);
   }, []);
 
@@ -499,8 +499,8 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
       togglePlugin,
       filteredSkills,
       filteredPlugins,
-      bluePointBalance,
-      setBluePointBalance,
+      pointBalance,
+      setPointBalance,
     }),
     [
       skills,
@@ -520,7 +520,7 @@ export const MarketplaceProvider: React.FC<{ children: React.ReactNode }> = ({ c
       togglePlugin,
       filteredSkills,
       filteredPlugins,
-      bluePointBalance,
+      pointBalance,
     ],
   );
 
@@ -533,5 +533,3 @@ export const useMarketplace = (): MarketplaceContextValue => {
   if (!ctx) throw new Error('useMarketplace must be used within a MarketplaceProvider');
   return ctx;
 };
-
-// Made with Bob

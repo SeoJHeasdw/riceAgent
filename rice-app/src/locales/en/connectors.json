@@ -201,7 +201,7 @@
   "directory": {
     "title": "Browse connectors",
     "searchPlaceholder": "Search connectors…",
-    "sourceChip": "IBM & Partners",
+    "sourceChip": "Community & Partners",
     "catalogCount": "Catalog · {{count}}",
     "comingSoonHint": "\"Coming soon\" items cannot be connected directly yet. If you have an MCP server URL, try",
     "comingSoonCta": "\"Add custom\"",
@@ -320,35 +320,6 @@
       "automation": "Automation",
       "conversation": "Conversation"
     },
-    "db2": {
-      "category": "Database",
-      "summary": "Production database connection used for quarterly sales queries and schema checks.",
-      "scopes": [
-        "List schemas and tables in the connected database.",
-        "Describe columns, types, and indexes for a specific table.",
-        "Run read-only SQL (SELECT) queries.",
-        "Retrieve query execution plans (EXPLAIN).",
-        "Run INSERT, UPDATE, and DELETE statements."
-      ],
-      "usedBy": [
-        {
-          "kind": "skill",
-          "name": "Quarterly sales summary"
-        },
-        {
-          "kind": "skill",
-          "name": "Db2 schema check"
-        },
-        {
-          "kind": "plugin",
-          "name": "Db2 expert"
-        }
-      ],
-      "examples": [
-        "Review the sales table schema",
-        "Create a 2026 Q1 sales summary"
-      ]
-    },
     "slack": {
       "category": "Messaging",
       "summary": "Send summaries and reports to channels, and read mentions.",
@@ -426,25 +397,6 @@
       "usedBy": [],
       "examples": [
         "Summarize the documents in this folder"
-      ]
-    },
-    "orchestrate": {
-      "category": "Automation",
-      "summary": "Run workflows automatically on a schedule or trigger.",
-      "scopes": [
-        "List available workflows.",
-        "Check workflow run status and history.",
-        "Run a workflow.",
-        "Register or modify a workflow schedule."
-      ],
-      "usedBy": [
-        {
-          "kind": "automation",
-          "name": "Quarterly sales summary · Every Mon 08:00"
-        }
-      ],
-      "examples": [
-        "Set up a Monday morning report automation"
       ]
     },
     "gmail": {

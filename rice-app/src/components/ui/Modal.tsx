@@ -5,7 +5,7 @@ import { dialogBackdropCls, dialogSurfaceCls } from './surfaces';
 import { useDialogA11y } from '../../hooks/useDialogA11y';
 
 /**
- * Modal component — Carbon color tokens with modernized shape
+ * Modal component — RICE color tokens with modernized shape
  * - Modal dialog with blurred backdrop overlay
  * - Rounded corners with deep overlay shadow
  *
@@ -109,5 +109,3 @@ export const Modal: React.FC<ModalProps> = ({
     document.body,
   );
 };
-
-// Made with Bob

@@ -6,7 +6,7 @@ import i18n from './i18n';
 /**
  * skillBridge — the seam between the two "skill" worlds.
  *
- *   마켓 Skill (types.ts)  = 배포 패키지 (downloads·rating·BP·files)
+ *   마켓 Skill (types.ts)  = 배포 패키지 (downloads·rating·points·files)
  *   소유 Skill (learningData) = 소유 인스턴스 (origin·rules·versions·health)
  *
  * 두 타입을 하나로 머지하지 않고, 공유 코어(SkillFile + 식별자)를 통해 변환한다.
@@ -319,5 +319,3 @@ export function marketPluginToMyPlugin(p: MarketPlugin): MyPlugin {
     examples: p.useCases ?? [],
   };
 }
-
-// Made with Bob

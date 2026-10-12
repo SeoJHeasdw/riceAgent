@@ -675,5 +675,3 @@ export const useLearning = (): LearningContextValue => {
   if (!ctx) throw new Error('useLearning must be used within a LearningProvider');
   return ctx;
 };
-
-// Made with Bob

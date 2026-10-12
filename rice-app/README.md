@@ -34,9 +34,9 @@ RICE is a sophisticated desktop application that combines conversational AI with
 - **Vite 5.3+**: Fast build tool and dev server
 
 ### UI & Styling
-- **IBM Carbon Design System v11**: Enterprise-grade design system
+- **RICE Design System**: Application components and semantic theme tokens
 - **TailwindCSS 3.4+**: Utility-first CSS framework
-- **IBM Plex Fonts**: Sans, Mono, and Serif typefaces
+- **System Fonts**: Local sans, mono, and serif font stacks
 
 ### State Management & Data
 - **React Hooks**: Custom hooks for chat, learning loop, and marketplace
@@ -144,7 +144,7 @@ packages/rice-app/
 │   │   │   ├── Tabs.tsx
 │   │   │   ├── Tag.tsx
 │   │   │   └── Toast.tsx
-│   │   ├── carbon/            # Carbon-specific components
+│   │   ├── workspace/         # Application workspace components
 │   │   │   ├── ChatInput.tsx
 │   │   │   ├── MessageList.tsx
 │   │   │   ├── Message.tsx
@@ -253,15 +253,15 @@ packages/rice-app/
 
 ### Design System Guidelines
 
-This project follows IBM Carbon Design System principles:
+This project follows RICE Design System principles:
 
-- **0px border radius**: Flat, sharp corners (no rounded edges)
+- **Border radius**: 8px base radius and 12px dialog surfaces
 - **8px spacing scale**: 2/4/8/12/16/24/32/40/48/64/80/96/160
-- **IBM Plex fonts**: Sans, Mono, Serif
+- **System fonts**: Local sans, mono, and serif stacks
 - **Sentence case**: All UI text uses sentence case (not title case)
-- **Dark theme**: g100 theme by default
-- **Color tokens**: Use Carbon color tokens (e.g., `text-primary`, `layer-01`)
-- **Typography scale**: Use Carbon type tokens (e.g., `body-short-02`, `heading-03`)
+- **Themes**: Graphite dark theme by default, with a light theme option
+- **Color tokens**: Use RICE color tokens (e.g., `text-primary`, `layer-01`)
+- **Typography scale**: Use RICE type tokens (e.g., `body-short-02`, `heading-03`)
 
 See [DESIGN_SYSTEM.md](docs/DESIGN_SYSTEM.md) for detailed guidelines.
 
@@ -343,7 +343,7 @@ Comprehensive documentation is available in the `docs/` directory:
 
 - **[ARCHITECTURE.md](docs/ARCHITECTURE.md)**: System architecture and design patterns
 - **[COMPONENTS.md](docs/COMPONENTS.md)**: Component catalog and usage examples
-- **[DESIGN_SYSTEM.md](docs/DESIGN_SYSTEM.md)**: IBM Carbon Design System integration
+- **[DESIGN_SYSTEM.md](docs/DESIGN_SYSTEM.md)**: RICE Design System integration
 - **[DEVELOPMENT.md](docs/DEVELOPMENT.md)**: Development workflow and best practices
 - **[API_INTEGRATION.md](docs/API_INTEGRATION.md)**: Runtime API and SSE streaming
 - **[DEPLOYMENT.md](docs/DEPLOYMENT.md)**: Build and distribution guide
@@ -367,7 +367,7 @@ Comprehensive documentation is available in the `docs/` directory:
 - Use functional components with hooks
 - Add JSDoc comments for complex functions
 - Keep components small and focused
-- Use Carbon Design System components when possible
+- Use RICE Design System components when possible
 
 ### Commit Messages
 
@@ -429,12 +429,10 @@ xcode-select --install
 - Restart Electron: `npm run electron:dev`
 - Clear browser cache in Electron DevTools
 
-#### Carbon styles not loading
+#### Application styles not loading
 
-```bash
-# Reinstall Carbon packages
-npm install @carbon/react @carbon/icons-react
-```
+- Check that `src/styles/globals.css` is imported.
+- Restart Vite after changing `tailwind.config.js`.
 
 ### Debug Mode
 
@@ -461,7 +459,6 @@ MIT License - see LICENSE file for details
 
 ## 🙏 Acknowledgments
 
-- **IBM Carbon Design System**: For the excellent design system
 - **Electron**: For the cross-platform framework
 - **React**: For the UI library
 - **Vite**: For the fast build tool

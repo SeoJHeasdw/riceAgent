@@ -1,7 +1,7 @@
 import React from 'react';
 
 /**
- * Card component — Carbon color tokens with modernized shape
+ * Card component — RICE color tokens with modernized shape
  * - Flat by default: border가 형태를 잡고, 그림자는 overlay 표면 전용
  * - Uses layer backgrounds
  */
@@ -61,5 +61,3 @@ export const Card = React.forwardRef<HTMLDivElement, CardProps>(
 );
 
 Card.displayName = 'Card';
-
-// Made with Bob

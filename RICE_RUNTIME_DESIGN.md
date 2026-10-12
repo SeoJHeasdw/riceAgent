@@ -18,7 +18,7 @@
 | 스킬 생성 트리거 | ★ **차용 후 RICE식 재구성** | 현재 구현은 시스템 프롬프트 가이드만이 아니라 `ReviewGate`/`ReviewEngine` 사후 리뷰와 `propose_skill` 미드턴 도구를 함께 사용한다. 저장은 항상 `skill_patch_proposed` 승인 후 수행 |
 | Curator | ★ **단순화** — 자동 전이(규칙)만 차용, LLM 리뷰는 수동 트리거 버튼으로 | 기본 7일 주기는 데모에서 절대 안 보임. UI에서 "스킬 정리" 버튼 → 즉시 실행이 데모에 유리 |
 | Memory Manager | ★ **차용** (builtin 1개로 시작) | Hermes도 외부 provider 1개 제한. MVP는 builtin(로컬)만 |
-| Honcho (외부 user modeling) | ★ **제외** | 원격 API 의존 — IBM 내부 데모에 외부 SaaS 부적합. user modeling은 로컬 구현 (3장) |
+| Honcho (외부 user modeling) | ★ **제외** | 원격 API 의존 — 사내 데모에 외부 SaaS 부적합. user modeling은 로컬 구현 (3장) |
 | `execute_code` (PTC) → 실제 구현명 `terminal` | ✅ **차용했으나 경계는 원안보다 약하게 구현됨** — repo 단위 코드/명령 실행 도구로 제공 | Hermes도 코드를 생성·실행한다(스킬에 넣지 않을 뿐). 원안은 자식 프로세스+cwd 한정이었으나, 실제 `agent/builtins/terminal_tool.py`는 **의도적으로 "호스트 셸"**이라 cwd를 제한하지 않는다 — 실제 방어선은 승인 게이트뿐이다. 상세·격차는 5장 |
 | Plugin 시스템 (`register(ctx)`) | ★ **차용** (artifact 스펙은 CONTRACTS 문서) | Plugin Market의 전제 조건 |
 | Cron Scheduler | ★ **제외** | 데모 범위 밖 |
@@ -170,7 +170,7 @@ Gemini CLI Scheduler의 상태 머신 전체를 옮기지는 않는다. RICE는 
 
 **알려진 격차(코드 변경 필요)**: 위 표의 `execute_code` 행이 원래 정의했던 "자식 프로세스+작업 repo cwd 한정+env 스크럽+타임아웃"은 `terminal`에는 **채택되지 않았다** — `terminal_tool.py` 자체 코드 주석이 이를 명시적으로 인정한다. 이번 동기화는 문서를 실제 구현에 맞춰 정정한다. 원안 수준의 격리(자식 프로세스+cwd+env allowlist)로 강화할지, 승인 게이트만으로 충분하다고 볼지는 별도 제품/보안 판단 대상이다.
 
-**실행 방식**: 마켓에서 설치한 plugin·Connector(MCP) 코드는 **자식 프로세스 + env 스크럽**으로 실행하고, "데모 한정, 신뢰된 사내 artifact만"을 전제로 둔다 — 데모 대상이 IBM 내부 큐레이션된 artifact이기 때문. 제품화 시 Docker 컨테이너(CPU/메모리 제한)로 전환은 ADR로 기록.
+**실행 방식**: 마켓에서 설치한 plugin·Connector(MCP) 코드는 **자식 프로세스 + env 스크럽**으로 실행하고, "데모 한정, 신뢰된 사내 artifact만"을 전제로 둔다 — 데모 대상이 조직 내부에서 큐레이션된 artifact이기 때문. 제품화 시 Docker 컨테이너(CPU/메모리 제한)로 전환은 ADR로 기록.
 
 > 검토했던 대안: Docker 실행(안전하나 사용자 PC에 Docker 요구 → 데모 제약), 선언적만 허용(가장 안전 — skill은 이미 선언적이나, Connector(MCP) 실행이 막혀 외부 연동 데모 약화).
 
@@ -198,14 +198,13 @@ Gemini CLI Scheduler의 상태 머신 전체를 옮기지는 않는다. RICE는 
 
 ## 6. 모델 프로바이더 & 키 보관 (REPO_STRATEGY #3 해소)
 
-서비스 형태 관점으로 **5개 provider**를 지원한다("모델 선택" UI가 조합을 다룬다) — 애초 "Phase 2"로 미뤄뒀던 OpenAI 호환 게이트웨이 추상화는 이미 구현·병합됐다:
+서비스 형태 관점으로 **4개 provider**를 지원한다("모델 선택" UI가 조합을 다룬다) — 애초 "Phase 2"로 미뤄뒀던 OpenAI 호환 게이트웨이 추상화는 이미 구현·병합됐다:
 
 | 형태 | Provider | 모델 (프로토타입) | 접속/인증 |
 |------|----------|-------------------|-----------|
 | **SaaS** | Claude (Anthropic API) | Claude Sonnet 4.5 | API 키 → OS 키체인, prompt caching 지원 |
 | **on-prem** | Ollama (로컬 모델) — **메인 대상** | Qwen3.6-27B / Qwen3.5-9B (MLX) / gpt-oss:20b | `base_url` (키 불필요), 사내·오프라인 |
 | **SaaS** | OpenAI 호환(`agent/providers/openai.py`) | 사용자 등록 모델(`registered_models`) | API 키 → OS 키체인 |
-| **SaaS** | IBM watsonx(`agent/providers/watsonx.py`) | 사용자 등록 모델 | API 키 → OS 키체인. ⚠️ 실사용 검증 미완(코드 주석 명시) — 재검토 필요 |
 | **폴백** | echo | 모델 미설정 시 | 키 불필요, 플래너 등 LLM 호출 스킵 |
 
 > 모델명은 프로토타입 기준이며 수시 교체된다 — 고정값으로 읽지 말 것. (※ Claude 최신은 Sonnet 4.6(`claude-sonnet-4-6`) — 필요 시 교체)

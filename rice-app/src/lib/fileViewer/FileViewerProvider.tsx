@@ -29,5 +29,3 @@ export const FileViewerProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   return <FileViewerContext.Provider value={{ openFile }}>{children}</FileViewerContext.Provider>;
 };
-
-// Made with Bob

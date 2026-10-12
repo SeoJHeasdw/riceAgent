@@ -96,5 +96,3 @@ export const Toggle: React.FC<ToggleProps> = ({
     </div>
   );
 };
-
-// Made with Bob

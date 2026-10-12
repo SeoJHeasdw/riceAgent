@@ -1,6 +1,6 @@
 /**
  * Base UI Components
- * IBM Carbon Design System compliant components
+ * RICE Design System compliant components
  */
 
 export { Button } from './Button';
@@ -49,5 +49,3 @@ export { Kbd } from './Kbd';
 
 export { Tooltip } from './Tooltip';
 export type { TooltipProps } from './Tooltip';
-
-// Made with Bob

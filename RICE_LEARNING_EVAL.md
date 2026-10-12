@@ -80,7 +80,7 @@ RICE의 단 하나의 핵심 주장은 **"쓸수록 사용자에게 맞춰 똑�
 |----|-------------|-----------|-------------------|
 | T-A | "이 서비스 배포해줘" | `deploy-k8s-service` | mock 배포 tool이 올바른 순서/인자로 호출됨 |
 | T-B | "프로젝트 테스트 돌려줘" | `run-tests` + pytest preference | mock test runner가 `-n 8`(교정 반영)로 호출됨 |
-| T-C | "배포 오류(ImagePullBackOff) 트러블슈팅" | `deploy-k8s-service`(실제 `eval/tasks/t_c_debug.yaml` 기준. `wxo-expert` plugin은 현재 eval task에 사용되지 않음) | 정답 진단 단계 시퀀스 도달 |
+| T-C | "배포 오류(ImagePullBackOff) 트러블슈팅" | `deploy-k8s-service`(실제 `eval/tasks/t_c_debug.yaml` 기준. `deployment-expert` plugin은 현재 eval task에 사용되지 않음) | 정답 진단 단계 시퀀스 도달 |
 
 **성공 체크는 결정적 mock 기반으로 구현한다.** 실제 부수효과(실 배포) 대신 **mock tool의 호출 시퀀스/최종 상태**로 판정한다(예: 정해진 인자·순서로 호출됐는가, 최종 상태가 기대값인가). LLM-judge(자유 서술 채점)는 결정성을 해치므로 **보조 수단으로만** 쓴다. 각 task의 `success_check`는 이 결정적 술어로 작성한다.
 
@@ -137,7 +137,7 @@ rice-runtime/
 
 **MySkillsScreen 내 패널.** 별도 화면을 추가하지 않고 정량 증거를 차별점 화면에 자연 배치한다. (검토했던 대안: ChatScreen 사이드 배지 — 공간 협소 / 새 화면 신설 — 화면 구조 변경 부담.)
 
-> **구현 상태**: 이 패널은 프론트엔드에 **이미 구현됨** — [`LearningImpactPanel.tsx`](rice-app/src/components/carbon/LearningImpactPanel.tsx)가 MySkillsScreen 안에서 "Learning Impact" 탭으로 렌더된다([MySkillsScreen.tsx](rice-app/src/screens/MySkillsScreen.tsx) — `showImpact` 토글). 6.3 스키마(`ImpactReport`)에만 의존하므로 현재 시드 fixture가 추후 harness 실측치로 drop-in 교체된다.
+> **구현 상태**: 이 패널은 프론트엔드에 **이미 구현됨** — [`LearningImpactPanel.tsx`](rice-app/src/components/workspace/LearningImpactPanel.tsx)가 MySkillsScreen 안에서 "Learning Impact" 탭으로 렌더된다([MySkillsScreen.tsx](rice-app/src/screens/MySkillsScreen.tsx) — `showImpact` 토글). 6.3 스키마(`ImpactReport`)에만 의존하므로 현재 시드 fixture가 추후 harness 실측치로 drop-in 교체된다.
 
 ### 6.2 패널 와이어프레임 (개념)
 

@@ -9,5 +9,3 @@ export const Kbd: React.FC<React.HTMLAttributes<HTMLElement>> = ({ children, cla
     {children}
   </kbd>
 );
-
-// Made with Bob

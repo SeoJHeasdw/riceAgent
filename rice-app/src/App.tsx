@@ -9,7 +9,7 @@ import { I18nProvider } from './lib/i18n/I18nContext';
 import { LearningProvider } from './lib/learning/LearningContext';
 import { MarketplaceProvider } from './lib/marketplace/MarketplaceContext';
 import { ToastProvider } from './lib/toast/ToastProvider';
-import { LanguageSelectDialog } from './components/carbon/LanguageSelectDialog';
+import { LanguageSelectDialog } from './components/workspace/LanguageSelectDialog';
 import {
   TourOverlay,
   TOUR_STEPS,
@@ -20,13 +20,13 @@ import {
   CONNECTORS_TOUR_STEPS,
   screenTourIdForPath,
   useScreenTour,
-} from './components/carbon/tour';
-import { CommandPalette } from './components/carbon/CommandPalette';
+} from './components/workspace/tour';
+import { CommandPalette } from './components/workspace/CommandPalette';
 import { REPLAY_ONBOARDING_EVENT, REPLAY_TOUR_EVENT, RESET_ALL_DATA_EVENT } from './lib/tutorial';
 import { useLearning } from './lib/learning/LearningContext';
 import { defaultModelSettings } from './lib/mockData';
-import type { ModelSettings } from './components/carbon/ModelSettingsPanel';
-import type { RegisteredModel } from './components/carbon/ModelSettingsPanel';
+import type { ModelSettings } from './components/workspace/ModelSettingsPanel';
+import type { RegisteredModel } from './components/workspace/ModelSettingsPanel';
 import HomeScreen from '@screens/HomeScreen';
 import MySkillsScreen from '@screens/MySkillsScreen';
 import MyPluginsScreen from '@screens/MyPluginsScreen';
@@ -38,7 +38,7 @@ import SettingsScreen from '@screens/SettingsScreen';
 // The cinematic renderer includes Three.js. Load it only after language
 // selection so the everyday app shell stays lean and fast to reopen.
 const ModelOnboarding = lazy(() =>
-  import('./components/carbon/ModelOnboarding').then((module) => ({ default: module.ModelOnboarding })),
+  import('./components/workspace/ModelOnboarding').then((module) => ({ default: module.ModelOnboarding })),
 );
 
 // 좌측 레일 항목은 공용 네비게이션 매니페스트에서 파생한다(홈 허브와 동일 출처).
@@ -192,13 +192,11 @@ type RuntimeBridge = {
 };
 
 // 등록 모델의 provider(UI) → 런타임 provider kind 매핑.
-const providerKind = (provider?: string): 'claude' | 'openai' | 'watsonx' => {
+const providerKind = (provider?: string): 'claude' | 'openai' => {
   switch (provider) {
     case 'openai':
     case 'custom':
       return 'openai';
-    case 'watsonx':
-      return 'watsonx';
     default:
       return 'claude';
   }
@@ -402,5 +400,3 @@ function App() {
 }
 
 export default App;
-
-// Made with Bob

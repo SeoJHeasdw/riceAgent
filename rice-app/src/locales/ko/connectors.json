@@ -201,7 +201,7 @@
   "directory": {
     "title": "커넥터 둘러보기",
     "searchPlaceholder": "커넥터 검색…",
-    "sourceChip": "IBM 및 파트너",
+    "sourceChip": "커뮤니티 및 파트너",
     "catalogCount": "카탈로그 · {{count}}",
     "comingSoonHint": "\"준비 중\" 항목은 아직 바로 연결할 수 없어요. MCP 서버 URL을 알고 있다면",
     "comingSoonCta": "\"커스텀 추가\"",
@@ -320,35 +320,6 @@
       "automation": "자동화",
       "conversation": "대화"
     },
-    "db2": {
-      "category": "데이터베이스",
-      "summary": "분기 매출 조회·스키마 점검에 쓰는 운영 데이터베이스 연결이에요.",
-      "scopes": [
-        "연결된 데이터베이스의 스키마·테이블 목록을 조회합니다.",
-        "특정 테이블의 컬럼·타입·인덱스를 설명합니다.",
-        "읽기 전용 SQL(SELECT) 쿼리를 실행합니다.",
-        "쿼리 실행 계획(EXPLAIN)을 조회합니다.",
-        "INSERT·UPDATE·DELETE 문을 실행합니다."
-      ],
-      "usedBy": [
-        {
-          "kind": "skill",
-          "name": "분기 매출 요약"
-        },
-        {
-          "kind": "skill",
-          "name": "Db2 스키마 점검"
-        },
-        {
-          "kind": "plugin",
-          "name": "Db2 전문가"
-        }
-      ],
-      "examples": [
-        "sales 테이블 스키마를 리뷰해줘",
-        "2026 Q1 매출 요약 만들어줘"
-      ]
-    },
     "slack": {
       "category": "메시징",
       "summary": "요약·리포트를 채널로 보내고 멘션을 읽어옵니다.",
@@ -426,25 +397,6 @@
       "usedBy": [],
       "examples": [
         "이 폴더의 문서들을 요약해줘"
-      ]
-    },
-    "orchestrate": {
-      "category": "자동화",
-      "summary": "워크플로를 스케줄·트리거로 자동 실행합니다.",
-      "scopes": [
-        "사용 가능한 워크플로 목록을 조회합니다.",
-        "워크플로 실행 상태·기록을 확인합니다.",
-        "워크플로를 실행합니다.",
-        "워크플로 스케줄을 등록·변경합니다."
-      ],
-      "usedBy": [
-        {
-          "kind": "automation",
-          "name": "분기 매출 요약 · 매주 월 08:00"
-        }
-      ],
-      "examples": [
-        "매주 월요일 아침 리포트 자동화를 만들어줘"
       ]
     },
     "gmail": {

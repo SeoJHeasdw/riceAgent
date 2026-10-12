@@ -1,6 +1,6 @@
 # RICE 설계 문서
 
-> RICE: 일하며 만든 업무 방식을 재사용 가능한 자산으로 축적하고, 검증된 자산을 조직 실행으로 확장하는 AI 업무 시스템 (IBM 내부용 데스크톱 앱)
+> RICE: 일하며 만든 업무 방식을 재사용 가능한 자산으로 축적하고, 검증된 자산을 조직 실행으로 확장하는 AI 업무 시스템 (조직 업무용 데스크톱 앱)
 > Agent는 업무 수행 인터페이스, Skill은 업무 자산의 기술 단위, Learning Loop는 자산 후보의 발견·재사용·개선을 돕는 내부 엔진이다.
 > Claude Desktop · Hermes Agent를 실행 경험과 learning loop의 참조 모델로 삼는다.
 
@@ -55,8 +55,8 @@ npm install
 `rice-marketplace`는 Anthropic · OpenAI 마켓플레이스의 plugin/skill을 다운로드하여 보관하는 **별도 레포**이며, rice 레포와 **sibling** 위치에 클론해야 한다.
 
 ```bash
-# rice 레포와 같은 부모 디렉토리에서 실행
-git clone git@github.ibm.com:JaeHo-Seo/rice-marketplace.git
+# rice 레포와 같은 부모 디렉토리에서 실제 저장소 주소로 바꿔 실행
+git clone '<rice-marketplace-repository-url>' rice-marketplace
 ```
 
 결과 디렉토리 구조:

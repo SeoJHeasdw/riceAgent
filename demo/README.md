@@ -28,8 +28,9 @@ RICE_DEMO=1 rice-app/node_modules/.bin/electron rice-app
 모르고, 앱의 사정은 이 파일에만 있다. 실행은 엔진 쪽에서 한다.
 
 ```bash
+RICE_DEMO_SCENARIO="$PWD/demo/scenarios/rice-first-run.json"
 cd ../../javis/local-tts-engine
-npm run demo -- record /Users/jaehoseo/Desktop/vswrk/bob/rice/demo/scenarios/rice-core-flow.json
+npm run demo -- record "$RICE_DEMO_SCENARIO"
 ```
 
 느리게 그려지는 장면(온보딩 시네마틱)은 시나리오의 장면에 `"timeScale": 0.25`를 적는다.

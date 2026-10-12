@@ -54,5 +54,3 @@ export const Tag: React.FC<TagProps> = ({
     </span>
   );
 };
-
-// Made with Bob

@@ -16,5 +16,3 @@ export const TwoColumnLayout: React.FC<TwoColumnLayoutProps> = ({ children }) =>
     </div>
   );
 };
-
-// Made with Bob

@@ -1,7 +1,7 @@
 # RICE Platform Design
 
 > 작성일: 2026-06-18 (개정: 2026-06-26, **2026-07-08 — 소스 드리프트 동기화: 목표 설계와 현 MVP 구현 범위 구분**) · 상태: **확정 (Phase 2, 목표 설계 — 실 구현은 MVP 단계)**
-> 범위: `rice-platform`(원격 마켓 서버)의 설계 — 모듈 구조, catalog, artifact registry, publish, Blue Point, PostgreSQL 스키마
+> 범위: `rice-platform`(원격 마켓 서버)의 설계 — 모듈 구조, catalog, artifact registry, publish, Point, PostgreSQL 스키마
 > 관계: API 계약은 [RICE_CONTRACTS.md](RICE_CONTRACTS.md) 3장이 소유, artifact manifest는 [RICE_CONTRACTS.md](RICE_CONTRACTS.md) 2장이 단일 출처. 레포 책임은 [RICE_REPO_STRATEGY.md](RICE_REPO_STRATEGY.md) 5.3.
 
 ---
@@ -140,7 +140,7 @@ RICE_PLUGIN_MARKETPLACES=../rice-marketplace
 
 ---
 
-## 6. Blue Point (sponsor, mock)
+## 6. Point (sponsor, mock)
 
 - `POST /artifacts/{id}/sponsor` — 유용한 스킬에 포인트 후원(데모 mock). 실제 정산 없음.
 - **집계는 in-process 딕셔너리다**(2026-07-08 확인 — `app.py`의 `_sponsor_totals: dict[str, int]`, 코드 주석 그대로 "메모리 내 포인트 집계, 재시작 시 초기화") — `sponsors` 테이블은 §7과 마찬가지로 목표 설계일 뿐 존재하지 않는다. catalog `sort=popular`에 가중 반영은 여전히 향후 항목.

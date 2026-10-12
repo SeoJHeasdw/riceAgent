@@ -19,5 +19,3 @@ export const startNewChat = () => window.dispatchEvent(new CustomEvent(NEW_CHAT_
 
 /** Open the global command palette from visible UI affordances. */
 export const openCommandPalette = () => window.dispatchEvent(new CustomEvent(OPEN_COMMAND_PALETTE_EVENT));
-
-// Made with Bob

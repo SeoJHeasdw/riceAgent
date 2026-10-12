@@ -28,7 +28,7 @@
 
 결정 규칙(resolve_profile): config의 `agent.orchestration_profile`이 명시되면
 그대로, "auto"면 provider에서 유추한다 — kind=ollama 또는 로컬 주소의 base_url을
-가진 openai 호환 서버(LM Studio 등)는 local, SaaS(claude/openai/watsonx)는 frontier.
+가진 openai 호환 서버(LM Studio 등)는 local, SaaS(claude/openai)는 frontier.
 """
 
 from __future__ import annotations

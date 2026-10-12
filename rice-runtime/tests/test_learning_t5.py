@@ -230,7 +230,7 @@ class TestConsolidationEngine:
     @pytest.mark.asyncio
     async def test_plugin_provided_skills_excluded_from_candidates(self):
         self._skill_store.write(_make_skill("user-sk-1", source="user"))
-        self._skill_store.write(_make_skill("plugin-sk", source="plugin:wxo-expert"))
+        self._skill_store.write(_make_skill("plugin-sk", source="plugin:deployment-expert"))
         engine = self._engine(_FakeProvider([]))
         candidates = engine._build_candidates()  # noqa: SLF001 (내부 검증)
         ids = [c[0] for c in candidates]
@@ -515,7 +515,7 @@ class TestPluginImmutability:
         ),
     )
     def test_store_backed_plugin_is_immutable_at_every_service_write_sink(self, operation: str):
-        plugin = _make_skill("plugin-owned", source="plugin:wxo-expert")
+        plugin = _make_skill("plugin-owned", source="plugin:deployment-expert")
         self._store.write(plugin)
 
         def mutate() -> None:
@@ -548,7 +548,7 @@ class TestPluginImmutability:
         )
 
     def test_rule_curator_does_not_transition_store_backed_plugin(self):
-        plugin = _make_skill("plugin-owned", source="plugin:wxo-expert")
+        plugin = _make_skill("plugin-owned", source="plugin:deployment-expert")
         self._store.write(plugin)
         svc = LearningService(
             _fresh_db(),

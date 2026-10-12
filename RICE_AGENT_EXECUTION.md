@@ -864,7 +864,7 @@ fake는 영향이 없다.
 | 컨텍스트 예산 클램프 | ✅ num_ctx 역산 | ❌ | `orchestrator.py::effective_context_config` |
 
 결정 규칙(auto): `kind=ollama` 또는 루프백 base_url의 openai 호환(LM Studio 등) →
-local, SaaS(claude/openai/watsonx) → frontier. `agent.orchestration_profile`로
+local, SaaS(claude/openai) → frontier. `agent.orchestration_profile`로
 강제 오버라이드 가능(원격 Ollama를 프론티어급으로 쓰는 배치 등).
 
 ### 10.1 로컬 LLM 효율 계약 (provider 계층)

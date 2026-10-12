@@ -1,7 +1,7 @@
 import React, { useId, useRef, useState } from 'react';
 
 /**
- * Tabs component following IBM Carbon design principles
+ * Tabs component following RICE design principles
  * - Tab navigation component
  * - 0px border radius
  * - Underline indicator for active tab
@@ -150,5 +150,3 @@ export const Tabs: React.FC<TabsProps> = ({
     </div>
   );
 };
-
-// Made with Bob

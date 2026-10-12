@@ -16,5 +16,3 @@ export const replayOnboarding = () => window.dispatchEvent(new CustomEvent(REPLA
 
 /** 인앱 둘러보기(말풍선 투어)를 다시 시작한다. */
 export const replayTour = () => window.dispatchEvent(new CustomEvent(REPLAY_TOUR_EVENT));
-
-// Made with Bob

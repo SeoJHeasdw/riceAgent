@@ -192,12 +192,12 @@ workspace의 일반 파일은 RICE 소유 루트가 아니므로 재귀 삭제�
 # rice-artifact.yaml
 schema_version: 1
 type: skill | plugin         # 마켓 구분 (REPO_STRATEGY 5.3의 artifact_type)
-name: wxo-expert
+name: deployment-expert
 version: 1.2.0               # semver
-display_name: "WXO 전문가"
+display_name: "배포 전문가"
 description: "..."
 category: expert                          # 마켓 필터용 (PLATFORM_DESIGN catalog)
-tags: ["wxo", "ibm", "troubleshooting"]   # 마켓 검색/필터용
+tags: ["deployment", "operations", "troubleshooting"]   # 마켓 검색/필터용
 author: { name: "...", team: "..." }
 entrypoint:                   # type별 상이
   # skill:  선언적 절차 (SKILL.md + 선택적 references/scripts/templates)
@@ -245,7 +245,7 @@ artifact.tar.gz (skill)              artifact.tar.gz (plugin)
 
 ## 3. Platform API (Phase 2 직전 상세화 — 지금은 개요만)
 
-> 플랫폼 설계 상세(catalog · registry · 버전 · publish · moderation · Blue Point · PostgreSQL 스키마)는 [RICE_PLATFORM_DESIGN.md](RICE_PLATFORM_DESIGN.md)를 참조.
+> 플랫폼 설계 상세(catalog · registry · 버전 · publish · moderation · Point · PostgreSQL 스키마)는 [RICE_PLATFORM_DESIGN.md](RICE_PLATFORM_DESIGN.md)를 참조.
 
 | Method | Path | 용도 |
 |--------|------|------|
@@ -254,7 +254,7 @@ artifact.tar.gz (skill)              artifact.tar.gz (plugin)
 | GET | `/artifacts/{id}/files/{path}` | artifact 내 개별 파일 내용 (app SkillFileBrowser lazy load) |
 | POST | `/artifacts` | 등록(publish). 앱 게시본은 manifest에 `managed_by: rice-app`을 기록 |
 | DELETE | `/artifacts/{id}` | `managed_by: rice-app` 게시본 내리기 |
-| POST | `/artifacts/{id}/sponsor` | Blue Point 후원 (mock) |
+| POST | `/artifacts/{id}/sponsor` | Point 후원 (mock) |
 
 - ✅ 스펙 소유: `rice-platform`의 `apps/api`
 - 데모 단계 인증 없음 (REPO_STRATEGY 4.2)

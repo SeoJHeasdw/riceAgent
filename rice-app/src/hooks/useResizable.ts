@@ -159,5 +159,3 @@ export function useResizable({
 
   return { width, min, max, isResizing, startResize, resetWidth, resizeBy };
 }
-
-// Made with Bob

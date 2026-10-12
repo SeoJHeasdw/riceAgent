@@ -7,32 +7,32 @@ export default {
   theme: {
     extend: {
       colors: {
-        // IBM Carbon color tokens
-        background: 'var(--cds-background)',
+        // RICE color tokens
+        background: 'var(--rice-background)',
         layer: {
-          DEFAULT: 'var(--cds-layer)',
+          DEFAULT: 'var(--rice-layer)',
           // /opacity 수식이 실제 동작하도록 alpha 주입 가능한 형태로 (자주 쓰는 층만)
-          '01': 'rgb(var(--cds-layer-01-rgb) / <alpha-value>)',
-          '02': 'rgb(var(--cds-layer-02-rgb) / <alpha-value>)',
-          '03': 'var(--cds-layer-03)',
+          '01': 'rgb(var(--rice-layer-01-rgb) / <alpha-value>)',
+          '02': 'rgb(var(--rice-layer-02-rgb) / <alpha-value>)',
+          '03': 'var(--rice-layer-03)',
           accent: {
-            DEFAULT: 'var(--cds-layer-accent)',
-            '01': 'var(--cds-layer-accent-01)',
-            '02': 'var(--cds-layer-accent-02)',
-            '03': 'var(--cds-layer-accent-03)',
+            DEFAULT: 'var(--rice-layer-accent)',
+            '01': 'var(--rice-layer-accent-01)',
+            '02': 'var(--rice-layer-accent-02)',
+            '03': 'var(--rice-layer-accent-03)',
           },
           hover: {
-            '01': 'var(--cds-layer-hover-01)',
-            '02': 'var(--cds-layer-hover-02)',
+            '01': 'var(--rice-layer-hover-01)',
+            '02': 'var(--rice-layer-hover-02)',
           },
           active: {
-            '01': 'var(--cds-layer-active-01)',
+            '01': 'var(--rice-layer-active-01)',
           },
           selected: {
-            '01': 'var(--cds-layer-selected-01)',
+            '01': 'var(--rice-layer-selected-01)',
           },
         },
-        // Carbon palette shades used directly in components.
+        // RICE palette shades used directly in components.
         // 임의값 유틸(text-[#...])은 금지 — 여기 이름 붙은 단계만 쓴다.
         // Theme-aware palette aliases. Foreground steps become darker in the
         // light theme while translucent backgrounds keep the same hue family.
@@ -94,10 +94,10 @@ export default {
           '80': 'rgb(var(--rice-teal-80-rgb) / <alpha-value>)',
         },
         // 상태(hover/active) 시맨틱 — globals.css 토큰과 동기
-        'interactive-hover': 'var(--cds-interactive-hover)',
-        'interactive-active': 'var(--cds-interactive-active)',
-        'danger-hover': 'var(--cds-danger-hover)',
-        'danger-active': 'var(--cds-danger-active)',
+        'interactive-hover': 'var(--rice-interactive-hover)',
+        'interactive-active': 'var(--rice-interactive-active)',
+        'danger-hover': 'var(--rice-danger-hover)',
+        'danger-active': 'var(--rice-danger-active)',
         // diff 표면 (추가/삭제 행)
         diff: {
           'add-bg': 'var(--diff-add-bg)',
@@ -123,71 +123,71 @@ export default {
           plugin: 'var(--accent-plugin)',
           connector: 'var(--accent-connector)',
         },
-        overlay: 'var(--cds-overlay)',
+        overlay: 'var(--rice-overlay)',
         field: {
-          DEFAULT: 'var(--cds-field)',
-          '01': 'var(--cds-field-01)',
-          '02': 'var(--cds-field-02)',
-          '03': 'var(--cds-field-03)',
+          DEFAULT: 'var(--rice-field)',
+          '01': 'var(--rice-field-01)',
+          '02': 'var(--rice-field-02)',
+          '03': 'var(--rice-field-03)',
         },
         border: {
           subtle: {
-            DEFAULT: 'var(--cds-border-subtle)',
-            '00': 'var(--cds-border-subtle-00)',
-            '01': 'var(--cds-border-subtle-01)',
-            '02': 'var(--cds-border-subtle-02)',
-            '03': 'var(--cds-border-subtle-03)',
+            DEFAULT: 'var(--rice-border-subtle)',
+            '00': 'var(--rice-border-subtle-00)',
+            '01': 'var(--rice-border-subtle-01)',
+            '02': 'var(--rice-border-subtle-02)',
+            '03': 'var(--rice-border-subtle-03)',
           },
           strong: {
-            DEFAULT: 'var(--cds-border-strong)',
-            '01': 'rgb(var(--cds-border-strong-01-rgb) / <alpha-value>)',
-            '02': 'var(--cds-border-strong-02)',
-            '03': 'var(--cds-border-strong-03)',
+            DEFAULT: 'var(--rice-border-strong)',
+            '01': 'rgb(var(--rice-border-strong-01-rgb) / <alpha-value>)',
+            '02': 'var(--rice-border-strong-02)',
+            '03': 'var(--rice-border-strong-03)',
           },
-          inverse: 'var(--cds-border-inverse)',
-          interactive: 'var(--cds-border-interactive)',
+          inverse: 'var(--rice-border-inverse)',
+          interactive: 'var(--rice-border-interactive)',
         },
         text: {
-          primary: 'var(--cds-text-primary)',
-          secondary: 'var(--cds-text-secondary)',
-          placeholder: 'var(--cds-text-placeholder)',
-          helper: 'rgb(var(--cds-text-helper-rgb) / <alpha-value>)',
-          error: 'var(--cds-text-error)',
-          inverse: 'var(--cds-text-inverse)',
-          'on-color': 'var(--cds-text-on-color)',
-          'on-color-disabled': 'var(--cds-text-on-color-disabled)',
+          primary: 'var(--rice-text-primary)',
+          secondary: 'var(--rice-text-secondary)',
+          placeholder: 'var(--rice-text-placeholder)',
+          helper: 'rgb(var(--rice-text-helper-rgb) / <alpha-value>)',
+          error: 'var(--rice-text-error)',
+          inverse: 'var(--rice-text-inverse)',
+          'on-color': 'var(--rice-text-on-color)',
+          'on-color-disabled': 'var(--rice-text-on-color-disabled)',
         },
         link: {
-          primary: 'var(--cds-link-primary)',
-          secondary: 'var(--cds-link-secondary)',
-          visited: 'var(--cds-link-visited)',
-          inverse: 'var(--cds-link-inverse)',
+          primary: 'var(--rice-link-primary)',
+          secondary: 'var(--rice-link-secondary)',
+          visited: 'var(--rice-link-visited)',
+          inverse: 'var(--rice-link-inverse)',
         },
         icon: {
-          primary: 'var(--cds-icon-primary)',
-          secondary: 'var(--cds-icon-secondary)',
-          inverse: 'var(--cds-icon-inverse)',
-          'on-color': 'var(--cds-icon-on-color)',
-          'on-color-disabled': 'var(--cds-icon-on-color-disabled)',
+          primary: 'var(--rice-icon-primary)',
+          secondary: 'var(--rice-icon-secondary)',
+          inverse: 'var(--rice-icon-inverse)',
+          'on-color': 'var(--rice-icon-on-color)',
+          'on-color-disabled': 'var(--rice-icon-on-color-disabled)',
         },
         support: {
-          error: 'rgb(var(--cds-support-error-rgb) / <alpha-value>)',
-          success: 'rgb(var(--cds-support-success-rgb) / <alpha-value>)',
-          warning: 'rgb(var(--cds-support-warning-rgb) / <alpha-value>)',
-          info: 'rgb(var(--cds-support-info-rgb) / <alpha-value>)',
+          error: 'rgb(var(--rice-support-error-rgb) / <alpha-value>)',
+          success: 'rgb(var(--rice-support-success-rgb) / <alpha-value>)',
+          warning: 'rgb(var(--rice-support-warning-rgb) / <alpha-value>)',
+          info: 'rgb(var(--rice-support-info-rgb) / <alpha-value>)',
         },
-        interactive: 'rgb(var(--cds-interactive-rgb) / <alpha-value>)',
-        focus: 'var(--cds-focus)',
-        'focus-inset': 'var(--cds-focus-inset)',
-        'focus-inverse': 'var(--cds-focus-inverse)',
+        interactive: 'rgb(var(--rice-interactive-rgb) / <alpha-value>)',
+        focus: 'var(--rice-focus)',
+        'focus-inset': 'var(--rice-focus-inset)',
+        'focus-inverse': 'var(--rice-focus-inverse)',
       },
       fontFamily: {
         sans: ['var(--font-sans)'],
         mono: ['var(--font-mono)'],
-        serif: ['IBM Plex Serif', 'Georgia', 'Times New Roman', 'serif'],
+        serif: ['Georgia', 'Times New Roman', 'serif'],
       },
       spacing: {
-        // IBM Carbon 8px spacing scale
+        // RICE 8px spacing scale
         '0': '0px',
         '0.5': '2px',
         '1': '4px',
@@ -205,7 +205,7 @@ export default {
         '20': '160px',
       },
       borderRadius: {
-        // Modernized radius scale (departs from Carbon's flat 0px)
+        // Application radius scale
         none: '0px',
         sm: '6px',
         DEFAULT: '8px',
@@ -226,8 +226,8 @@ export default {
         'elevation-3': 'var(--rice-elevation-3)',
       },
       fontSize: {
-        // IBM Carbon type scale
-        // label-micro: Carbon 스케일(최소 12px) 아래 유일한 공식 마이크로 단계.
+        // RICE type scale
+        // label-micro: RICE 스케일(최소 12px) 아래 유일한 공식 마이크로 단계.
         // 배지·Kbd·그룹라벨 전용 — 이 외 9~11.5px 임의값 금지.
         'label-micro': ['0.6875rem', { lineHeight: '0.875rem', letterSpacing: '0.32px' }],
         'caption-01': ['0.75rem', { lineHeight: '1rem', letterSpacing: '0.32px' }],
@@ -251,7 +251,7 @@ export default {
         'heading-07': ['3.375rem', { lineHeight: '4rem', letterSpacing: '0' }],
       },
       animation: {
-        // IBM Carbon motion tokens
+        // RICE motion tokens
         'fade-in': 'fadeIn 0.11s cubic-bezier(0, 0, 0.38, 0.9)',
         'fade-out': 'fadeOut 0.11s cubic-bezier(0.2, 0, 1, 0.9)',
         'slide-in': 'slideIn 0.11s cubic-bezier(0, 0, 0.38, 0.9)',
@@ -284,5 +284,3 @@ export default {
   },
   plugins: [],
 }
-
-// Made with Bob

@@ -85,5 +85,3 @@ compression: normal
 electronVersion: 31.2.0
 electronDownload:
   mirror: https://npmmirror.com/mirrors/electron/
-
-# Made with Bob

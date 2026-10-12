@@ -4,5 +4,3 @@
  * The state/logic moved to ../lib/marketplace/MarketplaceContext.
  */
 export { useMarketplace, type SkillDraft, type MarketplaceContextValue as UseMarketplaceReturn } from '../lib/marketplace/MarketplaceContext';
-
-// Made with Bob

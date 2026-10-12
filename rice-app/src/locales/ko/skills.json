@@ -1,7 +1,7 @@
 {
   "market": {
     "title": "스킬 마켓",
-    "subtitle": "IBMer가 만든 스킬을 다운로드하고 블루 포인트로 제작자를 후원하세요",
+    "subtitle": "구성원이 만든 스킬을 다운로드하고 포인트로 제작자를 후원하세요",
     "search": "스킬 검색...",
     "install": "설치",
     "installed": "설치됨",
@@ -11,7 +11,8 @@
     "sortRecent": "최신순",
     "sortRating": "평점순",
     "sortSponsored": "후원 많은 순",
-    "railBalanceLabel": "내 IBM 블루 포인트",
+    "pointsUnit": "포인트",
+    "railBalanceLabel": "내 포인트",
     "railMonthlyChange": "이번 달 +{{amount}}",
     "railCategoriesTitle": "카테고리",
     "railUploadBtn": "나의 스킬 업로드",
@@ -22,7 +23,7 @@
     "toastRiskFlagged": "{{name}}에서 위험 신호가 감지됐습니다 — 나의 스킬에서 본문을 확인하세요",
     "toastUninstalled": "{{name}}이(가) 제거되었습니다",
     "toastRemoveFailed": "{{name}}을(를) 제거하지 못했습니다",
-    "toastSponsored": "{{author}}에게 {{amount}} BP를 후원했습니다",
+    "toastSponsored": "{{author}}에게 {{amount}} 포인트를 후원했습니다",
     "toastPublished": "{{name}}을(를) 마켓에 게시했어요",
     "toastPublishFailed": "{{name}}을(를) 마켓에 게시하지 못했습니다",
     "emptyTitle": "스킬을 찾지 못했습니다",
@@ -61,7 +62,7 @@
     "categoryCommunication": "커뮤니케이션",
     "categoryProductivity": "생산성",
     "getBtn": "받기",
-    "sponsorBtnTitle": "블루 포인트로 후원하기",
+    "sponsorBtnTitle": "포인트로 후원하기",
     "sponsorBtnLabel": "후원"
   },
   "publish": {
@@ -129,7 +130,7 @@
     "blocked1": "SKILL.md 본문을 작성하세요",
     "doneTitle": "게시 완료",
     "doneHeading": "스킬이 마켓에 게시됐어요",
-    "doneBody": "이제 다른 IBMer가 {{name}}을(를) 찾아 설치하고 후원할 수 있어요.",
+    "doneBody": "이제 다른 구성원이 {{name}}을(를) 찾아 설치하고 후원할 수 있어요.",
     "doneCloseBtn": "닫기",
     "doneViewBtn": "마켓에서 보기",
     "filePickTitle": "이미 SKILL.md가 있나요?",
@@ -166,7 +167,7 @@
     "metaTagsNone": "없음",
     "metaDef": "정의",
     "metaDefValue": "SKILL.md · {{count}}자",
-    "scopeHint": "게시하면 사내 모든 IBMer가 이 스킬을 검색·설치할 수 있어요.",
+    "scopeHint": "게시하면 사내 모든 구성원이 이 스킬을 검색·설치할 수 있어요.",
     "scopeUnpublishHint": "언제든 나의 스킬에서 비공개로 전환하거나 내릴 수 있어요.",
     "tagSuggestionDataAnalysis": "데이터,분석,시각화,excel",
     "tagSuggestionAutomation": "자동화,워크플로,스케줄",
@@ -475,9 +476,9 @@
   "sponsor": {
     "modalTitle": "스킬 후원",
     "descriptionPrefix": "제작자",
-    "descriptionSuffix": "에게 IBM 블루 포인트를 보냅니다",
-    "balanceLabel": "내 잔액 {{balance}} BP",
-    "sponsorBtn": "{{amount}} BP 후원"
+    "descriptionSuffix": "에게 포인트를 보냅니다",
+    "balanceLabel": "내 잔액 {{balance}} 포인트",
+    "sponsorBtn": "{{amount}} 포인트 후원"
   },
   "sourceWorkspace": {
     "backTitle": "스킬 상세로 돌아가기 (Esc)",

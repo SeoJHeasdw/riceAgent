@@ -637,8 +637,8 @@ export interface Proposal {
 }
 
 // 근거는 모두 시드된 대화(seed_c1…, state.db)의 실제 내용에 기반한다 (출처 대화에서 직접 확인 가능):
-//  p1 — c1 매출 요약 불릿에 'watsonx.ai 라인 기여도'가 2번 등장 (아직 규칙 아님)
-//  p2 — c1·c2·c3 모두 Db2 조회로 분석을 시작 (반복 패턴 → 도구화)
+//  p1 — c1 매출 요약 불릿에 'AI 서비스 라인 기여도'가 2번 등장 (아직 규칙 아님)
+//  p2 — c1·c2·c3 모두 데이터베이스 조회로 분석을 시작 (반복 패턴 → 도구화)
 export interface LoopStage {
   key: string;
   label: string;
@@ -914,32 +914,13 @@ function fixtureExamples(id: string): string[] {
 
 export const CONNECTORS: Connector[] = [
   {
-    id: 'db2',
-    name: 'Db2 (prod)',
-    icon: 'database',
-    get category() { return tAny('connectors:fixture.db2.category'); },
-    provider: 'IBM Db2',
-    status: 'connected',
-    account: 'db2-prod.ibm.internal',
-    get lastSync() { return tAny('connectors:fixture.lastSync.justNow'); },
-    get summary() { return tAny('connectors:fixture.db2.summary'); },
-    get scopes() {
-      return fixtureScopes('db2',
-        ['read', 'read', 'read', 'read', 'write'],
-        [undefined, undefined, undefined, undefined, 'approval'],
-      );
-    },
-    get usedBy() { return fixtureUsedBy('db2'); },
-    get examples() { return fixtureExamples('db2'); },
-  },
-  {
     id: 'slack',
     name: 'Slack',
     icon: 'chat',
     get category() { return tAny('connectors:fixture.slack.category'); },
     provider: 'Slack',
     status: 'connected',
-    account: 'ibm-data-platform.slack.com',
+    account: 'rice-workspace.slack.com',
     get lastSync() { return tAny('connectors:fixture.lastSync.min10Ago'); },
     get summary() { return tAny('connectors:fixture.slack.summary'); },
     get scopes() {
@@ -957,7 +938,7 @@ export const CONNECTORS: Connector[] = [
     get category() { return tAny('connectors:fixture.outlook.category'); },
     provider: 'Microsoft 365',
     status: 'connected',
-    account: 'jaeho.seo@ibm.com',
+    account: 'user@example.com',
     get lastSync() { return tAny('connectors:fixture.lastSync.hour1Ago'); },
     get summary() { return tAny('connectors:fixture.outlook.summary'); },
     get scopes() {
@@ -1000,25 +981,6 @@ export const CONNECTORS: Connector[] = [
     },
     usedBy: [],
     get examples() { return fixtureExamples('gdrive'); },
-  },
-  {
-    id: 'orchestrate',
-    name: 'watsonx Orchestrate',
-    icon: 'flow',
-    get category() { return tAny('connectors:fixture.orchestrate.category'); },
-    provider: 'IBM watsonx',
-    status: 'connected',
-    account: 'orchestrate.ibm.com',
-    get lastSync() { return tAny('connectors:fixture.lastSync.yesterday'); },
-    get summary() { return tAny('connectors:fixture.orchestrate.summary'); },
-    get scopes() {
-      return fixtureScopes('orchestrate',
-        ['read', 'read', 'exec', 'exec'],
-        [undefined, undefined, 'approval', 'approval'],
-      );
-    },
-    get usedBy() { return fixtureUsedBy('orchestrate'); },
-    get examples() { return fixtureExamples('orchestrate'); },
   },
   {
     id: 'gmail',
@@ -1105,7 +1067,7 @@ export const CONNECTORS: Connector[] = [
     transport: {
       type: 'stdio',
       command: 'uvx',
-      args: ['mcp-server-git', '--repository', '/Users/jaehoseo/Desktop/vswrk/bob/rice'],
+      args: ['mcp-server-git', '--repository', '.'],
     },
     // MCP tool names은 코드 식별자이므로 번역 대상 아님
     scopes: [
@@ -1141,8 +1103,6 @@ export function connectorIdForScope(scope: string): string | null {
   const s = scope.toLowerCase();
   if (s.includes('gmail') || s.includes('send email') || s.includes('inbox') || s.includes('draft email')) return 'gmail';
   if (s.includes('calendar') || s.includes('event') || s.includes('schedule')) return 'calendar';
-  if (s.startsWith('db2')) return 'db2';
-  if (s.includes('orchestrate') || s.includes('workflow')) return 'orchestrate';
   if (s.startsWith('#') || s.includes('slack') || s.includes('mention') || s.includes('channel')) return 'slack';
   if (s.includes('outlook') || s.includes('mail') || s.includes('appointment')) return 'outlook';
   if (s.includes('drive')) return 'gdrive';
@@ -1405,5 +1365,3 @@ export function renderChangelog(changelog: string | undefined, isNew: boolean, t
   if (text === LEGACY_CHANGELOG_CONSOLIDATION) return t('learning.changelogConsolidation');
   return text;
 }
-
-// Made with Bob

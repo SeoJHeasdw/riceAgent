@@ -4,5 +4,3 @@ export default {
     autoprefixer: {},
   },
 }
-
-// Made with Bob

@@ -468,7 +468,7 @@
     "groupLast30Days": "Last 30 days",
     "groupOlder": "Older",
     "modelLocal": "Local · Ollama",
-    "modelSaas": "SaaS · watsonx"
+    "modelSaas": "SaaS"
   },
   "modelSettings": {
     "title": "Model settings",
@@ -513,7 +513,7 @@
     "barWarm": "After",
     "taskTitle": {
       "T-A": "Quarterly sales summary",
-      "T-B": "Db2 schema check",
+      "T-B": "Database schema check",
       "T-C": "Customer churn analysis"
     }
   },

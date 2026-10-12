@@ -81,9 +81,8 @@ rice-runtime/                                # 배포물 ② : 로컬 단일 프
 │   │       ├── claude.py                    #     SaaS (Anthropic API)
 │   │       ├── ollama.py                    #     on-prem (로컬 모델) — 메인 대상
 │   │       ├── openai.py                    #     SaaS (OpenAI 호환)
-│   │       ├── watsonx.py                   #     SaaS (IBM watsonx) — 실사용 검증 미완, 재검토 필요(코드 주석 명시)
 │   │       ├── echo.py                      #     모델 미설정 시 폴백(테스트/데모, 플래너 건너뜀)
-│   │       ├── _openai_compat.py            #     openai/watsonx가 공유하는 OpenAI 호환 wire 헬퍼
+│   │       ├── _openai_compat.py            #     OpenAI 호환 endpoint에서 사용하는 OpenAI 호환 wire 헬퍼
 │   │       └── registry.py
 │   │
 │   ├── prompts/                             # model-facing 프롬프트 조립 전용 leaf 모듈

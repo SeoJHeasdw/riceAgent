@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useTranslation, Trans } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button, Icon, Tag, ResizeHandle, Toggle } from '../components/ui';
-import { ConnectorRequiredModal } from '../components/carbon/ConnectorRequiredModal';
+import { ConnectorRequiredModal } from '../components/workspace/ConnectorRequiredModal';
 import { useResizable } from '../hooks/useResizable';
 import { useLearning } from '../lib/learning/LearningContext';
 import { api } from '../lib/api';

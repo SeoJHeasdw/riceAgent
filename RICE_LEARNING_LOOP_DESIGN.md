@@ -38,7 +38,7 @@ tags: [kubernetes, deploy, ci]        # 마켓/필터/검색용
 description: K8s 서비스 배포 절차       # 한 줄 요약 (목록·prefetch 매칭에 사용)
 created_at: 2026-06-18T10:00:00Z
 updated_at: 2026-06-20T09:00:00Z      # patch 시 갱신 (생성 시 = created_at)
-source: session:abc123 | plugin:wxo-expert | user | curator:consolidate | builtin  # 출처
+source: session:abc123 | plugin:deployment-expert | user | curator:consolidate | builtin  # 출처
 state: active                         # active | stale | archived
 absorbed_into: null                   # curator 통합으로 archived됐으면 흡수한 umbrella 이름 (§5.1)
 ---

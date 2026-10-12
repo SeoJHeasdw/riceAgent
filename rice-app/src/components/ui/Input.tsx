@@ -1,7 +1,7 @@
 import React, { useId } from 'react';
 
 /**
- * Input component — Carbon color tokens with modernized shape
+ * Input component — RICE color tokens with modernized shape
  * - Boxed style with rounded corners
  * - Focus ring highlight
  */
@@ -79,5 +79,3 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
 );
 
 Input.displayName = 'Input';
-
-// Made with Bob

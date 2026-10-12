@@ -191,7 +191,7 @@ Skill Market과 Plugin Market을 함께 다루는 공유 플랫폼 레포
 - 마켓 API
 - 카탈로그 / 패키지 메타데이터 / 버전 관리
 - 다운로드/배포
-- 후원/포인트 데모 기능 (Blue Point)
+- 후원/포인트 데모 기능 (Point)
 - skill listing / plugin listing
 - 설치 manifest
 - 리뷰/추천 확장 포인트

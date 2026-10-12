@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { TwoColumnLayout } from '../components/TwoColumnLayout';
-import { SkillCard } from '../components/carbon/SkillCard';
-import { MarketplaceHeader } from '../components/carbon/MarketplaceHeader';
-import { SponsorModal } from '../components/carbon/SponsorModal';
-import { ArtifactDetailModal } from '../components/carbon/ArtifactDetailModal';
-import { CardSkeletonGrid } from '../components/carbon/MarketSkeleton';
-import { NotificationVariant } from '../components/carbon/NotificationToast';
-import { SkillAuthorModal } from '../components/carbon/SkillAuthorModal';
+import { SkillCard } from '../components/workspace/SkillCard';
+import { MarketplaceHeader } from '../components/workspace/MarketplaceHeader';
+import { SponsorModal } from '../components/workspace/SponsorModal';
+import { ArtifactDetailModal } from '../components/workspace/ArtifactDetailModal';
+import { CardSkeletonGrid } from '../components/workspace/MarketSkeleton';
+import { NotificationVariant } from '../components/workspace/NotificationToast';
+import { SkillAuthorModal } from '../components/workspace/SkillAuthorModal';
 import { useToast } from '../lib/toast/ToastContext';
 import { useMarketplace } from '../hooks/useMarketplace';
 import { useResizable } from '../hooks/useResizable';
@@ -53,8 +53,8 @@ function SkillMarketScreen() {
     unpublishSkill,
     sponsorSkill,
     publishSkill,
-    bluePointBalance,
-    setBluePointBalance,
+    pointBalance,
+    setPointBalance,
   } = useMarketplace();
 
   // 설치를 학습 store까지 배선 — 설치한 마켓 스킬이 "나의 스킬"에 소유 인스턴스로 등장한다.
@@ -178,7 +178,7 @@ function SkillMarketScreen() {
   const handleSponsor = async (amount: number) => {
     if (sponsorModalSkill) {
       await sponsorSkill(sponsorModalSkill.id, amount);
-      setBluePointBalance(bluePointBalance - amount);
+      setPointBalance(pointBalance - amount);
       showToast(t('market.toastSponsored', { author: sponsorModalSkill.author, amount: amount.toLocaleString() }));
       setSponsorModalSkill(null);
     }
@@ -225,7 +225,7 @@ function SkillMarketScreen() {
         className="flex-shrink-0 bg-layer-01 border-r border-border-subtle-01 flex flex-col min-w-0 overflow-hidden"
         style={{ width: railPanel.width }}
       >
-        {/* Blue Point Balance — domain accent만 남겨 장시간 쓰는 작업 화면의 시각 소음을 줄인다. */}
+        {/* Point Balance — domain accent만 남겨 장시간 쓰는 작업 화면의 시각 소음을 줄인다. */}
         <div className="p-3">
           <div className="domain-summary domain-summary--skill rounded-xl p-4">
             <div className="mb-2 flex items-center gap-1.5 text-caption-01 text-text-helper">
@@ -235,8 +235,8 @@ function SkillMarketScreen() {
               {t('market.railBalanceLabel')}
             </div>
             <div className="text-heading-03 font-semibold text-text-primary leading-none tracking-tight tabular-nums">
-              {bluePointBalance.toLocaleString()}
-              <span className="text-body-short-01 font-normal text-text-helper ml-1.5">BP</span>
+              {pointBalance.toLocaleString()}
+              <span className="text-body-short-01 font-normal text-text-helper ml-1.5">{t('market.pointsUnit')}</span>
             </div>
             <div className="domain-summary__chip mt-3 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-caption-01">
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -361,7 +361,7 @@ function SkillMarketScreen() {
           skillName={sponsorModalSkill.name}
           authorName={sponsorModalSkill.author}
           onSponsor={handleSponsor}
-          balance={bluePointBalance}
+          balance={pointBalance}
         />
       )}
 
@@ -397,5 +397,3 @@ function SkillMarketScreen() {
 }
 
 export default SkillMarketScreen;
-
-// Made with Bob

@@ -1,7 +1,7 @@
 import React from 'react';
 
 /**
- * Avatar component — Carbon color tokens with modernized shape
+ * Avatar component — RICE color tokens with modernized shape
  * - User/agent avatar component (rounded squircle)
  * - Multiple sizes
  */
@@ -60,5 +60,3 @@ export const Avatar: React.FC<AvatarProps> = ({
     </div>
   );
 };
-
-// Made with Bob

@@ -19,7 +19,6 @@ from rice_runtime.agent.providers.claude import ClaudeProvider, _to_claude_messa
 from rice_runtime.agent.providers.interfaces import ILLMProvider
 from rice_runtime.agent.providers.ollama import OllamaProvider, _to_ollama_messages
 from rice_runtime.agent.providers.openai import OpenAIProvider
-from rice_runtime.agent.providers.watsonx import WatsonxProvider
 from rice_runtime.core.config import Config, ProviderConfig, RuntimeArgs
 from rice_runtime.core.errors import ProviderError
 from rice_runtime.core.paths import RicePaths
@@ -246,12 +245,33 @@ def test_missing_claude_key_falls_back_to_echo():
         c.shutdown()
 
 
+@pytest.mark.asyncio
+async def test_settings_omit_unavailable_registered_models():
+    from rice_runtime.server.routes.settings import SettingsIn, get_settings, update_settings
+
+    c = _container_with("echo")
+    try:
+        for model_id, provider in (("retired-model", "retired-provider"), ("custom-model", "custom")):
+            c.db.execute(
+                "INSERT INTO provider_models(model_id, provider, provider_label, api_key) VALUES (?, ?, ?, ?)",
+                (model_id, provider, provider, "test-key"),
+            )
+        res = await get_settings(c)
+        models = res["data"]["registered_models"]
+        assert [m["modelId"] for m in models] == ["custom-model"]
+        await update_settings(SettingsIn(registered_models=models), c)
+        rows = c.db.query_all("SELECT model_id, api_key FROM provider_models")
+        assert [(r["model_id"], r["api_key"]) for r in rows] == [("custom-model", "test-key")]
+    finally:
+        c.shutdown()
+
+
 def test_claude_mapping_rejects_tool_message_without_link():
     with pytest.raises(ProviderError):
         _to_claude_messages((Message(role="tool", content="oops"),))
 
 
-# ── OpenAI / watsonx (OpenAI-compatible wire shape) ──────────────────────────
+# ── OpenAI (OpenAI-compatible wire shape) ──────────────────────────
 def test_oai_history_mapping_round_trip():
     call = ToolCall(tool_name="lookup", arguments={"q": "rice"}, id="call_1")
     messages = (
@@ -305,33 +325,6 @@ async def test_openai_stream_assembles_tool_call_from_fragments(monkeypatch):
     assert chunks[-1].stop_reason == "tool_use"
 
 
-@pytest.mark.asyncio
-async def test_watsonx_stream_text(monkeypatch):
-    provider = WatsonxProvider(
-        ProviderConfig(kind="watsonx", model="ibm/granite"),
-        api_key="k",
-        project_id="p",
-        base_url="https://us-south.ml.cloud.ibm.com",
-    )
-
-    async def fake_token():
-        return "tok"
-
-    async def fake_raw(payload, token):
-        assert payload["model_id"] == "ibm/granite"
-        assert payload["project_id"] == "p"
-        assert token == "tok"
-        yield {"choices": [{"delta": {"content": "안녕"}}]}
-        yield {"choices": [{"delta": {}, "finish_reason": "stop"}]}
-
-    monkeypatch.setattr(provider, "_iam_token", fake_token)
-    monkeypatch.setattr(provider, "_stream_raw", fake_raw)
-    chunks = await _collect(provider.stream(system="sys", messages=(Message(role="user", content="hi"),)))
-
-    assert [c.kind for c in chunks] == ["text", "done"]
-    assert chunks[-1].stop_reason == "end_turn"
-
-
 def test_registered_key_selects_claude_provider():
     """A SaaS key stored in provider_models is injected so the provider resolves
     (no fall-back to echo) — the gap that made SaaS non-functional before."""
@@ -368,7 +361,7 @@ async def test_settings_registered_models_round_trip():
             SettingsIn(
                 registered_models=[
                     {"modelId": "gpt-x", "provider": "openai", "providerLabel": "OpenAI", "apiKey": "sk-x", "baseUrl": "https://gw.local/v1"},
-                    {"modelId": "granite", "provider": "watsonx", "providerLabel": "watsonx", "apiKey": "k", "projectId": "p", "baseUrl": "https://us-south.ml.cloud.ibm.com"},
+                    {"modelId": "gpt-custom", "provider": "custom", "providerLabel": "Custom", "apiKey": "k", "baseUrl": "https://custom-gateway.example/v1"},
                 ]
             ),
             c,
@@ -377,14 +370,13 @@ async def test_settings_registered_models_round_trip():
         models = {m["modelId"]: m for m in res["data"]["registered_models"]}
         assert models["gpt-x"]["baseUrl"] == "https://gw.local/v1"
         assert "projectId" not in models["gpt-x"]
-        assert models["granite"]["projectId"] == "p"
-        assert models["granite"]["baseUrl"].endswith("ibm.com")
+        assert models["gpt-custom"]["baseUrl"] == "https://custom-gateway.example/v1"
         # 적대 리뷰 P1#9: GET /settings 는 평문 키를 되돌려주지 않는다 — 마스크 +
         # hasKey 만 노출한다. 실제 저장 여부는 DB 로 확인한다.
-        assert models["granite"]["apiKey"].startswith("••••")
-        assert "k" not in models["granite"]["apiKey"]
-        assert models["granite"]["hasKey"] is True
-        row = c.db.query_one("SELECT api_key FROM provider_models WHERE model_id='granite'")
+        assert models["gpt-custom"]["apiKey"].startswith("••••")
+        assert "k" not in models["gpt-custom"]["apiKey"]
+        assert models["gpt-custom"]["hasKey"] is True
+        row = c.db.query_one("SELECT api_key FROM provider_models WHERE model_id='gpt-custom'")
         assert row["api_key"] == "k"
 
         # 마스크값을 그대로 되돌려 보내는 PUT(프론트의 일반 저장 경로)은 키를

@@ -219,7 +219,6 @@ def build_container(
         return ProviderCredentials(
             api_key=row["api_key"] or None,
             base_url=extra.get("base_url"),
-            project_id=extra.get("project_id"),
         )
 
     providers: IProviderRegistry = ProviderRegistry(config_store, credentials_for)

@@ -2,7 +2,7 @@
 
   GET /settings        provider/temperature/configured + registered_models (state.db)
   PUT /settings        update config + replace registered SaaS models (model+key+extra)
-  GET /models          available provider kinds (echo/claude/ollama/openai/watsonx)
+  GET /models          available provider kinds (echo/claude/ollama/openai)
   GET /ollama/models   list models installed in the local Ollama daemon
   GET /memories        personalization visualization
 """
@@ -63,7 +63,11 @@ def _load_registered_models(c: Container) -> list[dict[str, Any]]:
         "SELECT model_id, provider, provider_label, api_key, extra FROM provider_models ORDER BY created_at"
     )
     out: list[dict[str, Any]] = []
+    supported = set(c.providers.available())
     for r in rows:
+        kind = {"anthropic": "claude", "custom": "openai"}.get(r["provider"], r["provider"] or "claude")
+        if kind not in supported:
+            continue  # Removed providers must not reappear in the model picker.
         extra = json.loads(r["extra"]) if r["extra"] else {}
         out.append(
             {
@@ -74,7 +78,6 @@ def _load_registered_models(c: Container) -> list[dict[str, Any]]:
                 "hasKey": bool(r["api_key"]),
                 # provider-specific (없으면 생략)
                 **({"baseUrl": extra["base_url"]} if extra.get("base_url") else {}),
-                **({"projectId": extra["project_id"]} if extra.get("project_id") else {}),
             }
         )
     return out
@@ -128,11 +131,7 @@ async def update_settings(body: SettingsIn, c: Container = Depends(get_container
             if _is_masked_key(api_key):
                 # GET 이 준 마스크가 그대로 돌아왔다 = 변경 의사 없음 → 기존 키 유지.
                 api_key = stored.get(m.get("modelId"), "")
-            extra = {
-                k: v
-                for k, v in (("base_url", m.get("baseUrl")), ("project_id", m.get("projectId")))
-                if v
-            }
+            extra = {"base_url": m["baseUrl"]} if m.get("baseUrl") else {}
             rows.append(
                 (
                     m.get("modelId"),

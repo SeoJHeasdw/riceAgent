@@ -128,8 +128,6 @@
     "providerLabel": "제공자",
     "modelIdLabel": "모델명",
     "modelIdPlaceholder": "모델 식별자를 입력하세요",
-    "projectIdLabel": "project_id",
-    "projectIdPlaceholder": "watsonx 프로젝트 ID",
     "apiKeyLabel": "API 키",
     "showKey": "키 보기",
     "hideKey": "키 숨기기",
@@ -145,12 +143,6 @@
       "anthropic": {
         "keyPlaceholder": "sk-ant-...",
         "keyLabel": "API 키"
-      },
-      "watsonx": {
-        "keyLabel": "IBM Cloud API 키",
-        "keyPlaceholder": "IBM Cloud API 키",
-        "baseUrlLabel": "지역 엔드포인트",
-        "baseUrlPlaceholder": "https://us-south.ml.cloud.ibm.com"
       },
       "custom": {
         "label": "OpenAI 호환 (커스텀)",

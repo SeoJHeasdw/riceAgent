@@ -128,8 +128,6 @@
     "providerLabel": "プロバイダー",
     "modelIdLabel": "モデルID",
     "modelIdPlaceholder": "モデル識別子を入力",
-    "projectIdLabel": "project_id",
-    "projectIdPlaceholder": "watsonx プロジェクトID",
     "apiKeyLabel": "APIキー",
     "showKey": "キーを表示",
     "hideKey": "キーを非表示",
@@ -145,12 +143,6 @@
       "anthropic": {
         "keyPlaceholder": "sk-ant-...",
         "keyLabel": "APIキー"
-      },
-      "watsonx": {
-        "keyLabel": "IBM Cloud APIキー",
-        "keyPlaceholder": "IBM Cloud APIキー",
-        "baseUrlLabel": "リージョナルエンドポイント",
-        "baseUrlPlaceholder": "https://us-south.ml.cloud.ibm.com"
       },
       "custom": {
         "label": "OpenAI互換（カスタム）",

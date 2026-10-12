@@ -17,5 +17,3 @@ export interface FileViewerValue {
 export const FileViewerContext = createContext<FileViewerValue>({ openFile: () => {} });
 
 export const useFileViewer = () => useContext(FileViewerContext);
-
-// Made with Bob

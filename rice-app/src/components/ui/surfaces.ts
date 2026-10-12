@@ -31,5 +31,3 @@ export const dialogSurfaceCls =
  */
 export const floatingSurfaceCls =
   'bg-layer-02/85 backdrop-blur-xl border border-border-strong-01/60 shadow-elevation-3';
-
-// Made with Bob

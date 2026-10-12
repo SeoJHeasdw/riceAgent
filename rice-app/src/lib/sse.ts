@@ -215,5 +215,3 @@ export class SSEClient {
 
 export const sseClient = new SSEClient();
 export default sseClient;
-
-// Made with Bob

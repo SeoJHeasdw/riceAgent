@@ -128,8 +128,6 @@
     "providerLabel": "Provider",
     "modelIdLabel": "Model ID",
     "modelIdPlaceholder": "Enter model identifier",
-    "projectIdLabel": "project_id",
-    "projectIdPlaceholder": "watsonx Project ID",
     "apiKeyLabel": "API Key",
     "showKey": "Show key",
     "hideKey": "Hide key",
@@ -145,12 +143,6 @@
       "anthropic": {
         "keyPlaceholder": "sk-ant-...",
         "keyLabel": "API Key"
-      },
-      "watsonx": {
-        "keyLabel": "IBM Cloud API Key",
-        "keyPlaceholder": "IBM Cloud API Key",
-        "baseUrlLabel": "Regional endpoint",
-        "baseUrlPlaceholder": "https://us-south.ml.cloud.ibm.com"
       },
       "custom": {
         "label": "OpenAI-compatible (Custom)",

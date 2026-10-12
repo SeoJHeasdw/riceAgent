@@ -1,7 +1,7 @@
 {
   "market": {
     "title": "スキルマーケット",
-    "subtitle": "IBMerが作成したスキルをダウンロードして、ブルーポイントで作成者を応援",
+    "subtitle": "メンバーが作成したスキルをダウンロードして、ポイントで作成者を応援",
     "search": "スキルを検索...",
     "install": "インストール",
     "installed": "インストール済み",
@@ -11,7 +11,8 @@
     "sortRecent": "新着順",
     "sortRating": "評価順",
     "sortSponsored": "スポンサー順",
-    "railBalanceLabel": "マイIBMブルーポイント",
+    "pointsUnit": "ポイント",
+    "railBalanceLabel": "マイポイント",
     "railMonthlyChange": "今月 +{{amount}}",
     "railCategoriesTitle": "カテゴリー",
     "railUploadBtn": "スキルをアップロード",
@@ -22,7 +23,7 @@
     "toastRiskFlagged": "{{name}}にリスク信号が検出されました — マイスキルで本文を確認してください",
     "toastUninstalled": "{{name}}が削除されました",
     "toastRemoveFailed": "{{name}}を削除できませんでした",
-    "toastSponsored": "{{author}}に{{amount}} BPをスポンサーしました",
+    "toastSponsored": "{{author}}に{{amount}} ポイントをスポンサーしました",
     "toastPublished": "{{name}}をマーケットに公開しました",
     "toastPublishFailed": "{{name}}をマーケットに公開できませんでした",
     "emptyTitle": "スキルが見つかりません",
@@ -61,7 +62,7 @@
     "categoryCommunication": "コミュニケーション",
     "categoryProductivity": "生産性",
     "getBtn": "取得",
-    "sponsorBtnTitle": "ブルーポイントでスポンサー",
+    "sponsorBtnTitle": "ポイントでスポンサー",
     "sponsorBtnLabel": "スポンサー"
   },
   "publish": {
@@ -129,7 +130,7 @@
     "blocked1": "SKILL.mdのコンテンツを記述してください",
     "doneTitle": "公開済み",
     "doneHeading": "スキルがマーケットに公開されました",
-    "doneBody": "他のIBMerが{{name}}を検索・インストール・スポンサーできるようになりました。",
+    "doneBody": "他のメンバーが{{name}}を検索・インストール・スポンサーできるようになりました。",
     "doneCloseBtn": "閉じる",
     "doneViewBtn": "マーケットで表示",
     "filePickTitle": "SKILL.mdをお持ちですか？",
@@ -166,7 +167,7 @@
     "metaTagsNone": "なし",
     "metaDef": "定義",
     "metaDefValue": "SKILL.md · {{count}}文字",
-    "scopeHint": "公開すると、すべてのIBMerがこのスキルを検索・インストールできます。",
+    "scopeHint": "公開すると、すべてのメンバーがこのスキルを検索・インストールできます。",
     "scopeUnpublishHint": "マイスキルからいつでも公開を取り消せます。",
     "tagSuggestionDataAnalysis": "データ,分析,可視化,エクセル",
     "tagSuggestionAutomation": "オートメーション,ワークフロー,スケジュール",
@@ -474,10 +475,10 @@
   },
   "sponsor": {
     "modalTitle": "スキルをスポンサー",
-    "descriptionPrefix": "IBMブルーポイントを送る先：",
+    "descriptionPrefix": "ポイントを送る先：",
     "descriptionSuffix": "",
-    "balanceLabel": "残高: {{balance}} BP",
-    "sponsorBtn": "{{amount}} BPをスポンサー"
+    "balanceLabel": "残高: {{balance}} ポイント",
+    "sponsorBtn": "{{amount}} ポイントをスポンサー"
   },
   "sourceWorkspace": {
     "backTitle": "スキル詳細に戻る（Esc）",

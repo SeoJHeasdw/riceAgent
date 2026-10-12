@@ -87,5 +87,3 @@ export const useDemoAnimationSpeed = (ref: RefObject<HTMLElement | null>): void 
     return () => cancelAnimationFrame(frame);
   }, [ref]);
 };
-
-// Made with Bob

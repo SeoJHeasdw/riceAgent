@@ -515,7 +515,7 @@ class TestReviewEngine:
     @pytest.mark.asyncio
     async def test_store_backed_plugin_is_visible_but_never_patchable(self):
         plugin = _make_skill("plugin-visible", body="## Plugin body\n")
-        plugin.source = "plugin:wxo-expert"
+        plugin.source = "plugin:deployment-expert"
         self._skill_store.write(plugin)
 
         full_body, compact, patchable_ids = self._engine(_FakeProvider([]))._build_catalog(
@@ -529,7 +529,7 @@ class TestReviewEngine:
     @pytest.mark.asyncio
     async def test_review_engine_drops_forged_plugin_patch_tool_call(self):
         plugin = _make_skill("plugin-forged", body="## Plugin body\n")
-        plugin.source = "plugin:wxo-expert"
+        plugin.source = "plugin:deployment-expert"
         self._skill_store.write(plugin)
         call = ToolCall(
             tool_name="propose_skill_patch",

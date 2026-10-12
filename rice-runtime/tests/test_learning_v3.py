@@ -163,7 +163,7 @@ class TestStageProposal:
         assert "v1→v2" in res["message"]
 
     def test_stage_refuses_plugin_owned_skill(self):
-        self._store.write(_make_skill("plug-sk", source="plugin:wxo"))
+        self._store.write(_make_skill("plug-sk", source="plugin:deployment"))
         res = self._svc.stage_proposal("s1", name="plug-sk", body="x")
         assert res["status"] == "dropped"
 
@@ -309,7 +309,7 @@ class TestReviewSuppression:
 class TestDiscovery:
     def _digests(self) -> list[SessionDigest]:
         return [
-            SessionDigest("s1", "주간 리포트", "user: 매출 뽑아줘\nassistant: db2 조회 후 요약했습니다"),
+            SessionDigest("s1", "주간 리포트", "user: 매출 뽑아줘\nassistant: database 조회 후 요약했습니다"),
             SessionDigest("s2", "리포트 또", "user: 이번주도 매출 리포트\nassistant: 같은 절차로 처리"),
         ]
 
@@ -319,7 +319,7 @@ class TestDiscovery:
         provider = _FakeProvider([
             ToolCall(tool_name="propose_skill_create", arguments={
                 "name": "weekly-sales-report", "description": "주간 매출 리포트",
-                "body": "1. db2 조회\n2. 요약\n", "tags": ["report"],
+                "body": "1. database 조회\n2. 요약\n", "tags": ["report"],
             }),
         ])
         svc = _service(paths=paths, provider=provider)
@@ -349,11 +349,11 @@ class TestDiscovery:
     def test_build_session_digest_compacts_and_skips_tool_bodies(self):
         messages = [
             Message(role="user", content="매출 뽑아줘"),
-            Message(role="tool", content="x" * 5000, metadata={"tool_name": "db2.query"}),
+            Message(role="tool", content="x" * 5000, metadata={"tool_name": "database.query"}),
             Message(role="assistant", content="y" * 500),
         ]
         d = build_session_digest("s1", "리포트", messages, max_chars=1000)
-        assert "db2.query" in d.excerpt and "xxxx" not in d.excerpt
+        assert "database.query" in d.excerpt and "xxxx" not in d.excerpt
         assert len(d.excerpt) <= 1000
 
     @pytest.mark.asyncio

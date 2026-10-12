@@ -12,7 +12,6 @@ import { platform } from '../lib/api';
 interface AppSettings {
   theme: 'dark' | 'light';
   font: 'system' | 'mono' | 'sans';
-  watsonxApiKey: string;
   ollamaEndpoint: string;
   runtimeAutoStart: boolean;
   telemetryEnabled: boolean;
@@ -31,7 +30,6 @@ type GlyphName = 'general' | 'privacy' | 'about' | 'sun' | 'moon';
 const DEFAULT_SETTINGS: AppSettings = {
   theme: 'dark',
   font: 'system',
-  watsonxApiKey: '',
   ollamaEndpoint: 'http://localhost:11434',
   runtimeAutoStart: true,
   telemetryEnabled: false,
@@ -57,10 +55,14 @@ function loadSettings(): AppSettings {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
       const storedSettings = JSON.parse(stored) as Record<string, unknown>;
-      // Language has its own canonical store (rice.language). Ignore the legacy
-      // rice.settings.language field so it cannot overwrite onboarding choices.
-      delete storedSettings.language;
-      return { ...DEFAULT_SETTINGS, ...storedSettings } as AppSettings;
+      // Only current settings are restored so removed fields are not retained
+      // or written back to local storage.
+      const currentSettings = Object.fromEntries(
+        Object.keys(DEFAULT_SETTINGS)
+          .filter((key) => key in storedSettings)
+          .map((key) => [key, storedSettings[key]]),
+      );
+      return { ...DEFAULT_SETTINGS, ...currentSettings } as AppSettings;
     }
   } catch {
     // Invalid or unavailable local storage falls back to safe defaults.
@@ -693,5 +695,3 @@ function SettingsScreen({ open, onClose }: SettingsScreenProps) {
 }
 
 export default SettingsScreen;
-
-// Made with Bob

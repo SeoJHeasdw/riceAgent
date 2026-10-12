@@ -27,5 +27,3 @@ export function demoTimeScale(raw: string | undefined = process.env.RICE_DEMO_TI
 export function demoSearch(): string {
   return demoEnabled ? `demo=1&timeScale=${demoTimeScale()}` : '';
 }
-
-// Made with Bob

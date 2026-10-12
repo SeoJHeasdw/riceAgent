@@ -468,7 +468,7 @@
     "groupLast30Days": "過去30日",
     "groupOlder": "それ以前",
     "modelLocal": "ローカル · Ollama",
-    "modelSaas": "SaaS · watsonx"
+    "modelSaas": "SaaS"
   },
   "modelSettings": {
     "title": "モデル設定",
@@ -513,7 +513,7 @@
     "barWarm": "学習後",
     "taskTitle": {
       "T-A": "四半期売上サマリー",
-      "T-B": "Db2スキーマチェック",
+      "T-B": "データベーススキーマチェック",
       "T-C": "顧客チャーン分析"
     }
   },

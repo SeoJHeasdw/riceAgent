@@ -85,5 +85,3 @@ declare global {
     electronAPI: ElectronAPI;
   }
 }
-
-// Made with Bob

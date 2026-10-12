@@ -705,7 +705,7 @@ class PlatformApiClient {
       .filter((f): f is import('./types').SkillFile => f !== null);
   }
 
-  /** POST /artifacts/{id}/sponsor — Blue Point 후원 */
+  /** POST /artifacts/{id}/sponsor — Point 후원 */
   sponsorArtifact(id: string, points: number): Promise<ApiResponse<{ artifact_id: string; total_points: number }>> {
     return this.send('POST', `/artifacts/${encodeURIComponent(id)}/sponsor`, { points });
   }
@@ -731,5 +731,3 @@ class PlatformApiClient {
 
 /** rice-platform 마켓 서버 싱글턴 */
 export const platform = new PlatformApiClient();
-
-// Made with Bob

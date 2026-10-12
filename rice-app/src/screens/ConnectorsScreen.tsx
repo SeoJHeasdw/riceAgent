@@ -10,7 +10,7 @@ import {
   CustomConnectorModal,
   type CustomConnectorAddPayload,
   type DiscoveredOAuthConfig,
-} from '../components/carbon';
+} from '../components/workspace';
 import { useResizable } from '../hooks/useResizable';
 import api from '../lib/api';
 import type { LocalMcpTransportPayload } from '../lib/api';
@@ -289,7 +289,7 @@ const transportLine = (t: McpTransport): string =>
 
 /**
  * ConnectorsScreen ("커넥터") — the home for linked external accounts / data
- * sources (Db2, Slack, Outlook, Jira, …). Master-detail: connect/disconnect,
+ * sources (databases, Slack, Outlook, Jira, …). Master-detail: connect/disconnect,
  * see each connector's access scope, which skills/plugins use it, and example
  * actions. Also the destination for "접근 권한 관리" links elsewhere.
  */
@@ -1688,5 +1688,3 @@ function ConnectorsScreen() {
 }
 
 export default ConnectorsScreen;
-
-// Made with Bob

@@ -114,7 +114,6 @@ def _dispatcher(builtins: dict) -> ToolDispatcher:
 def test_resolve_profile_auto_maps_provider_kind():
     assert resolve_profile("ollama") is LOCAL_PROFILE
     assert resolve_profile("claude") is FRONTIER_PROFILE
-    assert resolve_profile("watsonx") is FRONTIER_PROFILE
     # openai 호환 로컬 서버(LM Studio 등)는 루프백 base_url로 유추
     assert resolve_profile("openai", "http://localhost:1234/v1") is LOCAL_PROFILE
     assert resolve_profile("openai", "https://api.openai.com/v1") is FRONTIER_PROFILE

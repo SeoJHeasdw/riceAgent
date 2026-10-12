@@ -6,8 +6,8 @@
 // Base UI Components
 export * from './ui';
 
-// Carbon Component Wrappers
-export * from './carbon';
+// RICE Component Wrappers
+export * from './workspace';
 
 // Layout Components
 export { Layout } from './Layout';
@@ -15,5 +15,3 @@ export type { LayoutProps } from './Layout';
 
 export { TwoColumnLayout } from './TwoColumnLayout';
 export type { TwoColumnLayoutProps } from './TwoColumnLayout';
-
-// Made with Bob

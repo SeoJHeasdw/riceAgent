@@ -248,5 +248,3 @@ ipcMain.handle('artifact:download', async (_event, url: string) => {
   await fs.writeFile(filePath, buf);
   return { path: filePath, checksum };
 });
-
-// Made with Bob

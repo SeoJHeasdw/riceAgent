@@ -1,5 +1,5 @@
 import type React from 'react';
-import type { IconRailItem } from '../../components/carbon';
+import type { IconRailItem } from '../../components/workspace';
 import { NavIcon } from './NavIcon';
 
 /**
@@ -157,5 +157,3 @@ export const toRailItems = (): IconRailItem[] =>
     dividerAfter,
     icon: <NavIcon size={18}>{iconPaths}</NavIcon>,
   }));
-
-// Made with Bob

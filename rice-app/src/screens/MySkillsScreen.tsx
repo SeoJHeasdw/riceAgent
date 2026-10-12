@@ -7,11 +7,11 @@ import { useResizable } from '../hooks/useResizable';
 import { useLearning } from '../lib/learning/LearningContext';
 import { useMarketplace } from '../hooks/useMarketplace';
 import { useI18n } from '../lib/i18n/I18nContext';
-import { LearningImpactPanel } from '../components/carbon/LearningImpactPanel';
-import { SkillSourceWorkspace } from '../components/carbon/SkillSourceWorkspace';
-import { SkillPublishDialog } from '../components/carbon/SkillPublishDialog';
-import { SkillEditDrawer, type EditPatch } from '../components/carbon/SkillEditDrawer';
-import { Markdown } from '../components/carbon/Markdown';
+import { LearningImpactPanel } from '../components/workspace/LearningImpactPanel';
+import { SkillSourceWorkspace } from '../components/workspace/SkillSourceWorkspace';
+import { SkillPublishDialog } from '../components/workspace/SkillPublishDialog';
+import { SkillEditDrawer, type EditPatch } from '../components/workspace/SkillEditDrawer';
+import { Markdown } from '../components/workspace/Markdown';
 import { apiErrorMessage } from '../lib/i18n/apiError';
 import { IMPACT_REPORT, runtimeAnalysisToSkillAnalysis, renderTrend, renderCreatedFrom, renderLastUsed, renderVersionWhen, renderVersionNote, renderChangelog, wrapT } from '../lib/learningData';
 import { ownedSkillFiles, ownedToMarketSkill, publishedMarketId } from '../lib/skillBridge';
@@ -686,7 +686,7 @@ const KNOWN_TOOL_PATTERNS: { name: string; pattern: RegExp }[] = [
   { name: 'terminal', pattern: /\b(terminal|shell|bash|zsh|command line|CLI|npm|pnpm|yarn|pytest|git|rg|grep)\b/i },
   { name: 'file tools', pattern: /\b(read_file|write_file|edit_file|filesystem|file|workspace)\b/i },
   { name: 'web/search', pattern: /\b(web search|browser|url|http|docs|검색|브라우저)\b/i },
-  { name: 'database', pattern: /\b(sql|db2|postgres|mysql|database|schema|query)\b/i },
+  { name: 'database', pattern: /\b(sql|postgres|mysql|database|schema|query)\b/i },
   { name: 'python', pattern: /\b(python|pandas|notebook|script\.py)\b/i },
   { name: 'connector', pattern: /\b(gmail|calendar|drive|slack|salesforce|connector|oauth|api)\b/i },
 ];
@@ -2749,5 +2749,3 @@ function MySkillsScreen() {
 }
 
 export default MySkillsScreen;
-
-// Made with Bob

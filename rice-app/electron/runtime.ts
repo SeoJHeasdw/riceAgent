@@ -324,5 +324,3 @@ export class RuntimeManager {
     await this.stop();
   }
 }
-
-// Made with Bob

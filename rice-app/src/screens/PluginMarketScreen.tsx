@@ -2,12 +2,12 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { TwoColumnLayout } from '../components/TwoColumnLayout';
-import { PluginCard } from '../components/carbon/PluginCard';
-import { MarketplaceHeader } from '../components/carbon/MarketplaceHeader';
-import { ArtifactDetailModal } from '../components/carbon/ArtifactDetailModal';
-import { ConnectorRequiredModal } from '../components/carbon/ConnectorRequiredModal';
-import { CardSkeletonGrid } from '../components/carbon/MarketSkeleton';
-import { NotificationVariant } from '../components/carbon/NotificationToast';
+import { PluginCard } from '../components/workspace/PluginCard';
+import { MarketplaceHeader } from '../components/workspace/MarketplaceHeader';
+import { ArtifactDetailModal } from '../components/workspace/ArtifactDetailModal';
+import { ConnectorRequiredModal } from '../components/workspace/ConnectorRequiredModal';
+import { CardSkeletonGrid } from '../components/workspace/MarketSkeleton';
+import { NotificationVariant } from '../components/workspace/NotificationToast';
 import { useToast } from '../lib/toast/ToastContext';
 import { useMarketplace } from '../hooks/useMarketplace';
 import { useLearning } from '../lib/learning/LearningContext';
@@ -31,7 +31,6 @@ type SelectedPluginCategory = PluginCategorySentinel | PluginCategoryCode | stri
 // PluginCategoryCode → 번역. t()가 정적 키만 수용하므로 명시적 맵 사용.
 function getPluginCategoryLabel(code: PluginCategoryCode, t: ReturnType<typeof useTranslation<'plugins'>>['t']): string {
   const map: Record<PluginCategoryCode, string> = {
-    WXO: t('category.WXO'),
     sales: t('category.sales'),
     hr: t('category.hr'),
     finance: t('category.finance'),
@@ -345,5 +344,3 @@ function PluginMarketScreen() {
 }
 
 export default PluginMarketScreen;
-
-// Made with Bob

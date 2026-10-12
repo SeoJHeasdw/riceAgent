@@ -10,5 +10,3 @@
   },
   "include": ["vite.config.ts", "electron"]
 }
-
-// Made with Bob

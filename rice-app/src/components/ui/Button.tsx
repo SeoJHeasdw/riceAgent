@@ -1,7 +1,7 @@
 import React from 'react';
 
 /**
- * Button component — compact application actions using Carbon color tokens
+ * Button component — compact application actions using RICE color tokens
  * - A transparent border is always reserved so variants never change size
  * - Ghost actions are neutral; blue is reserved for primary/tertiary emphasis
  * - Destructive secondary actions use danger-ghost instead of ad-hoc overrides
@@ -79,5 +79,3 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
 );
 
 Button.displayName = 'Button';
-
-// Made with Bob

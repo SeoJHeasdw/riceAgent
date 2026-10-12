@@ -116,5 +116,3 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
     </div>
   );
 };
-
-// Made with Bob

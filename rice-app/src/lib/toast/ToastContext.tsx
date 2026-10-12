@@ -1,6 +1,6 @@
 import { createContext, useContext } from 'react';
-import type { ProgressTone } from '../../components/carbon/ProgressToast';
-import type { NotificationVariant } from '../../components/carbon/NotificationToast';
+import type { ProgressTone } from '../../components/workspace/ProgressToast';
+import type { NotificationVariant } from '../../components/workspace/NotificationToast';
 
 /**
  * 전역 토스트 시스템의 컨텍스트 + 소비 훅(useToast).
@@ -46,5 +46,3 @@ export const useToast = (): ToastApi => {
   if (!ctx) throw new Error('useToast must be used within <ToastProvider>');
   return ctx;
 };
-
-// Made with Bob

@@ -1,4 +1,4 @@
-import { ModelSettings } from '../components/carbon/ModelSettingsPanel';
+import { ModelSettings } from '../components/workspace/ModelSettingsPanel';
 
 /**
  * Sample marketplace data for the chat surface.
@@ -41,7 +41,6 @@ export type SkillCategoryCode = (typeof skillCategoryCodes)[number];
  * Rendered via t('plugins:category.<code>').
  */
 export const pluginCategoryCodes = [
-  'WXO',
   'sales',
   'hr',
   'finance',
@@ -49,5 +48,3 @@ export const pluginCategoryCodes = [
   'itOps',
 ] as const;
 export type PluginCategoryCode = (typeof pluginCategoryCodes)[number];
-
-// Made with Bob

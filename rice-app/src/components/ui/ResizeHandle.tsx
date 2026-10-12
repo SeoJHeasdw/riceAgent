@@ -61,5 +61,3 @@ export const ResizeHandle: React.FC<ResizeHandleProps> = ({
     />
   </div>
 );
-
-// Made with Bob

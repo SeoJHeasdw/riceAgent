@@ -150,5 +150,3 @@ export const OverflowMenu: React.FC<OverflowMenuProps> = ({ items, align = 'righ
     </div>
   );
 };
-
-// Made with Bob

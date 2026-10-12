@@ -1,6 +1,6 @@
 # RICE 시각 규율 (Visual Discipline)
 
-IBM Carbon 토큰 위에 얹는 RICE의 시각 규칙. 목표는 "더 꾸미기"가 아니라
+공통 디자인 토큰을 사용하는 RICE의 시각 규칙. 목표는 "더 꾸미기"가 아니라
 **덜 말하고 더 정확하게 보이기** — Cursor / Raycast / Linear급 데스크톱 밀도.
 
 디자인 리뷰(2026-07)에서 확정된 규칙이며, 코드 리뷰 시 이 문서를 기준으로 판정한다.
@@ -37,23 +37,23 @@ IBM Carbon 토큰 위에 얹는 RICE의 시각 규칙. 목표는 "더 꾸미기"
 - 입력 높이 `h-9` (조밀한 곳은 `h-8`), padding `px-3`.
 - label `text-label-01`, 본문 `text-body-short-01`, 모달 제목 `text-heading-01`.
 - 모달 body 간격 `space-y-4`. 버튼 표준 `size="sm"`(h-8) — 모달 CTA에 `h-12` 금지.
-- **임의 폰트 크기(`text-[..px]`) 금지.** Carbon 스케일 아래 유일한 공식 마이크로 단계는
+- **임의 폰트 크기(`text-[..px]`) 금지.** RICE 스케일 아래 유일한 공식 마이크로 단계는
   `text-label-micro`(11px) — 배지·Kbd·그룹라벨 전용. 9~11.5px 임의값은 전부 이걸로,
   12~13px는 `caption-01`/`body-short-01`로 스냅한다.
 
 ## 4b. 색 토큰 규율
 
 - **임의 hex 유틸(`bg-[#...]` 등) 금지.** [tailwind.config.js](../tailwind.config.js)에
-  이름 붙은 Carbon 팔레트 단계(blue/red/green/yellow/orange/purple/teal/magenta)만 쓴다.
+  이름 붙은 RICE 팔레트 단계(blue/red/green/yellow/orange/purple/teal/magenta)만 쓴다.
   필요한 단계가 없으면 config에 추가하는 것이 정답이지, 임의값이 아니다.
 - 버튼 hover/active는 시맨틱 토큰: `bg-interactive-hover/active`, `bg-danger-hover/active`
-  (globals.css `--cds-interactive-hover` 등과 동기 — 테마 전환 대비).
+  (globals.css `--rice-interactive-hover` 등과 동기 — 테마 전환 대비).
 - diff 표면(추가/삭제 행)은 `bg-diff-add-bg text-diff-add-text` 계열 시맨틱 토큰.
 - 허용된 리터럴 hex: macOS 트래픽 라이트 목업, 외부 프로바이더 브랜드 색(inline style).
 
 ## 4c. 키보드 포커스
 
-- 전역 `:focus-visible { outline: 2px solid var(--cds-focus); outline-offset: 2px }`가
+- 전역 `:focus-visible { outline: 2px solid var(--rice-focus); outline-offset: 2px }`가
   기본값 — 개별 컴포넌트에 focus 클래스를 살포하지 않는다.
 - `outline-none`은 **부모가 `focus-within`으로 포커스를 표시하는 내장 input**에만 허용.
 - 모달·확인창·드로어는 열릴 때 내부 첫 컨트롤로 포커스를 옮기고, Tab을 가두며,
@@ -62,9 +62,9 @@ IBM Carbon 토큰 위에 얹는 RICE의 시각 규칙. 목표는 "더 꾸미기"
 
 ## 4e. 테마·글꼴
 
-- 모든 콘텐츠 표면은 시맨틱 Carbon 토큰만 사용해 `[data-theme='dark|light']`를 함께 지원한다.
+- 모든 콘텐츠 표면은 시맨틱 RICE 토큰만 사용해 `[data-theme='dark|light']`를 함께 지원한다.
 - brand shell은 테마와 관계없이 어둡게 유지해 앱의 고정 프레임 역할을 한다.
-- UI 글꼴은 `--font-sans`를 단일 진입점으로 사용한다. 시스템·IBM Plex Sans·Mono 선택이
+- UI 글꼴은 `--font-sans`를 단일 진입점으로 사용한다. 시스템·산세리프·고정폭 글꼴 선택이
   화면별 하드코딩 없이 전체 앱에 적용돼야 한다.
 
 ## 4d. 화면 헤더 리듬

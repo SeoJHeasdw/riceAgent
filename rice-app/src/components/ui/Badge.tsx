@@ -1,7 +1,7 @@
 import React from 'react';
 
 /**
- * Badge component following IBM Carbon design principles
+ * Badge component following RICE design principles
  * - Count/status badge component
  * - 0px border radius
  * - Multiple variants
@@ -45,5 +45,3 @@ export const Badge: React.FC<BadgeProps> = ({
     </span>
   );
 };
-
-// Made with Bob

@@ -25,5 +25,3 @@ export const NavIcon: React.FC<{ size?: number; className?: string; children: Re
     {children}
   </svg>
 );
-
-// Made with Bob
