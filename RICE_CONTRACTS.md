@@ -115,7 +115,7 @@ workspace의 일반 파일은 RICE 소유 루트가 아니므로 재귀 삭제�
 | **GET** | **`/ollama/models`** | **로컬 Ollama 데몬의 설치 모델 목록 프록시(2026-07-08 반영)** |
 | **GET** | **`/ollama/health`** | **현재 설정된 Ollama 모델의 설치 여부 확인(2026-07-08 반영)** |
 | GET | `/settings` | 설정 조회 (provider·learning·context·ui·**agent**(plan-and-execute 노브, AGENT_EXECUTION §8 정본) + registered_models) |
-| PUT | `/settings` | 설정 갱신 (provider/model/temperature, context 렌더링 예산/threshold, **agent 섹션**, **registered_models**(멀티 SaaS 모델+API 키 등록), api_key→키체인, language, theme, **font**) |
+| PUT | `/settings` | 설정 갱신 (provider/model/temperature, context 렌더링 예산/threshold, **agent 섹션**, **registered_models**(멀티 SaaS 모델+API 키 등록), **ui 섹션**(language/theme/font). 앱 등록 모델 키는 state.db에 저장하고 GET 응답에서 마스킹) |
 | POST | `/artifacts/install` | platform에서 받은 artifact 설치 (2장 manifest 전달) |
 | DELETE | `/artifacts/{id}` | 제거 |
 | **GET** | **`/workspace`** | **표시용 워크스페이스 절대 경로 조회(`RICE_HOME` 재배치 반영; 변경 대기 중이면 대기 경로 반환) — 2026-07-10 반영** |

@@ -131,7 +131,7 @@
     "apiKeyLabel": "API Key",
     "showKey": "Show key",
     "hideKey": "Hide key",
-    "storageNote": "API keys are stored <device>on this device only</device> and are never sent to external servers.",
+    "storageNote": "API keys are stored <device>on this device</device> and used to authenticate requests to your selected model provider.",
     "storageNoteDb": "Stored in plain text in the local database (state.db).",
     "providers": {
       "openai": {

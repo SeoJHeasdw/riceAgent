@@ -188,6 +188,7 @@ function AppShell({ tourActive, screenToursSuspended, onTourDone, onTriggerOnboa
 type RuntimeStatusMsg = { running: boolean; port?: number; token?: string };
 type RuntimeBridge = {
   getStatus: () => Promise<RuntimeStatusMsg>;
+  start?: () => Promise<RuntimeStatusMsg>;
   onReady?: (cb: (status: RuntimeStatusMsg) => void) => () => void;
 };
 
@@ -210,59 +211,68 @@ function App() {
   const [currentModel, setCurrentModel] = useState('claude-sonnet-4-6');
   const [modelSettings, setModelSettings] = useState<ModelSettings>(defaultModelSettings);
 
-  // Connect the API/SSE clients to the local runtime only when Electron reports
-  // it running (IPC — no network probe). In the design demo (browser, or runtime
-  // not spawned) we stay offline: clients no-op and screens use scripted mock
-  // data, so no failing localhost requests hit the console.
+  // Electron discovers its supervised runtime through IPC; browser development
+  // connects to the configured localhost URL. Failed connections remain offline.
   useEffect(() => {
-    const connect = (baseUrl: string, token: string | null = null) => {
-      // A factory reset/restart mints a new port and bearer token. Cycle the
-      // connected flag even when it was already true so every runtime-backed
-      // provider discards stale in-memory data and hydrates from the fresh DB.
+    let cancelled = false;
+    const disconnect = () => {
       api.setEnabled(false);
       sseClient.setEnabled(false);
+    };
+    const connect = (baseUrl: string, token: string | null = null) => {
+      if (cancelled) return;
+      // Restart/factory reset may change the port, token, and persisted data.
+      disconnect();
       api.setBaseUrl(baseUrl);
       api.setToken(token);
-      api.setEnabled(true);
       sseClient.setBaseUrl(baseUrl);
       sseClient.setToken(token);
+      api.setEnabled(true);
       sseClient.setEnabled(true);
-      console.info('[RICE] runtime connected:', baseUrl);
     };
 
     const bridge = (window as { electronAPI?: { runtime?: RuntimeBridge } }).electronAPI?.runtime;
-    if (bridge) {
-      // Runtime may already be up (fast restart) → probe once now …
-      bridge
-        .getStatus()
-        .then((status) => {
-          if (status?.running && status.port) connect(`http://localhost:${status.port}`, status.token ?? null);
-        })
-        .catch(() => {
-          /* runtime not reachable yet — wait for the ready push below */
-        });
-      // … and/or connect when main reports it healthy (window paints before spawn).
-      const off = bridge.onReady?.((status) => {
-        if (status?.running && status.port) connect(`http://localhost:${status.port}`, status.token ?? null);
-      });
-      return () => off?.();
-    }
-
-    // Renderer-only dev (no Electron IPC): connect directly to a locally-run
-    // runtime if VITE_RICE_RUNTIME_URL is set AND /health answers. The health
-    // probe means we silently stay on scripted mock data when the runtime is
-    // down — no failing requests, no console noise.
     const env = import.meta.env as Record<string, string | undefined>;
-    const devUrl = env.VITE_RICE_RUNTIME_URL;
-    if (!devUrl) return;
-    const token = env.VITE_RICE_RUNTIME_TOKEN ?? null;
-    void fetch(`${devUrl}/health`)
-      .then((r) => {
-        if (r.ok) connect(devUrl, token);
-      })
-      .catch(() => {
-        /* dev runtime not up — stay on mock */
-      });
+    const devUrl = env.VITE_RICE_RUNTIME_URL ?? 'http://localhost:8080';
+    const connectRuntime = async (startIfStopped: boolean): Promise<boolean> => {
+      try {
+        if (bridge) {
+          let status = await bridge.getStatus();
+          if (!status.running && startIfStopped && bridge.start) status = await bridge.start();
+          if (cancelled) return false;
+          if (!status.running || !status.port) {
+            disconnect();
+            return false;
+          }
+          connect(`http://localhost:${status.port}`, status.token ?? null);
+        } else {
+          const response = await fetch(`${devUrl}/health`, { signal: AbortSignal.timeout(5000) });
+          if (cancelled) return false;
+          if (!response.ok) {
+            disconnect();
+            return false;
+          }
+          connect(devUrl, env.VITE_RICE_RUNTIME_TOKEN ?? null);
+        }
+        return true;
+      } catch {
+        if (!cancelled) disconnect();
+        return false;
+      }
+    };
+
+    api.setConnectionRetry(() => connectRuntime(true));
+    void connectRuntime(false);
+    const off = bridge?.onReady?.((status) => {
+      if (cancelled) return;
+      if (status.running && status.port) connect(`http://localhost:${status.port}`, status.token ?? null);
+      else disconnect();
+    });
+    return () => {
+      cancelled = true;
+      off?.();
+      api.setConnectionRetry(null);
+    };
   }, []);
 
   // 런타임 연결 시 configured 여부를 확인해 온보딩을 트리거한다.

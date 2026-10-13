@@ -2,17 +2,9 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 
-// Renderer-only dev config (electron-free).
-//
-// The default `vite.config.ts` loads `vite-plugin-electron`, which crashes under
-// the installed Node toolchain and takes the renderer dev server down with it.
-// This config drops every electron plugin so the React app runs in a plain
-// browser. `lib/api.ts` falls back to scripted mock data when no runtime is
-// connected; set `VITE_RICE_RUNTIME_URL` (see .env.local) to drive a locally-run
-// rice-runtime over HTTP/SSE instead.
-//
-//   npx vite --config vite.renderer.config.ts
-//
+// Browser development without launching Electron. The renderer connects to
+// VITE_RICE_RUNTIME_URL, or http://localhost:8080 when no override is set.
+// Start with: npx vite --config vite.renderer.config.ts
 export default defineConfig({
   plugins: [react()],
   resolve: {

@@ -9,6 +9,13 @@
   "delete": "削除",
   "edit": "編集",
   "retry": "再試行",
+  "runtime": {
+    "unavailable": "ローカルランタイムに接続されていません",
+    "unavailableHint": "ランタイムに接続すると、チャットとコネクターを利用できます。",
+    "reconnect": "再接続",
+    "reconnecting": "接続中…",
+    "retryFailed": "接続できませんでした。アプリまたは開発用ランタイムが起動しているか確認してください。"
+  },
   "me": "自分",
   "dialog": "ダイアログ",
   "closeDialog": "ダイアログを閉じる",

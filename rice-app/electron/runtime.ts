@@ -53,7 +53,7 @@ function findFreePort(): Promise<number> {
  *   → (packaged) `<resources>/rice-runtime`.
  *
  * Spawn failures (no Python, etc.) are non-fatal: the app stays usable and the
- * renderer falls back to scripted mock data (App bootstrap stays "offline").
+ * renderer stays offline and offers a connection retry.
  */
 export class RuntimeManager {
   private process: ChildProcess | null = null;

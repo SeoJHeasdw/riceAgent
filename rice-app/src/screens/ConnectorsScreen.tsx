@@ -15,10 +15,10 @@ import { useResizable } from '../hooks/useResizable';
 import api from '../lib/api';
 import type { LocalMcpTransportPayload } from '../lib/api';
 import { openExternal } from '../lib/openExternal';
+import { RuntimeConnectionNotice } from '../components/workspace/RuntimeConnectionNotice';
 import { useToast } from '../lib/toast/ToastContext';
 import i18n from '../lib/i18n';
 import {
-  CONNECTORS,
   connectorKind,
   type CatalogConnector,
   type Connector,
@@ -577,6 +577,7 @@ const ConnectorDetailView: React.FC<{
   const removable = online && (isMcp || (!!c.persisted && !connected));
   const patch = (fn: (c: Connector) => Connector) => setConnectors((a) => a.map((x) => (x.id === connectorId ? fn(x) : x)));
   const toggleConnect = () => {
+    if (!online) return;
     // 런타임 온라인 + 원격 커넥터: 실제 OAuth 연결/해제 경로(백엔드 /connectors).
     if (online && !isMcp) {
       if (connected) onRealDisconnect(c);
@@ -589,17 +590,6 @@ const ConnectorDetailView: React.FC<{
       onRefreshLocal(c);
       return;
     }
-    // 오프라인(디자인 데모): 기존 목업 토글 유지.
-    patch((x) =>
-      x.status === 'connected'
-        ? { ...x, status: 'disconnected', account: undefined, lastSync: undefined }
-        : {
-            ...x,
-            status: 'connected',
-            account: x.transport ? transportLine(x.transport) : `${x.id}@example.com`,
-            lastSync: i18n.t('connectors:meta.justNow'),
-          },
-    );
   };
   // 도구는 제공자가 정의하므로 추가/삭제하지 않고 "언제 호출할 수 있는가"만 바꾼다.
   // 실제(온라인) 커넥터(원격이든 로컬 MCP 든)면 백엔드에 정책을 저장한다 — dispatcher 가 강제.
@@ -607,30 +597,21 @@ const ConnectorDetailView: React.FC<{
     if (online) onSetToolPermission(c.id, toolName, perm);
   };
   const setScopePermission = (idx: number, perm: ScopePermission) => {
+    if (!online) return;
     const tool = c.scopes[idx];
     patch((x) => ({ ...x, scopes: x.scopes.map((s, i) => (i === idx ? { ...s, permission: perm } : s)) }));
     if (tool) persistPerm(tool.name, perm);
   };
   // 그룹(읽기/쓰기) 전체를 한 번에 설정 — 도구가 많은 커넥터(Gmail 등)에서 필수
   const setGroupPermission = (predicate: (s: ConnectorScope) => boolean, perm: ScopePermission) => {
+    if (!online) return;
     const targets = c.scopes.filter(predicate);
     patch((x) => ({ ...x, scopes: x.scopes.map((s) => (predicate(s) ? { ...s, permission: perm } : s)) }));
     targets.forEach((t) => persistPerm(t.name, perm));
   };
-  // 업데이트 적용 — 원격 커넥터는 백엔드 apply-update(pending→active) 호출, 그 외(목업)는
-  // 클라이언트에서 addsTools 를 병합.
+  // Updates are applied by the runtime and reloaded from its persisted catalog.
   const applyUpdate = () => {
-    if (!c.update) return;
-    if (online && !isMcp) {
-      onApplyUpdate(c);
-      return;
-    }
-    patch((x) => ({
-      ...x,
-      scopes: [...x.scopes, ...(x.update?.addsTools ?? [])],
-      lastSync: i18n.t('connectors:meta.justNow'),
-      update: undefined,
-    }));
+    if (online && !isMcp && c.update) onApplyUpdate(c);
   };
 
   const meta: [string, string][] = isMcp
@@ -718,7 +699,7 @@ const ConnectorDetailView: React.FC<{
             <Button
               kind={connected ? 'secondary' : 'primary'}
               size="sm"
-              disabled={busy}
+              disabled={busy || !online}
               icon={<Icon name={busy ? 'renew' : isMcp && online ? 'renew' : connected ? 'close' : verifyRecovery ? 'renew' : 'connect'} size={15} />}
               onClick={verifyRecovery ? () => onVerify(c) : toggleConnect}
             >
@@ -901,7 +882,7 @@ const ConnectorDetailView: React.FC<{
                       <span className="text-caption-01 font-semibold text-text-secondary">{g.label}</span>
                       <span className="text-caption-01 text-text-helper">{g.items.length}</span>
                       <div className="ml-auto">
-                        <GroupPermissionMenu disabled={!connected} onPick={(p) => setGroupPermission(g.filter, p)} />
+                        <GroupPermissionMenu disabled={!online || !connected} onPick={(p) => setGroupPermission(g.filter, p)} />
                       </div>
                     </div>
                     <div className="flex flex-col gap-px bg-border-subtle-01 rounded-lg overflow-hidden">
@@ -922,7 +903,7 @@ const ConnectorDetailView: React.FC<{
                             </div>
                             <PermissionControl
                               value={permOf(s)}
-                              disabled={!connected}
+                              disabled={!online || !connected}
                               onChange={(p) => setScopePermission(idx, p)}
                             />
                           </div>
@@ -968,16 +949,16 @@ const ConnectorDetailView: React.FC<{
 function ConnectorsScreen() {
   const { t } = useTranslation('connectors');
   const { id } = useParams<{ id?: string }>();
-  const [connectors, setConnectors] = useState<Connector[]>(CONNECTORS);
+  const [connectors, setConnectors] = useState<Connector[]>(CONNECTABLE_PRESETS);
   const [online, setOnline] = useState<boolean>(api.isEnabled);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
-  const initial = id ? CONNECTORS.find((c) => c.id === id) : undefined;
-  const [kind, setKind] = useState<Kind>(initial ? connectorKind(initial) : 'remote');
+  const initial = id ? CONNECTABLE_PRESETS.find((c) => c.id === id) : undefined;
+  const [kind, setKind] = useState<Kind>(id?.startsWith('local:') ? 'local-mcp' : 'remote');
   const [mcpModalOpen, setMcpModalOpen] = useState(false);
   const [directoryOpen, setDirectoryOpen] = useState(false);
   const [customModalOpen, setCustomModalOpen] = useState(false);
-  const [sel, setSel] = useState<string | null>((initial?.id ?? CONNECTORS[0]?.id) ?? null);
+  const [sel, setSel] = useState<string | null>(initial?.id ?? null);
   const toast = useToast();
 
   // 화면을 떠나면(다른 스크린으로 이동 등) 진행 중이던 폴링을 계속하지 않는다 — 안 그러면
@@ -1075,6 +1056,7 @@ function ConnectorsScreen() {
     const unsub = api.onEnabledChange((en) => {
       setOnline(en);
       if (en) void load();
+      else setConnectors(CONNECTABLE_PRESETS);
     });
     return () => {
       cancelled = true;
@@ -1428,7 +1410,9 @@ function ConnectorsScreen() {
   };
 
   return (
-    <div className="flex flex-1 min-w-0 bg-background overflow-hidden">
+    <div className="flex flex-1 min-w-0 flex-col overflow-hidden">
+      {!online && <RuntimeConnectionNotice />}
+      <div className="flex flex-1 min-h-0 min-w-0 bg-background overflow-hidden">
       {/* rail */}
       <div
         className="flex-shrink-0 bg-layer-01 border-r border-border-subtle-01 flex flex-col min-w-0 overflow-hidden"
@@ -1683,6 +1667,7 @@ function ConnectorsScreen() {
         onTest={handleTestLocalMcp}
         onRegister={handleRegisterLocalMcp}
       />
+      </div>
     </div>
   );
 }

@@ -2,6 +2,10 @@
 
 RICE Skill & Plugin Market API 서버 (최소 버전, RICE_PLATFORM_DESIGN.md)
 
+마켓 서버는 로컬 디렉토리의 artifact를 읽고 설치·게시 API를 제공합니다.
+포인트 후원은 메모리 내 데모 집계이며, 기본 다운로드 수는 manifest의 고정값입니다.
+인증·사용자별 포인트 원장은 구현되어 있지 않습니다.
+
 ## 구조
 
 ```
@@ -10,6 +14,7 @@ rice-platform/
 │   ├── app.py          FastAPI 앱 + 라우터
 │   └── registry.py     로컬 디렉토리 기반 artifact 레지스트리
 ├── artifacts/          예시 artifact 패키지들
+│   ├── algorithmic-art/
 │   ├── caveman/        SKILL.md + rice-artifact.yaml
 │   ├── git-workflow/
 │   ├── code-review/
@@ -21,15 +26,18 @@ rice-platform/
 
 ```bash
 cd rice-platform
-pip install -e ".[dev]"      # 또는 uv pip install -e .
-rice-platform                # 기본: 0.0.0.0:7070
-rice-platform --port 7070 --artifacts-dir ./artifacts
+python3 -m venv .venv
+.venv/bin/python -m pip install -e '.[test]'
+.venv/bin/rice-platform --host 127.0.0.1 --port 7070 --artifacts-dir ./artifacts
 ```
 
 환경변수로 artifacts 경로 지정:
 ```bash
 RICE_ARTIFACTS_DIR=/path/to/artifacts rice-platform
 ```
+
+Windows에서는 가상환경의 `Scripts/python.exe`와 `Scripts/rice-platform.exe`를
+사용합니다. `RICE_PLUGIN_MARKETPLACES`로 지정하는 외부 마켓플레이스는 선택 사항입니다.
 
 ## API
 

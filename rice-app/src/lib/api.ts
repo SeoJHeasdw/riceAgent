@@ -69,19 +69,20 @@ export interface RuntimePluginInfo {
  *
  * The runtime owns `contracts/runtime.yaml` (REPO_STRATEGY 4.3); this client is
  * the consumer side. Paths here mirror that spec so the app is wire-ready: when
- * the local runtime is up, these resolve; until then the screens fall back to
- * the scripted mock (lib/learningData). Transport is localhost HTTP; streaming
+ * the local runtime is up, these resolve; until then calls report offline.
+ * Transport is localhost HTTP; streaming
  * (POST /sessions/{id}/messages → SSE) lives in lib/sse.ts.
  */
 class ApiClient {
   private baseUrl: string;
   /** one-shot local auth token issued by Electron main on spawn (CONTRACTS 1.1) */
   private token: string | null = null;
-  /** is a local runtime actually connected? Off in the design demo (no runtime
-   *  spawned) so we make no failing requests — calls resolve to a no-op result
-   *  and screens fall back to scripted mock data. Flipped on at startup once
+  /** Is a local runtime connected? Until then calls report offline and screens
+   *  show a connection notice.
+   *  Flipped on at startup once
    *  Electron reports the runtime running (App bootstrap). */
   private enabled = false;
+  private connectionRetry: (() => Promise<boolean>) | null = null;
   /** Subscribers notified when the runtime connects/disconnects. The connect
    *  probe (App bootstrap) is async, so screens can't read `isEnabled` once at
    *  mount — they subscribe here to react when it flips on. */
@@ -118,6 +119,19 @@ class ApiClient {
 
   get isEnabled(): boolean {
     return this.enabled;
+  }
+
+  /** App owns runtime discovery; screens can retry the same connection path. */
+  setConnectionRetry(retry: (() => Promise<boolean>) | null) {
+    this.connectionRetry = retry;
+  }
+
+  async retryConnection(): Promise<boolean> {
+    try {
+      return await this.connectionRetry?.() ?? false;
+    } catch {
+      return false;
+    }
   }
 
   /** localhost auth token (CONTRACTS 1.1) — sent as a bearer header */
@@ -583,7 +597,7 @@ export default api;
  * PlatformApiClient — rice-platform 마켓 서버 클라이언트.
  * 런타임(api)과 완전히 분리된 별도 인스턴스. 인증 없음(데모 단계).
  * platform 오프라인 시에는 메서드가 { success: false }를 반환하고
- * 호출 측(MarketplaceContext)에서 mock 폴백을 유지한다.
+ * 호출 측(MarketplaceContext)은 플랫폼 오프라인이면 빈 카탈로그를 표시한다.
  */
 class PlatformApiClient {
   private baseUrl: string;

@@ -99,7 +99,7 @@ def create_app(container: Container):
         token = container.args.token
         if request.method != "OPTIONS" and request.url.path not in _PUBLIC_PATHS:
             # (1) Origin 방어: 브라우저가 붙인 Origin이 있고 localhost가 아니면 거부
-            #     (cross-site 웹페이지의 localhost 공격 차단). Electron IPC·서버간
+            #     (cross-site 웹페이지의 localhost 공격 차단). Electron·서버 간 HTTP
             #     호출은 Origin이 없으므로 통과. 로컬 브라우저 dev(5273)는 통과.
             origin = request.headers.get("origin")
             if origin and not _host_is_local(origin):
@@ -116,9 +116,8 @@ def create_app(container: Container):
         return await call_next(request)
 
     # ── CORS (renderer-only dev) ──────────────────────────────────────────────
-    # The Electron build talks to the runtime over IPC (same origin), so this is a
-    # no-op there. But `vite.renderer.config.ts` runs the React app in a plain
-    # browser (http://localhost:5273) that fetches this localhost API cross-origin,
+    # Both renderers use HTTP/SSE for runtime calls. The browser development UI
+    # (http://localhost:5273) fetches the localhost API across origins,
     # which the browser blocks without these headers. Scoped to localhost only;
     # added last so it sits OUTERMOST and answers preflight before the auth guard.
     from fastapi.middleware.cors import CORSMiddleware

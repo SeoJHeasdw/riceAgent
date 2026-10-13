@@ -131,7 +131,7 @@
     "apiKeyLabel": "API 키",
     "showKey": "키 보기",
     "hideKey": "키 숨기기",
-    "storageNote": "API 키는 <device>이 기기에만 저장</device>되며 외부 서버로 전송되지 않습니다.",
+    "storageNote": "API 키는 <device>이 기기에 저장</device>되며, 선택한 모델 제공자에 요청할 때 인증에 사용됩니다.",
     "storageNoteDb": "로컬 데이터베이스(state.db)에 평문으로 보관됩니다.",
     "providers": {
       "openai": {

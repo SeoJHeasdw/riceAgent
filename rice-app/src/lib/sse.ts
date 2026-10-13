@@ -89,7 +89,7 @@ function parseFrame(frame: string): SSEEvent | null {
 export class SSEClient {
   private baseUrl: string;
   private token: string | null = null;
-  /** off in the design demo (no runtime) — see ApiClient.enabled */
+  /** Enabled only after the local runtime has connected — see ApiClient.enabled. */
   private enabled = false;
 
   constructor(baseUrl: string = 'http://localhost:8080') {

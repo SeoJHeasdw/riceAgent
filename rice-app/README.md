@@ -1,470 +1,105 @@
-# RICE Frontend Application
+# rice-app
 
-The desktop application for **RICE** (Runtime Intelligence & Continuous Evolution) - an AI-powered conversational interface with integrated learning loop capabilities.
+RICE의 React UI와 Electron 데스크톱 프로세스입니다. 로컬 런타임의 HTTP/SSE
+응답을 화면에 표시하고, 모델·대화·스킬·커넥터·마켓을 관리합니다.
 
-## 📋 Table of Contents
+## 개발 환경
 
-- [Overview](#overview)
-- [Technology Stack](#technology-stack)
-- [Features](#features)
-- [Getting Started](#getting-started)
-- [Project Structure](#project-structure)
-- [Development](#development)
-- [Building & Deployment](#building--deployment)
-- [Documentation](#documentation)
-- [Contributing](#contributing)
-- [Troubleshooting](#troubleshooting)
+전체 설치와 실행은 [저장소 README](../README.md)를 참고하세요.
+프론트엔드 의존성은 이 디렉토리에서 `npm ci`로 설치합니다.
+라이브러리와 버전은 [package.json](package.json) 및 잠금 파일이 기준입니다.
 
-## 🎯 Overview
-
-RICE is a sophisticated desktop application that combines conversational AI with a learning loop system. It provides:
-
-- **Intelligent Chat Interface**: Stream-based conversations with AI models
-- **Learning Loop Visualization**: Real-time display of skill creation and user model updates
-- **Tool & Plugin Marketplace**: Discover and install MCP tools and plugins
-- **Session Management**: Organize conversations with persistent history
-- **Model Configuration**: Switch between SaaS and local models with custom settings
-
-## 🛠 Technology Stack
-
-### Core Framework
-- **Electron 31.2+**: Cross-platform desktop application framework
-- **React 18.3+**: UI library with hooks and functional components
-- **TypeScript 5.5+**: Type-safe development
-- **Vite 5.3+**: Fast build tool and dev server
-
-### UI & Styling
-- **RICE Design System**: Application components and semantic theme tokens
-- **TailwindCSS 3.4+**: Utility-first CSS framework
-- **System Fonts**: Local sans, mono, and serif font stacks
-
-### State Management & Data
-- **React Hooks**: Custom hooks for chat, learning loop, and marketplace
-- **Server-Sent Events (SSE)**: Real-time streaming from runtime
-- **REST API**: Communication with RICE runtime backend
-
-### Build & Development
-- **electron-builder**: Package and distribute desktop apps
-- **ESLint**: Code linting and quality
-- **PostCSS**: CSS processing with Autoprefixer
-
-## ✨ Features
-
-### Chat Interface
-- Real-time message streaming with SSE
-- Multi-session support with history
-- Message retry and abort capabilities
-- Skill usage indicators
-- Tool call visualization
-
-### Learning Loop
-- **Skills Panel**: View and manage learned skills
-- **User Model Display**: Track confidence scores for user preferences
-- **Session Deltas**: See what changed during conversations
-- **Skill Creation Notifications**: Toast alerts for new skills
-
-### Marketplace
-- **Tool Market**: Browse and install MCP tools
-- **Plugin Market**: Discover domain-specific plugins
-- **Filtering & Search**: Category-based filtering and tag search
-- **Sponsorship System**: Support tool developers with points
-- **Installation Progress**: Visual feedback during installation
-
-### Settings
-- **Model Selection**: Choose between SaaS and local models
-- **Model Configuration**: Adjust temperature, max tokens, context length
-- **User Modeling**: Toggle learning loop features
-- **API Keys**: Manage authentication credentials
-
-## 🚀 Getting Started
-
-### Prerequisites
-
-- **Node.js 18+** and npm
-- **Git** for version control
-- Platform-specific build tools (for packaging):
-  - macOS: Xcode Command Line Tools
-  - Windows: Visual Studio Build Tools
-  - Linux: Standard build tools
-
-### Installation
+저장소 루트에서:
 
 ```bash
-# Clone the repository
-git clone <repository-url>
-cd rice/packages/rice-app
-
-# Install dependencies
-npm install
+./app.sh    # Electron과 마켓 서버 실행; Electron이 런타임 시작
+./dev.sh    # 브라우저 UI, 런타임, 마켓 서버 실행
 ```
 
-### Development Mode
+UI만 실행하려면 이 디렉토리에서:
 
 ```bash
-# Start Vite dev server and Electron
-npm run electron:dev
-
-# Or run separately:
-npm run dev              # Start Vite dev server (http://localhost:5173)
-npm run build:electron   # Build Electron files
+npx vite --config vite.renderer.config.ts   # http://localhost:5273
 ```
 
-The application will open automatically with hot-reload enabled.
+브라우저 UI는 `VITE_RICE_RUNTIME_URL` 또는 기본 `http://localhost:8080`에
+연결합니다. 토큰이 필요한 런타임에는 `VITE_RICE_RUNTIME_TOKEN`도 지정합니다.
+Electron은 main process가 시작한 런타임의 포트·토큰을 preload IPC로 전달받습니다.
+대화와 도구 실행은 두 환경 모두 localhost HTTP/SSE로 통신합니다.
 
-### Building for Production
+런타임이 없으면 연결 안내와 재연결 버튼을 표시합니다. 대화 전송·커넥터 연결을
+막고 입력 중인 내용은 보존합니다. 런타임이 시작된 뒤 재연결하면 저장된 모델,
+대화와 커넥터를 다시 불러옵니다.
 
-```bash
-# Build for all platforms
-npm run build
+## 구조
 
-# Build for specific platform
-npm run package:mac      # macOS (DMG + ZIP)
-npm run package:win      # Windows (NSIS + ZIP)
-```
-
-Built applications will be in `release/<version>/` directory.
-
-## 📁 Project Structure
-
-```
-packages/rice-app/
-├── electron/                    # Electron main process
-│   ├── main.ts                 # Main process entry point
-│   ├── preload.ts              # Preload script (IPC bridge)
-│   └── runtime.ts              # Runtime manager (lifecycle)
+```text
+rice-app/
+├── electron/                  # 창·런타임 관리와 OS 기능 IPC
 ├── src/
-│   ├── components/             # React components
-│   │   ├── ui/                # Base UI components
-│   │   │   ├── Avatar.tsx
-│   │   │   ├── Badge.tsx
-│   │   │   ├── Button.tsx
-│   │   │   ├── Card.tsx
-│   │   │   ├── Input.tsx
-│   │   │   ├── Modal.tsx
-│   │   │   ├── Tabs.tsx
-│   │   │   ├── Tag.tsx
-│   │   │   └── Toast.tsx
-│   │   ├── workspace/         # Application workspace components
-│   │   │   ├── ChatInput.tsx
-│   │   │   ├── MessageList.tsx
-│   │   │   ├── Message.tsx
-│   │   │   ├── SessionSidebar.tsx
-│   │   │   ├── LearningPanel.tsx
-│   │   │   ├── SkillsList.tsx
-│   │   │   ├── SkillCard.tsx
-│   │   │   ├── UserModelDisplay.tsx
-│   │   │   ├── SessionDelta.tsx
-│   │   │   ├── ModelSettingsPanel.tsx
-│   │   │   ├── ToolCard.tsx
-│   │   │   ├── PluginCard.tsx
-│   │   │   ├── MarketplaceHeader.tsx
-│   │   │   ├── InstallationProgress.tsx
-│   │   │   ├── SponsorModal.tsx
-│   │   │   ├── ArtifactDetailModal.tsx
-│   │   │   ├── SkillCreationToast.tsx
-│   │   │   ├── ConfidenceIndicator.tsx
-│   │   │   └── IconRail.tsx
-│   │   ├── Layout.tsx         # Main layout wrapper
-│   │   ├── TwoColumnLayout.tsx
-│   │   └── ThreeColumnLayout.tsx
-│   ├── screens/               # Main application screens
-│   │   ├── ChatScreen.tsx
-│   │   ├── ToolMarketScreen.tsx
-│   │   ├── PluginMarketScreen.tsx
-│   │   └── SettingsScreen.tsx
-│   ├── hooks/                 # Custom React hooks
-│   │   ├── useChat.ts
-│   │   ├── useLearningLoop.ts
-│   │   └── useMarketplace.ts
-│   ├── lib/                   # Utilities and helpers
-│   │   ├── api.ts            # Runtime API client
-│   │   ├── sse.ts            # SSE streaming client
-│   │   ├── types.ts          # TypeScript definitions
-│   │   └── mockData.ts       # Development mock data
-│   ├── styles/
-│   │   └── globals.css       # Global styles + Tailwind
-│   ├── App.tsx               # Root component
-│   └── main.tsx              # React entry point
-├── public/                    # Static assets
-├── docs/                      # Documentation
-│   ├── ARCHITECTURE.md
-│   ├── COMPONENTS.md
-│   ├── DESIGN_SYSTEM.md
-│   ├── DEVELOPMENT.md
-│   ├── API_INTEGRATION.md
-│   └── DEPLOYMENT.md
-├── index.html                 # HTML entry point
-├── package.json
-├── vite.config.ts            # Vite configuration
-├── tailwind.config.js        # Tailwind configuration
-├── postcss.config.js         # PostCSS configuration
-├── tsconfig.json             # TypeScript config (React)
-├── tsconfig.node.json        # TypeScript config (Node)
-├── electron-builder.yml      # Electron builder config
-└── README.md                 # This file
+│   ├── App.tsx                # 연결 초기화·라우팅·온보딩
+│   ├── screens/               # 대화·스킬·마켓·커넥터·설정
+│   ├── components/workspace/  # 기능별 공용 UI
+│   ├── components/ui/         # 버튼·모달·아이콘·접근성
+│   ├── lib/                   # API/SSE·상태·번역·파일 뷰어
+│   ├── locales/               # 한국어·영어·일본어
+│   └── styles/globals.css     # 테마·디자인 토큰
+├── scripts/                   # 런타임 번들 및 설치 파일 빌드
+└── package.json
 ```
 
-## 💻 Development
+`lib/mockData.ts`에는 기본 모델 설정과 마켓 카테고리 코드가 있습니다.
+`lib/learningData.ts`는 UI 타입·변환 함수·예시 데이터 등을 포함합니다.
+스킬·메모리·설치 상태는 연결된 런타임에서, 마켓 목록은 플랫폼에서 가져옵니다.
 
-### Available Scripts
+## 설정과 데이터
 
-| Script | Description |
-|--------|-------------|
-| `npm run dev` | Start Vite dev server |
-| `npm run build` | Build for production (all platforms) |
-| `npm run build:electron` | Build Electron files only |
-| `npm run build:react` | Build React app only |
-| `npm run electron:dev` | Run Electron in development mode |
-| `npm run electron:build` | Build Electron app |
-| `npm run package` | Package app for distribution |
-| `npm run package:mac` | Package for macOS |
-| `npm run package:win` | Package for Windows |
-| `npm run preview` | Preview production build |
-| `npm run lint` | Run ESLint |
-| `npm run type-check` | Run TypeScript type checking |
+| 항목 | 저장·적용 경로 |
+|---|---|
+| 테마·글꼴 | `rice.settings` → 문서의 테마·글꼴 속성 |
+| 언어 | i18n의 `rice.language` 저장소 |
+| 모델·온도·Ollama 주소·추론 표시 | `PUT /settings` → 로컬 런타임 설정 |
+| SaaS 등록 모델·키 | 로컬 `state.db`; UI에는 마스킹된 키 반환 |
+| 대화·스킬·메모리 | 로컬 런타임의 데이터 저장소 |
+| 패널 크기 등 UI 상태 | `rice.*` localStorage 항목 |
 
-### Development Workflow
+일반 설정 화면에 별도로 있는 Ollama 주소와 자동 시작·사용자 모델링·로컬 저장·
+텔레메트리 옵션은 현재 localStorage에 저장만 됩니다. 이 값으로 런타임 동작을
+제어하지 않습니다. 모델 접속 주소는 채팅의 모델 설정을 사용합니다.
 
-1. **Start Development Server**
-   ```bash
-   npm run electron:dev
-   ```
+API 키는 기기에 보관하고 선택한 모델 제공자에 요청할 때 인증에 사용합니다.
+SaaS 요청에 포함된 대화·도구 결과도 해당 제공자에 전달됩니다.
 
-2. **Make Changes**
-   - Edit files in `src/` for React components
-   - Edit files in `electron/` for Electron main process
-   - Hot reload is enabled for React
-   - Electron requires restart for main process changes
+## 확인
 
-3. **Test Changes**
-   - Use mock data for development (see `src/lib/mockData.ts`)
-   - Check console for errors and warnings
-   - Use React DevTools for component inspection
-
-4. **Type Check**
-   ```bash
-   npm run type-check
-   ```
-
-5. **Lint Code**
-   ```bash
-   npm run lint
-   ```
-
-### Design System Guidelines
-
-This project follows RICE Design System principles:
-
-- **Border radius**: 8px base radius and 12px dialog surfaces
-- **8px spacing scale**: 2/4/8/12/16/24/32/40/48/64/80/96/160
-- **System fonts**: Local sans, mono, and serif stacks
-- **Sentence case**: All UI text uses sentence case (not title case)
-- **Themes**: Graphite dark theme by default, with a light theme option
-- **Color tokens**: Use RICE color tokens (e.g., `text-primary`, `layer-01`)
-- **Typography scale**: Use RICE type tokens (e.g., `body-short-02`, `heading-03`)
-
-See [DESIGN_SYSTEM.md](docs/DESIGN_SYSTEM.md) for detailed guidelines.
-
-### Code Organization
-
-- **Components**: Reusable UI components in `src/components/`
-- **Screens**: Top-level views in `src/screens/`
-- **Hooks**: Custom React hooks in `src/hooks/`
-- **Utils**: Helper functions in `src/lib/`
-- **Types**: TypeScript definitions in `src/lib/types.ts`
-
-### Mock Data
-
-For development without a running backend, use mock data:
-
-```typescript
-import { mockMessages, mockSessions, mockTools } from '@lib/mockData';
-```
-
-Mock data includes:
-- Sample messages and sessions
-- Tool and plugin marketplace data
-- User model signals and skills
-- Model configurations
-
-## 🏗 Building & Deployment
-
-### Production Build
+이 디렉토리에서 실행합니다.
 
 ```bash
-# Build React app and Electron
-npm run build
-```
-
-This creates:
-- `dist/`: React production build
-- `dist-electron/`: Compiled Electron files
-- `release/<version>/`: Packaged applications
-
-### Platform-Specific Builds
-
-```bash
-# macOS
-npm run package:mac
-# Creates: RICE-<version>.dmg and RICE-<version>-mac.zip
-
-# Windows
-npm run package:win
-# Creates: RICE Setup <version>.exe and RICE-<version>-win.zip
-
-# Linux (requires Linux host)
-npm run package
-# Creates: RICE-<version>.AppImage and RICE-<version>.deb
-```
-
-### Code Signing
-
-For distribution, configure code signing:
-
-**macOS:**
-```bash
-export CSC_LINK=/path/to/certificate.p12
-export CSC_KEY_PASSWORD=your-password
-export APPLE_ID=your@email.com
-export APPLE_ID_PASSWORD=app-specific-password
-```
-
-**Windows:**
-```bash
-export CSC_LINK=/path/to/certificate.pfx
-export CSC_KEY_PASSWORD=your-password
-```
-
-See [DEPLOYMENT.md](docs/DEPLOYMENT.md) for detailed instructions.
-
-## 📚 Documentation
-
-Comprehensive documentation is available in the `docs/` directory:
-
-- **[ARCHITECTURE.md](docs/ARCHITECTURE.md)**: System architecture and design patterns
-- **[COMPONENTS.md](docs/COMPONENTS.md)**: Component catalog and usage examples
-- **[DESIGN_SYSTEM.md](docs/DESIGN_SYSTEM.md)**: RICE Design System integration
-- **[DEVELOPMENT.md](docs/DEVELOPMENT.md)**: Development workflow and best practices
-- **[API_INTEGRATION.md](docs/API_INTEGRATION.md)**: Runtime API and SSE streaming
-- **[DEPLOYMENT.md](docs/DEPLOYMENT.md)**: Build and distribution guide
-
-## 🤝 Contributing
-
-### Development Setup
-
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/my-feature`
-3. Make your changes
-4. Run tests and linting: `npm run type-check && npm run lint`
-5. Commit with descriptive messages
-6. Push to your fork
-7. Create a Pull Request
-
-### Code Style
-
-- Use TypeScript for all new code
-- Follow existing code patterns
-- Use functional components with hooks
-- Add JSDoc comments for complex functions
-- Keep components small and focused
-- Use RICE Design System components when possible
-
-### Commit Messages
-
-Follow conventional commits:
-- `feat:` New feature
-- `fix:` Bug fix
-- `docs:` Documentation changes
-- `style:` Code style changes (formatting)
-- `refactor:` Code refactoring
-- `test:` Test additions or changes
-- `chore:` Build process or tooling changes
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-#### Electron won't start
-
-```bash
-# Clear node_modules and reinstall
-rm -rf node_modules package-lock.json
-npm install
-```
-
-#### Vite dev server not connecting
-
-```bash
-# Check if port 5173 is available
-lsof -i :5173
-
-# Kill process if needed
-kill -9 <PID>
-```
-
-#### TypeScript errors
-
-```bash
-# Rebuild TypeScript
-npm run build:electron
 npm run type-check
+npm run lint
+npm run build:react
 ```
 
-#### Build fails on macOS
+`build:react`는 현재 Vite 설정에 따라 렌더러와 Electron main/preload를 빌드합니다.
+결과는 `dist/`와 `dist-electron/`에 있습니다.
+
+## 설치 파일
 
 ```bash
-# Install Xcode Command Line Tools
-xcode-select --install
+npm run package:mac
+npm run package:win
+npm run package:linux
 ```
 
-#### Build fails on Windows
+각 명령은 대상 OS에서 실행합니다. Python 런타임 준비·타입 검사·앱 빌드·패키징을
+함께 수행하고 `release/<version>/`에 설치 파일을 생성합니다.
+[배포 문서](docs/distribution.md)에 런타임 번들·서명·진단 방법이 있습니다.
 
-- Install Visual Studio Build Tools
-- Ensure Python 3.x is installed
-- Run as Administrator if permission errors occur
+## UI 개발 기준
 
-#### Hot reload not working
+테마·색·타입은 [디자인 시스템](docs/DESIGN_SYSTEM.md)의 토큰을 사용합니다.
+공용 모달과 포커스 처리는 `components/ui` 및 `hooks/useDialogA11y.ts`를 사용하며,
+사용자 문구는 [번역 카탈로그](docs/i18n.md)에서 관리합니다.
 
-- Check that Vite dev server is running on port 5173
-- Restart Electron: `npm run electron:dev`
-- Clear browser cache in Electron DevTools
-
-#### Application styles not loading
-
-- Check that `src/styles/globals.css` is imported.
-- Restart Vite after changing `tailwind.config.js`.
-
-### Debug Mode
-
-Enable debug logging:
-
-```bash
-# Set environment variable
-export DEBUG=rice:*
-
-# Run in development
-npm run electron:dev
-```
-
-### Getting Help
-
-- Check existing documentation in `docs/`
-- Search GitHub issues
-- Review console logs in Electron DevTools
-- Check network tab for API errors
-
-## 📄 License
-
-MIT License - see LICENSE file for details
-
-## 🙏 Acknowledgments
-
-- **Electron**: For the cross-platform framework
-- **React**: For the UI library
-- **Vite**: For the fast build tool
-
----
-
-**Made with ❤️ by the RICE Team**
-
-For more information, visit the [main RICE repository](../../README.md).
+연결 문제는 개발 런타임의 `/health` 응답과 앱의 연결 안내를 먼저 확인합니다.
+로컬 모델 문제는 Ollama 실행 상태와 채팅의 모델 설정을 확인합니다.

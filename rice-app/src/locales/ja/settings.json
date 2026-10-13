@@ -131,7 +131,7 @@
     "apiKeyLabel": "APIキー",
     "showKey": "キーを表示",
     "hideKey": "キーを非表示",
-    "storageNote": "APIキーは<device>このデバイスのみ</device>に保存され、外部サーバーに送信されることはありません。",
+    "storageNote": "APIキーは<device>このデバイスに保存</device>され、選択したモデルプロバイダーへのリクエスト認証に使用されます。",
     "storageNoteDb": "ローカルデータベース（state.db）にプレーンテキストで保存されます。",
     "providers": {
       "openai": {

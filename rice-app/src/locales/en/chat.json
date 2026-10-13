@@ -413,6 +413,7 @@
   "error": {
     "turnError": "⚠️ Error: {{message}}",
     "connectionError": "⚠️ Connection error: {{message}}",
+    "runtimeUnavailable": "Chat and connectors will be available when the runtime connects.",
     "runtimeConnectionFailed": "Could not connect to the RICE runtime. Check that the app is running, then try again. ({{message}})",
     "sessionCreateFailed": "⚠️ Failed to create runtime session: {{message}}",
     "ollamaUnreachable": "Cannot reach Ollama. Please check your endpoint.",
@@ -428,26 +429,6 @@
   "model": {
     "noSelection": "No model selected",
     "noLocalSelection": "No local model selected"
-  },
-  "mock": {
-    "thinkingDuration": "9s",
-    "stepInterpret": "Interpreting request",
-    "stepPlan": "Building execution plan",
-    "stepPlanDetail": "Composing required steps",
-    "stepSelectTool": "Selecting tools & skills",
-    "stepSelectToolDetail": "Matching installed tools and learned skills",
-    "stepExecute": "Execute",
-    "stepExecuteDetail": "Running the selected tool",
-    "toolrunLabel": "Processing request",
-    "callPlanLabel": "Build step plan",
-    "callPlanResult": "4-step plan",
-    "callSelectLabel": "Select required tools",
-    "callSelectResult": "2 selected",
-    "callExecuteLabel": "Executing…",
-    "callExecuteLabelDone": "Execution complete",
-    "callDone": "Done",
-    "runTime": "2.0s",
-    "agentAnswer": "Done. Applied your learned preferences (Korean, concise bullets, units included)."
   },
   "sessionSidebar": {
     "newChat": "New chat",

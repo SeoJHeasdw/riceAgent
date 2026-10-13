@@ -64,7 +64,7 @@ app.whenReady().then(async () => {
   // Paint the window immediately, then start the runtime in the background
   // (CONTRACTS §1.1). When it's healthy, push `runtime:ready` so the renderer
   // connects its API/SSE clients (App bootstrap). Spawn failure is non-fatal:
-  // the renderer just stays "offline" and uses scripted mock data.
+  // the renderer shows a connection notice with a retry action.
   createWindow();
 
   void runtimeManager

@@ -202,9 +202,9 @@ Gemini CLI Scheduler의 상태 머신 전체를 옮기지는 않는다. RICE는 
 
 | 형태 | Provider | 모델 (프로토타입) | 접속/인증 |
 |------|----------|-------------------|-----------|
-| **SaaS** | Claude (Anthropic API) | Claude Sonnet 4.5 | API 키 → OS 키체인, prompt caching 지원 |
+| **SaaS** | Claude (Anthropic API) | Claude Sonnet 4.5 | 앱 등록 API 키 → 로컬 state.db, prompt caching 지원 |
 | **on-prem** | Ollama (로컬 모델) — **메인 대상** | Qwen3.6-27B / Qwen3.5-9B (MLX) / gpt-oss:20b | `base_url` (키 불필요), 사내·오프라인 |
-| **SaaS** | OpenAI 호환(`agent/providers/openai.py`) | 사용자 등록 모델(`registered_models`) | API 키 → OS 키체인 |
+| **SaaS** | OpenAI 호환(`agent/providers/openai.py`) | 사용자 등록 모델(`registered_models`) | API 키 → 로컬 state.db |
 | **폴백** | echo | 모델 미설정 시 | 키 불필요, 플래너 등 LLM 호출 스킵 |
 
 > 모델명은 프로토타입 기준이며 수시 교체된다 — 고정값으로 읽지 말 것. (※ Claude 최신은 Sonnet 4.6(`claude-sonnet-4-6`) — 필요 시 교체)
@@ -214,7 +214,7 @@ Gemini CLI Scheduler의 상태 머신 전체를 옮기지는 않는다. RICE는 
 - **streaming**: 각 provider 스트림 → 공통 **SSE 이벤트**(9종, 2026-07-04 `plan_updated` 추가 — 명세 정본 [RICE_CONTRACTS.md](RICE_CONTRACTS.md) 1.3)로 변환
 - **prompt caching**: Claude `cache_control`(스킬 주입 비용 상쇄, Hermes 검증 #6) ↔ Ollama 미지원 → keep-alive·컨텍스트 재사용으로 대체
 
-- ★ 키 보관: SaaS provider API 키는 OS 키체인(macOS Keychain / Windows Credential Manager)에 저장한다. `.env` 평문 저장은 금지한다. on-prem(Ollama)은 키가 없다.
+- 현재 키 보관: 앱에서 등록한 SaaS provider API 키는 로컬 `state.db(provider_models)`에 평문 저장하고, 설정 API 응답에서는 마스킹한다. 모델 제공자 요청에는 인증정보로 전달한다. Claude의 기존 환경변수·키체인 로딩 경로도 남아 있다. Connector OAuth credential은 OS 키체인을 사용한다. on-prem(Ollama)은 API 키가 없다.
 
 ---
 
@@ -367,7 +367,7 @@ def check_plugin_permission(plugin_id: str, connector_type: str) -> bool:
 ## 10. 보안 베이스라인
 
 1. **로컬 API 인증**: 런타임 spawn 시 일회성 토큰 발급 → 앱만 접근 가능 (포트 스캔하는 타 프로세스 차단)
-2. **시크릿**: OS 키체인 (6장, 9.3장), 로그에 키/토큰 출력 금지
+2. **시크릿**: 앱 등록 모델 키는 로컬 state.db, Connector OAuth credential은 OS 키체인 (6장, 9.3장). 로그에 키/토큰 출력 금지
 3. **마켓 artifact 실행 경계**: 5장 결정에 따름 + artifact 체크섬 검증 (CONTRACTS 문서)
    - **Phase 2 백로그 (MVP 밖, 결정 아님)**: 체크섬만으로는 위변조 방지가 약함 → 디지털 서명(GPG/X.509) + platform 측 서명 키 관리 + runtime 측 신뢰 체인 검증 (우선순위 🟢 낮음, 담당: 보안 팀 + Platform 팀)
 4. **Connector Credential**: OS 키체인 저장, 메모리에서 즉시 삭제, 로그 금지

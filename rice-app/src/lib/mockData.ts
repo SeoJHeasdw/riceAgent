@@ -1,7 +1,7 @@
 import { ModelSettings } from '../components/workspace/ModelSettingsPanel';
 
 /**
- * Sample marketplace data for the chat surface.
+ * Default model settings and marketplace category codes.
  * Models are NOT listed here: SaaS models are user-registered (model + API key)
  * and local models are fetched live from Ollama. (Learning-loop content lives in
  * ./learningData.)

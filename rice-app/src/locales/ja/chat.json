@@ -413,6 +413,7 @@
   "error": {
     "turnError": "⚠️ エラー: {{message}}",
     "connectionError": "⚠️ 接続エラー: {{message}}",
+    "runtimeUnavailable": "ランタイムに接続すると、チャットとコネクターを利用できます。",
     "runtimeConnectionFailed": "RICEランタイムに接続できません。アプリの実行状態を確認してから、もう一度お試しください。（{{message}}）",
     "sessionCreateFailed": "⚠️ ランタイムセッションの作成に失敗しました: {{message}}",
     "ollamaUnreachable": "Ollamaに接続できません。エンドポイントを確認してください。",
@@ -428,26 +429,6 @@
   "model": {
     "noSelection": "モデルが選択されていません",
     "noLocalSelection": "ローカルモデルが選択されていません"
-  },
-  "mock": {
-    "thinkingDuration": "9秒",
-    "stepInterpret": "リクエストを解釈中",
-    "stepPlan": "実行計画を構築中",
-    "stepPlanDetail": "必要なステップを作成中",
-    "stepSelectTool": "ツールとスキルを選択中",
-    "stepSelectToolDetail": "インストール済みのツールと学習済みスキルを照合中",
-    "stepExecute": "実行",
-    "stepExecuteDetail": "選択したツールを実行中",
-    "toolrunLabel": "リクエストを処理中",
-    "callPlanLabel": "ステップ計画を構築",
-    "callPlanResult": "4ステップ計画",
-    "callSelectLabel": "必要なツールを選択",
-    "callSelectResult": "2件選択",
-    "callExecuteLabel": "実行中…",
-    "callExecuteLabelDone": "実行完了",
-    "callDone": "完了",
-    "runTime": "2.0秒",
-    "agentAnswer": "完了。学習した設定（日本語、簡潔な箇条書き、単位を含む）を適用しました。"
   },
   "sessionSidebar": {
     "newChat": "新しいチャット",

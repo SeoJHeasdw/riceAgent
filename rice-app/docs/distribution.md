@@ -5,6 +5,10 @@
 백엔드를 one-folder 실행 파일로 만들고, electron-builder가 이를 앱의
 `resources/rice-runtime`에 넣는다.
 
+번들에 포함되는 서버는 `rice-runtime`입니다. 마켓을 사용하려면 별도
+`rice-platform`을 실행해야 합니다. SaaS 모델 등록 키는 사용자 데이터의
+`state.db`에 저장하고, Google 커넥터 OAuth 자격증명은 OS 키체인을 사용합니다.
+
 ## 로컬에서 설치 파일 만들기
 
 빌드 PC에는 Node.js 20+와 Python 3.13+가 필요하다.

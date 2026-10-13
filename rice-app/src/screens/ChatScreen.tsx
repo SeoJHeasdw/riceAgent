@@ -11,6 +11,7 @@ import { useResizable } from '../hooks/useResizable';
 import { useLearning } from '../lib/learning/LearningContext';
 import { renderChangelog, type ThreadMessage } from '../lib/learningData';
 import { defaultModelSettings } from '../lib/mockData';
+import { RuntimeConnectionNotice } from '../components/workspace/RuntimeConnectionNotice';
 import { RUN_SKILL_EVENT, NEW_CHAT_EVENT, openCommandPalette } from '../lib/commandBridge';
 import { api } from '../lib/api';
 import { sseClient } from '../lib/sse';
@@ -1114,13 +1115,6 @@ function ChatScreen({ active = true }: { active?: boolean }) {
     );
   };
 
-  const setThread = (update: ThreadStateUpdate) => {
-    const next = typeof update === 'function' ? update(threadRef.current) : update;
-    threadRef.current = next;
-    cacheThread(activeSessionIdRef.current, next);
-    setThreadState(next);
-  };
-
   const updateThreadFor = (sessionId: string, update: ThreadStateUpdate) => {
     const previous = threadCacheRef.current.get(sessionId) ?? [];
     const next = typeof update === 'function' ? update(previous) : update;
@@ -1252,8 +1246,7 @@ function ChatScreen({ active = true }: { active?: boolean }) {
   }, [draft, command]);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Real backend session id for the live (runtime-connected) path. Created lazily
-  // on first send; reused for the rest of this mounted ChatScreen. Independent of
-  // the scripted demo sessions in the sidebar.
+  // on first send and reused for the rest of this mounted ChatScreen.
   const liveSessionId = useRef<string | null>(null);
   // 새 세션의 첫 턴 완료 후 제목 생성(POST /title)이 필요할 때만 true — 기존 세션 연속 전송 시 skip.
   const needsTitleRefresh = useRef<Set<string>>(new Set());
@@ -2320,21 +2313,17 @@ function ChatScreen({ active = true }: { active?: boolean }) {
       );
   };
 
-  // Sidebar selection: load from DB when connected, else the scripted demo thread.
+  // Sidebar selection: only open sessions through the connected runtime.
   const handleSelectSession = (id: string) => {
     // 이미 열린 방을 다시 클릭하면 무시: 불필요한 재조회를 막고, 스트리밍 중이면
     // DB 히스토리가 진행 중인 라이브 thread를 덮어쓰는 것도 방지한다.
     if (id === activeSessionIdRef.current) return;
     if (connected) void openLiveSession(id);
-    else {
-      activeSessionIdRef.current = id;
-      setActiveSessionId(id);
-    }
   };
 
   const renameSession = async (id: string, title: string): Promise<boolean> => {
     const nextTitle = title.trim();
-    if (!nextTitle) return false;
+    if (!nextTitle || !api.isEnabled) return false;
     if (connected) {
       const res = await api.renameSession(id, nextTitle);
       if (!res.success) {
@@ -2357,13 +2346,13 @@ function ChatScreen({ active = true }: { active?: boolean }) {
   // Delete: confirm first (ConfirmDialog), then remove server-side + locally.
   const requestDeleteSession = (id: string) => {
     const s = sessions.find((x) => x.id === id);
-    if (s) setConfirmDelete(s);
+    if (s && api.isEnabled) setConfirmDelete(s);
   };
 
   const performDelete = async () => {
     const target = confirmDelete;
     setConfirmDelete(null);
-    if (!target) return;
+    if (!target || !api.isEnabled) return;
     if (connected) {
       const res = await api.deleteSession(target.id);
       if (!res.success) return; // leave the list as-is on failure
@@ -2415,6 +2404,10 @@ function ChatScreen({ active = true }: { active?: boolean }) {
   // (setDraft 직후 같은 틱에서 send()를 부르면 draft가 아직 반영 전이라 stale하게 읽힌다)
   const send = (overrideText?: string) => {
     if (busy) return; // a live turn is still streaming — ignore re-entrant sends
+    if (!api.isEnabled) {
+      toast.notify({ message: t('error.runtimeUnavailable'), variant: 'error' });
+      return;
+    }
     const body = (overrideText ?? draft).trim();
     if (!command && !body) return;
     const q = command ? `/${command}${body ? ' ' + body : ''}` : body;
@@ -2422,88 +2415,7 @@ function ChatScreen({ active = true }: { active?: boolean }) {
     setCommand(null);
     setIsEmpty(false);
 
-    // Runtime connected → real streaming turn.
-    if (api.isEnabled) {
-      runLiveTurn(q);
-      return;
-    }
-
-    // Offline (design demo) → scripted mock turn.
-    const runId = 'r' + Date.now();
-    setThread((p) => [...p, { kind: 'user', text: q, sentAt: Date.now() }]);
-
-    // thinking trace
-    setTimeout(() => {
-      setThread((p) => [
-        ...p,
-        {
-          kind: 'thinking',
-          duration: t('mock.thinkingDuration'),
-          steps: [
-            { label: t('mock.stepInterpret'), detail: q.length > 40 ? q.slice(0, 40) + '…' : q },
-            { label: t('mock.stepPlan'), detail: t('mock.stepPlanDetail'), tool: 'plan.build' },
-            { label: t('mock.stepSelectTool'), detail: t('mock.stepSelectToolDetail'), tool: 'tool.select' },
-            { label: t('mock.stepExecute'), detail: t('mock.stepExecuteDetail'), tool: 'tool.execute' },
-          ],
-        },
-      ]);
-    }, 200);
-
-    // running tool card
-    setTimeout(() => {
-      setThread((p) => [
-        ...p,
-        {
-          kind: 'toolrun',
-          id: runId,
-          label: t('mock.toolrunLabel'),
-          status: 'running',
-          steps: 0,
-          time: '',
-          open: true,
-          calls: [
-            { tool: 'plan.build', label: t('mock.callPlanLabel'), status: 'done', time: '0.4s', params: { goal: q.slice(0, 40) }, result: t('mock.callPlanResult') },
-            { tool: 'tool.select', label: t('mock.callSelectLabel'), status: 'done', time: '0.3s', params: { from: 'installed' }, result: t('mock.callSelectResult') },
-            { tool: 'tool.execute', label: t('mock.callExecuteLabel'), status: 'running', time: '', params: {}, result: '' },
-          ],
-        },
-      ]);
-    }, 350);
-
-    // finish run
-    setTimeout(() => {
-      setThread((p) =>
-        p.map((m) =>
-          m.kind === 'toolrun' && m.id === runId
-            ? {
-                ...m,
-                status: 'done',
-                steps: 5,
-                time: t('mock.runTime'),
-                open: false,
-                calls: m.calls.map((c) => ({
-                  ...c,
-                  status: 'done' as const,
-                  time: c.time || '0.9s',
-                  label: c.label === t('mock.callExecuteLabel') ? t('mock.callExecuteLabelDone') : c.label,
-                  result: c.result || t('mock.callDone'),
-                })),
-              }
-            : m,
-        ),
-      );
-    }, 1500);
-
-    // answer
-    setTimeout(() => {
-      setThread((p) => [
-        ...p,
-        {
-          kind: 'agent',
-          text: t('mock.agentAnswer'),
-        },
-      ]);
-    }, 1700);
+    runLiveTurn(q);
   };
 
   const newChat = () => {
@@ -2700,6 +2612,8 @@ function ChatScreen({ active = true }: { active?: boolean }) {
               </span>
             )}
           </div>
+
+          {!connected && <RuntimeConnectionNotice />}
 
           {/* Thread */}
           <div className="relative flex-1 min-h-0">
@@ -2955,15 +2869,15 @@ function ChatScreen({ active = true }: { active?: boolean }) {
                   <Tooltip label={busy ? t('stopTooltip') : t('sendTooltip')}>
                     <button
                       onClick={() => (busy ? stopTurn() : send())}
-                      disabled={!busy && !command && !draft.trim()}
+                      disabled={!busy && (!connected || (!command && !draft.trim()))}
                       className={`w-7 h-7 rounded-full flex items-center justify-center transition-opacity duration-150 ${
                         busy
                           ? 'bg-layer-02 hover:bg-layer-hover-02 border border-border-subtle-01 cursor-pointer'
-                          : command || draft.trim()
+                          : connected && (command || draft.trim())
                           ? 'hover:opacity-90 cursor-pointer'
                           : 'bg-layer-02 cursor-not-allowed opacity-50'
                       }`}
-                      style={!busy && (command || draft.trim()) ? { background: 'var(--gradient-skill)' } : undefined}
+                      style={!busy && connected && (command || draft.trim()) ? { background: 'var(--gradient-skill)' } : undefined}
                     >
                       <Icon name={busy ? 'close' : 'send'} size={13} className={busy ? 'text-text-primary' : 'text-white'} />
                     </button>

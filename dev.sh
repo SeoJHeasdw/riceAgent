@@ -75,6 +75,8 @@ fi
 echo "▶ 프론트: vite --config vite.renderer.config.ts → http://localhost:5273"
 (
   cd "$APP_DIR"
+  export VITE_RICE_RUNTIME_URL="http://localhost:$PORT"
+  export VITE_RICE_RUNTIME_TOKEN=""
   exec npx vite --config vite.renderer.config.ts
 ) &
 

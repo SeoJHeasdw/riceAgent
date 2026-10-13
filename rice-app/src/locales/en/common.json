@@ -9,6 +9,13 @@
   "delete": "Delete",
   "edit": "Edit",
   "retry": "Retry",
+  "runtime": {
+    "unavailable": "Local runtime is disconnected",
+    "unavailableHint": "Chat and connectors will be available when the runtime connects.",
+    "reconnect": "Reconnect",
+    "reconnecting": "Connecting…",
+    "retryFailed": "Could not connect. Check that the app or development runtime is running."
+  },
   "me": "Me",
   "dialog": "Dialog",
   "closeDialog": "Close dialog",
